@@ -29,9 +29,10 @@ GpuServiceProxy::GpuServiceProxy(GpuServiceProxyDelegate* delegate)
       main_thread_task_runner_(base::ThreadTaskRunnerHandle::Get()),
       shutdown_event_(base::WaitableEvent::ResetPolicy::AUTOMATIC,
                       base::WaitableEvent::InitialState::NOT_SIGNALED) {
+  gpu_main_.OnStart();
   // TODO(sad): Once GPU process is split, this would look like:
   //   connector->ConnectToInterface("mojo:gpu", &gpu_service_);
-  gpu_main_.Add(GetProxy(&gpu_service_));
+  gpu_main_.Create(GetProxy(&gpu_service_));
   gpu_service_->Initialize(
       base::Bind(&GpuServiceProxy::OnInitialized, base::Unretained(this)));
 }
@@ -58,13 +59,13 @@ void GpuServiceProxy::OnInitialized(const gpu::GPUInfo& gpu_info) {
 
 void GpuServiceProxy::OnInternalGpuChannelEstablished(
     mojo::ScopedMessagePipeHandle channel_handle) {
-  io_thread_.reset(new base::Thread("GPUIOThread"));
+  io_thread_ = base::MakeUnique<base::Thread>("GPUIOThread");
   base::Thread::Options thread_options(base::MessageLoop::TYPE_IO, 0);
   thread_options.priority = base::ThreadPriority::NORMAL;
   CHECK(io_thread_->StartWithOptions(thread_options));
 
-  gpu_memory_buffer_manager_.reset(new MusGpuMemoryBufferManager(
-      gpu_main_.gpu_service(), kInternalGpuChannelClientId));
+  gpu_memory_buffer_manager_ = base::MakeUnique<MusGpuMemoryBufferManager>(
+      gpu_main_.gpu_service(), kInternalGpuChannelClientId);
   gpu_channel_ = gpu::GpuChannelHost::Create(
       this, kInternalGpuChannelClientId, gpu_info_,
       IPC::ChannelHandle(channel_handle.release()), &shutdown_event_,

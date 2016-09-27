@@ -155,7 +155,8 @@ void ClientSessionTest::SetUp() {
   task_runner_ = new AutoThreadTaskRunner(
       message_loop_.task_runner(), run_loop_.QuitClosure());
 
-  desktop_environment_factory_.reset(new FakeDesktopEnvironmentFactory());
+  desktop_environment_factory_.reset(
+      new FakeDesktopEnvironmentFactory(message_loop_.task_runner()));
   session_config_ = SessionConfig::ForTest();
 }
 
@@ -199,13 +200,13 @@ void ClientSessionTest::ConnectClientSession() {
   EXPECT_FALSE(connection_->clipboard_stub());
   EXPECT_FALSE(connection_->input_stub());
 
-  client_session_->OnConnectionAuthenticated(client_session_->connection());
+  client_session_->OnConnectionAuthenticated();
 
   EXPECT_TRUE(connection_->clipboard_stub());
   EXPECT_TRUE(connection_->input_stub());
 
-  client_session_->CreateMediaStreams(client_session_->connection());
-  client_session_->OnConnectionChannelsConnected(client_session_->connection());
+  client_session_->CreateMediaStreams();
+  client_session_->OnConnectionChannelsConnected();
 }
 
 void ClientSessionTest::NotifyVideoSize() {

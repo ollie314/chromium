@@ -277,6 +277,10 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothDevice {
   bool IsPairable() const;
 
   // Indicates whether the device is paired with the adapter.
+  // On Chrome OS this function also returns true if the user has connected
+  // to the device in the past.
+  // TODO(crbug.com/649651): Change Chrome OS to only return true if the
+  // device is actually paired.
   virtual bool IsPaired() const = 0;
 
   // Indicates whether the device is currently connected to the adapter.
@@ -513,8 +517,12 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothDevice {
   // empty string.
   static std::string CanonicalizeAddress(const std::string& address);
 
-  // Return the timestamp for when this device was last seen.
-  base::Time GetLastUpdateTime() const { return last_update_time_; }
+  // Update the last time this device was seen.
+  void UpdateTimestamp();
+
+  // Returns the time of the last call to UpdateTimestamp(), or base::Time() if
+  // it hasn't been called yet.
+  virtual base::Time GetLastUpdateTime() const;
 
   // Called by BluetoothAdapter when a new Advertisement is seen for this
   // device. This replaces previously seen Advertisement Data.
@@ -576,9 +584,6 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothDevice {
   };
 
   BluetoothDevice(BluetoothAdapter* adapter);
-
-  // Update the last time this device was seen.
-  void UpdateTimestamp();
 
   // Implements platform specific operations to initiate a GATT connection.
   // Subclasses must also call DidConnectGatt, DidFailToConnectGatt, or

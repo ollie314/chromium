@@ -22,24 +22,24 @@
 #ifndef SVGSVGElement_h
 #define SVGSVGElement_h
 
-#include "core/svg/SVGAnimatedBoolean.h"
 #include "core/svg/SVGAnimatedLength.h"
 #include "core/svg/SVGFitToViewBox.h"
 #include "core/svg/SVGGraphicsElement.h"
-#include "core/svg/SVGLengthTearOff.h"
-#include "core/svg/SVGPointTearOff.h"
+#include "core/svg/SVGPoint.h"
 #include "core/svg/SVGZoomAndPan.h"
 #include "platform/heap/Handle.h"
 
 namespace blink {
 
-class SVGMatrixTearOff;
-class SVGAngleTearOff;
-class SVGNumberTearOff;
-class SVGTransformTearOff;
-class SVGViewSpec;
-class SVGViewElement;
 class SMILTimeContainer;
+class SVGAngleTearOff;
+class SVGLengthTearOff;
+class SVGMatrixTearOff;
+class SVGNumberTearOff;
+class SVGPointTearOff;
+class SVGTransformTearOff;
+class SVGViewElement;
+class SVGViewSpec;
 
 class SVGSVGElement final : public SVGGraphicsElement,
                             public SVGFitToViewBox,

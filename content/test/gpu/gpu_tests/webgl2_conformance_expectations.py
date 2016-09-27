@@ -147,8 +147,6 @@ class WebGL2ConformanceExpectations(WebGLConformanceExpectations):
     # Mac only.
 
     # Fixed on OSX 10.11
-    self.Fail('deqp/functional/gles3/shaderloop_do_while.html',
-        ['mac'], bug=617820)
     self.Fail('deqp/functional/gles3/shaderoperator/common_functions.html',
         ['mac', 'amd'], bug=483282)
 
@@ -532,6 +530,10 @@ class WebGL2ConformanceExpectations(WebGLConformanceExpectations):
         ['linux', 'opengl'], bug=483282)
     self.Fail('conformance2/reading/read-pixels-pack-parameters.html',
         ['linux', 'opengl'], bug=483282)
+
+    # Linux without ANGLE only
+    self.Flaky('conformance2/buffers/getBufferSubData.html',
+               ['linux', 'no_angle'], bug=650123)
 
     # Linux NVIDIA
     # This test is flaky both with and without ANGLE.

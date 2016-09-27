@@ -655,7 +655,7 @@ WebInspector.ConsoleView.prototype = {
             var lines = [];
             for (var i = 0; i < chunkSize && i + messageIndex < this.itemCount(); ++i) {
                 var message = this.itemElement(messageIndex + i);
-                var messageContent = message.formattedMessage().deepTextContent();
+                var messageContent = message.contentElement().deepTextContent();
                 for (var j = 0; j < message.repeatCount(); ++j)
                     lines.push(messageContent);
             }
@@ -1261,15 +1261,6 @@ WebInspector.ConsoleCommand = function(message, linkifier, nestingLevel)
 }
 
 WebInspector.ConsoleCommand.prototype = {
-    /**
-     * @override
-     * @return {!Element})
-     */
-    searchableElement: function()
-    {
-        return this.contentElement();
-    },
-
     /**
      * @override
      * @return {!Element}

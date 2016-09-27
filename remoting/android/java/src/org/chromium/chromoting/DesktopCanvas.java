@@ -30,7 +30,7 @@ public class DesktopCanvas {
     private PointF mViewportPosition = new PointF();
 
     /**
-     * Represents the amount of space, in pixels, used by system UI.
+     * Represents the amount of space, in pixels, used by System UI.
      */
     private Rect mSystemUiOffsetPixels = new Rect();
 
@@ -87,28 +87,14 @@ public class DesktopCanvas {
     }
 
     /**
-     * Returns the current size of the viewport.  This size includes the offset calculations for
-     * any visible system UI.
-     *
-     * @return A point representing the current size of the viewport.
-     */
-    private PointF getViewportSize() {
-        float adjustedScreenWidth = mRenderData.screenWidth - mSystemUiOffsetPixels.right;
-        float adjustedScreenHeight = mRenderData.screenHeight - mSystemUiOffsetPixels.bottom;
-
-        return new PointF(adjustedScreenWidth, adjustedScreenHeight);
-    }
-
-    /**
      * Returns the true center position of the viewport (in image coordinates).
      *
      * @return A point representing the true center position of the viewport.
      */
     private PointF getTrueViewportCenter() {
-        PointF viewportSize = getViewportSize();
-
         // Find the center point of the viewport on the screen.
-        float[] viewportPosition = {((float) viewportSize.x / 2), ((float) viewportSize.y / 2)};
+        float[] viewportPosition = {
+                ((float) mRenderData.screenWidth / 2), ((float) mRenderData.screenHeight / 2)};
 
         // Convert the screen position to an image position.
         Matrix screenToImage = new Matrix();
@@ -118,15 +104,20 @@ public class DesktopCanvas {
     }
 
     /**
-     * Sets the offset values used to calculate the space used by system UI.
+     * Sets the offset values used to calculate the space used by System UI.
      *
-     * @param left The space used by system UI on the left edge of the screen.
-     * @param top The space used by system UI on the top edge of the screen.
-     * @param right The space used by system UI on the right edge of the screen.
-     * @param bottom The space used by system UI on the bottom edge of the screen.
+     * @param left The space used by System UI on the left edge of the screen.
+     * @param top The space used by System UI on the top edge of the screen.
+     * @param right The space used by System UI on the right edge of the screen.
+     * @param bottom The space used by System UI on the bottom edge of the screen.
      */
     public void setSystemUiOffsetValues(int left, int top, int right, int bottom) {
         mSystemUiOffsetPixels.set(left, top, right, bottom);
+    }
+
+    /** Called to indicate that no System UI is visible. */
+    public void clearSystemUiOffsets() {
+        mSystemUiOffsetPixels.setEmpty();
     }
 
     /** Repositions the image by zooming it such that the image is displayed without borders. */
@@ -156,7 +147,6 @@ public class DesktopCanvas {
      *                       center position before being adjusted to fit the screen boundaries.
      */
     public void repositionImage(boolean centerViewport) {
-        PointF viewportSize = getViewportSize();
         // The goal of the code below is to position the viewport as close to the desired center
         // position as possible whilst keeping as much of the desktop in view as possible.
         // To achieve these goals, we first position the desktop image at the desired center
@@ -166,10 +156,11 @@ public class DesktopCanvas {
             float[] viewportPosition = {mViewportPosition.x, mViewportPosition.y};
             mRenderData.transform.mapPoints(viewportPosition);
 
+            float viewportTransX = ((float) mRenderData.screenWidth / 2) - viewportPosition[0];
+            float viewportTransY = ((float) mRenderData.screenHeight / 2) - viewportPosition[1];
+
             // Translate so the viewport is displayed in the middle of the screen.
-            mRenderData.transform.postTranslate(
-                    ((float) viewportSize.x / 2) - viewportPosition[0],
-                    ((float) viewportSize.y / 2) - viewportPosition[1]);
+            mRenderData.transform.postTranslate(viewportTransX, viewportTransY);
         }
 
         // Get the coordinates of the desktop rectangle (top-left/bottom-right corners) in
@@ -186,7 +177,7 @@ public class DesktopCanvas {
         float xAdjust = 0;
         float yAdjust = 0;
 
-        if (rectScreen.right - rectScreen.left < viewportSize.x) {
+        if (rectScreen.right - rectScreen.left < mRenderData.screenWidth) {
             // Image is narrower than the screen, so center it.
             xAdjust = -(rightDelta + leftDelta) / 2;
         } else if (leftDelta > 0 && rightDelta > 0) {
@@ -198,7 +189,7 @@ public class DesktopCanvas {
         }
 
         // Apply similar logic for yAdjust.
-        if (rectScreen.bottom - rectScreen.top < viewportSize.y) {
+        if (rectScreen.bottom - rectScreen.top < mRenderData.screenHeight) {
             yAdjust = -(bottomDelta + topDelta) / 2;
         } else if (topDelta > 0 && bottomDelta > 0) {
             yAdjust = -Math.min(topDelta, bottomDelta);
