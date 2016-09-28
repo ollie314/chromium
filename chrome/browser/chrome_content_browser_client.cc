@@ -177,8 +177,11 @@
 #include "net/cookies/cookie_options.h"
 #include "net/ssl/ssl_cert_request_info.h"
 #include "ppapi/host/ppapi_host.h"
+#include "services/shell/public/cpp/interface_provider.h"
 #include "services/shell/public/cpp/service.h"
 #include "storage/browser/fileapi/external_mount_points.h"
+#include "third_party/WebKit/public/platform/modules/payments/payment_request.mojom.h"
+#include "third_party/WebKit/public/platform/modules/webshare/webshare.mojom.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/resources/grit/ui_resources.h"
@@ -231,10 +234,10 @@
 #endif
 
 #if BUILDFLAG(ANDROID_JAVA_UI)
-#include "chrome/browser/android/mojo/chrome_interface_registrar_android.h"
 #include "chrome/browser/android/ntp/new_tab_page_url_handler.h"
 #include "chrome/browser/android/service_tab_launcher.h"
 #include "chrome/browser/android/webapps/single_tab_mode_tab_helper.h"
+#include "content/public/browser/android/java_interfaces.h"
 #endif
 
 #if defined(OS_ANDROID)
@@ -777,6 +780,12 @@ class ClearSiteDataObserver : public BrowsingDataRemover::Observer {
   base::Closure callback_;
   int count_;
 };
+
+WebContents* GetWebContents(int render_process_id, int render_frame_id) {
+  RenderFrameHost* rfh =
+      RenderFrameHost::FromID(render_process_id, render_frame_id);
+  return WebContents::FromRenderFrameHost(rfh);
+}
 
 }  // namespace
 
@@ -1321,11 +1330,12 @@ bool ChromeContentBrowserClient::ShouldSwapBrowsingInstancesForNavigation(
 }
 
 bool ChromeContentBrowserClient::ShouldSwapProcessesForRedirect(
-    content::ResourceContext* resource_context, const GURL& current_url,
+    content::BrowserContext* browser_context,
+    const GURL& current_url,
     const GURL& new_url) {
 #if defined(ENABLE_EXTENSIONS)
   return ChromeContentBrowserClientExtensionsPart::
-      ShouldSwapProcessesForRedirect(resource_context, current_url, new_url);
+      ShouldSwapProcessesForRedirect(browser_context, current_url, new_url);
 #else
   return false;
 #endif
@@ -1810,10 +1820,12 @@ bool ChromeContentBrowserClient::AllowGetCookie(
   bool allow = io_data->GetCookieSettings()->
       IsReadingCookieAllowed(url, first_party);
 
+  base::Callback<content::WebContents*(void)> wc_getter =
+      base::Bind(&GetWebContents, render_process_id, render_frame_id);
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      base::Bind(&TabSpecificContentSettings::CookiesRead, render_process_id,
-                 render_frame_id, url, first_party, cookie_list, !allow));
+      base::Bind(&TabSpecificContentSettings::CookiesRead, wc_getter, url,
+                 first_party, cookie_list, !allow));
   return allow;
 }
 
@@ -1831,11 +1843,12 @@ bool ChromeContentBrowserClient::AllowSetCookie(
       io_data->GetCookieSettings();
   bool allow = cookie_settings->IsSettingCookieAllowed(url, first_party);
 
+  base::Callback<content::WebContents*(void)> wc_getter =
+      base::Bind(&GetWebContents, render_process_id, render_frame_id);
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      base::Bind(&TabSpecificContentSettings::CookieChanged, render_process_id,
-                 render_frame_id, url, first_party, cookie_line, options,
-                 !allow));
+      base::Bind(&TabSpecificContentSettings::CookieChanged, wc_getter, url,
+                 first_party, cookie_line, options, !allow));
   return allow;
 }
 
@@ -2953,8 +2966,16 @@ void ChromeContentBrowserClient::RegisterRenderFrameMojoInterfaces(
                  render_frame_host));
 
 #if BUILDFLAG(ANDROID_JAVA_UI)
-  ChromeInterfaceRegistrarAndroid::ExposeInterfacesToFrame(
-      registry, render_frame_host);
+  content::WebContents* web_contents =
+      content::WebContents::FromRenderFrameHost(render_frame_host);
+  if (web_contents) {
+    registry->AddInterface(
+        web_contents->GetJavaInterfaces()
+            ->CreateInterfaceFactory<blink::mojom::PaymentRequest>());
+    registry->AddInterface(
+        web_contents->GetJavaInterfaces()
+            ->CreateInterfaceFactory<blink::mojom::ShareService>());
+  }
 #endif
 
 #if defined(ENABLE_MEDIA_ROUTER)

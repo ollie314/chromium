@@ -100,7 +100,7 @@ class NTPSnippetsService : public ContentSuggestionsProvider,
   // Fetches snippets from the server for specified hosts (overriding
   // suggestions from the suggestion service) and adds them to the current ones.
   // Only called from chrome://snippets-internals, DO NOT USE otherwise!
-  // Ignored while |loaded()| is false.
+  // Ignored while ready() is false.
   void FetchSnippetsFromHosts(const std::set<std::string>& hosts,
                               bool interactive_request);
 
@@ -108,8 +108,10 @@ class NTPSnippetsService : public ContentSuggestionsProvider,
     return snippets_fetcher_.get();
   }
 
-  // (Re)schedules the periodic fetching of snippets.
-  void RescheduleFetching();
+  // (Re)schedules the periodic fetching of snippets. If |force| is true, the
+  // tasks will be re-scheduled even if they already exist and have the correct
+  // periods.
+  void RescheduleFetching(bool force);
 
   // ContentSuggestionsProvider implementation
   CategoryStatus GetCategoryStatus(Category category) override;
@@ -200,7 +202,7 @@ class NTPSnippetsService : public ContentSuggestionsProvider,
                            const std::string& snippet_id) const;
 
   // image_fetcher::ImageFetcherDelegate implementation.
-  void OnImageDataFetched(const std::string& snippet_id,
+  void OnImageDataFetched(const std::string& suggestion_id,
                           const std::string& image_data) override;
 
   // Callbacks for the NTPSnippetsDatabase.

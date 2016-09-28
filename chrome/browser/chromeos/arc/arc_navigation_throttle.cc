@@ -27,7 +27,9 @@ namespace arc {
 
 namespace {
 
-constexpr int kMinInstanceVersion = 7;
+constexpr uint32_t kMinVersionForHandleUrl = 2;
+constexpr uint32_t kMinVersionForRequestUrlHandlerList = 2;
+constexpr uint32_t kMinVersionForAddPreferredPackage = 7;
 
 scoped_refptr<ActivityIconLoader> GetIconLoader() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
@@ -103,7 +105,15 @@ content::NavigationThrottle::ThrottleCheckResult
 ArcNavigationThrottle::HandleRequest() {
   const GURL& url = navigation_handle()->GetURL();
 
-  if (ShouldIgnoreNavigation(navigation_handle()->GetPageTransition()))
+  // Always handle http(s) <form> submissions in Chrome for two reasons: 1) we
+  // don't have a way to send POST data to ARC, and 2) intercepting http(s) form
+  // submissions is not very important because such submissions are usually
+  // done within the same domain. ShouldOverrideUrlLoading() below filters out
+  // such submissions anyway.
+  constexpr bool kAllowFormSubmit = false;
+
+  if (ShouldIgnoreNavigation(navigation_handle()->GetPageTransition(),
+                             kAllowFormSubmit))
     return content::NavigationThrottle::PROCEED;
 
   const GURL previous_url = navigation_handle()->GetReferrer().url;
@@ -111,9 +121,9 @@ ArcNavigationThrottle::HandleRequest() {
   if (!ShouldOverrideUrlLoading(previous_url, current_url))
     return content::NavigationThrottle::PROCEED;
 
-  arc::ArcServiceManager* arc_service_manager = arc::ArcServiceManager::Get();
+  ArcServiceManager* arc_service_manager = ArcServiceManager::Get();
   DCHECK(arc_service_manager);
-  scoped_refptr<arc::LocalActivityResolver> local_resolver =
+  scoped_refptr<LocalActivityResolver> local_resolver =
       arc_service_manager->activity_resolver();
   if (local_resolver->ShouldChromeHandleUrl(url)) {
     // Allow navigation to proceed if there isn't an android app that handles
@@ -121,11 +131,11 @@ ArcNavigationThrottle::HandleRequest() {
     return content::NavigationThrottle::PROCEED;
   }
 
-  mojom::IntentHelperInstance* bridge_instance =
-      arc::ArcIntentHelperBridge::GetIntentHelperInstance(kMinInstanceVersion);
-  if (!bridge_instance)
+  auto* instance = ArcIntentHelperBridge::GetIntentHelperInstance(
+      "RequestUrlHandlerList", kMinVersionForRequestUrlHandlerList);
+  if (!instance)
     return content::NavigationThrottle::PROCEED;
-  bridge_instance->RequestUrlHandlerList(
+  instance->RequestUrlHandlerList(
       url.spec(), base::Bind(&ArcNavigationThrottle::OnAppCandidatesReceived,
                              weak_ptr_factory_.GetWeakPtr()));
   return content::NavigationThrottle::DEFER;
@@ -227,11 +237,11 @@ void ArcNavigationThrottle::OnIntentPickerClosed(
 
   previous_user_action_ = close_reason;
 
-  mojom::IntentHelperInstance* bridge =
-      arc::ArcIntentHelperBridge::GetIntentHelperInstance(kMinInstanceVersion);
-  if (!bridge || selected_app_index >= handlers.size()) {
+  // Make sure that the instance at least supports HandleUrl.
+  auto* instance = ArcIntentHelperBridge::GetIntentHelperInstance(
+      "HandleUrl", kMinVersionForHandleUrl);
+  if (!instance || selected_app_index >= handlers.size())
     close_reason = CloseReason::ERROR;
-  }
 
   switch (close_reason) {
     case CloseReason::ERROR:
@@ -244,7 +254,13 @@ void ArcNavigationThrottle::OnIntentPickerClosed(
       break;
     }
     case CloseReason::ALWAYS_PRESSED: {
-      bridge->AddPreferredPackage(handlers[selected_app_index]->package_name);
+      // Call AddPreferredPackage if it is supported. Reusing the same
+      // |instance| is okay.
+      if (ArcIntentHelperBridge::GetIntentHelperInstance(
+              "AddPreferredPackage", kMinVersionForAddPreferredPackage)) {
+        instance->AddPreferredPackage(
+            handlers[selected_app_index]->package_name);
+      }
       // fall through.
     }
     case CloseReason::JUST_ONCE_PRESSED:
@@ -253,8 +269,8 @@ void ArcNavigationThrottle::OnIntentPickerClosed(
               handlers[selected_app_index]->package_name)) {
         handle->Resume();
       } else {
-        bridge->HandleUrl(url.spec(),
-                          handlers[selected_app_index]->package_name);
+        instance->HandleUrl(url.spec(),
+                            handlers[selected_app_index]->package_name);
         handle->CancelDeferredNavigation(
             content::NavigationThrottle::CANCEL_AND_IGNORE);
         if (handle->GetWebContents()->GetController().IsInitialNavigation())

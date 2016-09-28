@@ -33,6 +33,19 @@
 DEFINE_WEB_CONTENTS_USER_DATA_KEY(
     page_load_metrics::MetricsWebContentsObserver);
 
+// This macro invokes the specified method on each observer, passing the
+// variable length arguments as the method's arguments, and removes the observer
+// from the list of observers if the given method returns STOP_OBSERVING.
+#define INVOKE_AND_PRUNE_OBSERVERS(observers, Method, ...)    \
+  for (auto it = observers.begin(); it != observers.end();) { \
+    if ((*it)->Method(__VA_ARGS__) ==                         \
+        PageLoadMetricsObserver::STOP_OBSERVING) {            \
+      it = observers.erase(it);                               \
+    } else {                                                  \
+      ++it;                                                   \
+    }                                                         \
+  }
+
 namespace page_load_metrics {
 
 namespace internal {
@@ -442,9 +455,8 @@ void PageLoadTracker::Commit(content::NavigationHandle* navigation_handle) {
   // Some transitions (like CLIENT_REDIRECT) are only known at commit time.
   page_transition_ = navigation_handle->GetPageTransition();
   user_gesture_ = navigation_handle->HasUserGesture();
-  for (const auto& observer : observers_) {
-    observer->OnCommit(navigation_handle);
-  }
+
+  INVOKE_AND_PRUNE_OBSERVERS(observers_, OnCommit, navigation_handle);
   LogAbortChainHistograms(navigation_handle);
 }
 
@@ -473,6 +485,10 @@ void PageLoadTracker::FlushMetricsOnAppEnterBackground() {
     RecordAppBackgroundPageLoadCompleted(false);
     app_entered_background_ = true;
   }
+
+  const PageLoadExtraInfo info = ComputePageLoadExtraInfo();
+  INVOKE_AND_PRUNE_OBSERVERS(observers_, FlushMetricsOnAppEnterBackground,
+                             timing_, info);
 }
 
 void PageLoadTracker::NotifyClientRedirectTo(
@@ -915,6 +931,11 @@ void MetricsWebContentsObserver::OnInputEvent(
 }
 
 void MetricsWebContentsObserver::FlushMetricsOnAppEnterBackground() {
+  // Signal to observers that we've been backgrounded, in cases where the
+  // FlushMetricsOnAppEnterBackground callback gets invoked before the
+  // associated WasHidden callback.
+  WasHidden();
+
   if (committed_load_)
     committed_load_->FlushMetricsOnAppEnterBackground();
   for (const auto& kv : provisional_loads_) {

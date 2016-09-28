@@ -62,9 +62,12 @@ StyleEngine::StyleEngine(Document& document)
     : m_document(&document)
     , m_isMaster(!document.importsController() || document.importsController()->master() == &document)
     , m_documentStyleSheetCollection(DocumentStyleSheetCollection::create(document))
+    // We don't need to create CSSFontSelector for imported document or
+    // HTMLTemplateElement's document, because those documents have no frame.
+    , m_fontSelector(document.frame() ? CSSFontSelector::create(&document) : nullptr)
 {
-    m_fontSelector = CSSFontSelector::create(m_document);
-    m_fontSelector->registerForInvalidationCallbacks(this);
+    if (m_fontSelector)
+        m_fontSelector->registerForInvalidationCallbacks(this);
 }
 
 StyleEngine::~StyleEngine()
@@ -739,7 +742,7 @@ void StyleEngine::scheduleInvalidationsForRemovedSibling(Element* beforeElement,
 
     scheduleSiblingInvalidationsForElement(removedElement, *schedulingParent, 1);
 
-    for (unsigned i = 2; beforeElement && i <= affectedSiblings; i++, beforeElement = ElementTraversal::previousSibling(*beforeElement))
+    for (unsigned i = 1; beforeElement && i <= affectedSiblings; i++, beforeElement = ElementTraversal::previousSibling(*beforeElement))
         scheduleSiblingInvalidationsForElement(*beforeElement, *schedulingParent, i);
 }
 

@@ -228,6 +228,7 @@ extern const char kChromeUISyncFileSystemInternalsHost[];
 extern const char kChromeUISyncInternalsHost[];
 extern const char kChromeUISyncResourcesHost[];
 extern const char kChromeUISystemInfoHost[];
+extern const char kChromeUITaskSchedulerInternalsHost[];
 extern const char kChromeUITermsHost[];
 extern const char kChromeUIThemeHost[];
 extern const char kChromeUIThumbnailHost[];
@@ -342,7 +343,6 @@ extern const char kSyncSetupSubPage[];
 extern const char kTriggeredResetProfileSettingsSubPage[];
 #if defined(OS_CHROMEOS)
 extern const char kInternetOptionsSubPage[];
-extern const char kChangeProfilePictureSubPage[];
 #endif
 
 // Extensions sub pages.

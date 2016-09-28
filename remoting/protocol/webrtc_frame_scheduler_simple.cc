@@ -13,6 +13,9 @@ namespace protocol {
 
 namespace {
 
+// Number of samples used to estimate processing time for the next frame.
+const int kStatsWindow = 5;
+
 const int kTargetFrameRate = 30;
 constexpr base::TimeDelta kTargetFrameInterval =
     base::TimeDelta::FromMilliseconds(1000 / kTargetFrameRate);
@@ -20,9 +23,15 @@ constexpr base::TimeDelta kTargetFrameInterval =
 // Target quantizer at which stop the encoding top-off.
 const int kTargetQuantizerForVp8TopOff = 30;
 
+// Minimum target bitrate per megapixel. The value is chosen experimentally such
+// that when screen is not changing the codec converges to the target quantizer
+// above in less than 10 frames.
+const int kVp8MinimumTargetBitrateKbpsPerMegapixel = 2500;
+
 }  // namespace
 
-WebrtcFrameSchedulerSimple::WebrtcFrameSchedulerSimple() {}
+WebrtcFrameSchedulerSimple::WebrtcFrameSchedulerSimple()
+    : frame_processing_delay_us_(kStatsWindow) {}
 WebrtcFrameSchedulerSimple::~WebrtcFrameSchedulerSimple() {}
 
 void WebrtcFrameSchedulerSimple::Start(const base::Closure& capture_callback) {
@@ -56,7 +65,11 @@ bool WebrtcFrameSchedulerSimple::GetEncoderFrameParams(
     return false;
   }
 
-  params_out->bitrate_kbps = target_bitrate_kbps_;
+  // TODO(sergeyu): This logic is applicable only to VP8. Reconsider it for VP9.
+  int minimum_bitrate =
+      static_cast<uint64_t>(kVp8MinimumTargetBitrateKbpsPerMegapixel) *
+      frame.size().width() * frame.size().height() / 1000000LL;
+  params_out->bitrate_kbps = std::max(minimum_bitrate, target_bitrate_kbps_);
 
   // TODO(sergeyu): Currently duration is always set to 1/15 of a second.
   // Experiment with different values, and try changing it dynamically.
@@ -82,6 +95,9 @@ void WebrtcFrameSchedulerSimple::OnFrameEncoded(
     return;
   }
 
+  frame_processing_delay_us_.Record(
+      (base::TimeTicks::Now() - last_capture_started_time_).InMicroseconds());
+
   // Top-off until the target quantizer value is reached.
   top_off_is_active_ = encoded_frame.quantizer > kTargetQuantizerForVp8TopOff;
 
@@ -104,7 +120,10 @@ void WebrtcFrameSchedulerSimple::ScheduleNextFrame() {
   // If this is not the first frame then capture next frame after the previous
   // one has finished sending.
   if (!last_frame_send_finish_time_.is_null()) {
-    delay = std::max(base::TimeDelta(), last_frame_send_finish_time_ - now);
+    base::TimeDelta expected_processing_time =
+        base::TimeDelta::FromMicroseconds(frame_processing_delay_us_.Max());
+    delay = std::max(base::TimeDelta(), last_frame_send_finish_time_ -
+                                            expected_processing_time - now);
   }
 
   // Cap interval between frames to kTargetFrameInterval.

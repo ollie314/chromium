@@ -92,8 +92,8 @@ static void FetchSnippets(JNIEnv* env,
   service->FetchSnippets(j_force_request);
 }
 
-// Reschedules the fetching of snippets. Used to support different fetching
-// intervals for different times of day.
+// Reschedules the fetching of snippets. If tasks are already scheduled, they
+// will be rescheduled anyway, so all running intervals will be reset.
 static void RescheduleFetching(JNIEnv* env,
                                const JavaParamRef<jclass>& caller) {
   Profile* profile = ProfileManager::GetLastUsedProfile();
@@ -115,7 +115,7 @@ static void RescheduleFetching(JNIEnv* env,
   if (!service)
     return;
 
-  service->RescheduleFetching();
+  service->RescheduleFetching(/*force=*/true);
 }
 
 static void OnSuggestionTargetVisited(JNIEnv* env,

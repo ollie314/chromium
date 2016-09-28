@@ -226,12 +226,14 @@ NTPSnippetsService::NTPSnippetsService(
                                      base::Unretained(this)));
 }
 
-NTPSnippetsService::~NTPSnippetsService() {
-}
+NTPSnippetsService::~NTPSnippetsService() = default;
 
 // static
 void NTPSnippetsService::RegisterProfilePrefs(PrefRegistrySimple* registry) {
   registry->RegisterListPref(prefs::kSnippetHosts);
+  registry->RegisterInt64Pref(prefs::kSnippetBackgroundFetchingIntervalWifi, 0);
+  registry->RegisterInt64Pref(prefs::kSnippetBackgroundFetchingIntervalFallback,
+                              0);
 
   NTPSnippetsStatusService::RegisterProfilePrefs(registry);
 }
@@ -268,22 +270,40 @@ void NTPSnippetsService::FetchSnippetsFromHosts(
                                             interactive_request);
 }
 
-void NTPSnippetsService::RescheduleFetching() {
+void NTPSnippetsService::RescheduleFetching(bool force) {
   // The scheduler only exists on Android so far, it's null on other platforms.
   if (!scheduler_)
     return;
 
-  // If we're NOT_INITED, we don't know whether to schedule or un-schedule.
-  // We'll reschedule on the next state change anyway, so do nothing here.
-  if (state_ == State::NOT_INITED)
-    return;
-
   if (ready()) {
-    scheduler_->Schedule(GetFetchingIntervalWifi(),
-                         GetFetchingIntervalFallback(),
-                         /*reschedule_time=*/base::Time());
+    base::TimeDelta old_interval_wifi =
+        base::TimeDelta::FromInternalValue(pref_service_->GetInt64(
+            prefs::kSnippetBackgroundFetchingIntervalWifi));
+    base::TimeDelta old_interval_fallback =
+        base::TimeDelta::FromInternalValue(pref_service_->GetInt64(
+            prefs::kSnippetBackgroundFetchingIntervalFallback));
+    base::TimeDelta interval_wifi = GetFetchingIntervalWifi();
+    base::TimeDelta interval_fallback = GetFetchingIntervalFallback();
+    if (force || interval_wifi != old_interval_wifi ||
+        interval_fallback != old_interval_fallback) {
+      scheduler_->Schedule(interval_wifi, interval_fallback);
+      pref_service_->SetInt64(prefs::kSnippetBackgroundFetchingIntervalWifi,
+                              interval_wifi.ToInternalValue());
+      pref_service_->SetInt64(
+          prefs::kSnippetBackgroundFetchingIntervalFallback,
+          interval_fallback.ToInternalValue());
+    }
   } else {
-    scheduler_->Unschedule();
+    // If we're NOT_INITED, we don't know whether to schedule or un-schedule.
+    // If |force| is false, all is well: We'll reschedule on the next state
+    // change anyway. If it's true, then unschedule here, to make sure that the
+    // next reschedule actually happens.
+    if (state_ != State::NOT_INITED || force) {
+      scheduler_->Unschedule();
+      pref_service_->ClearPref(prefs::kSnippetBackgroundFetchingIntervalWifi);
+      pref_service_->ClearPref(
+          prefs::kSnippetBackgroundFetchingIntervalFallback);
+    }
   }
 }
 
@@ -543,7 +563,7 @@ void NTPSnippetsService::OnSuggestionsChanged(
   // for its callback.
   NotifyNewSuggestions();
 
-  FetchSnippetsFromHosts(hosts, /*force_request=*/false);
+  FetchSnippetsFromHosts(hosts, /*interactive_request=*/false);
 }
 
 void NTPSnippetsService::OnFetchFinished(
@@ -611,7 +631,7 @@ void NTPSnippetsService::OnFetchFinished(
   // succeeded, and also that we don't do a background fetch immediately after
   // a user-initiated one.
   if (snippets)
-    RescheduleFetching();
+    RescheduleFetching(true);
 }
 
 void NTPSnippetsService::ArchiveSnippets(Category category,
@@ -804,9 +824,8 @@ void NTPSnippetsService::OnSnippetImageFetchedFromDatabase(
   // |image_decoder_| is null in tests.
   if (image_decoder_ && !data.empty()) {
     image_decoder_->DecodeImage(
-        std::move(data),
-        base::Bind(&NTPSnippetsService::OnSnippetImageDecodedFromDatabase,
-                   base::Unretained(this), callback, suggestion_id));
+        data, base::Bind(&NTPSnippetsService::OnSnippetImageDecodedFromDatabase,
+                         base::Unretained(this), callback, suggestion_id));
     return;
   }
 
@@ -879,7 +898,7 @@ void NTPSnippetsService::EnterStateReady() {
     // Either add a DCHECK here that we actually are allowed to do network I/O
     // or change the logic so that some explicit call is always needed for the
     // network request.
-    FetchSnippets(/*force_request=*/false);
+    FetchSnippets(/*interactive_request=*/false);
     fetch_when_ready_ = false;
   }
 
@@ -991,10 +1010,7 @@ void NTPSnippetsService::EnterState(State state) {
   }
 
   // Schedule or un-schedule background fetching after each state change.
-  // TODO(treib): This resets all currently scheduled fetches on each Chrome
-  // start. Maybe store the currently scheduled values in prefs, and only
-  // reschedule if they have changed? crbug.com/646842
-  RescheduleFetching();
+  RescheduleFetching(false);
 }
 
 void NTPSnippetsService::NotifyNewSuggestions() {

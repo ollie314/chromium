@@ -48,60 +48,36 @@ TEST_P(PaintPropertyTreePrinterTest, SimpleTransformTree)
 {
     setBodyInnerHTML("hello world");
     String transformTreeAsString = transformPropertyTreeAsString(*document().view());
-    if (RuntimeEnabledFeatures::rootLayerScrollingEnabled()) {
-        EXPECT_THAT(transformTreeAsString.ascii().data(),
-            testing::MatchesRegex("PaintOffsetTranslation \\(LayoutView #document\\) .*"
-                "  ScrollTranslation \\(LayoutView #document\\) \\w+ .*"));
-    } else {
-        EXPECT_THAT(transformTreeAsString.ascii().data(),
-            testing::MatchesRegex("root .*"
-                "  PreTranslation \\(FrameView\\) .*"
-                "    ScrollTranslation \\(FrameView\\) .*"));
-    }
+    EXPECT_THAT(transformTreeAsString.ascii().data(),
+        testing::MatchesRegex("root .*"
+            "  .*Translation \\(.*\\) .*"));
 }
 
 TEST_P(PaintPropertyTreePrinterTest, SimpleClipTree)
 {
     setBodyInnerHTML("hello world");
     String clipTreeAsString = clipPropertyTreeAsString(*document().view());
-    if (RuntimeEnabledFeatures::rootLayerScrollingEnabled()) {
-        EXPECT_THAT(clipTreeAsString.ascii().data(),
-            testing::MatchesRegex("root \\w+ .*"
-                "  OverflowClip \\(LayoutView #document\\) .*"));
-    } else {
-        EXPECT_THAT(clipTreeAsString.ascii().data(),
-            testing::MatchesRegex("root .*"
-                "  ContentClip \\(FrameView\\) .*"));
-    }
+    EXPECT_THAT(clipTreeAsString.ascii().data(),
+        testing::MatchesRegex("root .*"
+            "  .*Clip \\(.*\\) .*"));
 }
 
 TEST_P(PaintPropertyTreePrinterTest, SimpleEffectTree)
 {
     setBodyInnerHTML("<div style='opacity: 0.9;'>hello world</div>");
     String effectTreeAsString = effectPropertyTreeAsString(*document().view());
-    if (RuntimeEnabledFeatures::rootLayerScrollingEnabled()) {
-        EXPECT_THAT(effectTreeAsString.ascii().data(),
-            testing::MatchesRegex("Effect \\(LayoutView #document\\) .*"
-                "  Effect \\(LayoutBlockFlow DIV\\) .*"));
-    } else {
-        EXPECT_THAT(effectTreeAsString.ascii().data(),
-            testing::MatchesRegex("root .*"
-                "  Effect \\(LayoutBlockFlow DIV\\) .*"));
-    }
+    EXPECT_THAT(effectTreeAsString.ascii().data(),
+        testing::MatchesRegex("root .*"
+            "  Effect \\(LayoutBlockFlow DIV\\) .*"));
 }
 
 TEST_P(PaintPropertyTreePrinterTest, SimpleScrollTree)
 {
     setBodyInnerHTML("<div style='height: 4000px;'>hello world</div>");
     String scrollTreeAsString = scrollPropertyTreeAsString(*document().view());
-    if (RuntimeEnabledFeatures::rootLayerScrollingEnabled()) {
-        EXPECT_THAT(scrollTreeAsString.ascii().data(),
-            testing::MatchesRegex("Scroll \\(LayoutView #document\\) .*"));
-    } else {
-        EXPECT_THAT(scrollTreeAsString.ascii().data(),
-            testing::MatchesRegex("root .*"
-                "  Scroll \\(FrameView\\) .*"));
-    }
+    EXPECT_THAT(scrollTreeAsString.ascii().data(),
+        testing::MatchesRegex("root .*"
+            "  Scroll \\(.*\\) .*"));
 }
 
 } // namespace blink

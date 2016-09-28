@@ -8,6 +8,7 @@
 #include "remoting/protocol/webrtc_frame_scheduler.h"
 
 #include "base/timer/timer.h"
+#include "remoting/base/running_samples.h"
 
 namespace remoting {
 namespace protocol {
@@ -39,13 +40,16 @@ class WebrtcFrameSchedulerSimple : public WebrtcFrameScheduler {
   base::Closure capture_callback_;
   bool paused_ = false;
   bool key_frame_request_ = false;
-  uint32_t target_bitrate_kbps_ = 1000;  // Initial bitrate.
+  int target_bitrate_kbps_ = 1000;  // Initial bitrate.
 
   base::TimeTicks last_capture_started_time_;
   base::TimeTicks last_frame_send_finish_time_;
 
   // Set to true when encoding unchanged frames for top-off.
   bool top_off_is_active_ = false;
+
+  // Accumulator for capture and encoder delay history.
+  RunningSamples frame_processing_delay_us_;
 
   base::OneShotTimer capture_timer_;
 };

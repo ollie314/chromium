@@ -28,14 +28,9 @@
 
 using std::string;
 using std::vector;
+using base::StringPiece;
 
 namespace net {
-
-void QuicSimpleClient::ClientQuicDataToResend::Resend() {
-  client_->SendRequest(*headers_, body_, fin_);
-  delete headers_;
-  headers_ = nullptr;
-}
 
 QuicSimpleClient::QuicSimpleClient(
     IPEndPoint server_address,
@@ -48,11 +43,11 @@ QuicSimpleClient::QuicSimpleClient(
                      CreateQuicConnectionHelper(),
                      CreateQuicAlarmFactory(),
                      std::move(proof_verifier)),
-      server_address_(server_address),
-      local_port_(0),
       initialized_(false),
       packet_reader_started_(false),
-      weak_factory_(this) {}
+      weak_factory_(this) {
+  set_server_address(server_address);
+}
 
 QuicSimpleClient::QuicSimpleClient(
     IPEndPoint server_address,
@@ -66,11 +61,11 @@ QuicSimpleClient::QuicSimpleClient(
                      CreateQuicConnectionHelper(),
                      CreateQuicAlarmFactory(),
                      std::move(proof_verifier)),
-      server_address_(server_address),
-      local_port_(0),
       initialized_(false),
       packet_reader_started_(false),
-      weak_factory_(this) {}
+      weak_factory_(this) {
+  set_server_address(server_address);
+}
 
 QuicSimpleClient::~QuicSimpleClient() {
   if (connected()) {
@@ -93,32 +88,21 @@ bool QuicSimpleClient::Initialize() {
   return true;
 }
 
-QuicSimpleClient::QuicDataToResend::QuicDataToResend(HttpRequestInfo* headers,
-                                                     base::StringPiece body,
-                                                     bool fin)
-    : headers_(headers), body_(body), fin_(fin) {}
-
-QuicSimpleClient::QuicDataToResend::~QuicDataToResend() {
-  if (headers_) {
-    delete headers_;
-  }
-}
-
 bool QuicSimpleClient::CreateUDPSocket() {
   std::unique_ptr<UDPClientSocket> socket(
       new UDPClientSocket(DatagramSocket::DEFAULT_BIND, RandIntCallback(),
                           &net_log_, NetLog::Source()));
 
-  int address_family = server_address_.GetSockAddrFamily();
-  if (bind_to_address_.size() != 0) {
-    client_address_ = IPEndPoint(bind_to_address_, local_port_);
+  int address_family = server_address().GetSockAddrFamily();
+  if (bind_to_address().size() != 0) {
+    client_address_ = IPEndPoint(bind_to_address(), local_port());
   } else if (address_family == AF_INET) {
-    client_address_ = IPEndPoint(IPAddress::IPv4AllZeros(), local_port_);
+    client_address_ = IPEndPoint(IPAddress::IPv4AllZeros(), local_port());
   } else {
-    client_address_ = IPEndPoint(IPAddress::IPv6AllZeros(), local_port_);
+    client_address_ = IPEndPoint(IPAddress::IPv6AllZeros(), local_port());
   }
 
-  int rc = socket->Connect(server_address_);
+  int rc = socket->Connect(server_address());
   if (rc != OK) {
     LOG(ERROR) << "Connect failed: " << ErrorToShortString(rc);
     return false;
@@ -172,16 +156,9 @@ bool QuicSimpleClient::Connect() {
     while (EncryptionBeingEstablished()) {
       WaitForEvents();
     }
-    if (FLAGS_enable_quic_stateless_reject_support && connected() &&
-        !data_to_resend_on_connect_.empty()) {
-      // A connection has been established and there was previously queued data
-      // to resend.  Resend it and empty the queue.
-      std::vector<std::unique_ptr<QuicDataToResend>> old_data;
-      old_data.swap(data_to_resend_on_connect_);
-      for (const auto& data : old_data) {
-        data->Resend();
-      }
-      data_to_resend_on_connect_.clear();
+    if (FLAGS_enable_quic_stateless_reject_support && connected()) {
+      // Resend any previously queued data.
+      ResendSavedData();
     }
     if (session() != nullptr &&
         session()->error() != QUIC_CRYPTO_HANDSHAKE_STATELESS_REJECT) {
@@ -210,7 +187,7 @@ void QuicSimpleClient::StartConnect() {
     // If the last error was not a stateless reject, then the queued up data
     // does not need to be resent.
     if (session()->error() != QUIC_CRYPTO_HANDSHAKE_STATELESS_REJECT) {
-      data_to_resend_on_connect_.clear();
+      ClearDataToResend();
     }
     // Before we destroy the last session and create a new one, gather its stats
     // and update the stats for the overall connection.
@@ -218,7 +195,7 @@ void QuicSimpleClient::StartConnect() {
   }
 
   CreateQuicClientSession(new QuicConnection(
-      GetNextConnectionId(), server_address_, helper(), alarm_factory(),
+      GetNextConnectionId(), server_address(), helper(), alarm_factory(),
       writer(),
       /* owns_writer= */ false, Perspective::IS_CLIENT, supported_versions()));
 
@@ -235,7 +212,7 @@ void QuicSimpleClient::Disconnect() {
         QUIC_PEER_GOING_AWAY, "Client disconnecting",
         ConnectionCloseBehavior::SEND_CONNECTION_CLOSE_PACKET);
   }
-  data_to_resend_on_connect_.clear();
+  ClearDataToResend();
 
   reset_writer();
   packet_reader_.reset();
@@ -244,49 +221,36 @@ void QuicSimpleClient::Disconnect() {
   initialized_ = false;
 }
 
-void QuicSimpleClient::SendRequest(const HttpRequestInfo& headers,
-                                   base::StringPiece body,
+void QuicSimpleClient::SendRequest(const SpdyHeaderBlock& headers,
+                                   StringPiece body,
                                    bool fin) {
+  QuicClientPushPromiseIndex::TryHandle* handle;
+  QuicAsyncStatus rv = push_promise_index()->Try(headers, this, &handle);
+  if (rv == QUIC_SUCCESS)
+    return;
+
+  if (rv == QUIC_PENDING) {
+    // May need to retry request if asynchronous rendezvous fails.
+    AddPromiseDataToResend(headers, body, fin);
+    return;
+  }
+
   QuicSpdyClientStream* stream = CreateReliableClientStream();
   if (stream == nullptr) {
-    LOG(DFATAL) << "stream creation failed!";
+    QUIC_BUG << "stream creation failed!";
     return;
   }
-  SpdyHeaderBlock header_block;
-  CreateSpdyHeadersFromHttpRequest(headers, headers.extra_headers, true,
-                                   &header_block);
   stream->set_visitor(this);
-  stream->SendRequest(std::move(header_block), body, fin);
-  if (FLAGS_enable_quic_stateless_reject_support) {
-    // Record this in case we need to resend.
-    auto* new_headers = new HttpRequestInfo;
-    *new_headers = headers;
-    auto* data_to_resend =
-        new ClientQuicDataToResend(new_headers, body, fin, this);
-    MaybeAddQuicDataToResend(std::unique_ptr<QuicDataToResend>(data_to_resend));
-  }
-}
-
-void QuicSimpleClient::MaybeAddQuicDataToResend(
-    std::unique_ptr<QuicDataToResend> data_to_resend) {
-  DCHECK(FLAGS_enable_quic_stateless_reject_support);
-  if (session()->IsCryptoHandshakeConfirmed()) {
-    // The handshake is confirmed.  No need to continue saving requests to
-    // resend.
-    data_to_resend_on_connect_.clear();
-    return;
-  }
-
-  // The handshake is not confirmed.  Push the data onto the queue of data to
-  // resend if statelessly rejected.
-  data_to_resend_on_connect_.push_back(std::move(data_to_resend));
+  stream->SendRequest(headers.Clone(), body, fin);
+  // Record this in case we need to resend.
+  MaybeAddDataToResend(headers, body, fin);
 }
 
 void QuicSimpleClient::SendRequestAndWaitForResponse(
-    const HttpRequestInfo& request,
+    const SpdyHeaderBlock& headers,
     base::StringPiece body,
     bool fin) {
-  SendRequest(request, body, fin);
+  SendRequest(headers, body, fin);
   while (WaitForEvents()) {
   }
 }
@@ -294,10 +258,13 @@ void QuicSimpleClient::SendRequestAndWaitForResponse(
 void QuicSimpleClient::SendRequestsAndWaitForResponse(
     const base::CommandLine::StringVector& url_list) {
   for (size_t i = 0; i < url_list.size(); ++i) {
-    HttpRequestInfo request;
-    request.method = "GET";
-    request.url = GURL(url_list[i]);
-    SendRequest(request, "", true);
+    string url = GURL(url_list[i]).spec();
+    SpdyHeaderBlock headers;
+    if (!SpdyUtils::PopulateHeaderBlockFromUrl(url, &headers)) {
+      QUIC_BUG << "Unable to create request";
+      continue;
+    }
+    SendRequest(headers, "", true);
   }
 
   while (WaitForEvents()) {
@@ -326,7 +293,7 @@ bool QuicSimpleClient::MigrateSocket(const IPAddress& new_host) {
     return false;
   }
 
-  bind_to_address_ = new_host;
+  set_bind_to_address(new_host);
   if (!CreateUDPSocket()) {
     return false;
   }
@@ -338,40 +305,6 @@ bool QuicSimpleClient::MigrateSocket(const IPAddress& new_host) {
   session()->connection()->SetQuicPacketWriter(writer, false);
 
   return true;
-}
-
-void QuicSimpleClient::OnClose(QuicSpdyStream* stream) {
-  DCHECK(stream != nullptr);
-  QuicSpdyClientStream* client_stream =
-      static_cast<QuicSpdyClientStream*>(stream);
-  HttpResponseInfo response;
-  SpdyHeadersToHttpResponse(client_stream->response_headers(), &response);
-  if (response_listener_.get() != nullptr) {
-    response_listener_->OnCompleteResponse(stream->id(), *response.headers,
-                                           client_stream->data());
-  }
-
-  // Store response headers and body.
-  if (store_response_) {
-    latest_response_code_ = client_stream->response_code();
-    response.headers->GetNormalizedHeaders(&latest_response_headers_);
-    latest_response_body_ = client_stream->data();
-  }
-}
-
-size_t QuicSimpleClient::latest_response_code() const {
-  LOG_IF(DFATAL, !store_response_) << "Response not stored!";
-  return latest_response_code_;
-}
-
-const string& QuicSimpleClient::latest_response_headers() const {
-  LOG_IF(DFATAL, !store_response_) << "Response not stored!";
-  return latest_response_headers_;
-}
-
-const string& QuicSimpleClient::latest_response_body() const {
-  LOG_IF(DFATAL, !store_response_) << "Response not stored!";
-  return latest_response_body_;
 }
 
 QuicConnectionId QuicSimpleClient::GenerateNewConnectionId() {

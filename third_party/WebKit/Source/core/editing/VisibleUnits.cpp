@@ -1923,8 +1923,8 @@ VisiblePosition endOfBlock(const VisiblePosition& visiblePosition, EditingBounda
 
 bool inSameBlock(const VisiblePosition& a, const VisiblePosition& b)
 {
-    // TODO(xiaochengh): Ensure that this function is called with valid |a| and
-    // |b|, and add |DCHECK(a.isValid())| and |DCHECK(b.isValid())|
+    DCHECK(a.isValid()) << a;
+    DCHECK(b.isValid()) << b;
     return !a.isNull() && enclosingBlock(a.deepEquivalent().computeContainerNode()) == enclosingBlock(b.deepEquivalent().computeContainerNode());
 }
 
@@ -2936,8 +2936,7 @@ bool isVisuallyEquivalentCandidate(const PositionInFlatTree& position)
 template <typename Strategy>
 static IntRect absoluteCaretBoundsOfAlgorithm(const VisiblePositionTemplate<Strategy>& visiblePosition)
 {
-    // TODO(xiaochengh): Ensure that this function is called with a valid
-    // |visiblePosition|, and add |DCHECK(visiblePosition.isValid())|;
+    DCHECK(visiblePosition.isValid()) << visiblePosition;
     LayoutObject* layoutObject;
     LayoutRect localRect = localCaretRectOfPosition(visiblePosition.toPositionWithAffinity(), layoutObject);
     if (localRect.isEmpty() || !layoutObject)
@@ -2984,8 +2983,7 @@ static VisiblePositionTemplate<Strategy> skipToEndOfEditingBoundary(const Visibl
 template <typename Strategy>
 static UChar32 characterAfterAlgorithm(const VisiblePositionTemplate<Strategy>& visiblePosition)
 {
-    // TODO(xiaochengh): Ensure that this function is called with a valid
-    // |visiblePosition|, and add |DCHECK(visiblePosition.isValid())|
+    DCHECK(visiblePosition.isValid()) << visiblePosition;
     // We canonicalize to the first of two equivalent candidates, but the second
     // of the two candidates is the one that will be inside the text node
     // containing the character after this visible position.
@@ -3017,8 +3015,7 @@ UChar32 characterAfter(const VisiblePositionInFlatTree& visiblePosition)
 template <typename Strategy>
 static UChar32 characterBeforeAlgorithm(const VisiblePositionTemplate<Strategy>& visiblePosition)
 {
-    // TODO(xiaochengh): Ensure that this function is called with a valid
-    // |visiblePosition|, and add |DCHECK(visiblePosition.isValid())|
+    DCHECK(visiblePosition.isValid()) << visiblePosition;
     return characterAfter(previousPositionOf(visiblePosition));
 }
 
@@ -3391,32 +3388,48 @@ VisiblePositionInFlatTree rightPositionOf(const VisiblePositionInFlatTree& visib
 }
 
 template <typename Strategy>
-static VisiblePositionTemplate<Strategy> nextPositionOfAlgorithm(const VisiblePositionTemplate<Strategy>& visiblePosition, EditingBoundaryCrossingRule rule)
+static VisiblePositionTemplate<Strategy> nextPositionOfAlgorithm(const PositionWithAffinityTemplate<Strategy>& position, EditingBoundaryCrossingRule rule)
 {
-    // TODO(xiaochengh): Ensure that this function is called with a valid
-    // |visiblePosition|, and add |DCHECK(visiblePosition.isValid())|;
-    const VisiblePositionTemplate<Strategy> next = createVisiblePositionDeprecated(nextVisuallyDistinctCandidate(visiblePosition.deepEquivalent()), visiblePosition.affinity());
+    const VisiblePositionTemplate<Strategy> next = createVisiblePosition(nextVisuallyDistinctCandidate(position.position()), position.affinity());
 
     switch (rule) {
     case CanCrossEditingBoundary:
         return next;
     case CannotCrossEditingBoundary:
-        return honorEditingBoundaryAtOrAfter(next, visiblePosition.deepEquivalent());
+        return honorEditingBoundaryAtOrAfter(next, position.position());
     case CanSkipOverEditingBoundary:
-        return skipToEndOfEditingBoundary(next, visiblePosition.deepEquivalent());
+        return skipToEndOfEditingBoundary(next, position.position());
     }
     NOTREACHED();
-    return honorEditingBoundaryAtOrAfter(next, visiblePosition.deepEquivalent());
+    return honorEditingBoundaryAtOrAfter(next, position.position());
 }
 
 VisiblePosition nextPositionOf(const VisiblePosition& visiblePosition, EditingBoundaryCrossingRule rule)
 {
-    return nextPositionOfAlgorithm<EditingStrategy>(visiblePosition, rule);
+    DCHECK(visiblePosition.isValid()) << visiblePosition;
+    return nextPositionOfAlgorithm<EditingStrategy>(visiblePosition.toPositionWithAffinity(), rule);
 }
 
 VisiblePositionInFlatTree nextPositionOf(const VisiblePositionInFlatTree& visiblePosition, EditingBoundaryCrossingRule rule)
 {
-    return nextPositionOfAlgorithm<EditingInFlatTreeStrategy>(visiblePosition, rule);
+    DCHECK(visiblePosition.isValid()) << visiblePosition;
+    return nextPositionOfAlgorithm<EditingInFlatTreeStrategy>(visiblePosition.toPositionWithAffinity(), rule);
+}
+
+VisiblePosition nextPositionOfDeprecated(const VisiblePosition& visiblePosition, EditingBoundaryCrossingRule rule)
+{
+    if (visiblePosition.isNull())
+        return VisiblePosition();
+    visiblePosition.deepEquivalent().document()->updateStyleAndLayoutIgnorePendingStylesheets();
+    return nextPositionOfAlgorithm<EditingStrategy>(visiblePosition.toPositionWithAffinity(), rule);
+}
+
+VisiblePositionInFlatTree nextPositionOfDeprecated(const VisiblePositionInFlatTree& visiblePosition, EditingBoundaryCrossingRule rule)
+{
+    if (visiblePosition.isNull())
+        return VisiblePositionInFlatTree();
+    visiblePosition.deepEquivalent().document()->updateStyleAndLayoutIgnorePendingStylesheets();
+    return nextPositionOfAlgorithm<EditingInFlatTreeStrategy>(visiblePosition.toPositionWithAffinity(), rule);
 }
 
 template <typename Strategy>
@@ -3445,45 +3458,61 @@ static VisiblePositionTemplate<Strategy> skipToStartOfEditingBoundary(const Visi
 }
 
 template <typename Strategy>
-static VisiblePositionTemplate<Strategy> previousPositionOfAlgorithm(const VisiblePositionTemplate<Strategy>& visiblePosition, EditingBoundaryCrossingRule rule)
+static VisiblePositionTemplate<Strategy> previousPositionOfAlgorithm(const PositionTemplate<Strategy>& position, EditingBoundaryCrossingRule rule)
 {
-    // TODO(xiaochengh): Ensure that this function is called with a valid
-    // |visiblePosition|, and add |DCHECK(visiblePosition.isValid())|;
-    const PositionTemplate<Strategy> pos = previousVisuallyDistinctCandidate(visiblePosition.deepEquivalent());
+    const PositionTemplate<Strategy> prevPosition = previousVisuallyDistinctCandidate(position);
 
     // return null visible position if there is no previous visible position
-    if (pos.atStartOfTree())
+    if (prevPosition.atStartOfTree())
         return VisiblePositionTemplate<Strategy>();
 
     // we should always be able to make the affinity |TextAffinity::Downstream|,
     // because going previous from an |TextAffinity::Upstream| position can
     // never yield another |TextAffinity::Upstream position| (unless line wrap
     // length is 0!).
-    const VisiblePositionTemplate<Strategy> prev = createVisiblePositionDeprecated(pos);
-    if (prev.deepEquivalent() == visiblePosition.deepEquivalent())
+    const VisiblePositionTemplate<Strategy> prev = createVisiblePosition(prevPosition);
+    if (prev.deepEquivalent() == position)
         return VisiblePositionTemplate<Strategy>();
 
     switch (rule) {
     case CanCrossEditingBoundary:
         return prev;
     case CannotCrossEditingBoundary:
-        return honorEditingBoundaryAtOrBefore(prev, visiblePosition.deepEquivalent());
+        return honorEditingBoundaryAtOrBefore(prev, position);
     case CanSkipOverEditingBoundary:
-        return skipToStartOfEditingBoundary(prev, visiblePosition.deepEquivalent());
+        return skipToStartOfEditingBoundary(prev, position);
     }
 
     NOTREACHED();
-    return honorEditingBoundaryAtOrBefore(prev, visiblePosition.deepEquivalent());
+    return honorEditingBoundaryAtOrBefore(prev, position);
 }
 
 VisiblePosition previousPositionOf(const VisiblePosition& visiblePosition, EditingBoundaryCrossingRule rule)
 {
-    return previousPositionOfAlgorithm<EditingStrategy>(visiblePosition, rule);
+    DCHECK(visiblePosition.isValid()) << visiblePosition;
+    return previousPositionOfAlgorithm<EditingStrategy>(visiblePosition.deepEquivalent(), rule);
 }
 
 VisiblePositionInFlatTree previousPositionOf(const VisiblePositionInFlatTree& visiblePosition, EditingBoundaryCrossingRule rule)
 {
-    return previousPositionOfAlgorithm<EditingInFlatTreeStrategy>(visiblePosition, rule);
+    DCHECK(visiblePosition.isValid()) << visiblePosition;
+    return previousPositionOfAlgorithm<EditingInFlatTreeStrategy>(visiblePosition.deepEquivalent(), rule);
+}
+
+VisiblePosition previousPositionOfDeprecated(const VisiblePosition& visiblePosition, EditingBoundaryCrossingRule rule)
+{
+    if (visiblePosition.isNull())
+        return VisiblePosition();
+    visiblePosition.deepEquivalent().document()->updateStyleAndLayoutIgnorePendingStylesheets();
+    return previousPositionOfAlgorithm<EditingStrategy>(visiblePosition.deepEquivalent(), rule);
+}
+
+VisiblePositionInFlatTree previousPositionOfDeprecated(const VisiblePositionInFlatTree& visiblePosition, EditingBoundaryCrossingRule rule)
+{
+    if (visiblePosition.isNull())
+        return VisiblePositionInFlatTree();
+    visiblePosition.deepEquivalent().document()->updateStyleAndLayoutIgnorePendingStylesheets();
+    return previousPositionOfAlgorithm<EditingInFlatTreeStrategy>(visiblePosition.deepEquivalent(), rule);
 }
 
 } // namespace blink

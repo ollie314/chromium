@@ -770,12 +770,15 @@ void CompositeEditCommand::prepareWhitespaceAtPositionForSplit(Position& positio
     // Delete collapsed whitespace so that inserting nbsps doesn't uncollapse it.
     Position upstreamPos = mostBackwardCaretPosition(position);
     deleteInsignificantText(upstreamPos, mostForwardCaretPosition(position));
-    position = mostForwardCaretPosition(upstreamPos);
 
-    VisiblePosition visiblePos = createVisiblePositionDeprecated(position);
+    document().updateStyleAndLayoutIgnorePendingStylesheets();
+    position = mostForwardCaretPosition(upstreamPos);
+    VisiblePosition visiblePos = createVisiblePosition(position);
     VisiblePosition previousVisiblePos = previousPositionOf(visiblePos);
     replaceCollapsibleWhitespaceWithNonBreakingSpaceIfNeeded(previousVisiblePos);
-    replaceCollapsibleWhitespaceWithNonBreakingSpaceIfNeeded(visiblePos);
+
+    document().updateStyleAndLayoutIgnorePendingStylesheets();
+    replaceCollapsibleWhitespaceWithNonBreakingSpaceIfNeeded(createVisiblePosition(position));
 }
 
 void CompositeEditCommand::replaceCollapsibleWhitespaceWithNonBreakingSpaceIfNeeded(const VisiblePosition& visiblePosition)
@@ -1174,7 +1177,7 @@ void CompositeEditCommand::cloneParagraphUnderNewElement(const Position& start, 
 
 void CompositeEditCommand::cleanupAfterDeletion(EditingState* editingState, VisiblePosition destination)
 {
-    VisiblePosition caretAfterDelete = endingSelection().visibleStart();
+    VisiblePosition caretAfterDelete = endingSelection().visibleStartDeprecated();
     Node* destinationNode = destination.deepEquivalent().anchorNode();
     if (caretAfterDelete.deepEquivalent() != destination.deepEquivalent() && isStartOfParagraphDeprecated(caretAfterDelete) && isEndOfParagraphDeprecated(caretAfterDelete)) {
         // Note: We want the rightmost candidate.
@@ -1289,8 +1292,8 @@ void CompositeEditCommand::moveParagraphs(const VisiblePosition& startOfParagrap
     int destinationIndex = -1;
     bool originalIsDirectional = endingSelection().isDirectional();
     if (shouldPreserveSelection == PreserveSelection && !endingSelection().isNone()) {
-        VisiblePosition visibleStart = endingSelection().visibleStart();
-        VisiblePosition visibleEnd = endingSelection().visibleEnd();
+        VisiblePosition visibleStart = endingSelection().visibleStartDeprecated();
+        VisiblePosition visibleEnd = endingSelection().visibleEndDeprecated();
 
         bool startAfterParagraph = comparePositions(visibleStart, endOfParagraphToMove) > 0;
         bool endBeforeParagraph = comparePositions(visibleEnd, startOfParagraphToMove) < 0;
@@ -1312,8 +1315,8 @@ void CompositeEditCommand::moveParagraphs(const VisiblePosition& startOfParagrap
         }
     }
 
-    RelocatablePosition beforeParagraphPosition(previousPositionOf(startOfParagraphToMove, CannotCrossEditingBoundary).deepEquivalent());
-    RelocatablePosition afterParagraphPosition(nextPositionOf(endOfParagraphToMove, CannotCrossEditingBoundary).deepEquivalent());
+    RelocatablePosition beforeParagraphPosition(previousPositionOfDeprecated(startOfParagraphToMove, CannotCrossEditingBoundary).deepEquivalent());
+    RelocatablePosition afterParagraphPosition(nextPositionOfDeprecated(endOfParagraphToMove, CannotCrossEditingBoundary).deepEquivalent());
 
     // We upstream() the end and downstream() the start so that we don't include collapsed whitespace in the move.
     // When we paste a fragment, spaces after the end and before the start are treated as though they were rendered.
@@ -1387,7 +1390,7 @@ void CompositeEditCommand::moveParagraphs(const VisiblePosition& startOfParagrap
     document().frame()->spellChecker().markMisspellingsAndBadGrammarForMovingParagraphs(endingSelection());
 
     // If the selection is in an empty paragraph, restore styles from the old empty paragraph to the new empty paragraph.
-    bool selectionIsEmptyParagraph = endingSelection().isCaret() && isStartOfParagraphDeprecated(endingSelection().visibleStart()) && isEndOfParagraphDeprecated(endingSelection().visibleStart());
+    bool selectionIsEmptyParagraph = endingSelection().isCaret() && isStartOfParagraphDeprecated(endingSelection().visibleStartDeprecated()) && isEndOfParagraphDeprecated(endingSelection().visibleStartDeprecated());
     if (styleInEmptyParagraph && selectionIsEmptyParagraph) {
         applyStyle(styleInEmptyParagraph, editingState);
         if (editingState->isAborted())
@@ -1420,7 +1423,7 @@ void CompositeEditCommand::moveParagraphs(const VisiblePosition& startOfParagrap
 // FIXME: Send an appropriate shouldDeleteRange call.
 bool CompositeEditCommand::breakOutOfEmptyListItem(EditingState* editingState)
 {
-    Node* emptyListItem = enclosingEmptyListItem(endingSelection().visibleStart());
+    Node* emptyListItem = enclosingEmptyListItem(endingSelection().visibleStartDeprecated());
     if (!emptyListItem)
         return false;
 
@@ -1506,7 +1509,7 @@ bool CompositeEditCommand::breakOutOfEmptyMailBlockquotedParagraph(EditingState*
     if (!endingSelection().isCaret())
         return false;
 
-    VisiblePosition caret = endingSelection().visibleStart();
+    VisiblePosition caret = endingSelection().visibleStartDeprecated();
     HTMLQuoteElement* highestBlockquote = toHTMLQuoteElement(highestEnclosingNodeOfType(caret.deepEquivalent(), &isMailHTMLBlockquoteElement));
     if (!highestBlockquote)
         return false;

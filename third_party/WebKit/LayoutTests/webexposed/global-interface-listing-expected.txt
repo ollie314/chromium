@@ -1168,6 +1168,18 @@ interface DelayNode : AudioNode
     attribute @@toStringTag
     getter delayTime
     method constructor
+interface DetectedFace
+    attribute @@toStringTag
+    getter boundingBox
+    method constructor
+interface DetectedObject
+    attribute @@toStringTag
+    getter boundingBox
+    method constructor
+interface Detector
+    attribute @@toStringTag
+    method constructor
+    method detect
 interface DeviceLightEvent : Event
     attribute @@toStringTag
     getter value
@@ -1721,6 +1733,10 @@ interface EventTarget
     method constructor
     method dispatchEvent
     method removeEventListener
+interface FaceDetector
+    attribute @@toStringTag
+    method constructor
+    method detect
 interface FederatedCredential : SiteBoundCredential
     attribute @@toStringTag
     getter protocol
@@ -2462,6 +2478,7 @@ interface HTMLIFrameElement : HTMLElement
     getter allowFullscreen
     getter contentDocument
     getter contentWindow
+    getter csp
     getter frameBorder
     getter height
     getter longDesc
@@ -2479,6 +2496,7 @@ interface HTMLIFrameElement : HTMLElement
     method getSVGDocument
     setter align
     setter allowFullscreen
+    setter csp
     setter frameBorder
     setter height
     setter longDesc
@@ -4526,6 +4544,7 @@ interface Permissions
     method revoke
 interface PhotoCapabilities
     attribute @@toStringTag
+    getter colorTemperature
     getter exposureCompensation
     getter exposureMode
     getter fillLightMode
@@ -4747,9 +4766,9 @@ interface RemotePlayback : EventTarget
     attribute @@toStringTag
     getter onstatechange
     getter state
-    method connect
     method constructor
     method getAvailability
+    method prompt
     setter onstatechange
 interface RemotePlaybackAvailability : EventTarget
     attribute @@toStringTag

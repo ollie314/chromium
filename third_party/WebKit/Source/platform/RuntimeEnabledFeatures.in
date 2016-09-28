@@ -69,6 +69,7 @@ CSSPaintAPI status=experimental, depends_on=CSSTypedOM, depends_on=Worklet
 CSSSnapSize status=experimental
 CSSStickyPosition status=experimental
 CSSTouchActionPanDirections status=stable
+CSSTouchActionPinchZoom status=experimental
 CSSTypedOM status=experimental
 CSSVariables2 status=experimental
 CSSViewport status=experimental
@@ -86,6 +87,7 @@ FontCacheScaling status=test
 ForceDisplayList2dCanvas
 // See crbug.com/585250.
 ForceDisable2dCanvasCopyOnWrite
+EmbedderCSPEnforcement status=experimental
 ExecCommandInJavaScript status=test
 ComputedAccessibilityInfo status=experimental
 ExperimentalCanvasFeatures status=test
@@ -202,6 +204,7 @@ ServiceWorkerClientsGetID status=stable
 ServiceWorkerWindowClientNavigate status=stable
 SetRootScroller status=experimental
 ShadowDOMV1 status=stable
+ShapeDetection status=experimental
 SharedArrayBuffer
 SharedWorker status=stable
 SlimmingPaintInvalidation implied_by=SlimmingPaintV2

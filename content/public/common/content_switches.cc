@@ -323,8 +323,8 @@ const char kDomAutomationController[]       = "dom-automation";
 // Causes the process to run as a download subprocess.
 const char kDownloadProcess[]               = "download";
 
-// Enable antialiasing on 2d canvas clips (as opposed to draw operations)
-const char kEnable2dCanvasClipAntialiasing[] = "enable-2d-canvas-clip-aa";
+// Disable antialiasing on 2d canvas clips
+const char kDisable2dCanvasClipAntialiasing[] = "disable-2d-canvas-clip-aa";
 
 // Disable partially decoding jpeg images using the GPU.
 // At least YUV decoding will be accelerated when not using this flag.
@@ -672,7 +672,6 @@ const char kNumRasterThreads[]              = "num-raster-threads";
 
 // Override the behavior of plugin throttling for testing.
 // By default the throttler is only enabled for a hard-coded list of plugins.
-// Set the value to 'ignore-list' to ignore the hard-coded list.
 // Set the value to 'always' to always throttle every plugin instance.
 const char kOverridePluginPowerSaverForTesting[] =
     "override-plugin-power-saver-for-testing";

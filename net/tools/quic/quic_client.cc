@@ -13,6 +13,7 @@
 
 #include "base/logging.h"
 #include "base/run_loop.h"
+#include "base/strings/string_number_conversions.h"
 #include "net/base/sockaddr_storage.h"
 #include "net/quic/core/crypto/quic_random.h"
 #include "net/quic/core/quic_bug_tracker.h"
@@ -21,6 +22,7 @@
 #include "net/quic/core/quic_flags.h"
 #include "net/quic/core/quic_protocol.h"
 #include "net/quic/core/quic_server_id.h"
+#include "net/quic/core/spdy_utils.h"
 #include "net/tools/quic/quic_epoll_alarm_factory.h"
 #include "net/tools/quic/quic_epoll_connection_helper.h"
 #include "net/tools/quic/quic_socket_utils.h"
@@ -34,18 +36,13 @@
 #define MMSG_MORE 0
 
 using base::StringPiece;
+using base::StringToInt;
 using std::string;
 using std::vector;
 
 namespace net {
 
 const int kEpollFlags = EPOLLIN | EPOLLOUT | EPOLLET;
-
-void QuicClient::ClientQuicDataToResend::Resend() {
-  client_->SendRequest(*headers_, body_, fin_);
-  delete headers_;
-  headers_ = nullptr;
-}
 
 QuicClient::QuicClient(IPEndPoint server_address,
                        const QuicServerId& server_id,
@@ -72,15 +69,13 @@ QuicClient::QuicClient(IPEndPoint server_address,
           new QuicEpollConnectionHelper(epoll_server, QuicAllocator::SIMPLE),
           new QuicEpollAlarmFactory(epoll_server),
           std::move(proof_verifier)),
-      server_address_(server_address),
-      local_port_(0),
       epoll_server_(epoll_server),
       initialized_(false),
       packets_dropped_(0),
       overflow_supported_(false),
-      store_response_(false),
-      latest_response_code_(-1),
-      packet_reader_(new QuicPacketReader()) {}
+      packet_reader_(new QuicPacketReader()) {
+  set_server_address(server_address);
+}
 
 QuicClient::~QuicClient() {
   if (connected()) {
@@ -124,32 +119,21 @@ bool QuicClient::Initialize() {
   return true;
 }
 
-QuicClient::QuicDataToResend::QuicDataToResend(BalsaHeaders* headers,
-                                               StringPiece body,
-                                               bool fin)
-    : headers_(headers), body_(body), fin_(fin) {}
-
-QuicClient::QuicDataToResend::~QuicDataToResend() {
-  if (headers_) {
-    delete headers_;
-  }
-}
-
 bool QuicClient::CreateUDPSocketAndBind() {
   int fd =
-      QuicSocketUtils::CreateUDPSocket(server_address_, &overflow_supported_);
+      QuicSocketUtils::CreateUDPSocket(server_address(), &overflow_supported_);
   if (fd < 0) {
     return false;
   }
 
   IPEndPoint client_address;
-  if (bind_to_address_.size() != 0) {
-    client_address = IPEndPoint(bind_to_address_, local_port_);
-  } else if (server_address_.GetSockAddrFamily() == AF_INET) {
-    client_address = IPEndPoint(IPAddress::IPv4AllZeros(), local_port_);
+  if (bind_to_address().size() != 0) {
+    client_address = IPEndPoint(bind_to_address(), local_port());
+  } else if (server_address().GetSockAddrFamily() == AF_INET) {
+    client_address = IPEndPoint(IPAddress::IPv4AllZeros(), local_port());
   } else {
     IPAddress any6 = IPAddress::IPv6AllZeros();
-    client_address = IPEndPoint(any6, local_port_);
+    client_address = IPEndPoint(any6, local_port());
   }
 
   sockaddr_storage raw_addr;
@@ -183,15 +167,9 @@ bool QuicClient::Connect() {
     while (EncryptionBeingEstablished()) {
       WaitForEvents();
     }
-    if (FLAGS_enable_quic_stateless_reject_support && connected() &&
-        !data_to_resend_on_connect_.empty()) {
-      // A connection has been established and there was previously queued data
-      // to resend.  Resend it and empty the queue.
-      std::vector<std::unique_ptr<QuicDataToResend>> old_data;
-      old_data.swap(data_to_resend_on_connect_);
-      for (const auto& data : old_data) {
-        data->Resend();
-      }
+    if (FLAGS_enable_quic_stateless_reject_support && connected()) {
+      // Resend any previously queued data.
+      ResendSavedData();
     }
     if (session() != nullptr &&
         session()->error() != QUIC_CRYPTO_HANDSHAKE_STATELESS_REJECT) {
@@ -220,7 +198,7 @@ void QuicClient::StartConnect() {
     // If the last error was not a stateless reject, then the queued up data
     // does not need to be resent.
     if (session()->error() != QUIC_CRYPTO_HANDSHAKE_STATELESS_REJECT) {
-      data_to_resend_on_connect_.clear();
+      ClearDataToResend();
     }
     // Before we destroy the last session and create a new one, gather its stats
     // and update the stats for the overall connection.
@@ -228,7 +206,8 @@ void QuicClient::StartConnect() {
   }
 
   CreateQuicClientSession(new QuicConnection(
-      GetNextConnectionId(), server_address_, helper(), alarm_factory(), writer,
+      GetNextConnectionId(), server_address(), helper(), alarm_factory(),
+      writer,
       /* owns_writer= */ false, Perspective::IS_CLIENT, supported_versions()));
 
   // Reset |writer()| after |session()| so that the old writer outlives the old
@@ -248,7 +227,7 @@ void QuicClient::Disconnect() {
         ConnectionCloseBehavior::SEND_CONNECTION_CLOSE_PACKET);
   }
 
-  data_to_resend_on_connect_.clear();
+  ClearDataToResend();
 
   CleanUpAllUDPSockets();
 
@@ -275,21 +254,17 @@ void QuicClient::CleanUpUDPSocketImpl(int fd) {
   }
 }
 
-void QuicClient::SendRequest(const BalsaHeaders& headers,
+void QuicClient::SendRequest(const SpdyHeaderBlock& headers,
                              StringPiece body,
                              bool fin) {
   QuicClientPushPromiseIndex::TryHandle* handle;
-  QuicAsyncStatus rv = push_promise_index()->Try(
-      SpdyBalsaUtils::RequestHeadersToSpdyHeaders(headers), this, &handle);
+  QuicAsyncStatus rv = push_promise_index()->Try(headers, this, &handle);
   if (rv == QUIC_SUCCESS)
     return;
 
   if (rv == QUIC_PENDING) {
     // May need to retry request if asynchronous rendezvous fails.
-    auto* new_headers = new BalsaHeaders;
-    new_headers->CopyFrom(headers);
-    push_promise_data_to_resend_.reset(
-        new ClientQuicDataToResend(new_headers, body, fin, this));
+    AddPromiseDataToResend(headers, body, fin);
     return;
   }
 
@@ -298,34 +273,12 @@ void QuicClient::SendRequest(const BalsaHeaders& headers,
     QUIC_BUG << "stream creation failed!";
     return;
   }
-  stream->SendRequest(SpdyBalsaUtils::RequestHeadersToSpdyHeaders(headers),
-                      body, fin);
-  if (FLAGS_enable_quic_stateless_reject_support) {
-    // Record this in case we need to resend.
-    auto* new_headers = new BalsaHeaders;
-    new_headers->CopyFrom(headers);
-    auto* data_to_resend =
-        new ClientQuicDataToResend(new_headers, body, fin, this);
-    MaybeAddQuicDataToResend(std::unique_ptr<QuicDataToResend>(data_to_resend));
-  }
+  stream->SendRequest(headers.Clone(), body, fin);
+  // Record this in case we need to resend.
+  MaybeAddDataToResend(headers, body, fin);
 }
 
-void QuicClient::MaybeAddQuicDataToResend(
-    std::unique_ptr<QuicDataToResend> data_to_resend) {
-  DCHECK(FLAGS_enable_quic_stateless_reject_support);
-  if (session()->IsCryptoHandshakeConfirmed()) {
-    // The handshake is confirmed.  No need to continue saving requests to
-    // resend.
-    data_to_resend_on_connect_.clear();
-    return;
-  }
-
-  // The handshake is not confirmed.  Push the data onto the queue of data to
-  // resend if statelessly rejected.
-  data_to_resend_on_connect_.push_back(std::move(data_to_resend));
-}
-
-void QuicClient::SendRequestAndWaitForResponse(const BalsaHeaders& headers,
+void QuicClient::SendRequestAndWaitForResponse(const SpdyHeaderBlock& headers,
                                                StringPiece body,
                                                bool fin) {
   SendRequest(headers, body, fin);
@@ -336,20 +289,15 @@ void QuicClient::SendRequestAndWaitForResponse(const BalsaHeaders& headers,
 void QuicClient::SendRequestsAndWaitForResponse(
     const vector<string>& url_list) {
   for (size_t i = 0; i < url_list.size(); ++i) {
-    BalsaHeaders headers;
-    headers.SetRequestFirstlineFromStringPieces("GET", url_list[i], "HTTP/1.1");
+    SpdyHeaderBlock headers;
+    if (!SpdyUtils::PopulateHeaderBlockFromUrl(url_list[i], &headers)) {
+      QUIC_BUG << "Unable to create request";
+      continue;
+    }
     SendRequest(headers, "", true);
   }
   while (WaitForEvents()) {
   }
-}
-
-QuicSpdyClientStream* QuicClient::CreateReliableClientStream() {
-  QuicSpdyClientStream* stream = QuicClientBase::CreateReliableClientStream();
-  if (stream) {
-    stream->set_visitor(this);
-  }
-  return stream;
 }
 
 bool QuicClient::WaitForEvents() {
@@ -377,7 +325,7 @@ bool QuicClient::MigrateSocket(const IPAddress& new_host) {
 
   CleanUpUDPSocket(GetLatestFD());
 
-  bind_to_address_ = new_host;
+  set_bind_to_address(new_host);
   if (!CreateUDPSocketAndBind()) {
     return false;
   }
@@ -411,66 +359,6 @@ void QuicClient::OnEvent(int fd, EpollEvent* event) {
   if (event->in_events & EPOLLERR) {
     DVLOG(1) << "Epollerr";
   }
-}
-
-void QuicClient::OnClose(QuicSpdyStream* stream) {
-  DCHECK(stream != nullptr);
-  QuicSpdyClientStream* client_stream =
-      static_cast<QuicSpdyClientStream*>(stream);
-  BalsaHeaders response_headers;
-  SpdyBalsaUtils::SpdyHeadersToResponseHeaders(
-      client_stream->response_headers(), &response_headers);
-
-  if (response_listener_.get() != nullptr) {
-    response_listener_->OnCompleteResponse(stream->id(), response_headers,
-                                           client_stream->data());
-  }
-
-  // Store response headers and body.
-  if (store_response_) {
-    latest_response_code_ = response_headers.parsed_response_code();
-    response_headers.DumpHeadersToString(&latest_response_headers_);
-    latest_response_body_ = client_stream->data();
-    latest_response_trailers_ =
-        client_stream->received_trailers().DebugString();
-  }
-}
-
-bool QuicClient::CheckVary(const SpdyHeaderBlock& client_request,
-                           const SpdyHeaderBlock& promise_request,
-                           const SpdyHeaderBlock& promise_response) {
-  return true;
-}
-
-void QuicClient::OnRendezvousResult(QuicSpdyStream* stream) {
-  std::unique_ptr<ClientQuicDataToResend> data_to_resend =
-      std::move(push_promise_data_to_resend_);
-  if (stream) {
-    stream->set_visitor(this);
-    stream->OnDataAvailable();
-  } else if (data_to_resend.get()) {
-    data_to_resend->Resend();
-  }
-}
-
-size_t QuicClient::latest_response_code() const {
-  QUIC_BUG_IF(!store_response_) << "Response not stored!";
-  return latest_response_code_;
-}
-
-const string& QuicClient::latest_response_headers() const {
-  QUIC_BUG_IF(!store_response_) << "Response not stored!";
-  return latest_response_headers_;
-}
-
-const string& QuicClient::latest_response_body() const {
-  QUIC_BUG_IF(!store_response_) << "Response not stored!";
-  return latest_response_body_;
-}
-
-const string& QuicClient::latest_response_trailers() const {
-  QUIC_BUG_IF(!store_response_) << "Response not stored!";
-  return latest_response_trailers_;
 }
 
 QuicPacketWriter* QuicClient::CreateQuicPacketWriter() {

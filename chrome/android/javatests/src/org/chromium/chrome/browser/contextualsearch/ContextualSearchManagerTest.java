@@ -17,6 +17,7 @@ import android.graphics.Point;
 import android.os.Environment;
 import android.os.SystemClock;
 import android.test.suitebuilder.annotation.SmallTest;
+import android.text.TextUtils;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewConfiguration;
@@ -37,6 +38,8 @@ import org.chromium.chrome.browser.compositor.bottombar.OverlayContentDelegate;
 import org.chromium.chrome.browser.compositor.bottombar.OverlayContentProgressObserver;
 import org.chromium.chrome.browser.compositor.bottombar.OverlayPanel.PanelState;
 import org.chromium.chrome.browser.compositor.bottombar.OverlayPanel.StateChangeReason;
+import org.chromium.chrome.browser.compositor.bottombar.contextualsearch.ContextualSearchIconSpriteControl;
+import org.chromium.chrome.browser.compositor.bottombar.contextualsearch.ContextualSearchImageControl;
 import org.chromium.chrome.browser.compositor.bottombar.contextualsearch.ContextualSearchPanel;
 import org.chromium.chrome.browser.contextualsearch.ContextualSearchFakeServer.FakeSlowResolveSearch;
 import org.chromium.chrome.browser.externalnav.ExternalNavigationHandler;
@@ -333,11 +336,12 @@ public class ContextualSearchManagerTest extends ChromeActivityTestCaseBase<Chro
         private final int mEndAdjust;
         private final String mContextLanguage;
         private final String mThumbnailUrl;
+        private final String mCaption;
 
         public FakeResponseOnMainThread(boolean isNetworkUnavailable, int responseCode,
                 String searchTerm, String displayText, String alternateTerm, String mid,
                 boolean doPreventPreload, int startAdjust, int endAdjudst, String contextLanguage,
-                String thumbnailUrl) {
+                String thumbnailUrl, String caption) {
             mIsNetworkUnavailable = isNetworkUnavailable;
             mResponseCode = responseCode;
             mSearchTerm = searchTerm;
@@ -349,13 +353,14 @@ public class ContextualSearchManagerTest extends ChromeActivityTestCaseBase<Chro
             mEndAdjust = endAdjudst;
             mContextLanguage = contextLanguage;
             mThumbnailUrl = thumbnailUrl;
+            mCaption = caption;
         }
 
         @Override
         public void run() {
             mFakeServer.handleSearchTermResolutionResponse(mIsNetworkUnavailable, mResponseCode,
                     mSearchTerm, mDisplayText, mAlternateTerm, mMid, mDoPreventPreload,
-                    mStartAdjust, mEndAdjust, mContextLanguage, mThumbnailUrl);
+                    mStartAdjust, mEndAdjust, mContextLanguage, mThumbnailUrl, mCaption);
         }
     }
 
@@ -366,7 +371,7 @@ public class ContextualSearchManagerTest extends ChromeActivityTestCaseBase<Chro
     private void fakeResponse(boolean isNetworkUnavailable, int responseCode,
             String searchTerm, String displayText, String alternateTerm, boolean doPreventPreload) {
         fakeResponse(isNetworkUnavailable, responseCode, searchTerm, displayText, alternateTerm,
-                null, doPreventPreload, 0, 0, "", "");
+                null, doPreventPreload, 0, 0, "", "", "");
     }
 
     /**
@@ -375,11 +380,12 @@ public class ContextualSearchManagerTest extends ChromeActivityTestCaseBase<Chro
      */
     private void fakeResponse(boolean isNetworkUnavailable, int responseCode, String searchTerm,
             String displayText, String alternateTerm, String mid, boolean doPreventPreload,
-            int startAdjust, int endAdjust, String contextLanguage, String thumbnailUrl) {
+            int startAdjust, int endAdjust, String contextLanguage, String thumbnailUrl,
+            String caption) {
         if (mFakeServer.getSearchTermRequested() != null) {
             getInstrumentation().runOnMainSync(new FakeResponseOnMainThread(isNetworkUnavailable,
                     responseCode, searchTerm, displayText, alternateTerm, mid, doPreventPreload,
-                    startAdjust, endAdjust, contextLanguage, thumbnailUrl));
+                    startAdjust, endAdjust, contextLanguage, thumbnailUrl, caption));
         }
     }
 
@@ -1852,6 +1858,7 @@ public class ContextualSearchManagerTest extends ChromeActivityTestCaseBase<Chro
     @Feature({"ContextualSearch"})
     @Restriction({ChromeRestriction.RESTRICTION_TYPE_PHONE, RESTRICTION_TYPE_NON_LOW_END_DEVICE})
     @DisableIf.Build(supported_abis_includes = "arm64-v8a", message = "crbug.com/596533")
+    @RetryOnFailure
     public void testPromoOpenCountForDecided() throws InterruptedException, TimeoutException {
         mPolicy.overrideDecidedStateForTesting(true);
 
@@ -2126,7 +2133,7 @@ public class ContextualSearchManagerTest extends ChromeActivityTestCaseBase<Chro
         waitForPanelToPeek();
 
         fakeResponse(false, 200, "Intelligence", "United States Intelligence", "alternate-term",
-                null, false, -14, 0, "", "");
+                null, false, -14, 0, "", "", "");
         waitForSelectionToBe("United States Intelligence");
     }
 
@@ -2652,4 +2659,47 @@ public class ContextualSearchManagerTest extends ChromeActivityTestCaseBase<Chro
         // Assert that the panel is closed.
         waitForPanelToClose();
     }
+
+    /**
+     * Tests that ContextualSearchImageControl correctly sets either the icon sprite or thumbnail
+     * as visible.
+     */
+    @SmallTest
+    @Feature({"ContextualSearch"})
+    @Restriction(RESTRICTION_TYPE_NON_LOW_END_DEVICE)
+    public void testImageControl() throws InterruptedException, TimeoutException {
+        simulateTapSearch("search");
+
+        ContextualSearchImageControl imageControl = mPanel.getImageControl();
+        final ContextualSearchIconSpriteControl iconSpriteControl =
+                imageControl.getIconSpriteControl();
+
+        assertTrue(iconSpriteControl.isVisible());
+        assertFalse(imageControl.getThumbnailVisible());
+        assertTrue(TextUtils.isEmpty(imageControl.getThumbnailUrl()));
+
+        imageControl.setThumbnailUrl("http://someimageurl.com/image.png");
+        imageControl.onThumbnailFetched(true);
+
+        assertTrue(imageControl.getThumbnailVisible());
+        assertEquals(imageControl.getThumbnailUrl(), "http://someimageurl.com/image.png");
+
+        // The switch between the icon sprite and thumbnail is animated. Poll the UI thread to
+        // check that the icon sprite is hidden at the end of the animation.
+        CriteriaHelper.pollUiThread(new Criteria() {
+            @Override
+            public boolean isSatisfied() {
+                return !iconSpriteControl.isVisible();
+            }
+        });
+
+        imageControl.hideThumbnail(false);
+
+        assertTrue(iconSpriteControl.isVisible());
+        assertFalse(imageControl.getThumbnailVisible());
+        assertTrue(TextUtils.isEmpty(imageControl.getThumbnailUrl()));
+    }
+
+    // TODO(twellington): Add an end-to-end integration test for fetching a thumbnail based on a
+    //                    a URL that is included with the resolution response.
 }

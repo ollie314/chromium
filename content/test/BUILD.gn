@@ -25,6 +25,8 @@ static_library("test_support") {
   sources = [
     "../browser/download/mock_download_file.cc",
     "../browser/download/mock_download_file.h",
+    "../browser/service_worker/embedded_worker_test_helper.cc",
+    "../browser/service_worker/embedded_worker_test_helper.h",
     "../public/test/async_file_test_helper.cc",
     "../public/test/async_file_test_helper.h",
     "../public/test/background_sync_test_util.cc",
@@ -278,7 +280,10 @@ static_library("test_support") {
       "//ppapi/shared_impl:test_support",
     ]
   } else {
-    sources -= [ "ppapi_unittest.cc" ]
+    sources -= [
+      "../public/test/ppapi_test_utils.cc",
+      "ppapi_unittest.cc",
+    ]
   }
 
   if (enable_webrtc) {
@@ -1110,6 +1115,7 @@ test("content_unittests") {
     "../browser/media/session/media_session_controller_unittest.cc",
     "../browser/media/session/media_session_uma_helper_unittest.cc",
     "../browser/memory/memory_coordinator_unittest.cc",
+    "../browser/memory/memory_monitor_android_unittest.cc",
     "../browser/memory/memory_monitor_win_unittest.cc",
     "../browser/memory/test_memory_monitor.cc",
     "../browser/memory/test_memory_monitor.h",
@@ -1182,8 +1188,6 @@ test("content_unittests") {
     "../browser/renderer_host/text_input_client_mac_unittest.mm",
     "../browser/resolve_proxy_msg_helper_unittest.cc",
     "../browser/service_worker/embedded_worker_instance_unittest.cc",
-    "../browser/service_worker/embedded_worker_test_helper.cc",
-    "../browser/service_worker/embedded_worker_test_helper.h",
     "../browser/service_worker/link_header_support_unittest.cc",
     "../browser/service_worker/service_worker_cache_writer_unittest.cc",
     "../browser/service_worker/service_worker_context_core_unittest.cc",

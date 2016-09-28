@@ -24,6 +24,7 @@
 #include "base/sha1.h"
 #include "base/strings/string_piece.h"
 #include "base/task_runner_util.h"
+#include "components/data_use_measurement/core/data_use_user_data.h"
 #include "components/precache/core/precache_database.h"
 #include "components/precache/core/precache_switches.h"
 #include "components/precache/core/proto/precache.pb.h"
@@ -254,6 +255,9 @@ void PrecacheFetcher::Fetcher::LoadFromCache() {
   fetch_stage_ = FetchStage::CACHE;
   cache_url_fetcher_ =
       net::URLFetcher::Create(url_, net::URLFetcher::GET, this);
+  data_use_measurement::DataUseUserData::AttachToFetcher(
+      cache_url_fetcher_.get(),
+      data_use_measurement::DataUseUserData::PRECACHE);
   cache_url_fetcher_->SetRequestContext(request_context_);
   cache_url_fetcher_->SetLoadFlags(net::LOAD_ONLY_FROM_CACHE | kNoTracking);
   std::unique_ptr<URLFetcherNullWriter> null_writer(new URLFetcherNullWriter);
@@ -265,6 +269,9 @@ void PrecacheFetcher::Fetcher::LoadFromNetwork() {
   fetch_stage_ = FetchStage::NETWORK;
   network_url_fetcher_ =
       net::URLFetcher::Create(url_, net::URLFetcher::GET, this);
+  data_use_measurement::DataUseUserData::AttachToFetcher(
+      network_url_fetcher_.get(),
+      data_use_measurement::DataUseUserData::PRECACHE);
   network_url_fetcher_->SetRequestContext(request_context_);
   if (is_resource_request_) {
     // LOAD_VALIDATE_CACHE allows us to refresh Date headers for resources
@@ -286,23 +293,25 @@ void PrecacheFetcher::Fetcher::LoadFromNetwork() {
 void PrecacheFetcher::Fetcher::OnURLFetchDownloadProgress(
     const net::URLFetcher* source,
     int64_t current,
-    int64_t total) {
-  // If going over the per-resource download cap.
+    int64_t total,
+    int64_t current_network_bytes) {
+  // If network bytes going over the per-resource download cap.
   if (fetch_stage_ == FetchStage::NETWORK &&
-      // |current| is guaranteed to be non-negative, so this cast is safe.
-      static_cast<size_t>(std::max(current, total)) > max_bytes_) {
+      // |current_network_bytes| is guaranteed to be non-negative, so this cast
+      // is safe.
+      static_cast<size_t>(current_network_bytes) > max_bytes_) {
     VLOG(1) << "Cancelling " << url_ << ": (" << current << "/" << total
             << ") is over " << max_bytes_;
 
     // Call the completion callback, to attempt the next download, or to trigger
     // cleanup in precache_delegate_->OnDone().
-    response_bytes_ = network_response_bytes_ = current;
+    response_bytes_ = current;
+    network_response_bytes_ = current_network_bytes;
     was_cached_ = source->WasCached();
 
     UMA_HISTOGRAM_CUSTOM_COUNTS("Precache.Fetch.ResponseBytes.NetworkWasted",
                                 network_response_bytes_, 1,
                                 1024 * 1024 /* 1 MB */, 100);
-
     // Cancel the download.
     network_url_fetcher_.reset();
     callback_.Run(*this);

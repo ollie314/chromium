@@ -122,11 +122,10 @@
 #include "wtf/StdLibExtras.h"
 #include <memory>
 
-// Change the the following line to "#if 0" to disable crash on unexpected
-// dirty layout (crbug.com/590856) when dcheck is off.
-#if 1
-#define CHECK_FOR_DIRTY_LAYOUT CHECK
-#else
+// Used to check for dirty layouts violating document lifecycle rules.
+// If arg evaluates to true, the program will continue. If arg evaluates to
+// false, program will crash if DCHECK_IS_ON() or return false from the current
+// function.
 #define CHECK_FOR_DIRTY_LAYOUT(arg) \
 do { \
     if (!(arg)) { \
@@ -134,7 +133,6 @@ do { \
         return false; \
     } \
 } while (false)
-#endif
 
 namespace blink {
 
@@ -777,8 +775,8 @@ void FrameView::countObjectsNeedingLayout(unsigned& needsLayoutObjects, unsigned
 
 inline void FrameView::forceLayoutParentViewIfNeeded()
 {
-    LayoutPart* ownerLayoutObject = m_frame->ownerLayoutObject();
-    if (!ownerLayoutObject || !ownerLayoutObject->frame())
+    LayoutPartItem ownerLayoutItem = m_frame->ownerLayoutItem();
+    if (ownerLayoutItem.isNull() || !ownerLayoutItem.frame())
         return;
 
     LayoutReplaced* contentBox = embeddedReplacedContent();
@@ -796,10 +794,10 @@ inline void FrameView::forceLayoutParentViewIfNeeded()
     // FrameView for a layout. After that the LayoutEmbeddedObject (ownerLayoutObject) carries the
     // correct size, which LayoutSVGRoot::computeReplacedLogicalWidth/Height rely on, when laying
     // out for the first time, or when the LayoutSVGRoot size has changed dynamically (eg. via <script>).
-    FrameView* frameView = ownerLayoutObject->frame()->view();
+    FrameView* frameView = ownerLayoutItem.frame()->view();
 
     // Mark the owner layoutObject as needing layout.
-    ownerLayoutObject->setNeedsLayoutAndPrefWidthsRecalcAndFullPaintInvalidation(LayoutInvalidationReason::Unknown);
+    ownerLayoutItem.setNeedsLayoutAndPrefWidthsRecalcAndFullPaintInvalidation(LayoutInvalidationReason::Unknown);
 
     // Synchronously enter layout, to layout the view containing the host object/embed/iframe.
     ASSERT(frameView);
@@ -2486,8 +2484,9 @@ void FrameView::updateScrollCorner()
 
         if (!cornerStyle) {
             // If we have an owning ipage/LocalFrame element, then it can set the custom scrollbar also.
-            if (LayoutPart* layoutObject = m_frame->ownerLayoutObject())
-                cornerStyle = layoutObject->getUncachedPseudoStyle(PseudoStyleRequest(PseudoIdScrollbarCorner), layoutObject->style());
+            LayoutPartItem layoutItem = m_frame->ownerLayoutItem();
+            if (!layoutItem.isNull())
+                cornerStyle = layoutItem.getUncachedPseudoStyle(PseudoStyleRequest(PseudoIdScrollbarCorner), layoutItem.style());
         }
     }
 

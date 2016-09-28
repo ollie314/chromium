@@ -39,11 +39,11 @@ vars = {
   # Three lines of non-changing comments so that
   # the commit queue can handle CLs rolling Skia
   # and whatever else without interference from each other.
-  'skia_revision': '787339e94278296639b36b980e1e6d5726ca9130',
+  'skia_revision': 'c4cbd74a38232a0e9f1cc1cc8fb826bb06c577a9',
   # Three lines of non-changing comments so that
   # the commit queue can handle CLs rolling V8
   # and whatever else without interference from each other.
-  'v8_revision': '21299c3ccd967a410e4a98a1b1f535abe2429b6f',
+  'v8_revision': '8abf5a71f66954b01b5b1055555f0bf6dc901e82',
   # Three lines of non-changing comments so that
   # the commit queue can handle CLs rolling swarming_client
   # and whatever else without interference from each other.
@@ -63,7 +63,7 @@ vars = {
   # Three lines of non-changing comments so that
   # the commit queue can handle CLs rolling PDFium
   # and whatever else without interference from each other.
-  'pdfium_revision': '2ab466e3a59d845422e06e50bc38d4bf31ac1adf',
+  'pdfium_revision': '341422fe3beb1210b28727d08e1e6f9a6fa4b030',
   # Three lines of non-changing comments so that
   # the commit queue can handle CLs rolling openmax_dl
   # and whatever else without interference from each other.
@@ -71,7 +71,7 @@ vars = {
   # Three lines of non-changing comments so that
   # the commit queue can handle CLs rolling BoringSSL
   # and whatever else without interference from each other.
-  'boringssl_revision': 'bd672ae8c7494732be9cf71b9bfdd431580204f1',
+  'boringssl_revision': '0d81373f9169637ff935449227be924c08bf1ec5',
   # Three lines of non-changing comments so that
   # the commit queue can handle CLs rolling google-toolbox-for-mac
   # and whatever else without interference from each other.
@@ -95,7 +95,7 @@ vars = {
   # Three lines of non-changing comments so that
   # the commit queue can handle CLs rolling catapult
   # and whatever else without interference from each other.
-  'catapult_revision': '28c78c375477cdf8bf196b95193977a014a4e23c',
+  'catapult_revision': '74b1b4470c7cc4404a524796ef972b47c7b9c8bc',
   # Three lines of non-changing comments so that
   # the commit queue can handle CLs rolling libFuzzer
   # and whatever else without interference from each other.
@@ -201,7 +201,7 @@ deps = {
     Var('chromium_git') + '/external/github.com/sctplab/usrsctp' + '@' + '7f9228152ab3d70e6848cc9c67389a0d4218740e',
 
   'src/third_party/libsrtp':
-    Var('chromium_git') + '/chromium/deps/libsrtp.git' + '@' + '48bdd208dcdbb018c4a154cf260414dbdfabb86d', # from svn revision 295151
+    Var('chromium_git') + '/chromium/deps/libsrtp.git' + '@' + 'b17c065a8a63725eca216fd461984f82c331dd07',
 
   'src/third_party/yasm/source/patched-yasm':
     Var('chromium_git') + '/chromium/deps/yasm/patched-yasm.git' + '@' + '7da28c6c7c6a1387217352ce02b31754deb54d2a',
@@ -390,7 +390,7 @@ deps_os = {
 
     # Build tools for Chrome OS. Note: This depends on third_party/pyelftools.
     'src/third_party/chromite':
-      Var('chromium_git') + '/chromiumos/chromite.git' + '@' + '0123f4124441ddb85745a6cb1ff853916e9626c9',
+      Var('chromium_git') + '/chromiumos/chromite.git' + '@' + '368c3e5db9c91424852aa37d8ef51f7a6d4ef2f5',
 
     # Dependency of chromite.git and skia.
     'src/third_party/pyelftools':
@@ -488,7 +488,7 @@ deps_os = {
       Var('chromium_git') + '/external/github.com/GoogleChrome/custom-tabs-client.git' + '@' + 'c51efbddc4f976c88d15c730a79feba65ca857af',
 
     'src/third_party/gvr-android-sdk/src':
-      Var('chromium_git') + '/external/github.com/googlevr/gvr-android-sdk.git' + '@' + '25e7e14413229d4644a66be77e8f8ddeb3f91fe7',
+      Var('chromium_git') + '/external/github.com/googlevr/gvr-android-sdk.git' + '@' + 'cff15311c7c1abbe77b3c714135dccc2009ee473',
   },
 }
 

@@ -1868,10 +1868,9 @@ class TestAckListener : public QuicAckListenerInterface {
 class TestResponseListener : public QuicClient::ResponseListener {
  public:
   void OnCompleteResponse(QuicStreamId id,
-                          const BalsaHeaders& response_headers,
+                          const SpdyHeaderBlock& response_headers,
                           const string& response_body) override {
-    string debug_string;
-    response_headers.DumpHeadersToString(&debug_string);
+    string debug_string = response_headers.DebugString();
     DVLOG(1) << "response for stream " << id << " " << debug_string << "\n"
              << response_body;
   }
@@ -2584,7 +2583,9 @@ TEST_P(EndToEndTestServerPush, ServerPush) {
   AddRequestAndResponseWithServerPush("example.com", "/push_example", kBody,
                                       push_urls, kNumResources, 0);
 
-  client_->client()->set_response_listener(new TestResponseListener);
+  client_->client()->set_response_listener(
+      std::unique_ptr<QuicClientBase::ResponseListener>(
+          new TestResponseListener));
 
   DVLOG(1) << "send request for /push_example";
   EXPECT_EQ(kBody, client_->SendSynchronousRequest(
@@ -2620,7 +2621,9 @@ TEST_P(EndToEndTestServerPush, ServerPushUnderLimit) {
   };
   AddRequestAndResponseWithServerPush("example.com", "/push_example", kBody,
                                       push_urls, kNumResources, 0);
-  client_->client()->set_response_listener(new TestResponseListener);
+  client_->client()->set_response_listener(
+      std::unique_ptr<QuicClientBase::ResponseListener>(
+          new TestResponseListener));
 
   // Send the first request: this will trigger the server to send all the push
   // resources associated with this request, and these will be cached by the
@@ -2666,7 +2669,9 @@ TEST_P(EndToEndTestServerPush, ServerPushOverLimitNonBlocking) {
   }
   AddRequestAndResponseWithServerPush("example.com", "/push_example", kBody,
                                       push_urls, kNumResources, 0);
-  client_->client()->set_response_listener(new TestResponseListener);
+  client_->client()->set_response_listener(
+      std::unique_ptr<QuicClientBase::ResponseListener>(
+          new TestResponseListener));
 
   // Send the first request: this will trigger the server to send all the push
   // resources associated with this request, and these will be cached by the
@@ -2722,7 +2727,9 @@ TEST_P(EndToEndTestServerPush, ServerPushOverLimitWithBlocking) {
   AddRequestAndResponseWithServerPush("example.com", "/push_example", kBody,
                                       push_urls, kNumResources, kBodySize);
 
-  client_->client()->set_response_listener(new TestResponseListener);
+  client_->client()->set_response_listener(
+      std::unique_ptr<QuicClientBase::ResponseListener>(
+          new TestResponseListener));
 
   client_->SendRequest("https://example.com/push_example");
 
@@ -2786,7 +2793,9 @@ TEST_P(EndToEndTestServerPush, DisabledWithoutConnectionOption) {
   };
   AddRequestAndResponseWithServerPush("example.com", "/push_example", kBody,
                                       push_urls, kNumResources, 0);
-  client_->client()->set_response_listener(new TestResponseListener);
+  client_->client()->set_response_listener(
+      std::unique_ptr<QuicClientBase::ResponseListener>(
+          new TestResponseListener));
   EXPECT_EQ(kBody, client_->SendSynchronousRequest(
                        "https://example.com/push_example"));
 

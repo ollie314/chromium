@@ -48,6 +48,7 @@
 #include "chrome/common/safe_browsing/file_type_policies.h"
 #include "chrome/common/safe_browsing/zip_analyzer_results.h"
 #include "chrome/common/url_constants.h"
+#include "components/data_use_measurement/core/data_use_user_data.h"
 #include "components/google/core/browser/google_util.h"
 #include "components/history/core/browser/history_service.h"
 #include "components/prefs/pref_service.h"
@@ -78,6 +79,9 @@ const int64_t kDownloadRequestTimeoutMs = 7000;
 // We sample 1% of whitelisted downloads to still send out download pings.
 const double kWhitelistDownloadSampleRate = 0.01;
 
+const char kDownloadExtensionUmaName[] = "SBClientDownload.DownloadExtensions";
+const char kUnsupportedSchemeUmaPrefix[] = "SBClientDownload.UnsupportedScheme";
+
 enum WhitelistType {
   NO_WHITELIST_MATCH,
   URL_WHITELIST,
@@ -101,16 +105,36 @@ const void* const DownloadProtectionService::kDownloadPingTokenKey
     = &kDownloadPingTokenKey;
 
 namespace {
-void RecordFileExtensionType(const base::FilePath& file) {
+void RecordFileExtensionType(const std::string& metric_name,
+                             const base::FilePath& file) {
   UMA_HISTOGRAM_SPARSE_SLOWLY(
-      "SBClientDownload.DownloadExtensions",
-      FileTypePolicies::GetInstance()->UmaValueForFile(file));
+      metric_name, FileTypePolicies::GetInstance()->UmaValueForFile(file));
 }
 
 void RecordArchivedArchiveFileExtensionType(const base::FilePath& file) {
   UMA_HISTOGRAM_SPARSE_SLOWLY(
       "SBClientDownload.ArchivedArchiveExtensions",
       FileTypePolicies::GetInstance()->UmaValueForFile(file));
+}
+
+std::string GetUnsupportedSchemeName(const GURL& download_url) {
+  if (download_url.SchemeIs(url::kContentScheme))
+    return "ContentScheme";
+  if (download_url.SchemeIs(url::kContentIDScheme))
+    return "ContentIdScheme";
+  if (download_url.SchemeIsFile())
+    return download_url.has_host() ? "RemoteFileScheme" : "LocalFileScheme";
+  if (download_url.SchemeIsFileSystem())
+    return "FileSystemScheme";
+  if (download_url.SchemeIs(url::kFtpScheme))
+    return "FtpScheme";
+  if (download_url.SchemeIs(url::kGopherScheme))
+    return "GopherScheme";
+  if (download_url.SchemeIs(url::kJavaScriptScheme))
+    return "JavaScriptScheme";
+  if (download_url.SchemeIsWSOrWSS())
+    return "WSOrWSSScheme";
+  return "OtherUnsupportedScheme";
 }
 
 // Enumerate for histogramming purposes.
@@ -341,19 +365,27 @@ class DownloadProtectionService::CheckClientDownloadRequest
       switch (reason) {
         case REASON_EMPTY_URL_CHAIN:
         case REASON_INVALID_URL:
-        case REASON_UNSUPPORTED_URL_SCHEME:
         case REASON_LOCAL_FILE:
         case REASON_REMOTE_FILE:
           PostFinishTask(UNKNOWN, reason);
           return;
-
+        case REASON_UNSUPPORTED_URL_SCHEME:
+          RecordFileExtensionType(
+              base::StringPrintf(
+                  "%s.%s", kUnsupportedSchemeUmaPrefix,
+                  GetUnsupportedSchemeName(item_->GetUrlChain().back())
+                      .c_str()),
+              item_->GetTargetFilePath());
+          PostFinishTask(UNKNOWN, reason);
+          return;
         case REASON_NOT_BINARY_FILE:
           if (ShouldSampleUnsupportedFile(item_->GetTargetFilePath())) {
             // Send a "light ping" and don't use the verdict.
             type_ = ClientDownloadRequest::SAMPLED_UNSUPPORTED_FILE;
             break;
           }
-          RecordFileExtensionType(item_->GetTargetFilePath());
+          RecordFileExtensionType(kDownloadExtensionUmaName,
+                                  item_->GetTargetFilePath());
           PostFinishTask(UNKNOWN, reason);
           return;
 
@@ -362,7 +394,8 @@ class DownloadProtectionService::CheckClientDownloadRequest
           NOTREACHED();
       }
     }
-    RecordFileExtensionType(item_->GetTargetFilePath());
+    RecordFileExtensionType(kDownloadExtensionUmaName,
+                            item_->GetTargetFilePath());
 
     // Compute features from the file contents. Note that we record histograms
     // based on the result, so this runs regardless of whether the pingbacks
@@ -557,6 +590,9 @@ class DownloadProtectionService::CheckClientDownloadRequest
       *reason = REASON_UNSUPPORTED_URL_SCHEME;
       return false;
     }
+    // TODO(jialiul): Remove duplicated counting of REMOTE_FILE and LOCAL_FILE
+    // after SBClientDownload.UnsupportedScheme.* metrics become available in
+    // stable channel.
     if (final_url.SchemeIsFile()) {
       *reason = final_url.has_host() ? REASON_REMOTE_FILE : REASON_LOCAL_FILE;
       return false;
@@ -1008,6 +1044,8 @@ class DownloadProtectionService::CheckClientDownloadRequest
     fetcher_ = net::URLFetcher::Create(0 /* ID used for testing */,
                                        GetDownloadRequestUrl(),
                                        net::URLFetcher::POST, this);
+    data_use_measurement::DataUseUserData::AttachToFetcher(
+        fetcher_.get(), data_use_measurement::DataUseUserData::SAFE_BROWSING);
     fetcher_->SetLoadFlags(net::LOAD_DISABLE_CACHE);
     fetcher_->SetAutomaticallyRetryOn5xx(false);  // Don't retry on error.
     fetcher_->SetRequestContext(service_->request_context_getter_.get());
@@ -1337,6 +1375,8 @@ class DownloadProtectionService::PPAPIDownloadRequest
 
     fetcher_ = net::URLFetcher::Create(0, GetDownloadRequestUrl(),
                                        net::URLFetcher::POST, this);
+    data_use_measurement::DataUseUserData::AttachToFetcher(
+        fetcher_.get(), data_use_measurement::DataUseUserData::SAFE_BROWSING);
     fetcher_->SetLoadFlags(net::LOAD_DISABLE_CACHE);
     fetcher_->SetAutomaticallyRetryOn5xx(false);
     fetcher_->SetRequestContext(service_->request_context_getter_.get());
