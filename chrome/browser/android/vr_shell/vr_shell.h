@@ -12,6 +12,7 @@
 #include "base/android/jni_weak_ref.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "base/synchronization/lock.h"
 #include "chrome/browser/android/vr_shell/ui_elements.h"
 #include "chrome/browser/android/vr_shell/ui_scene.h"
 #include "device/vr/android/gvr/gvr_delegate.h"
@@ -62,10 +63,12 @@ class VrShell : public device::GvrDelegate {
 
   // html/js UI hooks.
   static base::WeakPtr<VrShell> GetWeakPtr();
+  UiScene* GetScene();
   void OnDomContentsLoaded();
   void SetUiTextureSize(int width, int height);
 
   // device::GvrDelegate implementation
+  void SetWebVRSecureOrigin(bool secure_origin) override;
   void SubmitWebVRFrame() override;
   void UpdateWebVRTextureBounds(
       int eye, float left, float top, float width, float height) override;
@@ -84,18 +87,24 @@ class VrShell : public device::GvrDelegate {
       jint height,
       const base::android::JavaParamRef<jobject>& surface);
 
+  // Called from non-render thread to queue a callback onto the render thread.
+  // The render thread checks for callbacks and processes them between frames.
+  void QueueTask(base::Callback<void()>& callback);
+
  private:
   virtual ~VrShell();
   void LoadUIContent();
-  void DrawVrShell(int64_t time);
+  void DrawVrShell(const gvr::Mat4f& head_pose);
   void DrawEye(const gvr::Mat4f& view_matrix,
                const gvr::BufferViewport& params);
   void DrawContentRect();
   void DrawWebVr();
-  void DrawUI();
-  void DrawCursor();
+  void DrawUI(const gvr::Mat4f& render_matrix);
+  void DrawCursor(const gvr::Mat4f& render_matrix);
 
-  void UpdateController();
+  void UpdateController(const gvr::Vec3f& forward_vector);
+
+  void HandleQueuedTasks();
 
   // samplerExternalOES texture data for UI content image.
   jint ui_texture_id_ = 0;
@@ -106,7 +115,6 @@ class VrShell : public device::GvrDelegate {
   float desktop_height_;
 
   ContentRectangle* desktop_plane_;
-  gvr::Vec3f desktop_position_;
 
   UiScene scene_;
 
@@ -115,14 +123,11 @@ class VrShell : public device::GvrDelegate {
   std::unique_ptr<gvr::BufferViewport> buffer_viewport_;
   std::unique_ptr<gvr::SwapChain> swap_chain_;
 
-  gvr::Mat4f view_matrix_;
-  gvr::Mat4f projection_matrix_;
-
-  gvr::Mat4f head_pose_;
-  gvr::Vec3f forward_vector_;
-
   gvr::Sizei render_size_;
   float cursor_distance_;
+
+  std::queue<base::Callback<void()>> task_queue_;
+  base::Lock task_queue_lock_;
 
   std::unique_ptr<VrCompositor> content_compositor_;
   content::ContentViewCore* content_cvc_;
@@ -135,11 +140,14 @@ class VrShell : public device::GvrDelegate {
 
   gvr::Quatf controller_quat_;
   bool controller_active_ = false;
-  gvr::Vec3f look_at_vector_;
+
+  gvr::Vec3f target_point_;
+  const ContentRectangle* target_element_ = nullptr;
   int ui_tex_width_ = 0;
   int ui_tex_height_ = 0;
 
   bool webvr_mode_ = false;
+  bool webvr_secure_origin_ = false;
 
   base::WeakPtrFactory<VrShell> weak_ptr_factory_;
 

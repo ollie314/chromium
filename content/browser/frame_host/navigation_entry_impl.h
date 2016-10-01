@@ -7,6 +7,8 @@
 
 #include <stdint.h>
 
+#include <set>
+
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_vector.h"
@@ -20,6 +22,7 @@
 #include "content/public/browser/favicon_status.h"
 #include "content/public/browser/global_request_id.h"
 #include "content/public/browser/navigation_entry.h"
+#include "content/public/browser/reload_type.h"
 #include "content/public/browser/restore_type.h"
 #include "content/public/browser/ssl_status.h"
 #include "content/public/common/page_state.h"
@@ -185,7 +188,7 @@ class CONTENT_EXPORT NavigationEntryImpl
       const FrameNavigationEntry& frame_entry,
       bool is_same_document_history_load,
       bool is_history_navigation_in_new_child,
-      bool has_subtree_history_items,
+      const std::set<std::string>& subframe_unique_names,
       bool has_committed_real_load,
       bool intended_as_new_entry,
       int pending_offset_to_send,
@@ -229,14 +232,16 @@ class CONTENT_EXPORT NavigationEntryImpl
   // there is one in this NavigationEntry.
   FrameNavigationEntry* GetFrameEntry(FrameTreeNode* frame_tree_node) const;
 
-  // Returns whether the TreeNode associated with |frame_tree_node| has any
-  // children.  If not, the renderer process does not need to ask the browser
-  // when new subframes are created during a back/forward navigation.
-  // TODO(creis): Send a data structure with all unique names in the subtree,
-  // along with any corresponding same-process PageStates.  The renderer only
+  // Returns a set of frame unique names for immediate children of the TreeNode
+  // associated with |frame_tree_node|.  The renderer process will use this list
+  // of names to know whether to ask the browser process for a history item when
+  // new subframes are created during a back/forward navigation.
+  // TODO(creis): Send a data structure that also contains all corresponding
+  // same-process PageStates for the subtree, so that the renderer process only
   // needs to ask the browser process to handle the cross-process cases.
   // See https://crbug.com/639842.
-  bool HasSubtreeHistoryItems(FrameTreeNode* frame_tree_node) const;
+  std::set<std::string> GetSubframeUniqueNames(
+      FrameTreeNode* frame_tree_node) const;
 
   // Removes any subframe FrameNavigationEntries that match the unique name of
   // |frame_tree_node|, and all of their children. There should be at most one,
@@ -246,6 +251,14 @@ class CONTENT_EXPORT NavigationEntryImpl
 
   void set_unique_id(int unique_id) {
     unique_id_ = unique_id;
+  }
+
+  void set_started_from_context_menu(bool started_from_context_menu) {
+    started_from_context_menu_ = started_from_context_menu;
+  }
+
+  bool has_started_from_context_menu() const {
+    return started_from_context_menu_;
   }
 
   // The SiteInstance represents which pages must share processes. This is a
@@ -313,13 +326,19 @@ class CONTENT_EXPORT NavigationEntryImpl
   }
 
   // The RestoreType for this entry. This is set if the entry was retored. This
-  // is set to RESTORE_NONE once the entry is loaded.
+  // is set to RestoreType::NONE once the entry is loaded.
   void set_restore_type(RestoreType type) {
     restore_type_ = type;
   }
   RestoreType restore_type() const {
     return restore_type_;
   }
+
+  // The ReloadType for this entry.  This is set when a reload is requested.
+  // This is set to ReloadType::NONE if the entry isn't for a reload, or once
+  // the entry is loaded.
+  void set_reload_type(ReloadType type) { reload_type_ = type; }
+  ReloadType reload_type() const { return reload_type_; }
 
   void set_transferred_global_request_id(
       const GlobalRequestID& transferred_global_request_id) {
@@ -514,6 +533,13 @@ class CONTENT_EXPORT NavigationEntryImpl
   // Whether the URL load carries a user gesture.
   bool has_user_gesture_;
 #endif
+
+  // Used to store ReloadType for the entry.  This is ReloadType::NONE for
+  // non-reload navigations.  Reset at commit and not persisted.
+  ReloadType reload_type_;
+
+  // Determine if the navigation was started within a context menu.
+  bool started_from_context_menu_;
 
   // Used to store extra data to support browser features. This member is not
   // persisted, unless specific data is taken out/put back in at save/restore

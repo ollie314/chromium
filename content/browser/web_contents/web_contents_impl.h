@@ -92,6 +92,10 @@ struct MHTMLGenerationParams;
 struct ResourceRedirectDetails;
 struct ResourceRequestDetails;
 
+namespace mojom {
+class CreateNewWindowParams;
+}
+
 #if defined(OS_ANDROID)
 class WebContentsAndroid;
 #endif
@@ -536,7 +540,7 @@ class CONTENT_EXPORT WebContentsImpl
       int32_t route_id,
       int32_t main_frame_route_id,
       int32_t main_frame_widget_route_id,
-      const ViewHostMsg_CreateWindow_Params& params,
+      const mojom::CreateNewWindowParams& params,
       SessionStorageNamespace* session_storage_namespace) override;
   void CreateNewWidget(int32_t render_process_id,
                        int32_t route_id,
@@ -605,13 +609,15 @@ class CONTENT_EXPORT WebContentsImpl
                                         ReloadType reload_type) override;
   void RequestOpenURL(RenderFrameHostImpl* render_frame_host,
                       const OpenURLParams& params) override;
-  bool ShouldTransferNavigation() override;
+  bool ShouldTransferNavigation(bool is_main_frame_navigation) override;
   bool ShouldPreserveAbortedURLs() override;
   void DidStartLoading(FrameTreeNode* frame_tree_node,
                        bool to_different_document) override;
   void DidStopLoading() override;
   void DidChangeLoadProgress() override;
   ScopedVector<NavigationThrottle> CreateThrottlesForNavigation(
+      NavigationHandle* navigation_handle) override;
+  std::unique_ptr<NavigationUIData> GetNavigationUIData(
       NavigationHandle* navigation_handle) override;
 
   // RenderWidgetHostDelegate --------------------------------------------------

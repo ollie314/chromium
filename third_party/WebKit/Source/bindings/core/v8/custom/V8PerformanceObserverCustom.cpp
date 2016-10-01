@@ -15,35 +15,49 @@
 
 namespace blink {
 
-void V8PerformanceObserver::constructorCustom(const v8::FunctionCallbackInfo<v8::Value>& info)
-{
-    if (UNLIKELY(info.Length() < 1)) {
-        V8ThrowException::throwTypeError(info.GetIsolate(), ExceptionMessages::failedToConstruct("PerformanceObserver", ExceptionMessages::notEnoughArguments(1, info.Length())));
-        return;
-    }
+void V8PerformanceObserver::constructorCustom(
+    const v8::FunctionCallbackInfo<v8::Value>& info) {
+  if (UNLIKELY(info.Length() < 1)) {
+    V8ThrowException::throwTypeError(
+        info.GetIsolate(),
+        ExceptionMessages::failedToConstruct(
+            "PerformanceObserver",
+            ExceptionMessages::notEnoughArguments(1, info.Length())));
+    return;
+  }
 
-    v8::Local<v8::Object> wrapper = info.Holder();
+  v8::Local<v8::Object> wrapper = info.Holder();
 
-    Performance* performance = nullptr;
-    DOMWindow* window = toDOMWindow(wrapper->CreationContext());
-    if (!window) {
-        V8ThrowException::throwTypeError(info.GetIsolate(), ExceptionMessages::failedToConstruct("PerformanceObserver", "No 'window' in current context."));
-        return;
-    }
-    performance = DOMWindowPerformance::performance(*window);
-    ASSERT(performance);
+  Performance* performance = nullptr;
+  DOMWindow* window = toDOMWindow(wrapper->CreationContext());
+  if (!window) {
+    V8ThrowException::throwTypeError(
+        info.GetIsolate(),
+        ExceptionMessages::failedToConstruct(
+            "PerformanceObserver", "No 'window' in current context."));
+    return;
+  }
+  performance = DOMWindowPerformance::performance(*window);
+  ASSERT(performance);
 
-    PerformanceObserverCallback* callback;
-    {
-        if (info.Length() <= 0 || !info[0]->IsFunction()) {
-            V8ThrowException::throwTypeError(info.GetIsolate(), ExceptionMessages::failedToConstruct("PerformanceObserver", "The callback provided as parameter 1 is not a function."));
-            return;
-        }
-        callback = V8PerformanceObserverCallback::create(v8::Local<v8::Function>::Cast(info[0]), wrapper, ScriptState::current(info.GetIsolate()));
-    }
-    PerformanceObserver* observer = PerformanceObserver::create(performance, callback);
+  if (info.Length() <= 0 || !info[0]->IsFunction()) {
+    V8ThrowException::throwTypeError(
+        info.GetIsolate(),
+        ExceptionMessages::failedToConstruct(
+            "PerformanceObserver",
+            "The callback provided as parameter 1 is not a function."));
+    return;
+  }
+  V8PerformanceObserverCallback* callback =
+      V8PerformanceObserverCallback::create(
+          info.GetIsolate(), v8::Local<v8::Function>::Cast(info[0]));
 
-    v8SetReturnValue(info, V8DOMWrapper::associateObjectWithWrapper(info.GetIsolate(), observer, &wrapperTypeInfo, wrapper));
+  PerformanceObserver* observer = PerformanceObserver::create(
+      ScriptState::forReceiverObject(info), performance, callback);
+
+  v8SetReturnValue(info,
+                   V8DOMWrapper::associateObjectWithWrapper(
+                       info.GetIsolate(), observer, &wrapperTypeInfo, wrapper));
 }
 
-} // namespace blink
+}  // namespace blink

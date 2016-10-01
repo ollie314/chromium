@@ -59,6 +59,7 @@ class AppCacheService;
 class AsyncRevalidationManager;
 class LoaderDelegate;
 class NavigationURLLoaderImplCore;
+class NavigationUIData;
 class RenderFrameHostImpl;
 class ResourceContext;
 class ResourceDispatcherHostDelegate;
@@ -234,7 +235,8 @@ class CONTENT_EXPORT ResourceDispatcherHostImpl
   virtual std::unique_ptr<ResourceHandler> CreateResourceHandlerForDownload(
       net::URLRequest* request,
       bool is_content_initiated,
-      bool must_download);
+      bool must_download,
+      bool is_new_request);
 
   // Called to determine whether the response to |request| should be intercepted
   // and handled as a stream. Streams are used to pass direct access to a
@@ -272,6 +274,7 @@ class CONTENT_EXPORT ResourceDispatcherHostImpl
   void BeginNavigationRequest(
       ResourceContext* resource_context,
       const NavigationRequestInfo& info,
+      std::unique_ptr<NavigationUIData> navigation_ui_data,
       NavigationURLLoaderImplCore* loader,
       ServiceWorkerNavigationHandleCore* service_worker_handle_core);
 
@@ -651,7 +654,8 @@ class CONTENT_EXPORT ResourceDispatcherHostImpl
       net::URLRequest* request,
       std::unique_ptr<ResourceHandler> handler,
       bool is_content_initiated,
-      bool must_download);
+      bool must_download,
+      bool is_new_request);
 
   LoaderMap pending_loaders_;
 

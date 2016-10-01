@@ -9,7 +9,7 @@
 #include <cstdlib>
 
 #include "base/macros.h"
-#include "base/stl_util.h"
+#include "base/memory/ptr_util.h"
 #include "media/base/stream_parser_buffer.h"
 #include "media/base/timestamp_constants.h"
 
@@ -172,7 +172,6 @@ FrameProcessor::FrameProcessor(const UpdateDurationCB& update_duration_cb,
 
 FrameProcessor::~FrameProcessor() {
   DVLOG(2) << __func__ << "()";
-  base::STLDeleteValues(&track_buffers_);
 }
 
 void FrameProcessor::SetSequenceMode(bool sequence_mode) {
@@ -260,7 +259,7 @@ bool FrameProcessor::AddTrack(StreamParser::TrackId id,
     return false;
   }
 
-  track_buffers_[id] = new MseTrackBuffer(stream);
+  track_buffers_[id] = base::MakeUnique<MseTrackBuffer>(stream);
   return true;
 }
 
@@ -274,30 +273,27 @@ bool FrameProcessor::UpdateTrack(StreamParser::TrackId old_id,
     return false;
   }
 
-  track_buffers_[new_id] = track_buffers_[old_id];
+  track_buffers_[new_id] = std::move(track_buffers_[old_id]);
   CHECK_EQ(1u, track_buffers_.erase(old_id));
   return true;
 }
 
 void FrameProcessor::SetAllTrackBuffersNeedRandomAccessPoint() {
-  for (TrackBufferMap::iterator itr = track_buffers_.begin();
-       itr != track_buffers_.end();
-       ++itr) {
+  for (auto itr = track_buffers_.begin(); itr != track_buffers_.end(); ++itr) {
     itr->second->set_needs_random_access_point(true);
   }
 }
 
 void FrameProcessor::Reset() {
   DVLOG(2) << __func__ << "()";
-  for (TrackBufferMap::iterator itr = track_buffers_.begin();
-       itr != track_buffers_.end(); ++itr) {
+  for (auto itr = track_buffers_.begin(); itr != track_buffers_.end(); ++itr) {
     itr->second->Reset();
   }
 
   // Maintain current |coded_frame_group_last_dts_| state for Reset() during
   // sequence mode. Reset it here only if in segments mode. In sequence mode,
   // the current coded frame group may be continued across Reset() operations to
-  // allow the stream to coaelesce what might otherwise be gaps in the buffered
+  // allow the stream to coalesce what might otherwise be gaps in the buffered
   // ranges. See also the declaration for |coded_frame_group_last_dts_|.
   if (!sequence_mode_) {
     coded_frame_group_last_dts_ = kNoDecodeTimestamp();
@@ -325,20 +321,18 @@ void FrameProcessor::OnPossibleAudioConfigUpdate(
 }
 
 MseTrackBuffer* FrameProcessor::FindTrack(StreamParser::TrackId id) {
-  TrackBufferMap::iterator itr = track_buffers_.find(id);
+  auto itr = track_buffers_.find(id);
   if (itr == track_buffers_.end())
     return NULL;
 
-  return itr->second;
+  return itr->second.get();
 }
 
 void FrameProcessor::NotifyStartOfCodedFrameGroup(
     DecodeTimestamp start_timestamp) {
   DVLOG(2) << __func__ << "(" << start_timestamp.InSecondsF() << ")";
 
-  for (TrackBufferMap::iterator itr = track_buffers_.begin();
-       itr != track_buffers_.end();
-       ++itr) {
+  for (auto itr = track_buffers_.begin(); itr != track_buffers_.end(); ++itr) {
     itr->second->stream()->OnStartOfCodedFrameGroup(start_timestamp);
   }
 }
@@ -347,9 +341,7 @@ bool FrameProcessor::FlushProcessedFrames() {
   DVLOG(2) << __func__ << "()";
 
   bool result = true;
-  for (TrackBufferMap::iterator itr = track_buffers_.begin();
-       itr != track_buffers_.end();
-       ++itr) {
+  for (auto itr = track_buffers_.begin(); itr != track_buffers_.end(); ++itr) {
     if (!itr->second->FlushProcessedFrames())
       result = false;
   }
@@ -467,7 +459,7 @@ bool FrameProcessor::ProcessFrame(
   //     index.html#sourcebuffer-coded-frame-processing
   while (true) {
     // 1. Loop Top:
-    // Otherwise case: (See MediaSourceState's |auto_update_timestamp_offset_|,
+    // Otherwise case: (See SourceBufferState's |auto_update_timestamp_offset_|,
     // too).
     // 1.1. Let presentation timestamp be a double precision floating point
     //      representation of the coded frame's presentation timestamp in
@@ -743,7 +735,7 @@ bool FrameProcessor::ProcessFrame(
       group_end_timestamp_ = frame_end_timestamp;
     DCHECK(group_end_timestamp_ >= base::TimeDelta());
 
-    // Step 21 is currently handled differently. See MediaSourceState's
+    // Step 21 is currently handled differently. See SourceBufferState's
     // |auto_update_timestamp_offset_|.
     return true;
   }

@@ -19,6 +19,7 @@
 #include "content/common/resource_request_body_impl.h"
 #include "content/common/site_isolation_policy.h"
 #include "content/public/browser/content_browser_client.h"
+#include "content/public/browser/navigation_ui_data.h"
 #include "content/public/browser/site_instance.h"
 #include "content/public/common/browser_side_navigation_policy.h"
 #include "content/public/common/content_client.h"
@@ -47,11 +48,11 @@ std::unique_ptr<NavigationHandleImpl> NavigationHandleImpl::Create(
     bool is_synchronous,
     bool is_srcdoc,
     const base::TimeTicks& navigation_start,
-    int pending_nav_entry_id) {
-  return std::unique_ptr<NavigationHandleImpl>(
-      new NavigationHandleImpl(url, frame_tree_node, is_renderer_initiated,
-                               is_synchronous, is_srcdoc, navigation_start,
-                               pending_nav_entry_id));
+    int pending_nav_entry_id,
+    bool started_from_context_menu) {
+  return std::unique_ptr<NavigationHandleImpl>(new NavigationHandleImpl(
+      url, frame_tree_node, is_renderer_initiated, is_synchronous, is_srcdoc,
+      navigation_start, pending_nav_entry_id, started_from_context_menu));
 }
 
 NavigationHandleImpl::NavigationHandleImpl(
@@ -61,7 +62,8 @@ NavigationHandleImpl::NavigationHandleImpl(
     bool is_synchronous,
     bool is_srcdoc,
     const base::TimeTicks& navigation_start,
-    int pending_nav_entry_id)
+    int pending_nav_entry_id,
+    bool started_from_context_menu)
     : url_(url),
       has_user_gesture_(false),
       transition_(ui::PAGE_TRANSITION_LINK),
@@ -84,6 +86,7 @@ NavigationHandleImpl::NavigationHandleImpl(
       should_replace_current_entry_(false),
       is_download_(false),
       is_stream_(false),
+      started_from_context_menu_(started_from_context_menu),
       weak_factory_(this) {
   DCHECK(!navigation_start.is_null());
   redirect_chain_.push_back(url);
@@ -396,6 +399,9 @@ void NavigationHandleImpl::WillStartRequest(
   complete_callback_ = callback;
 
   RegisterNavigationThrottles();
+
+  if (IsBrowserSideNavigationEnabled())
+    navigation_ui_data_ = GetDelegate()->GetNavigationUIData(this);
 
   // Notify each throttle of the request.
   NavigationThrottle::ThrottleCheckResult result = CheckWillStartRequest();
@@ -727,6 +733,10 @@ void NavigationHandleImpl::RegisterNavigationThrottles() {
                       throttles_to_register.end());
     throttles_to_register.weak_clear();
   }
+}
+
+bool NavigationHandleImpl::WasStartedFromContextMenu() const {
+  return started_from_context_menu_;
 }
 
 }  // namespace content

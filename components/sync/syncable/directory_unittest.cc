@@ -5,7 +5,6 @@
 #include "components/sync/syncable/directory_unittest.h"
 
 #include <stddef.h>
-#include <stdint.h>
 
 #include <cstdlib>
 
@@ -19,7 +18,6 @@
 #include "components/sync/base/mock_unrecoverable_error_handler.h"
 #include "components/sync/syncable/syncable_proto_util.h"
 #include "components/sync/syncable/syncable_util.h"
-#include "components/sync/syncable/syncable_write_transaction.h"
 #include "components/sync/test/engine/test_syncable_utils.h"
 #include "components/sync/test/test_directory_backing_store.h"
 
@@ -1713,7 +1711,7 @@ TEST_F(SyncableDirectoryTest, MutableEntry_PutAttachmentMetadata) {
   sync_pb::AttachmentMetadata attachment_metadata;
   sync_pb::AttachmentMetadataRecord* record = attachment_metadata.add_record();
   sync_pb::AttachmentIdProto attachment_id_proto =
-      syncer::CreateAttachmentIdProto(0, 0);
+      CreateAttachmentIdProto(0, 0);
   *record->mutable_id() = attachment_id_proto;
   ASSERT_FALSE(dir()->IsAttachmentLinked(attachment_id_proto));
   {
@@ -1757,8 +1755,8 @@ TEST_F(SyncableDirectoryTest, MutableEntry_UpdateAttachmentId) {
   sync_pb::AttachmentMetadata attachment_metadata;
   sync_pb::AttachmentMetadataRecord* r1 = attachment_metadata.add_record();
   sync_pb::AttachmentMetadataRecord* r2 = attachment_metadata.add_record();
-  *r1->mutable_id() = syncer::CreateAttachmentIdProto(0, 0);
-  *r2->mutable_id() = syncer::CreateAttachmentIdProto(0, 0);
+  *r1->mutable_id() = CreateAttachmentIdProto(0, 0);
+  *r2->mutable_id() = CreateAttachmentIdProto(0, 0);
   sync_pb::AttachmentIdProto attachment_id_proto = r1->id();
 
   WriteTransaction trans(FROM_HERE, UNITTEST, dir().get());
@@ -1796,7 +1794,7 @@ TEST_F(SyncableDirectoryTest, Directory_DeleteDoesNotUnlinkAttachments) {
   sync_pb::AttachmentMetadata attachment_metadata;
   sync_pb::AttachmentMetadataRecord* record = attachment_metadata.add_record();
   sync_pb::AttachmentIdProto attachment_id_proto =
-      syncer::CreateAttachmentIdProto(0, 0);
+      CreateAttachmentIdProto(0, 0);
   *record->mutable_id() = attachment_id_proto;
   ASSERT_FALSE(dir()->IsAttachmentLinked(attachment_id_proto));
   const Id id = TestIdFactory::FromNumber(-1);
@@ -1825,7 +1823,7 @@ TEST_F(SyncableDirectoryTest, Directory_LastReferenceUnlinksAttachments) {
   sync_pb::AttachmentMetadata attachment_metadata;
   sync_pb::AttachmentMetadataRecord* record = attachment_metadata.add_record();
   sync_pb::AttachmentIdProto attachment_id_proto =
-      syncer::CreateAttachmentIdProto(0, 0);
+      CreateAttachmentIdProto(0, 0);
   *record->mutable_id() = attachment_id_proto;
 
   // Create two entries, each referencing the attachment.

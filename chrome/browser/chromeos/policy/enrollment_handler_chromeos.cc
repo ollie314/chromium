@@ -70,7 +70,7 @@ em::DeviceRegisterRequest::Flavor EnrollmentModeToRegistrationFlavor(
 
 EnrollmentHandlerChromeOS::EnrollmentHandlerChromeOS(
     DeviceCloudPolicyStoreChromeOS* store,
-    EnterpriseInstallAttributes* install_attributes,
+    chromeos::InstallAttributes* install_attributes,
     ServerBackedStateKeysBroker* state_keys_broker,
     chromeos::attestation::AttestationFlow* attestation_flow,
     std::unique_ptr<CloudPolicyClient> client,
@@ -118,6 +118,20 @@ EnrollmentHandlerChromeOS::~EnrollmentHandlerChromeOS() {
 void EnrollmentHandlerChromeOS::StartEnrollment() {
   CHECK_EQ(STEP_PENDING, enrollment_step_);
   enrollment_step_ = STEP_STATE_KEYS;
+
+  if (client_->machine_id().empty()) {
+    LOG(ERROR) << "Machine id empty.";
+    ReportResult(EnrollmentStatus::ForStatus(
+        EnrollmentStatus::STATUS_NO_MACHINE_IDENTIFICATION));
+    return;
+  }
+  if (client_->machine_model().empty()) {
+    LOG(ERROR) << "Machine model empty.";
+    ReportResult(EnrollmentStatus::ForStatus(
+        EnrollmentStatus::STATUS_NO_MACHINE_IDENTIFICATION));
+    return;
+  }
+
   state_keys_broker_->RequestStateKeys(
       base::Bind(&EnrollmentHandlerChromeOS::HandleStateKeysResult,
                  weak_ptr_factory_.GetWeakPtr()));
@@ -408,13 +422,13 @@ void EnrollmentHandlerChromeOS::HandleSetManagementSettingsDone(bool success) {
 }
 
 void EnrollmentHandlerChromeOS::HandleLockDeviceResult(
-    EnterpriseInstallAttributes::LockResult lock_result) {
+    chromeos::InstallAttributes::LockResult lock_result) {
   CHECK_EQ(STEP_LOCK_DEVICE, enrollment_step_);
   switch (lock_result) {
-    case EnterpriseInstallAttributes::LOCK_SUCCESS:
+    case chromeos::InstallAttributes::LOCK_SUCCESS:
       StartStoreRobotAuth();
       break;
-    case EnterpriseInstallAttributes::LOCK_NOT_READY:
+    case chromeos::InstallAttributes::LOCK_NOT_READY:
       // We wait up to |kLockRetryTimeoutMs| milliseconds and if it hasn't
       // succeeded by then show an error to the user and stop the enrollment.
       if (lockbox_init_duration_ < kLockRetryTimeoutMs) {
@@ -427,17 +441,17 @@ void EnrollmentHandlerChromeOS::HandleLockDeviceResult(
             base::TimeDelta::FromMilliseconds(kLockRetryIntervalMs));
         lockbox_init_duration_ += kLockRetryIntervalMs;
       } else {
-        HandleLockDeviceResult(EnterpriseInstallAttributes::LOCK_TIMEOUT);
+        HandleLockDeviceResult(chromeos::InstallAttributes::LOCK_TIMEOUT);
       }
       break;
-    case EnterpriseInstallAttributes::LOCK_TIMEOUT:
-    case EnterpriseInstallAttributes::LOCK_BACKEND_INVALID:
-    case EnterpriseInstallAttributes::LOCK_ALREADY_LOCKED:
-    case EnterpriseInstallAttributes::LOCK_SET_ERROR:
-    case EnterpriseInstallAttributes::LOCK_FINALIZE_ERROR:
-    case EnterpriseInstallAttributes::LOCK_READBACK_ERROR:
-    case EnterpriseInstallAttributes::LOCK_WRONG_DOMAIN:
-    case EnterpriseInstallAttributes::LOCK_WRONG_MODE:
+    case chromeos::InstallAttributes::LOCK_TIMEOUT:
+    case chromeos::InstallAttributes::LOCK_BACKEND_INVALID:
+    case chromeos::InstallAttributes::LOCK_ALREADY_LOCKED:
+    case chromeos::InstallAttributes::LOCK_SET_ERROR:
+    case chromeos::InstallAttributes::LOCK_FINALIZE_ERROR:
+    case chromeos::InstallAttributes::LOCK_READBACK_ERROR:
+    case chromeos::InstallAttributes::LOCK_WRONG_DOMAIN:
+    case chromeos::InstallAttributes::LOCK_WRONG_MODE:
       ReportResult(EnrollmentStatus::ForLockError(lock_result));
       break;
   }

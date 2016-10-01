@@ -23,6 +23,7 @@
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_data.h"
+#include "content/public/browser/navigation_ui_data.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/stream_handle.h"
 #include "content/public/common/content_client.h"
@@ -155,7 +156,7 @@ std::unique_ptr<NavigationRequest> NavigationRequest::CreateBrowserInitiated(
       entry.ConstructRequestNavigationParams(
           frame_entry, is_same_document_history_load,
           is_history_navigation_in_new_child,
-          entry.HasSubtreeHistoryItems(frame_tree_node),
+          entry.GetSubframeUniqueNames(frame_tree_node),
           frame_tree_node->has_committed_real_load(),
           controller->GetPendingEntryIndex() == -1,
           controller->GetIndexOfEntry(&entry),
@@ -188,13 +189,14 @@ std::unique_ptr<NavigationRequest> NavigationRequest::CreateRendererInitiated(
       0,                       // nav_entry_id
       false,                   // is_same_document_history_load
       false,                   // is_history_navigation_in_new_child
-      false,                   // has_subtree_history_items
+      std::set<std::string>(), // subframe_unique_names
       frame_tree_node->has_committed_real_load(),
       false,                   // intended_as_new_entry
       -1,                      // pending_history_list_offset
       current_history_list_offset, current_history_list_length,
       false,                   // is_view_source
-      false);                  // should_clear_history_list
+      false,                   // should_clear_history_list
+      begin_params.has_user_gesture);
   std::unique_ptr<NavigationRequest> navigation_request(
       new NavigationRequest(frame_tree_node, common_params, begin_params,
                             request_params, false, nullptr, nullptr));
@@ -297,11 +299,11 @@ void NavigationRequest::CreateNavigationHandle(int pending_nav_entry_id) {
   // TODO(nasko): Update the NavigationHandle creation to ensure that the
   // proper values are specified for is_synchronous and is_srcdoc.
   navigation_handle_ = NavigationHandleImpl::Create(
-      common_params_.url, frame_tree_node_,
-      !browser_initiated_,
+      common_params_.url, frame_tree_node_, !browser_initiated_,
       false,  // is_synchronous
       false,  // is_srcdoc
-      common_params_.navigation_start, pending_nav_entry_id);
+      common_params_.navigation_start, pending_nav_entry_id,
+      false);  // started_in_context_menu
 }
 
 void NavigationRequest::TransferNavigationHandleOwnership(
@@ -386,9 +388,8 @@ void NavigationRequest::OnResponseStarted(
   // renderer, allow the embedder to cancel the transfer.
   if (!browser_initiated_ &&
       render_frame_host != frame_tree_node_->current_frame_host() &&
-      !frame_tree_node_->navigator()
-           ->GetDelegate()
-           ->ShouldTransferNavigation()) {
+      !frame_tree_node_->navigator()->GetDelegate()->ShouldTransferNavigation(
+          frame_tree_node_->IsMainFrame())) {
     frame_tree_node_->ResetNavigationRequest(false);
     return;
   }
@@ -486,6 +487,10 @@ void NavigationRequest::OnStartChecksComplete(
                                   ? false
                                   : frame_tree_node_->parent()->IsMainFrame();
 
+  std::unique_ptr<NavigationUIData> navigation_ui_data;
+  if (navigation_handle_->navigation_ui_data())
+    navigation_ui_data = navigation_handle_->navigation_ui_data()->Clone();
+
   loader_ = NavigationURLLoader::Create(
       frame_tree_node_->navigator()->GetController()->GetBrowserContext(),
       base::MakeUnique<NavigationRequestInfo>(
@@ -493,6 +498,7 @@ void NavigationRequest::OnStartChecksComplete(
           frame_tree_node_->current_origin(), frame_tree_node_->IsMainFrame(),
           parent_is_main_frame, IsSecureFrame(frame_tree_node_->parent()),
           frame_tree_node_->frame_tree_node_id()),
+      std::move(navigation_ui_data),
       navigation_handle_->service_worker_handle(), this);
 }
 
@@ -545,6 +551,9 @@ void NavigationRequest::CommitNavigation() {
              frame_tree_node_->render_manager()->speculative_frame_host());
 
   TransferNavigationHandleOwnership(render_frame_host);
+
+  DCHECK_EQ(request_params_.has_user_gesture, begin_params_.has_user_gesture);
+
   render_frame_host->CommitNavigation(response_.get(), std::move(body_),
                                       common_params_, request_params_,
                                       is_view_source_);

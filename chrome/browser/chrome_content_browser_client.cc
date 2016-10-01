@@ -66,6 +66,7 @@
 #include "chrome/browser/profiles/chrome_browser_main_extra_parts_profiles.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_io_data.h"
+#include "chrome/browser/renderer_host/chrome_navigation_ui_data.h"
 #include "chrome/browser/renderer_host/chrome_render_message_filter.h"
 #include "chrome/browser/renderer_host/pepper/chrome_browser_pepper_host_factory.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
@@ -627,6 +628,20 @@ void HandleBlockedPopupOnUIThread(const BlockedWindowParams& params) {
     return;
   popup_helper->AddBlockedPopup(params);
 }
+
+#if defined(ENABLE_PLUGINS)
+void HandleFlashDownloadActionOnUIThread(int render_process_id,
+                                         int render_frame_id) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  RenderFrameHost* render_frame_host =
+      RenderFrameHost::FromID(render_process_id, render_frame_id);
+  if (!render_frame_host)
+    return;
+  WebContents* web_contents =
+      WebContents::FromRenderFrameHost(render_frame_host);
+  FlashDownloadInterception::InterceptFlashDownloadNavigation(web_contents);
+}
+#endif  // defined(ENABLE_PLUGINS)
 
 // An implementation of the SSLCertReporter interface used by
 // SSLErrorHandler. Uses the SafeBrowsing UI manager to send invalid
@@ -1676,7 +1691,6 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
       switches::kForcePNaClSubzero,
 #endif
       switches::kJavaScriptHarmony,
-      switches::kMessageLoopHistogrammer,
       switches::kOriginTrialDisabledFeatures,
       switches::kOriginTrialPublicKey,
       switches::kPpapiFlashArgs,
@@ -2283,7 +2297,10 @@ bool ChromeContentBrowserClient::CanCreateWindow(
   if (FlashDownloadInterception::ShouldStopFlashDownloadAction(
           content_settings, opener_top_level_frame_url, target_url,
           user_gesture)) {
-    // TODO(crbug.com/626728): Implement permission prompt logic.
+    BrowserThread::PostTask(
+        BrowserThread::UI, FROM_HERE,
+        base::Bind(&HandleFlashDownloadActionOnUIThread, render_process_id,
+                   opener_render_frame_id));
     return false;
   }
 #endif
@@ -3022,7 +3039,11 @@ ChromeContentBrowserClient::GetServiceManifestOverlay(
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
   int id = -1;
   if (name == content::kBrowserMojoApplicationName)
-    id = IDR_CONTENT_BROWSER_MANIFEST_OVERLAY;
+    id = IDR_CHROME_CONTENT_BROWSER_MANIFEST_OVERLAY;
+  else if (name == content::kGpuMojoApplicationName)
+    id = IDR_CHROME_CONTENT_GPU_MANIFEST_OVERLAY;
+  else if (name == content::kUtilityMojoApplicationName)
+    id = IDR_CHROME_CONTENT_UTILITY_MANIFEST_OVERLAY;
   if (id == -1)
     return nullptr;
 
@@ -3162,6 +3183,12 @@ ChromeContentBrowserClient::CreateThrottlesForNavigation(
   }
 
   return throttles;
+}
+
+std::unique_ptr<content::NavigationUIData>
+ChromeContentBrowserClient::GetNavigationUIData(
+    content::NavigationHandle* navigation_handle) {
+  return base::MakeUnique<ChromeNavigationUIData>(navigation_handle);
 }
 
 content::DevToolsManagerDelegate*

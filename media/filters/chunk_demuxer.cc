@@ -12,8 +12,8 @@
 #include "base/callback_helpers.h"
 #include "base/location.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "media/base/audio_decoder_config.h"
 #include "media/base/bind_to_current_loop.h"
@@ -81,7 +81,7 @@ bool ChunkDemuxerStream::IsSeekWaitingForData() const {
   base::AutoLock auto_lock(lock_);
 
   // This method should not be called for text tracks. See the note in
-  // MediaSourceState::IsSeekWaitingForData().
+  // SourceBufferState::IsSeekWaitingForData().
   DCHECK_NE(type_, DemuxerStream::TEXT);
 
   return stream_->IsSeekPending();
@@ -596,13 +596,13 @@ ChunkDemuxer::Status ChunkDemuxer::AddId(const std::string& id,
                                     base::Unretained(this)),
                          media_log_));
 
-  std::unique_ptr<MediaSourceState> source_state(
-      new MediaSourceState(std::move(stream_parser), std::move(frame_processor),
-                           base::Bind(&ChunkDemuxer::CreateDemuxerStream,
-                                      base::Unretained(this), id),
-                           media_log_));
+  std::unique_ptr<SourceBufferState> source_state(new SourceBufferState(
+      std::move(stream_parser), std::move(frame_processor),
+      base::Bind(&ChunkDemuxer::CreateDemuxerStream, base::Unretained(this),
+                 id),
+      media_log_));
 
-  MediaSourceState::NewTextTrackCB new_text_track_cb;
+  SourceBufferState::NewTextTrackCB new_text_track_cb;
 
   if (enable_text_) {
     new_text_track_cb = base::Bind(&ChunkDemuxer::OnNewTextTrack,
@@ -611,17 +611,17 @@ ChunkDemuxer::Status ChunkDemuxer::AddId(const std::string& id,
 
   pending_source_init_ids_.insert(id);
 
-  std::string expected_mss_codecs = codecs;
+  std::string expected_sbs_codecs = codecs;
   if (codecs == "" && type == "audio/aac")
-    expected_mss_codecs = "aac";
+    expected_sbs_codecs = "aac";
   if (codecs == "" && (type == "audio/mpeg" || type == "audio/mp3"))
-    expected_mss_codecs = "mp3";
+    expected_sbs_codecs = "mp3";
 
   source_state->Init(
       base::Bind(&ChunkDemuxer::OnSourceInitDone, base::Unretained(this), id),
-      expected_mss_codecs, encrypted_media_init_data_cb_, new_text_track_cb);
+      expected_sbs_codecs, encrypted_media_init_data_cb_, new_text_track_cb);
 
-  source_state_map_[id] = source_state.release();
+  source_state_map_[id] = std::move(source_state);
   return kOk;
 }
 
@@ -638,7 +638,6 @@ void ChunkDemuxer::RemoveId(const std::string& id) {
   base::AutoLock auto_lock(lock_);
   CHECK(IsValidId(id));
 
-  delete source_state_map_[id];
   source_state_map_.erase(id);
   pending_source_init_ids_.erase(id);
   // Remove demuxer streams created for this id.
@@ -671,7 +670,7 @@ Ranges<TimeDelta> ChunkDemuxer::GetBufferedRanges(const std::string& id) const {
   base::AutoLock auto_lock(lock_);
   DCHECK(!id.empty());
 
-  MediaSourceStateMap::const_iterator itr = source_state_map_.find(id);
+  auto itr = source_state_map_.find(id);
 
   DCHECK(itr != source_state_map_.end());
   return itr->second->GetBufferedRanges(duration_, state_ == ENDED);
@@ -682,7 +681,7 @@ base::TimeDelta ChunkDemuxer::GetHighestPresentationTimestamp(
   base::AutoLock auto_lock(lock_);
   DCHECK(!id.empty());
 
-  MediaSourceStateMap::const_iterator itr = source_state_map_.find(id);
+  auto itr = source_state_map_.find(id);
 
   DCHECK(itr != source_state_map_.end());
   return itr->second->GetHighestPresentationTimestamp();
@@ -757,7 +756,7 @@ bool ChunkDemuxer::EvictCodedFrames(const std::string& id,
       DecodeTimestamp::FromPresentationTime(currentMediaTime);
 
   DCHECK(!id.empty());
-  MediaSourceStateMap::const_iterator itr = source_state_map_.find(id);
+  auto itr = source_state_map_.find(id);
   if (itr == source_state_map_.end()) {
     LOG(WARNING) << __func__ << " stream " << id << " not found";
     return false;
@@ -924,8 +923,8 @@ void ChunkDemuxer::SetDuration(double duration) {
   duration_ = duration_td;
   host_->SetDuration(duration_);
 
-  for (MediaSourceStateMap::iterator itr = source_state_map_.begin();
-       itr != source_state_map_.end(); ++itr) {
+  for (auto itr = source_state_map_.begin(); itr != source_state_map_.end();
+       ++itr) {
     itr->second->OnSetDuration(duration_);
   }
 }
@@ -977,8 +976,8 @@ void ChunkDemuxer::MarkEndOfStream(PipelineStatus status) {
   }
 
   bool old_waiting_for_data = IsSeekWaitingForData_Locked();
-  for (MediaSourceStateMap::iterator itr = source_state_map_.begin();
-       itr != source_state_map_.end(); ++itr) {
+  for (auto itr = source_state_map_.begin(); itr != source_state_map_.end();
+       ++itr) {
     itr->second->MarkEndOfStream();
   }
 
@@ -1008,8 +1007,8 @@ void ChunkDemuxer::UnmarkEndOfStream() {
 
   ChangeState_Locked(INITIALIZED);
 
-  for (MediaSourceStateMap::iterator itr = source_state_map_.begin();
-       itr != source_state_map_.end(); ++itr) {
+  for (auto itr = source_state_map_.begin(); itr != source_state_map_.end();
+       ++itr) {
     itr->second->UnmarkEndOfStream();
   }
 }
@@ -1031,8 +1030,8 @@ void ChunkDemuxer::Shutdown() {
 
 void ChunkDemuxer::SetMemoryLimitsForTest(DemuxerStream::Type type,
                                           size_t memory_limit) {
-  for (MediaSourceStateMap::iterator itr = source_state_map_.begin();
-       itr != source_state_map_.end(); ++itr) {
+  for (auto itr = source_state_map_.begin(); itr != source_state_map_.end();
+       ++itr) {
     itr->second->SetMemoryLimits(type, memory_limit);
   }
 }
@@ -1046,8 +1045,6 @@ void ChunkDemuxer::ChangeState_Locked(State new_state) {
 
 ChunkDemuxer::~ChunkDemuxer() {
   DCHECK_NE(state_, INITIALIZED);
-
-  base::STLDeleteValues(&source_state_map_);
 }
 
 void ChunkDemuxer::ReportError_Locked(PipelineStatus error) {
@@ -1079,8 +1076,8 @@ void ChunkDemuxer::ReportError_Locked(PipelineStatus error) {
 
 bool ChunkDemuxer::IsSeekWaitingForData_Locked() const {
   lock_.AssertAcquired();
-  for (MediaSourceStateMap::const_iterator itr = source_state_map_.begin();
-       itr != source_state_map_.end(); ++itr) {
+  for (auto itr = source_state_map_.begin(); itr != source_state_map_.end();
+       ++itr) {
     if (itr->second->IsSeekWaitingForData())
       return true;
   }
@@ -1175,40 +1172,35 @@ ChunkDemuxerStream* ChunkDemuxer::CreateDemuxerStream(
 
   MediaTrack::Id media_track_id = GenerateMediaTrackId();
 
+  OwnedChunkDemuxerStreamVector* owning_vector = nullptr;
   switch (type) {
-    case DemuxerStream::AUDIO: {
-      std::unique_ptr<ChunkDemuxerStream> audio_stream(new ChunkDemuxerStream(
-          DemuxerStream::AUDIO, splice_frames_enabled_, media_track_id));
-      DCHECK(track_id_to_demux_stream_map_.find(media_track_id) ==
-             track_id_to_demux_stream_map_.end());
-      track_id_to_demux_stream_map_[media_track_id] = audio_stream.get();
-      id_to_streams_map_[source_id].push_back(audio_stream.get());
-      audio_streams_.push_back(std::move(audio_stream));
-      return audio_streams_.back().get();
-    }
-    case DemuxerStream::VIDEO: {
-      std::unique_ptr<ChunkDemuxerStream> video_stream(new ChunkDemuxerStream(
-          DemuxerStream::VIDEO, splice_frames_enabled_, media_track_id));
-      DCHECK(track_id_to_demux_stream_map_.find(media_track_id) ==
-             track_id_to_demux_stream_map_.end());
-      track_id_to_demux_stream_map_[media_track_id] = video_stream.get();
-      id_to_streams_map_[source_id].push_back(video_stream.get());
-      video_streams_.push_back(std::move(video_stream));
-      return video_streams_.back().get();
-    }
-    case DemuxerStream::TEXT: {
-      ChunkDemuxerStream* text_stream = new ChunkDemuxerStream(
-          DemuxerStream::TEXT, splice_frames_enabled_, media_track_id);
-      id_to_streams_map_[source_id].push_back(text_stream);
-      return text_stream;
-    }
+    case DemuxerStream::AUDIO:
+      owning_vector = &audio_streams_;
+      break;
+
+    case DemuxerStream::VIDEO:
+      owning_vector = &video_streams_;
+      break;
+
+    case DemuxerStream::TEXT:
+      owning_vector = &text_streams_;
+      break;
+
     case DemuxerStream::UNKNOWN:
     case DemuxerStream::NUM_TYPES:
       NOTREACHED();
-      return NULL;
+      return nullptr;
   }
-  NOTREACHED();
-  return NULL;
+
+  std::unique_ptr<ChunkDemuxerStream> stream =
+      base::MakeUnique<ChunkDemuxerStream>(type, splice_frames_enabled_,
+                                           media_track_id);
+  DCHECK(track_id_to_demux_stream_map_.find(media_track_id) ==
+         track_id_to_demux_stream_map_.end());
+  track_id_to_demux_stream_map_[media_track_id] = stream.get();
+  id_to_streams_map_[source_id].push_back(stream.get());
+  owning_vector->push_back(std::move(stream));
+  return owning_vector->back().get();
 }
 
 void ChunkDemuxer::OnNewTextTrack(ChunkDemuxerStream* text_stream,
@@ -1255,8 +1247,8 @@ void ChunkDemuxer::DecreaseDurationIfNecessary() {
 
   TimeDelta max_duration;
 
-  for (MediaSourceStateMap::const_iterator itr = source_state_map_.begin();
-       itr != source_state_map_.end(); ++itr) {
+  for (auto itr = source_state_map_.begin(); itr != source_state_map_.end();
+       ++itr) {
     max_duration = std::max(max_duration,
                             itr->second->GetMaxBufferedDuration());
   }
@@ -1279,46 +1271,46 @@ Ranges<TimeDelta> ChunkDemuxer::GetBufferedRanges_Locked() const {
   bool ended = state_ == ENDED;
   // TODO(acolwell): When we start allowing SourceBuffers that are not active,
   // we'll need to update this loop to only add ranges from active sources.
-  MediaSourceState::RangesList ranges_list;
-  for (MediaSourceStateMap::const_iterator itr = source_state_map_.begin();
-       itr != source_state_map_.end(); ++itr) {
+  SourceBufferState::RangesList ranges_list;
+  for (auto itr = source_state_map_.begin(); itr != source_state_map_.end();
+       ++itr) {
     ranges_list.push_back(itr->second->GetBufferedRanges(duration_, ended));
   }
 
-  return MediaSourceState::ComputeRangesIntersection(ranges_list, ended);
+  return SourceBufferState::ComputeRangesIntersection(ranges_list, ended);
 }
 
 void ChunkDemuxer::StartReturningData() {
-  for (MediaSourceStateMap::iterator itr = source_state_map_.begin();
-       itr != source_state_map_.end(); ++itr) {
+  for (auto itr = source_state_map_.begin(); itr != source_state_map_.end();
+       ++itr) {
     itr->second->StartReturningData();
   }
 }
 
 void ChunkDemuxer::AbortPendingReads_Locked() {
-  for (MediaSourceStateMap::iterator itr = source_state_map_.begin();
-       itr != source_state_map_.end(); ++itr) {
+  for (auto itr = source_state_map_.begin(); itr != source_state_map_.end();
+       ++itr) {
     itr->second->AbortReads();
   }
 }
 
 void ChunkDemuxer::SeekAllSources(TimeDelta seek_time) {
-  for (MediaSourceStateMap::iterator itr = source_state_map_.begin();
-       itr != source_state_map_.end(); ++itr) {
+  for (auto itr = source_state_map_.begin(); itr != source_state_map_.end();
+       ++itr) {
     itr->second->Seek(seek_time);
   }
 }
 
 void ChunkDemuxer::CompletePendingReadsIfPossible() {
-  for (MediaSourceStateMap::iterator itr = source_state_map_.begin();
-       itr != source_state_map_.end(); ++itr) {
+  for (auto itr = source_state_map_.begin(); itr != source_state_map_.end();
+       ++itr) {
     itr->second->CompletePendingReadIfPossible();
   }
 }
 
 void ChunkDemuxer::ShutdownAllStreams() {
-  for (MediaSourceStateMap::iterator itr = source_state_map_.begin();
-       itr != source_state_map_.end(); ++itr) {
+  for (auto itr = source_state_map_.begin(); itr != source_state_map_.end();
+       ++itr) {
     itr->second->Shutdown();
   }
 }

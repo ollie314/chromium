@@ -39,11 +39,11 @@ vars = {
   # Three lines of non-changing comments so that
   # the commit queue can handle CLs rolling Skia
   # and whatever else without interference from each other.
-  'skia_revision': 'c4cbd74a38232a0e9f1cc1cc8fb826bb06c577a9',
+  'skia_revision': '7a02f019f25c13e95d5e021bc6d8ce8f9d99292a',
   # Three lines of non-changing comments so that
   # the commit queue can handle CLs rolling V8
   # and whatever else without interference from each other.
-  'v8_revision': '8abf5a71f66954b01b5b1055555f0bf6dc901e82',
+  'v8_revision': '083ad4d4f89e83a6190f4902cacac1727c2d3a93',
   # Three lines of non-changing comments so that
   # the commit queue can handle CLs rolling swarming_client
   # and whatever else without interference from each other.
@@ -51,11 +51,11 @@ vars = {
   # Three lines of non-changing comments so that
   # the commit queue can handle CLs rolling ANGLE
   # and whatever else without interference from each other.
-  'angle_revision': '00ff11948e74abac78e2a125c7b85080d8877ada',
+  'angle_revision': '886de369c7f050e9622e0c41634feb1410d1b5cd',
   # Three lines of non-changing comments so that
   # the commit queue can handle CLs rolling build tools
   # and whatever else without interference from each other.
-  'buildtools_revision': '86f7e41d9424b9d8faf66c601b129855217f9a08',
+  'buildtools_revision': '5fd66957f08bb752dca714a591c84587c9d70762',
   # Three lines of non-changing comments so that
   # the commit queue can handle CLs rolling SwiftShader
   # and whatever else without interference from each other.
@@ -63,7 +63,7 @@ vars = {
   # Three lines of non-changing comments so that
   # the commit queue can handle CLs rolling PDFium
   # and whatever else without interference from each other.
-  'pdfium_revision': '341422fe3beb1210b28727d08e1e6f9a6fa4b030',
+  'pdfium_revision': 'cd5bca472261cebc60b37d7bbc8b81b4091a6cd6',
   # Three lines of non-changing comments so that
   # the commit queue can handle CLs rolling openmax_dl
   # and whatever else without interference from each other.
@@ -95,11 +95,11 @@ vars = {
   # Three lines of non-changing comments so that
   # the commit queue can handle CLs rolling catapult
   # and whatever else without interference from each other.
-  'catapult_revision': '74b1b4470c7cc4404a524796ef972b47c7b9c8bc',
+  'catapult_revision': 'bbe2a3f0c1783720b38dbc7a3aaf2b46706a166e',
   # Three lines of non-changing comments so that
   # the commit queue can handle CLs rolling libFuzzer
   # and whatever else without interference from each other.
-  'libfuzzer_revision': 'eb9b8b0366f34b53cd2ffde6837f037728aa5e9c',
+  'libfuzzer_revision': '11256fd0aa00523e65b8c4ec507150041c4bab91',
 }
 
 # Only these hosts are allowed for dependencies in this DEPS file.
@@ -192,7 +192,7 @@ deps = {
     Var('chromium_git') + '/external/selenium/py.git' + '@' + '5fd78261a75fe08d27ca4835fb6c5ce4b42275bd',
 
   'src/third_party/libvpx/source/libvpx':
-    Var('chromium_git') + '/webm/libvpx.git' + '@' +  '99ef84c65a2b5760bec5d9300974946303090afb',
+    Var('chromium_git') + '/webm/libvpx.git' + '@' +  '240726ac85c16792d2bcf656c20248ea24d4734c',
 
   'src/third_party/ffmpeg':
     Var('chromium_git') + '/chromium/third_party/ffmpeg.git' + '@' + '3c7a09882102bfd6fecdb9d7296f43a8501db95e',
@@ -231,7 +231,7 @@ deps = {
     Var('chromium_git') + '/external/github.com/open-source-parsers/jsoncpp.git' + '@' + 'f572e8e42e22cfcf5ab0aea26574f408943edfa4', # from svn 248
 
   'src/third_party/libyuv':
-    Var('chromium_git') + '/libyuv/libyuv.git' + '@' + 'de944ed8c74909ea6fbd743a22efe1e55e851b83',
+    Var('chromium_git') + '/libyuv/libyuv.git' + '@' + '7fc932ddd306c11493a27b65fdd042ae15be79bf',
 
   'src/third_party/smhasher/src':
     Var('chromium_git') + '/external/smhasher.git' + '@' + 'e87738e57558e0ec472b2fc3a643b838e5b6e88f',
@@ -1018,6 +1018,8 @@ hooks = [
 ]
 
 recursedeps = [
+  # buildtools provides clang_format, libc++, and libc++abi
+  'src/buildtools',
   # android_tools manages the NDK.
   'src/third_party/android_tools',
   # ANGLE manages DEPS that it also owns the build files for, such as dEQP.

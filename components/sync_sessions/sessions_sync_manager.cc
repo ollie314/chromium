@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <utility>
 
+#include "base/memory/ptr_util.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram_macros.h"
 #include "build/build_config.h"
@@ -23,8 +24,8 @@
 #include "components/variations/variations_associated_data.h"
 
 using sessions::SerializedNavigationEntry;
-using sync_driver::DeviceInfo;
-using sync_driver::LocalDeviceInfoProvider;
+using syncer::DeviceInfo;
+using syncer::LocalDeviceInfoProvider;
 using syncer::SyncChange;
 using syncer::SyncData;
 
@@ -77,8 +78,8 @@ std::string TagFromSpecifics(const sync_pb::SessionSpecifics& specifics) {
 // |local_device| is owned by ProfileSyncService, its lifetime exceeds
 // lifetime of SessionSyncManager.
 SessionsSyncManager::SessionsSyncManager(
-    SyncSessionsClient* sessions_client,
-    sync_driver::SyncPrefs* sync_prefs,
+    sync_sessions::SyncSessionsClient* sessions_client,
+    syncer::SyncPrefs* sync_prefs,
     LocalDeviceInfoProvider* local_device,
     std::unique_ptr<LocalSessionEventRouter> router,
     const base::Closure& sessions_updated_callback,
@@ -119,6 +120,15 @@ syncer::SyncMergeResult SessionsSyncManager::MergeDataAndStartSyncing(
 
   error_handler_ = std::move(error_handler);
   sync_processor_ = std::move(sync_processor);
+
+  // It's possible(via RebuildAssociations) for lost_navigations_recorder_ to
+  // persist between sync being stopped and started. If it did persist, it's
+  // already associated with |sync_processor|, so leave it alone.
+  if (!lost_navigations_recorder_.get()) {
+    lost_navigations_recorder_ =
+        base::MakeUnique<sync_sessions::LostNavigationsRecorder>();
+    sync_processor_->AddLocalChangeObserver(lost_navigations_recorder_.get());
+  }
 
   local_session_header_node_id_ = TabNodePool::kInvalidTabNodeID;
 
@@ -436,6 +446,11 @@ void SessionsSyncManager::OnFaviconsChanged(const std::set<GURL>& page_urls,
 
 void SessionsSyncManager::StopSyncing(syncer::ModelType type) {
   local_event_router_->Stop();
+  if (sync_processor_.get() && lost_navigations_recorder_.get()) {
+    sync_processor_->RemoveLocalChangeObserver(
+        lost_navigations_recorder_.get());
+    lost_navigations_recorder_.reset();
+  }
   sync_processor_.reset(NULL);
   error_handler_.reset();
   session_tracker_.Clear();

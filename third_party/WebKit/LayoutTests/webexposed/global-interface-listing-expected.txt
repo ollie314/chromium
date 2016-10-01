@@ -17,6 +17,14 @@ On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE
 
 
 [INTERFACES]
+interface AmbientLightSensor : Sensor
+    attribute @@toStringTag
+    getter reading
+    method constructor
+interface AmbientLightSensorReading : SensorReading
+    attribute @@toStringTag
+    getter illuminance
+    method constructor
 interface AnalyserNode : AudioNode
     attribute @@toStringTag
     getter fftSize
@@ -559,7 +567,6 @@ interface CSSSimpleLength : CSSLengthValue
     getter type
     getter value
     method constructor
-    setter value
 interface CSSSkew : CSSTransformComponent
     attribute @@toStringTag
     getter ax
@@ -3648,7 +3655,10 @@ interface KeyboardEvent : UIEvent
     method constructor
     method getModifierState
     method initKeyboardEvent
-interface KeyframeEffect : AnimationEffectReadOnly
+interface KeyframeEffect : KeyframeEffectReadOnly
+    attribute @@toStringTag
+    method constructor
+interface KeyframeEffectReadOnly : AnimationEffectReadOnly
     attribute @@toStringTag
     method constructor
 interface Location
@@ -3870,6 +3880,26 @@ interface MediaSource : EventTarget
     setter onsourceclose
     setter onsourceended
     setter onsourceopen
+interface MediaStream : EventTarget
+    attribute @@toStringTag
+    getter active
+    getter id
+    getter onactive
+    getter onaddtrack
+    getter oninactive
+    getter onremovetrack
+    method addTrack
+    method clone
+    method constructor
+    method getAudioTracks
+    method getTrackById
+    method getTracks
+    method getVideoTracks
+    method removeTrack
+    setter onactive
+    setter onaddtrack
+    setter oninactive
+    setter onremovetrack
 interface MediaStreamAudioDestinationNode : AudioNode
     attribute @@toStringTag
     getter stream
@@ -4047,7 +4077,6 @@ interface Navigator
     getter permissions
     getter platform
     getter plugins
-    getter pointerEnabled
     getter presentation
     getter product
     getter productSub
@@ -4703,6 +4732,16 @@ interface RTCSessionDescription
     method toJSON
     setter sdp
     setter type
+interface RTCStatsReport
+    attribute @@toStringTag
+    method @@iterator
+    method constructor
+    method entries
+    method forEach
+    method get
+    method has
+    method keys
+    method values
 interface RadioNodeList : NodeList
     attribute @@toStringTag
     getter value

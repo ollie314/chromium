@@ -470,7 +470,7 @@ class CONTENT_EXPORT RenderFrameImpl
   blink::BlameContext* frameBlameContext() override;
   blink::WebServiceWorkerProvider* createServiceWorkerProvider() override;
   void didAccessInitialDocument() override;
-  blink::WebFrame* createChildFrame(
+  blink::WebLocalFrame* createChildFrame(
       blink::WebLocalFrame* parent,
       blink::WebTreeScopeType scope,
       const blink::WebString& name,
@@ -480,7 +480,7 @@ class CONTENT_EXPORT RenderFrameImpl
   void didChangeOpener(blink::WebFrame* frame) override;
   void frameDetached(blink::WebLocalFrame* frame, DetachType type) override;
   void frameFocused() override;
-  void willClose(blink::WebFrame* frame) override;
+  void willCommitProvisionalLoad(blink::WebLocalFrame* frame) override;
   void didChangeName(const blink::WebString& name,
                      const blink::WebString& unique_name) override;
   void didEnforceInsecureRequestPolicy(
@@ -1096,16 +1096,16 @@ class CONTENT_EXPORT RenderFrameImpl
   // didCreateDataSource().
   std::unique_ptr<NavigationParams> pending_navigation_params_;
 
-  // Keeps track of whether the browser process has any history items that need
-  // to be used for subframes of this frame (in the case of a history
-  // navigation).  If not, the renderer can skip sending an IPC to the browser
-  // and directly load any initial URLs for children itself.  This state is
-  // cleared during didStopLoading, since it is not needed after the first load
-  // completes and is never used after the initial navigation.  It is inherited
-  // by subframes.
-  // TODO(creis): Switch this to a data structure of unique names and
-  // corresponding same-process PageStates in https://crbug.com/639842.
-  bool browser_has_subtree_history_items_;
+  // Keeps track of which future subframes the browser process has history items
+  // for during a history navigation.  The renderer process should ask the
+  // browser for history items when subframes with these names are created, and
+  // directly load the initial URLs for any other subframes.  This state is
+  // incrementally cleared as it is used and then reset in didStopLoading, since
+  // it is not needed after the first load completes and is never used after the
+  // initial navigation.
+  // TODO(creis): Expand this to include any corresponding same-process
+  // PageStates for the whole subtree in https://crbug.com/639842.
+  std::set<std::string> history_subframe_unique_names_;
 
   // Stores the current history item for this frame, so that updates to it can
   // be reported to the browser process via SendUpdateState.
@@ -1189,13 +1189,6 @@ class CONTENT_EXPORT RenderFrameImpl
   // Lazy-bound pointer to the RemoterFactory service in the browser
   // process. Always use the GetRemoterFactory() accessor instead of this.
   media::mojom::RemoterFactoryPtr remoter_factory_;
-
-#if defined(ENABLE_BROWSER_CDMS)
-  // Manage all CDMs in this render frame for communicating with the real CDM in
-  // the browser process. It's okay to use a raw pointer since it's a
-  // RenderFrameObserver.
-  RendererCdmManager* cdm_manager_;
-#endif
 
   // The CDM and decoder factory attached to this frame, lazily initialized.
   std::unique_ptr<media::CdmFactory> cdm_factory_;

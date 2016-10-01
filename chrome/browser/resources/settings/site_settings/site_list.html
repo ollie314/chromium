@@ -4,6 +4,7 @@
 <link rel="import" href="chrome://resources/polymer/v1_0/iron-icon/iron-icon.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-button/paper-button.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-icon-button/paper-icon-button.html">
+<link rel="import" href="chrome://resources/polymer/v1_0/paper-icon-button/paper-icon-button-light.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-menu/paper-menu.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-menu/paper-submenu.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-menu-button/paper-menu-button.html">
@@ -59,7 +60,7 @@
               <iron-icon icon="[[computeIconControlledBy_(item)]]"></iron-icon>
             </template>
 
-            <paper-menu-button hidden="[[isExceptionControlled_(item.source)]]"
+            <paper-menu-button hidden="[[!shouldShowMenu_(item.source)]]"
                 horizontal-align="right">
               <paper-icon-button icon="cr:more-vert" class="dropdown-trigger">
               </paper-icon-button>
@@ -67,26 +68,30 @@
                   on-iron-activate="onActionMenuIronActivate_"
                   attr-for-selected="menu-value">
                 <paper-item
-                    hidden="[[!showAllowAction_]]"
+                    hidden="[[!showAllowAction_]]" actionable
                     menu-value$="[[PermissionValues.ALLOW]]">
                   $i18n{siteSettingsActionAllow}
                 </paper-item>
                 <paper-item
-                    hidden="[[!showBlockAction_]]"
+                    hidden="[[!showBlockAction_]]" actionable
                     menu-value$="[[PermissionValues.BLOCK]]">
                   $i18n{siteSettingsActionBlock}
                 </paper-item>
                 <paper-item
-                    hidden="[[!showSessionOnlyActionForSite_(item)]]"
+                    hidden="[[!showSessionOnlyActionForSite_(item)]]" actionable
                     menu-value$="[[PermissionValues.SESSION_ONLY]]">
                   $i18n{siteSettingsActionSessionOnly}
                 </paper-item>
                 <paper-item
-                    menu-value$="[[PermissionValues.DEFAULT]]">
+                    menu-value$="[[PermissionValues.DEFAULT]]" actionable>
                   $i18n{siteSettingsActionReset}
                 </paper-item>
               </paper-menu>
             </paper-menu-button>
+            <div on-tap="onOriginTap_" actionable>
+              <button class="icon-arrow-right" is="paper-icon-button-light">
+              </button>
+            </div>
           </div>
         </template>
 

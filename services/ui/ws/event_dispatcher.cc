@@ -103,7 +103,12 @@ void EventDispatcher::SetMousePointerScreenLocation(
   delegate_->OnMouseCursorLocationChanged(screen_location);
 }
 
-bool EventDispatcher::GetCurrentMouseCursor(int32_t* cursor_out) {
+bool EventDispatcher::GetCurrentMouseCursor(ui::mojom::Cursor* cursor_out) {
+  if (drag_controller_) {
+    *cursor_out = drag_controller_->current_cursor();
+    return true;
+  }
+
   if (!mouse_cursor_source_window_)
     return false;
 
@@ -172,7 +177,7 @@ void EventDispatcher::SetDragDropSourceWindow(
     uint32_t drag_operations) {
   CancelImplicitCaptureExcept(nullptr);
   drag_controller_ = base::MakeUnique<DragController>(
-      drag_source, window, source_connection, drag_pointer,
+      this, drag_source, window, source_connection, drag_pointer,
       std::move(mime_data), drag_operations);
 }
 
@@ -610,6 +615,10 @@ void EventDispatcher::OnWindowDestroyed(ServerWindow* window) {
 
   if (mouse_cursor_source_window_ == window)
     mouse_cursor_source_window_ = nullptr;
+}
+
+void EventDispatcher::OnDragCursorUpdated() {
+  delegate_->UpdateNativeCursorFromDispatcher();
 }
 
 }  // namespace ws

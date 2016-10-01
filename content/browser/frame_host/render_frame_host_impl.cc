@@ -97,7 +97,6 @@
 #include "url/gurl.h"
 
 #if defined(OS_ANDROID)
-#include "content/browser/mojo/interface_registrar_android.h"
 #include "content/public/browser/android/java_interfaces.h"
 #if defined(ENABLE_MOJO_CDM)
 #include "content/browser/media/android/provision_fetcher_impl.h"
@@ -1215,11 +1214,11 @@ void RenderFrameHostImpl::OnDidCommitProvisionalLoad(const IPC::Message& msg) {
     // nav_id. If the previous handle was a prematurely aborted navigation
     // loaded via LoadDataWithBaseURL, propogate the entry id.
     navigation_handle_ = NavigationHandleImpl::Create(
-        validated_params.url, frame_tree_node_,
-        is_renderer_initiated,
+        validated_params.url, frame_tree_node_, is_renderer_initiated,
         true,  // is_synchronous
         validated_params.is_srcdoc, base::TimeTicks::Now(),
-        entry_id_for_data_nav);
+        entry_id_for_data_nav,
+        false);  // started_from_context_menu
     // PlzNavigate
     if (IsBrowserSideNavigationEnabled()) {
       // PlzNavigate: synchronous loads happen in the renderer, and the browser
@@ -1585,6 +1584,11 @@ void RenderFrameHostImpl::OnRunJavaScriptMessage(
     const GURL& frame_url,
     JavaScriptMessageType type,
     IPC::Message* reply_msg) {
+  if (!is_active()) {
+    JavaScriptDialogClosed(reply_msg, true, base::string16(), true);
+    return;
+  }
+
   int32_t message_length = static_cast<int32_t>(message.length());
   if (GetParent()) {
     UMA_HISTOGRAM_COUNTS("JSDialogs.CharacterCount.Subframe", message_length);
@@ -2066,9 +2070,11 @@ void RenderFrameHostImpl::OnDidChangeLoadProgress(double load_progress) {
 void RenderFrameHostImpl::OnSerializeAsMHTMLResponse(
     int job_id,
     bool success,
-    const std::set<std::string>& digests_of_uris_of_serialized_resources) {
+    const std::set<std::string>& digests_of_uris_of_serialized_resources,
+    base::TimeDelta renderer_main_thread_time) {
   MHTMLGenerationManager::GetInstance()->OnSerializeAsMHTMLResponse(
-      this, job_id, success, digests_of_uris_of_serialized_resources);
+      this, job_id, success, digests_of_uris_of_serialized_resources,
+      renderer_main_thread_time);
 }
 
 #if defined(USE_EXTERNAL_POPUP_MENU)
@@ -2499,6 +2505,10 @@ void RenderFrameHostImpl::FailedNavigation(
     const RequestNavigationParams& request_params,
     bool has_stale_copy_in_cache,
     int error_code) {
+  // Update renderer permissions even for failed commits, so that for example
+  // the URL bar correctly displays privileged URLs instead of filtering them.
+  UpdatePermissionsForNavigation(common_params, request_params);
+
   // Get back to a clean state, in case a new navigation started without
   // completing an unload handler.
   ResetWaitingState();
@@ -2532,22 +2542,9 @@ void RenderFrameHostImpl::SetUpMojoIfNeeded() {
   remote_interfaces_.reset(new shell::InterfaceProvider);
   remote_interfaces_->Bind(std::move(remote_interfaces));
   frame_->GetInterfaceProvider(std::move(remote_interfaces_request));
-
-#if defined(OS_ANDROID)
-  interface_registry_android_ =
-      InterfaceRegistryAndroid::Create(interface_registry_.get());
-  InterfaceRegistrarAndroid::ExposeInterfacesToFrame(
-      interface_registry_android_.get(), this);
-#endif
 }
 
 void RenderFrameHostImpl::InvalidateMojoConnection() {
-#if defined(OS_ANDROID)
-  // The Android-specific interface registry has a reference to
-  // |interface_registry_| and thus must be torn down first.
-  interface_registry_android_.reset();
-#endif
-
   interface_registry_.reset();
   frame_.reset();
   frame_host_binding_.Close();

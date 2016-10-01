@@ -13,7 +13,6 @@
 #include "base/metrics/field_trial.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "build/build_config.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/signin/signin_error_controller_factory.h"
@@ -465,7 +464,7 @@ AvatarSyncErrorType GetMessagesForAvatarSyncError(Profile* profile,
     }
 
     // Check for a sync passphrase error.
-    SyncErrorController* sync_error_controller =
+    syncer::SyncErrorController* sync_error_controller =
         service->sync_error_controller();
     if (sync_error_controller && sync_error_controller->HasError()) {
       *content_string_id = IDS_SYNC_ERROR_USER_MENU_PASSPHRASE_MESSAGE;

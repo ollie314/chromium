@@ -6,8 +6,9 @@
   "capabilities": {
     // Remove this once http://crbug.com/632818 is fixed.
     "provided": {
-      "all_interfaces": [ "*" ],
-      "web": [
+      "gpu": [ ],
+      "plugin":  [ ],
+      "renderer": [
         "blink::mojom::BackgroundSyncService",
         "blink::mojom::BroadcastChannelProvider",
         "blink::mojom::BudgetService",
@@ -17,7 +18,6 @@
         "blink::mojom::OffscreenCanvasSurface",
         "blink::mojom::PermissionService",
         "blink::mojom::WebSocket",
-        "content::mojom::LayoutTestBluetoothFakeAdapterSetter",
         "content::mojom::MemoryCoordinatorHandle",
         "content::mojom::StoragePartitionService",
         "content::mojom::URLLoaderFactory",
@@ -34,11 +34,11 @@
       "*": { "classes": [ "app" ] },
 
       // We allow the browser to connect to any interfaces exposed by its child
-      // processes.
-      "exe:content_gpu": { "classes": [ "all_interfaces" ] },
-      "exe:content_plugin": { "classes": [ "all_interfaces" ] },
+      // processes in the "browser" class.
+      "exe:content_gpu": { "classes": [ "browser" ] },
+      "exe:content_plugin": { "classes": [ "browser" ] },
       "exe:content_renderer": { "classes": [ "browser" ] },
-      "exe:content_utility": { "classes": [ "all_interfaces" ] },
+      "exe:content_utility": { "classes": [ "browser" ] },
 
       "mojo:shell": {
         "classes": [

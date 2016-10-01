@@ -13,7 +13,9 @@
 
 #include "base/macros.h"
 #include "services/ui/common/types.h"
+#include "services/ui/public/interfaces/cursor.mojom.h"
 #include "services/ui/public/interfaces/event_matcher.mojom.h"
+#include "services/ui/ws/drag_cursor_updater.h"
 #include "services/ui/ws/modal_window_controller.h"
 #include "services/ui/ws/server_window_observer.h"
 #include "ui/gfx/geometry/rect_f.h"
@@ -38,7 +40,7 @@ class EventDispatcherTestApi;
 }
 
 // Handles dispatching events to the right location as well as updating focus.
-class EventDispatcher : public ServerWindowObserver {
+class EventDispatcher : public ServerWindowObserver, public DragCursorUpdater {
  public:
   enum class AcceleratorMatchPhase {
     // Both pre and post should be considered.
@@ -63,7 +65,7 @@ class EventDispatcher : public ServerWindowObserver {
 
   // If we still have the window of the last mouse move, returns true and sets
   // the current cursor to use to |cursor_out|.
-  bool GetCurrentMouseCursor(int32_t* cursor_out);
+  bool GetCurrentMouseCursor(ui::mojom::Cursor* cursor_out);
 
   // |capture_window_| will receive all input. See window_tree.mojom for
   // details.
@@ -230,6 +232,9 @@ class EventDispatcher : public ServerWindowObserver {
                                    ServerWindow* old_parent) override;
   void OnWindowVisibilityChanged(ServerWindow* window) override;
   void OnWindowDestroyed(ServerWindow* window) override;
+
+  // DragCursorUpdater:
+  void OnDragCursorUpdated() override;
 
   EventDispatcherDelegate* delegate_;
 

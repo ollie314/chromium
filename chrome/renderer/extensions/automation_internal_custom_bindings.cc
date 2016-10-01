@@ -13,6 +13,7 @@
 #include "base/macros.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
+#include "chrome/common/extensions/api/automation_api_constants.h"
 #include "chrome/common/extensions/chrome_extension_messages.h"
 #include "chrome/common/extensions/manifest_handlers/automation.h"
 #include "content/public/renderer/render_frame.h"
@@ -112,11 +113,13 @@ static gfx::RectF ComputeLocalNodeBounds(TreeCache* cache, ui::AXNode* node) {
   return bounds;
 }
 
-// Compute the bounding box of a node in global coordinates, walking up the
-// parent hierarchy to offset by frame offsets and scroll offsets.
-static gfx::Rect ComputeGlobalNodeBounds(TreeCache* cache, ui::AXNode* node) {
-  gfx::RectF bounds = ComputeLocalNodeBounds(cache, node);
-
+// Adjust the bounding box of a node from local to global coordinates,
+// walking up the parent hierarchy to offset by frame offsets and
+// scroll offsets.
+static gfx::Rect ComputeGlobalNodeBounds(TreeCache* cache,
+                                         ui::AXNode* node,
+                                         gfx::RectF local_bounds) {
+  gfx::RectF bounds = local_bounds;
   while (node) {
     if (node->data().transform)
       node->data().transform->TransformRect(&bounds);
@@ -145,6 +148,17 @@ static gfx::Rect ComputeGlobalNodeBounds(TreeCache* cache, ui::AXNode* node) {
     }
 
     node = container;
+  }
+
+  // All trees other than the desktop tree are scaled by the device
+  // scale factor. Unscale them so they're all in consistent units.
+  if (cache->tree_id != api::automation::kDesktopTreeID) {
+    float scale_factor = cache->owner->context()
+                             ->GetRenderFrame()
+                             ->GetRenderView()
+                             ->GetDeviceScaleFactor();
+    if (scale_factor > 0)
+      bounds.Scale(1.0 / scale_factor);
   }
 
   return gfx::ToEnclosingRect(bounds);
@@ -523,9 +537,11 @@ AutomationInternalCustomBindings::AutomationInternalCustomBindings(
   RouteNodeIDFunction(
       "GetLocation", [](v8::Isolate* isolate, v8::ReturnValue<v8::Value> result,
                         TreeCache* cache, ui::AXNode* node) {
-        gfx::Rect location = ComputeGlobalNodeBounds(cache, node);
-        location.Offset(cache->location_offset);
-        result.Set(RectToV8Object(isolate, location));
+        gfx::RectF local_bounds = ComputeLocalNodeBounds(cache, node);
+        gfx::Rect global_bounds =
+            ComputeGlobalNodeBounds(cache, node, local_bounds);
+        global_bounds.Offset(cache->location_offset);
+        result.Set(RectToV8Object(isolate, global_bounds));
       });
   RouteNodeIDFunction(
       "GetLineStartOffsets",
@@ -560,40 +576,54 @@ AutomationInternalCustomBindings::AutomationInternalCustomBindings(
       "GetBoundsForRange",
       [](v8::Isolate* isolate, v8::ReturnValue<v8::Value> result,
          TreeCache* cache, ui::AXNode* node, int start, int end) {
-        gfx::Rect location = ComputeGlobalNodeBounds(cache, node);
-        location.Offset(cache->location_offset);
-        if (node->data().role == ui::AX_ROLE_INLINE_TEXT_BOX) {
-          std::string name = node->data().GetStringAttribute(ui::AX_ATTR_NAME);
-          std::vector<int> character_offsets =
-              node->data().GetIntListAttribute(ui::AX_ATTR_CHARACTER_OFFSETS);
-          int len =
-              static_cast<int>(std::min(name.size(), character_offsets.size()));
-          if (start >= 0 && start <= end && end <= len) {
-            int start_offset = start > 0 ? character_offsets[start - 1] : 0;
-            int end_offset = end > 0 ? character_offsets[end - 1] : 0;
+        gfx::RectF local_bounds = ComputeLocalNodeBounds(cache, node);
+        if (node->data().role != ui::AX_ROLE_INLINE_TEXT_BOX) {
+          gfx::Rect global_bounds =
+              ComputeGlobalNodeBounds(cache, node, local_bounds);
+          global_bounds.Offset(cache->location_offset);
+          result.Set(RectToV8Object(isolate, global_bounds));
+        }
 
-            switch (node->data().GetIntAttribute(ui::AX_ATTR_TEXT_DIRECTION)) {
-              case ui::AX_TEXT_DIRECTION_LTR:
-              default:
-                location.set_x(location.x() + start_offset);
-                location.set_width(end_offset - start_offset);
-                break;
-              case ui::AX_TEXT_DIRECTION_RTL:
-                location.set_x(location.x() + location.width() - end_offset);
-                location.set_width(end_offset - start_offset);
-                break;
-              case ui::AX_TEXT_DIRECTION_TTB:
-                location.set_y(location.y() + start_offset);
-                location.set_height(end_offset - start_offset);
-                break;
-              case ui::AX_TEXT_DIRECTION_BTT:
-                location.set_y(location.y() + location.height() - end_offset);
-                location.set_height(end_offset - start_offset);
-                break;
-            }
+        // Use character offsets to compute the local bounds of this subrange.
+        std::string name = node->data().GetStringAttribute(ui::AX_ATTR_NAME);
+        std::vector<int> character_offsets =
+            node->data().GetIntListAttribute(ui::AX_ATTR_CHARACTER_OFFSETS);
+        int len =
+            static_cast<int>(std::min(name.size(), character_offsets.size()));
+        if (start >= 0 && start <= end && end <= len) {
+          int start_offset = start > 0 ? character_offsets[start - 1] : 0;
+          int end_offset = end > 0 ? character_offsets[end - 1] : 0;
+
+          switch (node->data().GetIntAttribute(ui::AX_ATTR_TEXT_DIRECTION)) {
+            case ui::AX_TEXT_DIRECTION_LTR:
+            default:
+              local_bounds.set_x(local_bounds.x() + start_offset);
+              local_bounds.set_width(end_offset - start_offset);
+              break;
+            case ui::AX_TEXT_DIRECTION_RTL:
+              local_bounds.set_x(local_bounds.x() + local_bounds.width() -
+                                 end_offset);
+              local_bounds.set_width(end_offset - start_offset);
+              break;
+            case ui::AX_TEXT_DIRECTION_TTB:
+              local_bounds.set_y(local_bounds.y() + start_offset);
+              local_bounds.set_height(end_offset - start_offset);
+              break;
+            case ui::AX_TEXT_DIRECTION_BTT:
+              local_bounds.set_y(local_bounds.y() + local_bounds.height() -
+                                 end_offset);
+              local_bounds.set_height(end_offset - start_offset);
+              break;
           }
         }
-        result.Set(RectToV8Object(isolate, location));
+
+        // Convert from local to global coordinates second, after subsetting,
+        // because the local to global conversion might involve matrix
+        // transformations.
+        gfx::Rect global_bounds =
+            ComputeGlobalNodeBounds(cache, node, local_bounds);
+        global_bounds.Offset(cache->location_offset);
+        result.Set(RectToV8Object(isolate, global_bounds));
       });
 
   // Bindings that take a Tree ID and Node ID and string attribute name

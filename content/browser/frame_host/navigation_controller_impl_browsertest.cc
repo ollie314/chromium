@@ -12,6 +12,7 @@
 #include "base/macros.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/histogram_tester.h"
 #include "content/browser/frame_host/frame_navigation_entry.h"
 #include "content/browser/frame_host/frame_tree.h"
 #include "content/browser/frame_host/navigation_entry_impl.h"
@@ -27,6 +28,7 @@
 #include "content/public/browser/resource_dispatcher_host_delegate.h"
 #include "content/public/browser/resource_throttle.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_delegate.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/common/bindings_policy.h"
 #include "content/public/common/browser_side_navigation_policy.h"
@@ -3040,6 +3042,111 @@ IN_PROC_BROWSER_TEST_F(NavigationControllerBrowserTest,
   EXPECT_EQ(data_url, entry2->root_node()->children[1]->frame_entry->url());
 }
 
+// Allows waiting until an URL with a data scheme commits in any frame.
+class DataUrlCommitObserver : public WebContentsObserver {
+ public:
+  explicit DataUrlCommitObserver(WebContents* web_contents)
+      : WebContentsObserver(web_contents),
+        message_loop_runner_(new MessageLoopRunner) {}
+
+  void Wait() { message_loop_runner_->Run(); }
+
+ private:
+  void DidFinishNavigation(NavigationHandle* navigation_handle) override {
+    if (navigation_handle->HasCommitted() &&
+        !navigation_handle->IsErrorPage() &&
+        navigation_handle->GetURL().scheme() == "data")
+      message_loop_runner_->Quit();
+  }
+
+  // The MessageLoopRunner used to spin the message loop.
+  scoped_refptr<MessageLoopRunner> message_loop_runner_;
+};
+
+// Verify that dynamically generated iframes load properly during a history
+// navigation if no history item can be found for them.
+// See https://crbug.com/649345.
+IN_PROC_BROWSER_TEST_F(NavigationControllerBrowserTest,
+                       FrameNavigationEntry_DynamicSubframeHistoryFallback) {
+  // This test only makes sense when subframe FrameNavigationEntries are in use.
+  if (!SiteIsolationPolicy::UseSubframeNavigationEntries())
+    return;
+
+  // 1. Start on a page with a script-generated iframe.  The iframe has a
+  // dynamic name, starts at about:blank, and gets navigated to a dynamic data
+  // URL as the page is loading.
+  GURL main_url_a(embedded_test_server()->GetURL(
+      "a.com", "/navigation_controller/dynamic_iframe.html"));
+  {
+    // Wait until the data URL has committed, even if load stop happens after
+    // about:blank load.
+    DataUrlCommitObserver data_observer(shell()->web_contents());
+    EXPECT_TRUE(NavigateToURL(shell(), main_url_a));
+    data_observer.Wait();
+  }
+  const NavigationControllerImpl& controller =
+      static_cast<const NavigationControllerImpl&>(
+          shell()->web_contents()->GetController());
+  FrameTreeNode* root = static_cast<WebContentsImpl*>(shell()->web_contents())
+                            ->GetFrameTree()
+                            ->root();
+  ASSERT_EQ(1U, root->child_count());
+  ASSERT_EQ(0U, root->child_at(0)->child_count());
+  EXPECT_EQ(main_url_a, root->current_url());
+  EXPECT_EQ("data", root->child_at(0)->current_url().scheme());
+
+  EXPECT_EQ(1, controller.GetEntryCount());
+  EXPECT_EQ(0, controller.GetLastCommittedEntryIndex());
+  NavigationEntryImpl* entry1 = controller.GetLastCommittedEntry();
+
+  // The entry should have a FrameNavigationEntry for the data subframe.
+  ASSERT_EQ(1U, entry1->root_node()->children.size());
+  EXPECT_EQ("data",
+            entry1->root_node()->children[0]->frame_entry->url().scheme());
+
+  // 2. Navigate main frame cross-site, destroying the frames.
+  GURL main_url_b(embedded_test_server()->GetURL(
+      "b.com", "/navigation_controller/simple_page_2.html"));
+  EXPECT_TRUE(NavigateToURL(shell(), main_url_b));
+  ASSERT_EQ(0U, root->child_count());
+  EXPECT_EQ(main_url_b, root->current_url());
+
+  EXPECT_EQ(2, controller.GetEntryCount());
+  EXPECT_EQ(1, controller.GetLastCommittedEntryIndex());
+  NavigationEntryImpl* entry2 = controller.GetLastCommittedEntry();
+  EXPECT_EQ(0U, entry2->root_node()->children.size());
+
+  // 3. Go back, recreating the iframe.  The subframe will have a new name this
+  // time, so we won't find a history item for it.  We should let the new data
+  // URL be loaded into it, rather than clobbering it with an about:blank page.
+  {
+    // Wait until the data URL has committed, even if load stop happens first.
+    DataUrlCommitObserver back_load_observer(shell()->web_contents());
+    shell()->web_contents()->GetController().GoBack();
+    back_load_observer.Wait();
+  }
+  EXPECT_TRUE(WaitForLoadStop(shell()->web_contents()));
+  ASSERT_EQ(1U, root->child_count());
+  EXPECT_EQ(main_url_a, root->current_url());
+  EXPECT_EQ("data", root->child_at(0)->current_url().scheme());
+
+  EXPECT_EQ(2, controller.GetEntryCount());
+  EXPECT_EQ(0, controller.GetLastCommittedEntryIndex());
+  EXPECT_EQ(entry1, controller.GetLastCommittedEntry());
+
+  // The entry should have both the stale FrameNavigationEntry with the old
+  // name and the new FrameNavigationEntry for the fallback navigation.
+  ASSERT_EQ(2U, entry1->root_node()->children.size());
+  EXPECT_EQ("data",
+            entry1->root_node()->children[0]->frame_entry->url().scheme());
+  EXPECT_EQ("data",
+            entry1->root_node()->children[1]->frame_entry->url().scheme());
+
+  // The iframe commit should have been classified AUTO_SUBFRAME and not
+  // NEW_SUBFRAME, so we should still be able to go forward.
+  EXPECT_TRUE(shell()->web_contents()->GetController().CanGoForward());
+}
+
 // Verify that we don't clobber any content injected into the initial blank page
 // if we go back to an about:blank subframe.  See https://crbug.com/626416.
 IN_PROC_BROWSER_TEST_F(NavigationControllerBrowserTest,
@@ -5968,7 +6075,7 @@ IN_PROC_BROWSER_TEST_F(NavigationControllerBrowserTest,
   EXPECT_EQ(start_url.GetOrigin().spec(), origin + "/");
 }
 
-// A BrowserMessageFilter that delays FrameHostMsg_DidCommitProvisionaLoad IPC
+// A BrowserMessageFilter that delays FrameHostMsg_DidCommitProvisionalLoad IPC
 // message for a specified URL, navigates the WebContents back and then
 // processes the commit message.
 class GoBackAndCommitFilter : public BrowserMessageFilter {
@@ -5996,7 +6103,7 @@ class GoBackAndCommitFilter : public BrowserMessageFilter {
     if (message.type() != FrameHostMsg_DidCommitProvisionalLoad::ID)
       return false;
 
-    // Parse the IPC message so the URL can be checked agains the expected one.
+    // Parse the IPC message so the URL can be checked against the expected one.
     base::PickleIterator iter(message);
     FrameHostMsg_DidCommitProvisionalLoad_Params validated_params;
     if (!IPC::ParamTraits<FrameHostMsg_DidCommitProvisionalLoad_Params>::Read(
@@ -6135,6 +6242,214 @@ IN_PROC_BROWSER_TEST_F(NavigationControllerBrowserTest,
   entry = controller.GetLastCommittedEntry();
   content::FaviconStatus& favicon_status3 = entry->GetFavicon();
   EXPECT_FALSE(favicon_status3.valid);
+}
+
+namespace {
+
+// A BrowserMessageFilter that delays the FrameHostMsg_RunJavaScriptMessage IPC
+// message until a commit happens on a given WebContents. This allows testing a
+// race condition.
+class AllowDialogIPCOnCommitFilter : public BrowserMessageFilter,
+                                     public WebContentsDelegate {
+ public:
+  AllowDialogIPCOnCommitFilter(WebContents* web_contents)
+      : BrowserMessageFilter(FrameMsgStart),
+        render_frame_host_(web_contents->GetMainFrame()) {
+    web_contents_observer_.Observe(web_contents);
+  }
+
+ protected:
+  ~AllowDialogIPCOnCommitFilter() override {}
+
+ private:
+  // BrowserMessageFilter:
+  bool OnMessageReceived(const IPC::Message& message) override {
+    DCHECK_CURRENTLY_ON(BrowserThread::IO);
+    if (message.type() != FrameHostMsg_RunJavaScriptMessage::ID)
+      return false;
+
+    // Suspend the message.
+    web_contents_observer_.SetCallback(
+        base::Bind(&RenderFrameHost::OnMessageReceived,
+                   base::Unretained(render_frame_host_), message));
+    return true;
+  }
+
+  // WebContentsDelegate:
+  JavaScriptDialogManager* GetJavaScriptDialogManager(
+      WebContents* source) override {
+    CHECK(false);
+    return nullptr;  // agh compiler
+  }
+
+  // Separate because WebContentsObserver and BrowserMessageFilter each have an
+  // OnMessageReceived function; this is the simplest way to disambiguate.
+  class : public WebContentsObserver {
+   public:
+    using Callback = base::Callback<bool()>;
+
+    using WebContentsObserver::Observe;
+
+    void SetCallback(Callback callback) { callback_ = callback; }
+
+   private:
+    void DidNavigateAnyFrame(RenderFrameHost* render_frame_host,
+                             const LoadCommittedDetails& details,
+                             const FrameNavigateParams& params) override {
+      DCHECK_CURRENTLY_ON(BrowserThread::UI);
+
+      // Resume the message.
+      callback_.Run();
+    }
+
+    Callback callback_;
+  } web_contents_observer_;
+
+  RenderFrameHost* render_frame_host_;
+
+  DISALLOW_COPY_AND_ASSIGN(AllowDialogIPCOnCommitFilter);
+};
+
+}  // namespace
+
+// Check that swapped out frames cannot spawn JavaScript dialogs.
+IN_PROC_BROWSER_TEST_F(NavigationControllerBrowserTest,
+                       NoDialogsFromSwappedOutFrames) {
+  // Start on a normal page.
+  GURL url1 = embedded_test_server()->GetURL(
+      "/navigation_controller/beforeunload_dialog.html");
+  EXPECT_TRUE(NavigateToURL(shell(), url1));
+
+  // Add a filter to allow us to force an IPC race.
+  WebContents* web_contents = shell()->web_contents();
+  scoped_refptr<AllowDialogIPCOnCommitFilter> filter =
+      new AllowDialogIPCOnCommitFilter(web_contents);
+  web_contents->SetDelegate(filter.get());
+  web_contents->GetMainFrame()->GetProcess()->AddFilter(filter.get());
+
+  // Use a chrome:// url to force the second page to be in a different process.
+  GURL url2(std::string(kChromeUIScheme) + url::kStandardSchemeSeparator +
+            kChromeUIGpuHost);
+  EXPECT_TRUE(NavigateToURL(shell(), url2));
+
+  // What happens now is that attempting to unload the first page will trigger a
+  // JavaScript alert but allow navigation. The alert IPC will be suspended by
+  // the message filter. The commit of the second page will unblock the IPC. If
+  // the dialog IPC is allowed to spawn a dialog, the call by the WebContents to
+  // its delegate to get the JavaScriptDialogManager will cause a CHECK and the
+  // test will fail.
+}
+
+namespace {
+
+// Execute JavaScript without the user gesture flag set, and wait for the
+// triggered load finished.
+void ExecuteJavaScriptAndWaitForLoadStop(WebContents* web_contents,
+                                         const std::string script) {
+  // WaitForLoadStop() does not work to wait for loading that is triggered by
+  // JavaScript asynchronously.
+  TestNavigationObserver observer(web_contents);
+
+  // ExecuteScript() sets a user gesture flag internally for testing, but we
+  // want to run JavaScript without the flag.  Call ExecuteJavaScriptForTests
+  // directory.
+  static_cast<WebContentsImpl*>(web_contents)
+      ->GetMainFrame()
+      ->ExecuteJavaScriptForTests(base::UTF8ToUTF16(script));
+
+  observer.Wait();
+}
+
+}  // namespace
+
+// Check if consecutive reloads can be correctly captured by metrics.
+IN_PROC_BROWSER_TEST_F(NavigationControllerBrowserTest,
+                       ConsecutiveReloadMetrics) {
+  base::HistogramTester histogram;
+
+  const char kReloadToReloadMetricName[] =
+      "Navigation.Reload.ReloadToReloadDuration";
+  const char kReloadMainResourceToReloadMetricName[] =
+      "Navigation.Reload.ReloadMainResourceToReloadDuration";
+
+  // Navigate to a page, and check if metrics are initialized correctly.
+  NavigateToURL(shell(), embedded_test_server()->GetURL(
+                             "/navigation_controller/page_with_links.html"));
+  histogram.ExpectTotalCount(kReloadToReloadMetricName, 0);
+  histogram.ExpectTotalCount(kReloadMainResourceToReloadMetricName, 0);
+
+  NavigationControllerImpl& controller = static_cast<NavigationControllerImpl&>(
+      shell()->web_contents()->GetController());
+
+  // ReloadToRefreshContent triggers a reload of ReloadType::MAIN_RESOURCE.  The
+  // first reload should not be counted.
+  controller.ReloadToRefreshContent(false);
+  EXPECT_TRUE(WaitForLoadStop(shell()->web_contents()));
+  histogram.ExpectTotalCount(kReloadToReloadMetricName, 0);
+  histogram.ExpectTotalCount(kReloadMainResourceToReloadMetricName, 0);
+
+  // ReloadBypassingCache triggers a reload of ReloadType::BYPASSING_CACHE.
+  // Both metrics should count the consecutive reloads.
+  controller.ReloadBypassingCache(false);
+  EXPECT_TRUE(WaitForLoadStop(shell()->web_contents()));
+  histogram.ExpectTotalCount(kReloadToReloadMetricName, 1);
+  histogram.ExpectTotalCount(kReloadMainResourceToReloadMetricName, 1);
+
+  // Triggers another reload of ReloadType::BYPASSING_CACHE.
+  // ReloadMainResourceToReload should not be counted here.
+  controller.ReloadBypassingCache(false);
+  EXPECT_TRUE(WaitForLoadStop(shell()->web_contents()));
+  histogram.ExpectTotalCount(kReloadToReloadMetricName, 2);
+  histogram.ExpectTotalCount(kReloadMainResourceToReloadMetricName, 1);
+
+  // A browser-initiated navigation should reset the reload tracking
+  // information.
+  NavigateToURL(shell(), embedded_test_server()->GetURL(
+                             "/navigation_controller/simple_page_1.html"));
+  histogram.ExpectTotalCount(kReloadToReloadMetricName, 2);
+  histogram.ExpectTotalCount(kReloadMainResourceToReloadMetricName, 1);
+
+  // Then, the next reload should be assumed as the first reload.  Metrics
+  // should not be changed for the first reload.
+  controller.ReloadToRefreshContent(false);
+  EXPECT_TRUE(WaitForLoadStop(shell()->web_contents()));
+  histogram.ExpectTotalCount(kReloadToReloadMetricName, 2);
+  histogram.ExpectTotalCount(kReloadMainResourceToReloadMetricName, 1);
+
+  // Another reload of ReloadType::MAIN_RESOURCE should be counted by both
+  // metrics again.
+  controller.ReloadToRefreshContent(false);
+  EXPECT_TRUE(WaitForLoadStop(shell()->web_contents()));
+  histogram.ExpectTotalCount(kReloadToReloadMetricName, 3);
+  histogram.ExpectTotalCount(kReloadMainResourceToReloadMetricName, 2);
+
+  // A renderer-initiated navigations with no user gesture don't reset reload
+  // tracking information, and the following reload will be counted by metrics.
+  ExecuteJavaScriptAndWaitForLoadStop(
+      shell()->web_contents(),
+      "history.pushState({}, 'page 1', 'simple_page_1.html')");
+  histogram.ExpectTotalCount(kReloadToReloadMetricName, 3);
+  histogram.ExpectTotalCount(kReloadMainResourceToReloadMetricName, 2);
+  ExecuteJavaScriptAndWaitForLoadStop(shell()->web_contents(),
+                                      "location.href='simple_page_2.html'");
+  histogram.ExpectTotalCount(kReloadToReloadMetricName, 3);
+  histogram.ExpectTotalCount(kReloadMainResourceToReloadMetricName, 2);
+
+  controller.ReloadToRefreshContent(false);
+  EXPECT_TRUE(WaitForLoadStop(shell()->web_contents()));
+  histogram.ExpectTotalCount(kReloadToReloadMetricName, 4);
+  histogram.ExpectTotalCount(kReloadMainResourceToReloadMetricName, 3);
+
+  // Go back to the first page. Reload tracking information should be reset.
+  shell()->web_contents()->GetController().GoBack();
+  EXPECT_TRUE(WaitForLoadStop(shell()->web_contents()));
+  histogram.ExpectTotalCount(kReloadToReloadMetricName, 4);
+  histogram.ExpectTotalCount(kReloadMainResourceToReloadMetricName, 3);
+
+  controller.ReloadToRefreshContent(false);
+  EXPECT_TRUE(WaitForLoadStop(shell()->web_contents()));
+  histogram.ExpectTotalCount(kReloadToReloadMetricName, 4);
+  histogram.ExpectTotalCount(kReloadMainResourceToReloadMetricName, 3);
 }
 
 }  // namespace content

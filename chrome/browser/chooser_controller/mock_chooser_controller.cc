@@ -14,9 +14,7 @@
 MockChooserController::MockChooserController(content::RenderFrameHost* owner)
     : ChooserController(owner,
                         IDS_USB_DEVICE_CHOOSER_PROMPT_ORIGIN,
-                        IDS_USB_DEVICE_CHOOSER_PROMPT_EXTENSION_NAME),
-      no_options_text_(l10n_util::GetStringUTF16(
-          IDS_DEVICE_CHOOSER_NO_DEVICES_FOUND_PROMPT)) {}
+                        IDS_USB_DEVICE_CHOOSER_PROMPT_EXTENSION_NAME) {}
 
 MockChooserController::~MockChooserController() {}
 
@@ -25,7 +23,7 @@ bool MockChooserController::ShouldShowIconBeforeText() const {
 }
 
 base::string16 MockChooserController::GetNoOptionsText() const {
-  return no_options_text_;
+  return l10n_util::GetStringUTF16(IDS_DEVICE_CHOOSER_NO_DEVICES_FOUND_PROMPT);
 }
 
 base::string16 MockChooserController::GetOkButtonLabel() const {
@@ -66,15 +64,11 @@ void MockChooserController::OnAdapterPresenceChanged(
       NOTREACHED();
       break;
     case content::BluetoothChooser::AdapterPresence::POWERED_OFF:
-      no_options_text_ =
-          l10n_util::GetStringUTF16(IDS_BLUETOOTH_DEVICE_CHOOSER_ADAPTER_OFF);
       status_text_ = base::string16();
       if (view())
         view()->OnAdapterEnabledChanged(false /* Adapter is turned off */);
       break;
     case content::BluetoothChooser::AdapterPresence::POWERED_ON:
-      no_options_text_ =
-          l10n_util::GetStringUTF16(IDS_DEVICE_CHOOSER_NO_DEVICES_FOUND_PROMPT);
       status_text_ =
           l10n_util::GetStringUTF16(IDS_BLUETOOTH_DEVICE_CHOOSER_RE_SCAN);
       if (view())
@@ -154,6 +148,8 @@ const int MockChooserController::kSignalStrengthLevel1Bar = 1;
 const int MockChooserController::kSignalStrengthLevel2Bar = 2;
 const int MockChooserController::kSignalStrengthLevel3Bar = 3;
 const int MockChooserController::kSignalStrengthLevel4Bar = 4;
+const int MockChooserController::kImageColorUnselected = 0;
+const int MockChooserController::kImageColorSelected = 1;
 
 void MockChooserController::ClearAllOptions() {
   options_.clear();

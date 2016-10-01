@@ -478,6 +478,7 @@ interface Notification : EventTarget
 interface NotificationEvent : ExtendableEvent
     getter action
     getter notification
+    getter reply
     method constructor
 interface OffscreenCanvas
     getter height
@@ -1210,6 +1211,7 @@ interface WorkerGlobalScope : EventTarget
     getter caches
     getter crypto
     getter indexedDB
+    getter isSecureContext
     getter location
     getter navigator
     getter onerror

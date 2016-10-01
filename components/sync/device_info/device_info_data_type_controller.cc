@@ -5,15 +5,14 @@
 #include "components/sync/device_info/device_info_data_type_controller.h"
 
 #include "base/callback.h"
-#include "components/sync/device_info/local_device_info_provider.h"
 
-namespace sync_driver {
+namespace syncer {
 
 DeviceInfoDataTypeController::DeviceInfoDataTypeController(
     const base::Closure& dump_stack,
     SyncClient* sync_client,
     LocalDeviceInfoProvider* local_device_info_provider)
-    : UIDataTypeController(syncer::DEVICE_INFO, dump_stack, sync_client),
+    : UIDataTypeController(DEVICE_INFO, dump_stack, sync_client),
       local_device_info_provider_(local_device_info_provider) {}
 
 DeviceInfoDataTypeController::~DeviceInfoDataTypeController() {}
@@ -46,4 +45,4 @@ void DeviceInfoDataTypeController::OnLocalDeviceInfoLoaded() {
   OnModelLoaded();
 }
 
-}  // namespace sync_driver
+}  // namespace syncer

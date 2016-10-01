@@ -41,6 +41,7 @@ Canvas2dFixedRenderingMode status=test
 EnableCanvas2dDynamicRenderingModeSwitching status=experimental
 Canvas2dImageChromium status=experimental
 ClientHints status=stable
+CompositeOpaqueFixedPosition settable_from_internals=True
 CompositeOpaqueScrollers status=stable, settable_from_internals=True
 ColorCorrectRendering settable_from_internals=True
 CompositedSelectionUpdate
@@ -53,7 +54,6 @@ CSS3TextDecorations status=experimental
 CSSApplyAtRules status=experimental
 CSSAdditiveAnimations status=experimental, depends_on=StackedCSSPropertyAnimations
 CSSBackdropFilter status=experimental
-CSSBoxReflectFilter status=stable, implied_by=SlimmingPaintInvalidation
 CSSHexAlphaColor status=experimental
 CSSContainment status=stable
 CSSFontDisplay status=experimental
@@ -169,7 +169,7 @@ PerformanceObserver status=stable
 PermissionDelegation status=test
 Permissions status=stable
 PermissionsRequestRevoke status=experimental
-PointerEvent status=experimental
+PointerEvent status=stable
 // For temporary compat testing of Edge-like model - crbug.com/640700
 PointerEventV1SpecCapturing
 PreciseMemoryInfo
@@ -193,8 +193,7 @@ RootLayerScrolling
 RTCPeerConnectionNewGetStats status=test
 ScriptedSpeech status=stable
 // Scrolls to compensate for layout movements (bit.ly/scroll-anchoring).
-// TODO(skobes): Return ScrollAnchoring to experimental status by 9/16.
-ScrollAnchoring status=stable, settable_from_internals=True
+ScrollAnchoring status=experimental, settable_from_internals=True
 // Implements documentElement.scrollTop/Left and bodyElement.scrollTop/Left
 // as per the spec, matching other Web engines.
 ScrollTopLeftInterop status=experimental

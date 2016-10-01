@@ -8,9 +8,7 @@
 #include "content/common/media/media_player_messages_android.h"
 #include "content/public/common/renderer_preferences.h"
 #include "content/renderer/media/android/webmediaplayer_android.h"
-#include "content/renderer/media/cdm/renderer_cdm_manager.h"
 #include "content/renderer/render_view_impl.h"
-#include "media/base/cdm_context.h"
 #include "media/base/media_switches.h"
 #include "ui/gfx/geometry/rect_f.h"
 
@@ -43,8 +41,6 @@ bool RendererMediaPlayerManager::OnMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER(MediaPlayerMsg_MediaVideoSizeChanged,
                         OnVideoSizeChanged)
     IPC_MESSAGE_HANDLER(MediaPlayerMsg_MediaTimeUpdate, OnTimeUpdate)
-    IPC_MESSAGE_HANDLER(MediaPlayerMsg_WaitingForDecryptionKey,
-                        OnWaitingForDecryptionKey)
     IPC_MESSAGE_HANDLER(MediaPlayerMsg_MediaPlayerReleased,
                         OnMediaPlayerReleased)
     IPC_MESSAGE_HANDLER(MediaPlayerMsg_ConnectedToRemoteDevice,
@@ -68,14 +64,12 @@ void RendererMediaPlayerManager::Initialize(
     int player_id,
     const GURL& url,
     const GURL& first_party_for_cookies,
-    int demuxer_client_id,
     const GURL& frame_url,
     bool allow_credentials,
     int delegate_id) {
   MediaPlayerHostMsg_Initialize_Params media_player_params;
   media_player_params.type = type;
   media_player_params.player_id = player_id;
-  media_player_params.demuxer_client_id = demuxer_client_id;
   media_player_params.url = url;
   media_player_params.first_party_for_cookies = first_party_for_cookies;
   media_player_params.frame_url = frame_url;
@@ -190,12 +184,6 @@ void RendererMediaPlayerManager::OnTimeUpdate(
     player->OnTimeUpdate(current_timestamp, current_time_ticks);
 }
 
-void RendererMediaPlayerManager::OnWaitingForDecryptionKey(int player_id) {
-  media::RendererMediaPlayerInterface* player = GetMediaPlayer(player_id);
-  if (player)
-    player->OnWaitingForDecryptionKey();
-}
-
 void RendererMediaPlayerManager::OnMediaPlayerReleased(int player_id) {
   media::RendererMediaPlayerInterface* player = GetMediaPlayer(player_id);
   if (player)
@@ -250,14 +238,6 @@ void RendererMediaPlayerManager::OnRemoteRouteAvailabilityChanged(
 
 void RendererMediaPlayerManager::EnterFullscreen(int player_id) {
   Send(new MediaPlayerHostMsg_EnterFullscreen(routing_id(), player_id));
-}
-
-void RendererMediaPlayerManager::SetCdm(int player_id, int cdm_id) {
-  if (cdm_id == media::CdmContext::kInvalidCdmId) {
-    NOTREACHED();
-    return;
-  }
-  Send(new MediaPlayerHostMsg_SetCdm(routing_id(), player_id, cdm_id));
 }
 
 int RendererMediaPlayerManager::RegisterMediaPlayer(

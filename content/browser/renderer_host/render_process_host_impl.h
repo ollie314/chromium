@@ -26,6 +26,7 @@
 #include "content/browser/webrtc/webrtc_eventlog_host.h"
 #include "content/common/associated_interfaces.mojom.h"
 #include "content/common/content_export.h"
+#include "content/common/renderer.mojom.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/common/mojo_shell_connection.h"
 #include "ipc/ipc_channel_proxy.h"
@@ -37,10 +38,6 @@
 #include "services/shell/public/interfaces/service.mojom.h"
 #include "ui/gfx/gpu_memory_buffer.h"
 #include "ui/gl/gpu_switching_observer.h"
-
-#if defined(OS_ANDROID)
-#include "content/public/browser/android/interface_registry_android.h"
-#endif
 
 namespace base {
 class CommandLine;
@@ -59,8 +56,6 @@ class ChannelMojoHost;
 namespace content {
 class AudioInputRendererHost;
 class AudioRendererHost;
-class BrowserCdmManager;
-class BrowserDemuxerAndroid;
 class InProcessChildThreadParams;
 class MessagePortMessageFilter;
 class MojoChildConnection;
@@ -172,10 +167,6 @@ class CONTENT_EXPORT RenderProcessHostImpl
   std::unique_ptr<base::SharedPersistentMemoryAllocator> TakeMetricsAllocator()
       override;
   const base::TimeTicks& GetInitTimeForNavigationMetrics() const override;
-#if defined(ENABLE_BROWSER_CDMS)
-  scoped_refptr<media::MediaKeys> GetCdm(int render_frame_id,
-                                         int cdm_id) const override;
-#endif
   bool IsProcessBackgrounded() const override;
   void IncrementServiceWorkerRefCount() override;
   void DecrementServiceWorkerRefCount() override;
@@ -186,6 +177,7 @@ class CONTENT_EXPORT RenderProcessHostImpl
   void PurgeAndSuspend() override;
 
   mojom::RouteProvider* GetRemoteRouteProvider();
+  mojom::Renderer* GetRendererInterface();
 
   // IPC::Sender via RenderProcessHost.
   bool Send(IPC::Message* msg) override;
@@ -263,12 +255,6 @@ class CONTENT_EXPORT RenderProcessHostImpl
   // It is suspected that shared workers prevent render process hosts
   // from shutting down: crbug.com/608049
   static void CheckAllWorkersTerminated();
-
-#if defined(OS_ANDROID)
-  const scoped_refptr<BrowserDemuxerAndroid>& browser_demuxer_android() {
-    return browser_demuxer_android_;
-  }
-#endif
 
   RenderFrameMessageFilter* render_frame_message_filter_for_testing() const {
     return render_frame_message_filter_.get();
@@ -439,9 +425,6 @@ class CONTENT_EXPORT RenderProcessHostImpl
   int connection_filter_id_ = MojoShellConnection::kInvalidConnectionFilterId;
   scoped_refptr<ConnectionFilterController> connection_filter_controller_;
   shell::mojom::ServicePtr test_service_;
-#if defined(OS_ANDROID)
-  std::unique_ptr<InterfaceRegistryAndroid> interface_registry_android_;
-#endif
 
   size_t service_worker_ref_count_;
   size_t shared_worker_ref_count_;
@@ -552,10 +535,6 @@ class CONTENT_EXPORT RenderProcessHostImpl
 
   scoped_refptr<AudioInputRendererHost> audio_input_renderer_host_;
 
-#if defined(OS_ANDROID)
-  scoped_refptr<BrowserDemuxerAndroid> browser_demuxer_android_;
-#endif
-
 #if defined(ENABLE_WEBRTC)
   scoped_refptr<P2PSocketDispatcherHost> p2p_socket_dispatcher_host_;
 
@@ -602,6 +581,7 @@ class CONTENT_EXPORT RenderProcessHostImpl
   scoped_refptr<ResourceMessageFilter> resource_message_filter_;
 
   mojom::RouteProviderAssociatedPtr remote_route_provider_;
+  mojom::RendererAssociatedPtr renderer_interface_;
 
   // A WeakPtrFactory which is reset every time Cleanup() runs. Used to vend
   // WeakPtrs which are invalidated any time the RPHI is recycled.

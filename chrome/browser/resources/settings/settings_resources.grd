@@ -231,6 +231,10 @@
                  type="chrome_html" />
       <structure name="IDR_SETTINGS_SETTINGS_SHARED_CSS_HTML"
                  file="settings_shared_css.html"
+                 type="chrome_html"
+                 flattenhtml="true" />
+      <structure name="IDR_SETTINGS_SELECT_CSS_HTML"
+                 file="select_css.html"
                  type="chrome_html" />
       <structure name="IDR_SETTINGS_CR_SETTINGS_UI_HTML"
                  file="settings_ui/settings_ui.html"
@@ -881,9 +885,6 @@
                  type="chrome_html" />
       <structure name="IDR_SETTINGS_SETTINGS_HTML"
                  file="settings.html"
-                 type="chrome_html" />
-      <structure name="IDR_SETTINGS_SETTINGS_JS"
-                 file="settings.js"
                  type="chrome_html" />
       <structure name="IDR_SETTINGS_USB_DEVICES_HTML"
                  file="site_settings/usb_devices.html"

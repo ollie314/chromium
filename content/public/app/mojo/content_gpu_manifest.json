@@ -4,12 +4,15 @@
   "display_name": "Content Gpu",
   "capabilities": {
     "provided": {
-      "all_interfaces": [ "*" ]
+      "browser": [
+        "IPC::mojom::ChannelBootstrap",
+        "shell::mojom::ServiceFactory"
+      ]
     },
     "required": {
       "exe:content_browser": {
         "classes": [
-          "all_interfaces"
+          "gpu"
         ]
       }
     }

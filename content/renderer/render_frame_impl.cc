@@ -230,9 +230,6 @@
 #if defined(ENABLE_PEPPER_CDMS)
 #include "content/renderer/media/cdm/pepper_cdm_wrapper_impl.h"
 #include "content/renderer/media/cdm/render_cdm_factory.h"
-#elif defined(ENABLE_BROWSER_CDMS)
-#include "content/renderer/media/cdm/render_cdm_factory.h"
-#include "content/renderer/media/cdm/renderer_cdm_manager.h"
 #endif
 
 #if defined(ENABLE_MOJO_MEDIA)
@@ -793,6 +790,11 @@ bool IsHttpPost(const blink::WebURLRequest& request) {
 // Note that HLS and MP4 detection are pre-redirect and path-based. It is
 // possible to load such a URL and find different content.
 bool UseWebMediaPlayerImpl(const GURL& url) {
+  // Always use WMPI for playing blob URLs since WMPA could never play them very
+  // well and no longer has support for MSE based playbacks.
+  if (url.SchemeIsBlob())
+    return true;
+
   // WMPI does not support HLS.
   if (media::MediaCodecUtil::IsHLSURL(url))
     return false;
@@ -818,10 +820,9 @@ bool UseWebMediaPlayerImpl(const GURL& url) {
 #if defined(ENABLE_MOJO_CDM)
 // Returns whether mojo CDM should be used at runtime. Note that even when mojo
 // CDM is enabled at compile time (ENABLE_MOJO_CDM is defined), there are cases
-// where we want to choose other CDM types. For example, on Android when we use
-// WebMediaPlayerAndroid, we still want to use ProxyMediaKeys. In the future,
-// when we experiment mojo CDM on desktop, we will choose between mojo CDM and
-// pepper CDM at runtime.
+// where we want to choose other CDM types. For example, in the future, when we
+// experiment mojo CDM on desktop, we will choose between mojo CDM and pepper
+// CDM at runtime.
 // TODO(xhwang): Remove this when we use mojo CDM for all remote CDM cases by
 // default.
 bool UseMojoCdm() {
@@ -1043,7 +1044,6 @@ RenderFrameImpl::RenderFrameImpl(const CreateParams& params)
       render_view_(params.render_view->AsWeakPtr()),
       routing_id_(params.routing_id),
       proxy_routing_id_(MSG_ROUTING_NONE),
-      browser_has_subtree_history_items_(false),
 #if defined(ENABLE_PLUGINS)
       plugin_power_saver_helper_(nullptr),
       plugin_find_handler_(nullptr),
@@ -1058,9 +1058,6 @@ RenderFrameImpl::RenderFrameImpl(const CreateParams& params)
       media_session_manager_(NULL),
 #endif
       media_surface_manager_(nullptr),
-#if defined(ENABLE_BROWSER_CDMS)
-      cdm_manager_(NULL),
-#endif
       devtools_agent_(nullptr),
       push_messaging_dispatcher_(NULL),
       presentation_dispatcher_(NULL),
@@ -1166,11 +1163,6 @@ void RenderFrameImpl::Initialize() {
   RenderFrameImpl* parent_frame = RenderFrameImpl::FromWebFrame(
       frame_->parent());
   if (parent_frame) {
-    // Inherit knowledge of whether we need to consult the browser process for
-    // a history item on the first navigation.  This is inherited by further
-    // subframes and cleared at didStopLoading.
-    browser_has_subtree_history_items_ =
-        parent_frame->browser_has_subtree_history_items_;
     is_using_lofi_ = parent_frame->IsUsingLoFi();
     effective_connection_type_ = parent_frame->getEffectiveConnectionType();
   }
@@ -2818,7 +2810,7 @@ void RenderFrameImpl::didAccessInitialDocument() {
   has_accessed_initial_document_ = true;
 }
 
-blink::WebFrame* RenderFrameImpl::createChildFrame(
+blink::WebLocalFrame* RenderFrameImpl::createChildFrame(
     blink::WebLocalFrame* parent,
     blink::WebTreeScopeType scope,
     const blink::WebString& name,
@@ -2942,9 +2934,10 @@ void RenderFrameImpl::frameFocused() {
   Send(new FrameHostMsg_FrameFocused(routing_id_));
 }
 
-void RenderFrameImpl::willClose(blink::WebFrame* frame) {
+void RenderFrameImpl::willCommitProvisionalLoad(blink::WebLocalFrame* frame) {
   DCHECK_EQ(frame_, frame);
 
+  // TODO(dcheng): Rename observer to FrameWillCommitProvisionalLoad.
   FOR_EACH_OBSERVER(RenderFrameObserver, observers_, FrameWillClose());
   FOR_EACH_OBSERVER(RenderViewObserver, render_view_->observers(),
                     FrameWillClose(frame));
@@ -4196,10 +4189,6 @@ void RenderFrameImpl::didReceiveResponse(
         extra_data->was_alternate_protocol_available());
     document_state->set_connection_info(
         extra_data->connection_info());
-    document_state->set_was_fetched_via_proxy(
-        extra_data->was_fetched_via_proxy());
-    document_state->set_proxy_server(
-        extra_data->proxy_server());
   }
   InternalDocumentStateData* internal_data =
       InternalDocumentStateData::FromDocumentState(document_state);
@@ -4625,9 +4614,6 @@ void RenderFrameImpl::SendDidCommitProvisionalLoad(
   params.render_view_routing_id = render_view_->routing_id();
   params.socket_address.set_host(response.remoteIPAddress().utf8());
   params.socket_address.set_port(response.remotePort());
-  WebURLResponseExtraDataImpl* extra_data = GetExtraDataFromResponse(response);
-  if (extra_data)
-    params.was_fetched_via_proxy = extra_data->was_fetched_via_proxy();
   params.was_within_same_page = navigation_state->WasWithinSamePage();
 
   // Set the origin of the frame.  This will be replicated to the corresponding
@@ -4844,7 +4830,7 @@ void RenderFrameImpl::didStopLoading() {
   // Any subframes created after this point won't be considered part of the
   // current history navigation (if this was one), so we don't need to track
   // this state anymore.
-  browser_has_subtree_history_items_ = false;
+  history_subframe_unique_names_.clear();
 
   render_view_->FrameDidStopLoading(frame_);
   Send(new FrameHostMsg_DidStopLoading(routing_id_));
@@ -4882,6 +4868,12 @@ void RenderFrameImpl::OnCommitNavigation(
       new StreamOverrideParameters());
   stream_override->stream_url = stream_url;
   stream_override->response = response;
+
+  // If the request was initiated in the context of a user gesture then make
+  // sure that the navigation also executes in the context of a user gesture.
+  std::unique_ptr<blink::WebScopedUserGesture> gesture(
+      request_params.has_user_gesture ? new blink::WebScopedUserGesture
+          : nullptr);
 
   NavigateInternal(common_params, StartNavigationParams(), request_params,
                    std::move(stream_override));
@@ -4990,12 +4982,16 @@ WebNavigationPolicy RenderFrameImpl::decidePolicyForNavigation(
   }
 
   // In OOPIF-enabled modes, back/forward navigations in newly created subframes
-  // should be sent to the browser if there is a chance there is a matching
-  // FrameNavigationEntry.  If none is found (or if the browser has indicated it
-  // has no subtree history items), fall back to loading the default url.
+  // should be sent to the browser if there is a matching FrameNavigationEntry.
+  // If this frame isn't on the list of unique names that have history items,
+  // fall back to loading the default url.  (We remove each name as we encounter
+  // it, because it will only be used once as the frame is created.)
   if (SiteIsolationPolicy::UseSubframeNavigationEntries() &&
       info.isHistoryNavigationInNewChildFrame && is_content_initiated &&
-      browser_has_subtree_history_items_) {
+      frame_->parent() &&
+      RenderFrameImpl::FromWebFrame(frame_->parent())
+              ->history_subframe_unique_names_.erase(
+                  frame_->uniqueName().utf8()) > 0) {
     // Don't do this if |info| also says it is a client redirect, in which case
     // JavaScript on the page is trying to interrupt the history navigation.
     if (!info.isClientRedirect) {
@@ -5191,13 +5187,15 @@ void RenderFrameImpl::OnGetSerializedHtmlWithLocalLinks(
 void RenderFrameImpl::OnSerializeAsMHTML(
     const FrameMsg_SerializeAsMHTML_Params& params) {
   TRACE_EVENT0("page-serialization", "RenderFrameImpl::OnSerializeAsMHTML");
+  base::TimeTicks start_time = base::TimeTicks::Now();
   // Unpack IPC payload.
   base::File file = IPC::PlatformFileForTransitToFile(params.destination_file);
   const WebString mhtml_boundary =
       WebString::fromUTF8(params.mhtml_boundary_marker);
   DCHECK(!mhtml_boundary.isEmpty());
 
-  WebData data;
+  // Three WebData instances for header, parts and footer.
+  WebData mhtml_contents[3];
   std::set<std::string> digests_of_uris_of_serialized_resources;
   MHTMLPartsGenerationDelegate delegate(
       params, &digests_of_uris_of_serialized_resources);
@@ -5211,12 +5209,9 @@ void RenderFrameImpl::OnSerializeAsMHTML(
     // |data| can be empty if the main frame should be skipped.  If the main
     // frame is skipped, then the whole archive is bad, so bail to the error
     // condition.
-    WebData data = WebFrameSerializer::generateMHTMLHeader(
+    mhtml_contents[0] = WebFrameSerializer::generateMHTMLHeader(
         mhtml_boundary, GetWebFrame(), &delegate);
-    if (data.isEmpty() ||
-        file.WriteAtCurrentPos(data.data(), data.size()) < 0) {
-      success = false;
-    }
+    success = !mhtml_contents[0].isEmpty();
   }
 
   // Generate MHTML parts.  Note that if this is not the main frame, then even
@@ -5226,33 +5221,42 @@ void RenderFrameImpl::OnSerializeAsMHTML(
     TRACE_EVENT0("page-serialization",
                  "RenderFrameImpl::OnSerializeAsMHTML parts serialization");
     // |data| can be empty if the frame should be skipped, but this is OK.
-    data = WebFrameSerializer::generateMHTMLParts(mhtml_boundary, GetWebFrame(),
-                                                  &delegate);
-    // TODO(jcivelli): write the chunks in deferred tasks to give a chance to
-    //                 the message loop to process other events.
-    TRACE_EVENT0("page-serialization",
-                 "RenderFrameImpl::OnSerializeAsMHTML parts file writing");
-    if (!data.isEmpty() &&
-        file.WriteAtCurrentPos(data.data(), data.size()) < 0) {
-      success = false;
-    }
+    mhtml_contents[1] = WebFrameSerializer::generateMHTMLParts(
+        mhtml_boundary, GetWebFrame(), &delegate);
   }
 
   // Generate MHTML footer if needed.
   if (success && params.is_last_frame) {
     TRACE_EVENT0("page-serialization",
                  "RenderFrameImpl::OnSerializeAsMHTML footer");
-    data = WebFrameSerializer::generateMHTMLFooter(mhtml_boundary);
-    if (file.WriteAtCurrentPos(data.data(), data.size()) < 0) {
-      success = false;
+    mhtml_contents[2] = WebFrameSerializer::generateMHTMLFooter(mhtml_boundary);
+  }
+
+  // Writes all serialized data to file.
+  // TODO(jcivelli): write the chunks in deferred tasks to give a chance to
+  //                 the message loop to process other events.
+  if (success) {
+    TRACE_EVENT0("page-serialization",
+                 "RenderFrameImpl::OnSerializeAsMHTML writing to file");
+    SCOPED_UMA_HISTOGRAM_TIMER(
+        "PageSerialization.MhtmlGeneration.WriteToDiskTime.SingleFrame");
+    for (const WebData& data : mhtml_contents) {
+      if (file.WriteAtCurrentPos(data.data(), data.size()) < 0) {
+        success = false;
+        break;
+      }
     }
   }
 
   // Cleanup and notify the browser process about completion.
   file.Close();  // Need to flush file contents before sending IPC response.
+  base::TimeDelta main_thread_use_time = base::TimeTicks::Now() - start_time;
   Send(new FrameHostMsg_SerializeAsMHTMLResponse(
       routing_id_, params.job_id, success,
-      digests_of_uris_of_serialized_resources));
+      digests_of_uris_of_serialized_resources, main_thread_use_time));
+  UMA_HISTOGRAM_TIMES(
+      "PageSerialization.MhtmlGeneration.RendererMainThreadTime.SingleFrame",
+      main_thread_use_time);
 }
 
 void RenderFrameImpl::OnFind(int request_id,
@@ -5538,7 +5542,7 @@ void RenderFrameImpl::NavigateInternal(
   bool has_history_navigation_in_frame = false;
 
 #if defined(OS_ANDROID)
-  request.setHasUserGesture(start_params.has_user_gesture);
+  request.setHasUserGesture(request_params.has_user_gesture);
 #endif
 
   // PlzNavigate: Make sure that Blink's loader will not try to use browser side
@@ -5599,10 +5603,9 @@ void RenderFrameImpl::NavigateInternal(
                         : blink::WebFrameLoadType::BackForward;
         should_load_request = true;
 
-        // Remember whether we should consult the browser process for any
-        // subframes created during this history navigation.
-        browser_has_subtree_history_items_ =
-            request_params.has_subtree_history_items;
+        // Keep track of which subframes the browser process has history items
+        // for during a history navigation.
+        history_subframe_unique_names_ = request_params.subframe_unique_names;
 
         if (history_load_type == blink::WebHistorySameDocumentLoad) {
           // If this is marked as a same document load but we haven't committed
@@ -6246,10 +6249,6 @@ media::CdmFactory* RenderFrameImpl::GetCdmFactory() {
   DCHECK(frame_);
   cdm_factory_.reset(
       new RenderCdmFactory(base::Bind(&PepperCdmWrapperImpl::Create, frame_)));
-#elif defined(ENABLE_BROWSER_CDMS)
-  if (!cdm_manager_)
-    cdm_manager_ = new RendererCdmManager(this);
-  cdm_factory_.reset(new RenderCdmFactory(cdm_manager_));
 #endif  // defined(ENABLE_PEPPER_CDMS)
 
   return cdm_factory_.get();

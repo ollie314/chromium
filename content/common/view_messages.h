@@ -94,7 +94,6 @@ IPC_ENUM_TRAITS_MAX_VALUE(blink::WebTextDirection,
                           blink::WebTextDirection::WebTextDirectionLast)
 IPC_ENUM_TRAITS_MAX_VALUE(blink::WebDisplayMode,
                           blink::WebDisplayMode::WebDisplayModeLast)
-IPC_ENUM_TRAITS_MAX_VALUE(WindowContainerType, WINDOW_CONTAINER_TYPE_MAX_VALUE)
 IPC_ENUM_TRAITS(content::FaviconURL::IconType)
 IPC_ENUM_TRAITS(content::MenuItem::Type)
 IPC_ENUM_TRAITS_MAX_VALUE(content::NavigationGesture,
@@ -288,74 +287,6 @@ IPC_STRUCT_TRAITS_BEGIN(content::TextInputState)
   IPC_STRUCT_TRAITS_MEMBER(batch_edit)
 IPC_STRUCT_TRAITS_END()
 
-IPC_STRUCT_BEGIN(ViewHostMsg_CreateWindow_Params)
-  // Routing ID of the view initiating the open.
-  IPC_STRUCT_MEMBER(int, opener_id)
-
-  // True if this open request came in the context of a user gesture.
-  IPC_STRUCT_MEMBER(bool, user_gesture)
-
-  // Type of window requested.
-  IPC_STRUCT_MEMBER(WindowContainerType, window_container_type)
-
-  // The session storage namespace ID this view should use.
-  IPC_STRUCT_MEMBER(int64_t, session_storage_namespace_id)
-
-  // The name of the resulting frame that should be created (empty if none
-  // has been specified). UTF8 encoded string.
-  IPC_STRUCT_MEMBER(std::string, frame_name)
-
-  // The routing id of the frame initiating the open.
-  IPC_STRUCT_MEMBER(int, opener_render_frame_id)
-
-  // The URL of the frame initiating the open.
-  IPC_STRUCT_MEMBER(GURL, opener_url)
-
-  // The URL of the top frame containing the opener.
-  IPC_STRUCT_MEMBER(GURL, opener_top_level_frame_url)
-
-  // The security origin of the frame initiating the open.
-  IPC_STRUCT_MEMBER(GURL, opener_security_origin)
-
-  // Whether the opener will be suppressed in the new window, in which case
-  // scripting the new window is not allowed.
-  IPC_STRUCT_MEMBER(bool, opener_suppressed)
-
-  // Whether the window should be opened in the foreground, background, etc.
-  IPC_STRUCT_MEMBER(WindowOpenDisposition, disposition)
-
-  // The URL that will be loaded in the new window (empty if none has been
-  // sepcified).
-  IPC_STRUCT_MEMBER(GURL, target_url)
-
-  // The referrer that will be used to load |target_url| (empty if none has
-  // been specified).
-  IPC_STRUCT_MEMBER(content::Referrer, referrer)
-
-  // The window features to use for the new view.
-  IPC_STRUCT_MEMBER(blink::WebWindowFeatures, features)
-
-  // The additional window features to use for the new view. We pass these
-  // separately from |features| above because we cannot serialize WebStrings
-  // over IPC.
-  IPC_STRUCT_MEMBER(std::vector<base::string16>, additional_features)
-IPC_STRUCT_END()
-
-IPC_STRUCT_BEGIN(ViewHostMsg_CreateWindow_Reply)
-  // The ID of the view to be created. If the ID is MSG_ROUTING_NONE, then the
-  // view couldn't be created.
-  IPC_STRUCT_MEMBER(int32_t, route_id, MSG_ROUTING_NONE)
-
-  // The ID of the main frame hosted in the view.
-  IPC_STRUCT_MEMBER(int32_t, main_frame_route_id, MSG_ROUTING_NONE)
-
-  // The ID of the widget for the main frame.
-  IPC_STRUCT_MEMBER(int32_t, main_frame_widget_route_id, MSG_ROUTING_NONE)
-
-  // TODO(dcheng): No clue. This is kind of duplicated from ViewMsg_New_Params.
-  IPC_STRUCT_MEMBER(int64_t, cloned_session_storage_namespace_id)
-IPC_STRUCT_END()
-
 IPC_STRUCT_BEGIN(ViewHostMsg_CreateWorker_Params)
   // URL for the worker script.
   IPC_STRUCT_MEMBER(GURL, url)
@@ -432,75 +363,6 @@ IPC_STRUCT_BEGIN(ViewHostMsg_UpdateRect_Params)
   IPC_STRUCT_MEMBER(int, flags)
 IPC_STRUCT_END()
 
-IPC_STRUCT_BEGIN(ViewMsg_New_Params)
-  // Renderer-wide preferences.
-  IPC_STRUCT_MEMBER(content::RendererPreferences, renderer_preferences)
-
-  // Preferences for this view.
-  IPC_STRUCT_MEMBER(content::WebPreferences, web_preferences)
-
-  // The ID of the view to be created.
-  IPC_STRUCT_MEMBER(int32_t, view_id, MSG_ROUTING_NONE)
-
-  // The ID of the main frame hosted in the view.
-  IPC_STRUCT_MEMBER(int32_t, main_frame_routing_id, MSG_ROUTING_NONE)
-
-  // The ID of the widget for the main frame.
-  IPC_STRUCT_MEMBER(int32_t, main_frame_widget_routing_id, MSG_ROUTING_NONE)
-
-  // The session storage namespace ID this view should use.
-  IPC_STRUCT_MEMBER(int64_t, session_storage_namespace_id)
-
-  // The route ID of the opener RenderFrame or RenderFrameProxy, if we need to
-  // set one (MSG_ROUTING_NONE otherwise).
-  IPC_STRUCT_MEMBER(int, opener_frame_route_id, MSG_ROUTING_NONE)
-
-  // Whether the RenderView should initially be swapped out.
-  IPC_STRUCT_MEMBER(bool, swapped_out)
-
-  // Carries replicated information, such as frame name and sandbox flags, for
-  // this view's main frame, which will be a proxy in |swapped_out|
-  // views when in --site-per-process mode, or a RenderFrame in all other
-  // cases.
-  IPC_STRUCT_MEMBER(content::FrameReplicationState, replicated_frame_state)
-
-  // The ID of the proxy object for the main frame in this view. It is only
-  // used if |swapped_out| is true.
-  IPC_STRUCT_MEMBER(int32_t, proxy_routing_id, MSG_ROUTING_NONE)
-
-  // Whether the RenderView should initially be hidden.
-  IPC_STRUCT_MEMBER(bool, hidden)
-
-  // Whether the RenderView will never be visible.
-  IPC_STRUCT_MEMBER(bool, never_visible)
-
-  // Whether the window associated with this view was created with an opener.
-  IPC_STRUCT_MEMBER(bool, window_was_created_with_opener)
-
-  // The initial page ID to use for this view, which must be larger than any
-  // existing navigation that might be loaded in the view.  Page IDs are unique
-  // to a view and are only updated by the renderer after this initial value.
-  IPC_STRUCT_MEMBER(int32_t, next_page_id)
-
-  // The initial renderer size.
-  IPC_STRUCT_MEMBER(content::ResizeParams, initial_size)
-
-  // Whether to enable auto-resize.
-  IPC_STRUCT_MEMBER(bool, enable_auto_resize)
-
-  // The minimum size to layout the page if auto-resize is enabled.
-  IPC_STRUCT_MEMBER(gfx::Size, min_size)
-
-  // The maximum size to layout the page if auto-resize is enabled.
-  IPC_STRUCT_MEMBER(gfx::Size, max_size)
-
-  // The page zoom level.
-  IPC_STRUCT_MEMBER(double, page_zoom_level)
-
-  // The ICC profile of the output color space to use for image decode.
-  IPC_STRUCT_MEMBER(gfx::ICCProfile, image_decode_color_space)
-IPC_STRUCT_END()
-
 #if defined(OS_MACOSX)
 IPC_STRUCT_BEGIN(ViewMsg_UpdateScrollbarTheme_Params)
   IPC_STRUCT_MEMBER(float, initial_button_delay)
@@ -531,13 +393,6 @@ IPC_MESSAGE_ROUTED1(ViewMsg_LockMouse_ACK,
                     bool /* succeeded */)
 // Tells the render side that the mouse has been unlocked.
 IPC_MESSAGE_ROUTED0(ViewMsg_MouseLockLost)
-
-// Tells the renderer to create a new view.
-// This message is slightly different, the view it takes (via
-// ViewMsg_New_Params) is the view to create, the message itself is sent as a
-// non-view control message.
-IPC_MESSAGE_CONTROL1(ViewMsg_New,
-                     ViewMsg_New_Params)
 
 // Sends updated preferences to the renderer.
 IPC_MESSAGE_ROUTED1(ViewMsg_SetRendererPrefs,
@@ -824,13 +679,6 @@ IPC_MESSAGE_ROUTED1(ViewMsg_HandleCompositorProto,
 // to be be delivered until the notification is disabled.
 IPC_MESSAGE_ROUTED1(ViewHostMsg_SetNeedsBeginFrames,
                     bool /* enabled */)
-
-// Sent by the renderer when it is creating a new window.  The browser creates a
-// tab for it.  If |reply.route_id| is MSG_ROUTING_NONE, the view couldn't be
-// created.
-IPC_SYNC_MESSAGE_CONTROL1_1(ViewHostMsg_CreateWindow,
-                            ViewHostMsg_CreateWindow_Params,
-                            ViewHostMsg_CreateWindow_Reply)
 
 // Similar to ViewHostMsg_CreateWindow, except used for sub-widgets, like
 // <select> dropdowns.  This message is sent to the WebContentsImpl that

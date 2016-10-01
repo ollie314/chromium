@@ -32,7 +32,8 @@ class ColorSpaceToColorSpaceTransform;
 class GFX_EXPORT ColorSpace {
  public:
   enum class PrimaryID : uint16_t {
-    // The first 0-255 values should match the H264 specification.
+    // The first 0-255 values should match the H264 specification (see Table E-3
+    // Colour Primaries in https://www.itu.int/rec/T-REC-H.264/en).
     RESERVED0 = 0,
     BT709 = 1,
     UNSPECIFIED = 2,
@@ -57,7 +58,8 @@ class GFX_EXPORT ColorSpace {
   };
 
   enum class TransferID : uint16_t {
-    // The first 0-255 values should match the H264 specification.
+    // The first 0-255 values should match the H264 specification (see Table E-4
+    // Transfer Characteristics in https://www.itu.int/rec/T-REC-H.264/en).
     RESERVED0 = 0,
     BT709 = 1,
     UNSPECIFIED = 2,
@@ -95,7 +97,8 @@ class GFX_EXPORT ColorSpace {
   };
 
   enum class MatrixID : int16_t {
-    // The first 0-255 values should match the H264 specification.
+    // The first 0-255 values should match the H264 specification (see Table E-5
+    // Matrix Coefficients in https://www.itu.int/rec/T-REC-H.264/en).
     RGB = 0,
     BT709 = 1,
     UNSPECIFIED = 2,
@@ -161,6 +164,7 @@ class GFX_EXPORT ColorSpace {
 
   // Note that this may return nullptr.
   sk_sp<SkColorSpace> ToSkColorSpace() const;
+  static ColorSpace FromSkColorSpace(const sk_sp<SkColorSpace>& sk_color_space);
 
  private:
   PrimaryID primaries_ = PrimaryID::UNSPECIFIED;

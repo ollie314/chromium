@@ -5,8 +5,6 @@
 #include "chrome/browser/sync/sync_error_notifier_ash.h"
 
 #include "ash/common/system/system_notifier.h"
-#include "base/macros.h"
-#include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
@@ -98,10 +96,9 @@ void SyncNotificationDelegate::ShowSyncSetup() {
 
 } // namespace
 
-SyncErrorNotifier::SyncErrorNotifier(SyncErrorController* controller,
+SyncErrorNotifier::SyncErrorNotifier(syncer::SyncErrorController* controller,
                                      Profile* profile)
-    : error_controller_(controller),
-      profile_(profile) {
+    : error_controller_(controller), profile_(profile) {
   // Create a unique notification ID for this profile.
   notification_id_ =
       kProfileSyncNotificationId + profile_->GetProfileUserName();

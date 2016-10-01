@@ -112,6 +112,7 @@ IPC_STRUCT_TRAITS_BEGIN(blink::WebFindOptions)
   IPC_STRUCT_TRAITS_MEMBER(forward)
   IPC_STRUCT_TRAITS_MEMBER(matchCase)
   IPC_STRUCT_TRAITS_MEMBER(findNext)
+  IPC_STRUCT_TRAITS_MEMBER(force)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(content::ColorSuggestion)
@@ -255,10 +256,6 @@ IPC_STRUCT_BEGIN_WITH_PARENT(FrameHostMsg_DidCommitProvisionalLoad_Params,
   // so that we can set the appropriate page type.
   IPC_STRUCT_MEMBER(bool, url_is_unreachable)
 
-  // True if the connection was proxied.  In this case, socket_address
-  // will represent the address of the proxy, rather than the remote host.
-  IPC_STRUCT_MEMBER(bool, was_fetched_via_proxy)
-
   // Serialized history item state to store in the navigation entry.
   IPC_STRUCT_MEMBER(content::PageState, page_state)
 
@@ -356,9 +353,6 @@ IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(content::StartNavigationParams)
   IPC_STRUCT_TRAITS_MEMBER(extra_headers)
-#if defined(OS_ANDROID)
-  IPC_STRUCT_TRAITS_MEMBER(has_user_gesture)
-#endif
   IPC_STRUCT_TRAITS_MEMBER(transferred_request_child_id)
   IPC_STRUCT_TRAITS_MEMBER(transferred_request_request_id)
 IPC_STRUCT_TRAITS_END()
@@ -379,7 +373,7 @@ IPC_STRUCT_TRAITS_BEGIN(content::RequestNavigationParams)
   IPC_STRUCT_TRAITS_MEMBER(nav_entry_id)
   IPC_STRUCT_TRAITS_MEMBER(is_same_document_history_load)
   IPC_STRUCT_TRAITS_MEMBER(is_history_navigation_in_new_child)
-  IPC_STRUCT_TRAITS_MEMBER(has_subtree_history_items)
+  IPC_STRUCT_TRAITS_MEMBER(subframe_unique_names)
   IPC_STRUCT_TRAITS_MEMBER(has_committed_real_load)
   IPC_STRUCT_TRAITS_MEMBER(intended_as_new_entry)
   IPC_STRUCT_TRAITS_MEMBER(pending_history_list_offset)
@@ -390,6 +384,7 @@ IPC_STRUCT_TRAITS_BEGIN(content::RequestNavigationParams)
   IPC_STRUCT_TRAITS_MEMBER(should_create_service_worker)
   IPC_STRUCT_TRAITS_MEMBER(navigation_timing)
   IPC_STRUCT_TRAITS_MEMBER(service_worker_provider_id)
+  IPC_STRUCT_TRAITS_MEMBER(has_user_gesture)
 #if defined(OS_ANDROID)
   IPC_STRUCT_TRAITS_MEMBER(data_url_as_string)
 #endif
@@ -899,7 +894,7 @@ IPC_MESSAGE_ROUTED4(FrameMsg_CommitNavigation,
                     content::ResourceResponseHead,    /* response */
                     GURL,                             /* stream_url */
                     content::CommonNavigationParams,  /* common_params */
-                    content::RequestNavigationParams) /* request_params */
+                    content::RequestNavigationParams  /* request_params */)
 
 // PlzNavigate
 // Tells the renderer that a navigation failed with the error code |error_code|
@@ -1496,11 +1491,12 @@ IPC_MESSAGE_ROUTED2(FrameHostMsg_SerializedHtmlWithLocalLinksResponse,
                     bool /* end of data? */)
 
 // Response to FrameMsg_SerializeAsMHTML.
-IPC_MESSAGE_ROUTED3(
+IPC_MESSAGE_ROUTED4(
     FrameHostMsg_SerializeAsMHTMLResponse,
     int /* job_id (used to match responses to requests) */,
     bool /* true if success, false if error */,
-    std::set<std::string> /* digests of uris of serialized resources */)
+    std::set<std::string> /* digests of uris of serialized resources */,
+    base::TimeDelta /* how much time of the main render thread was used */)
 
 // Sent when the renderer updates hint for importance of a tab.
 IPC_MESSAGE_ROUTED1(FrameHostMsg_UpdatePageImportanceSignals,

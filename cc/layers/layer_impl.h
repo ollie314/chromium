@@ -102,6 +102,7 @@ class CC_EXPORT LayerImpl {
   bool IsActive() const;
 
   void DistributeScroll(ScrollState* scroll_state);
+  void ApplyScroll(ScrollState* scroll_state);
 
   void set_property_tree_sequence_number(int sequence_number) {}
 
@@ -247,8 +248,6 @@ class CC_EXPORT LayerImpl {
   // so that its list can be recreated.
   void ClearRenderSurfaceLayerList();
   void SetHasRenderSurface(bool has_render_surface);
-
-  void SetForceRenderSurface(bool has_render_surface);
 
   RenderSurfaceImpl* render_surface() const { return render_surface_.get(); }
 
@@ -435,8 +434,6 @@ class CC_EXPORT LayerImpl {
   void UpdatePropertyTreeForScrollingAndAnimationIfNeeded();
 
   bool IsHidden() const;
-
-  bool InsideReplica() const;
 
   float GetIdealContentsScale() const;
 

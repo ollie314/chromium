@@ -4,20 +4,12 @@
 
 #include "components/sync/test/fake_server/unique_client_entity.h"
 
-#include <stdint.h>
-
-#include <memory>
-#include <string>
-
 #include "base/guid.h"
-#include "components/sync/base/model_type.h"
 #include "components/sync/protocol/sync.pb.h"
 #include "components/sync/syncable/syncable_util.h"
-#include "components/sync/test/fake_server/fake_server_entity.h"
 #include "components/sync/test/fake_server/permanent_entity.h"
 
 using std::string;
-
 using syncer::GetModelTypeFromSpecifics;
 using syncer::ModelType;
 using syncer::syncable::GenerateSyncableHash;

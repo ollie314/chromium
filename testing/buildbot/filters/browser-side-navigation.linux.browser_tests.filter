@@ -12,7 +12,6 @@
 -ContinueWhereILeftOffTest.PostWithPassword
 -ContinueWhereILeftOffTest.PostWithPasswordBrowserClose
 -ContinueWhereILeftOffTest.PostWithPasswordCloseAllBrowsers
--CrashRecoveryBrowserTest.*
 -CrazyExtensionTest.Crazy
 -DevToolsSanityTest.TestNetworkRawHeadersText
 -ErrorPageTest.IFrameDNSError_JavaScript
@@ -60,6 +59,7 @@
 -TemplateURLScraperTest.ScrapeWithOnSubmit
 -ThreatDOMDetailsTest.Everything
 -TracingBrowserTest.TestBackgroundMemoryInfra
+-TracingBrowserTest.TestMemoryInfra
 -WebBluetoothTest.WebBluetoothAfterCrash
 -WebNavigationApiTest.Crash
 -WebNavigationApiTest.CrossProcess
@@ -105,3 +105,9 @@
 -WebViewScrollGuestContent/WebViewScrollGuestContentTest.ScrollGuestContent/0
 -WebViewScrollBubbling/WebViewGuestScrollTouchTest.TestGuestGestureScrollsBubble*
 -WebViewTests/WebViewFocusTest.TouchFocusesEmbedder/0
+
+# Fail in Debug.
+-BookmarkBubbleSignInDelegateTest.OnSignInLinkClicked
+-GetAuthTokenFunctionTest.ComponentWithNormalClientId
+-GetAuthTokenFunctionTest.ComponentWithChromeClientId
+-PolicyTest.ExtensionInstallBlacklistSharedModules

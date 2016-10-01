@@ -34,6 +34,7 @@
 #include "services/ui/public/interfaces/mus_constants.mojom.h"
 #include "services/ui/public/interfaces/window_manager.mojom.h"
 #include "ui/base/hit_test.h"
+#include "ui/display/display_observer.h"
 #include "ui/events/mojo/event.mojom.h"
 #include "ui/views/mus/pointer_watcher_event_router.h"
 #include "ui/views/mus/screen_mus.h"
@@ -93,9 +94,8 @@ void WindowManager::SetScreenLocked(bool is_locked) {
 
 ui::Window* WindowManager::NewTopLevelWindow(
     std::map<std::string, std::vector<uint8_t>>* properties) {
-  // TODO(sky): need to maintain active as well as allowing specifying display.
   RootWindowController* root_window_controller =
-      root_window_controllers_.begin()->get();
+      GetRootWindowControllerForNewTopLevelWindow(properties);
   return root_window_controller->NewTopLevelWindow(properties);
 }
 
@@ -137,15 +137,20 @@ void WindowManager::RemoveObserver(WindowManagerObserver* observer) {
 RootWindowController* WindowManager::CreateRootWindowController(
     ui::Window* window,
     const display::Display& display) {
+  // CreateRootWindowController() means a new display is being added, so the
+  // DisplayList needs to be updated. Calling AddDisplay() results in
+  // notifying DisplayObservers. Ash code assumes when this happens there is
+  // a valid RootWindowController for the new display. Suspend notifying
+  // observers, add the Display, create the RootWindowController, and then
+  // notify DisplayObservers. Classic ash does this by making sure
+  // WindowTreeHostManager is added as a DisplayObserver early on.
+  std::unique_ptr<display::DisplayListObserverLock> display_lock =
+      screen_->display_list()->SuspendObserverUpdates();
+  const bool is_first_display = screen_->display_list()->displays().empty();
   // TODO(sky): should be passed whether display is primary.
-
-  // There needs to be at least one display before creating
-  // RootWindowController, otherwise initializing the compositor fails.
-  const bool was_displays_empty = screen_->display_list()->displays().empty();
-  if (was_displays_empty) {
-    screen_->display_list()->AddDisplay(display,
-                                        display::DisplayList::Type::PRIMARY);
-  }
+  screen_->display_list()->AddDisplay(
+      display, is_first_display ? display::DisplayList::Type::PRIMARY
+                                : display::DisplayList::Type::NOT_PRIMARY);
 
   std::unique_ptr<RootWindowController> root_window_controller_ptr(
       new RootWindowController(this, window, display));
@@ -156,15 +161,10 @@ RootWindowController* WindowManager::CreateRootWindowController(
   FOR_EACH_OBSERVER(WindowManagerObserver, observers_,
                     OnRootWindowControllerAdded(root_window_controller));
 
-  if (!was_displays_empty) {
-    // If this isn't the initial display then add the display to Screen after
-    // creating the RootWindowController. We need to do this after creating the
-    // RootWindowController as adding the display triggers OnDisplayAdded(),
-    // which triggers some overrides asking for the RootWindowController for the
-    // new display.
-    screen_->display_list()->AddDisplay(
-        display, display::DisplayList::Type::NOT_PRIMARY);
-  }
+  FOR_EACH_OBSERVER(display::DisplayObserver,
+                    *screen_->display_list()->observers(),
+                    OnDisplayAdded(root_window_controller->display()));
+
   return root_window_controller;
 }
 
@@ -196,10 +196,23 @@ void WindowManager::Shutdown() {
   FOR_EACH_OBSERVER(WindowManagerObserver, observers_,
                     OnWindowTreeClientDestroyed());
 
-  // Destroy the roots of the RootWindowControllers, which triggers removal
-  // in OnWindowDestroyed().
-  while (!root_window_controllers_.empty())
-    DestroyRootWindowController(root_window_controllers_.begin()->get());
+  // Primary RootWindowController must be destroyed last.
+  RootWindowController* primary_root_window_controller =
+      GetPrimaryRootWindowController();
+  std::set<RootWindowController*> secondary_root_window_controllers;
+  for (auto& root_window_controller_ptr : root_window_controllers_) {
+    if (root_window_controller_ptr.get() != primary_root_window_controller)
+      secondary_root_window_controllers.insert(
+          root_window_controller_ptr.get());
+  }
+  for (RootWindowController* root_window_controller :
+       secondary_root_window_controllers) {
+    DestroyRootWindowController(root_window_controller);
+  }
+  if (primary_root_window_controller)
+    DestroyRootWindowController(primary_root_window_controller);
+
+  DCHECK(root_window_controllers_.empty());
 
   lookup_.reset();
   shell_->Shutdown();
@@ -225,6 +238,23 @@ WindowManager::FindRootWindowControllerByWindow(ui::Window* window) {
 RootWindowController* WindowManager::GetPrimaryRootWindowController() {
   return static_cast<WmRootWindowControllerMus*>(
              WmShell::Get()->GetPrimaryRootWindowController())
+      ->root_window_controller();
+}
+
+RootWindowController*
+WindowManager::GetRootWindowControllerForNewTopLevelWindow(
+    std::map<std::string, std::vector<uint8_t>>* properties) {
+  // If a specific display was requested, use it.
+  const int64_t display_id = GetInitialDisplayId(*properties);
+  for (auto& root_window_controller_ptr : root_window_controllers_) {
+    if (root_window_controller_ptr->display().id() == display_id)
+      return root_window_controller_ptr.get();
+  }
+
+  return static_cast<WmRootWindowControllerMus*>(
+             WmShellMus::Get()
+                 ->GetRootWindowForNewWindows()
+                 ->GetRootWindowController())
       ->root_window_controller();
 }
 

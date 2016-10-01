@@ -48,14 +48,10 @@ class CONTENT_EXPORT VideoCaptureImpl
  public:
   ~VideoCaptureImpl() override;
 
-  VideoCaptureImpl(media::VideoCaptureSessionId session_id,
-                   VideoCaptureMessageFilter* filter);
-
-  // Start listening to IPC messages.
-  void Init();
-
-  // Stop listening to IPC messages.
-  void DeInit();
+  VideoCaptureImpl(
+      media::VideoCaptureSessionId session_id,
+      VideoCaptureMessageFilter* filter,
+      scoped_refptr<base::SingleThreadTaskRunner> io_task_runner);
 
   // Stop/resume delivering video frames to clients, based on flag |suspend|.
   void SuspendCapture(bool suspend);
@@ -86,6 +82,10 @@ class CONTENT_EXPORT VideoCaptureImpl
   void GetDeviceFormatsInUse(const VideoCaptureDeviceFormatsCB& callback);
 
   media::VideoCaptureSessionId session_id() const { return session_id_; }
+
+ protected:
+  // Note: Overridden only by unit test subclasses.
+  virtual void Send(IPC::Message* message);
 
  private:
   friend class VideoCaptureImplTest;
@@ -149,8 +149,6 @@ class CONTENT_EXPORT VideoCaptureImpl
   void RestartCapture();
   void StartCaptureInternal();
 
-  virtual void Send(IPC::Message* message);
-
   // Helpers.
   bool RemoveClient(int client_id, ClientInfoMap* clients);
 
@@ -196,7 +194,7 @@ class CONTENT_EXPORT VideoCaptureImpl
   VideoCaptureState state_;
 
   // IO message loop reference for checking correct class operation.
-  scoped_refptr<base::SingleThreadTaskRunner> io_task_runner_;
+  const scoped_refptr<base::SingleThreadTaskRunner> io_task_runner_;
 
   // WeakPtrFactory pointing back to |this| object, for use with
   // media::VideoFrames constructed in OnBufferReceived() from buffers cached

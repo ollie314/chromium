@@ -70,14 +70,14 @@ public class FakeSuggestionsSource implements SuggestionsSource {
      * Removes the given suggestion from the source and notifies any observer that it has been
      * invalidated.
      */
-    public void fireSuggestionInvalidated(@CategoryInt int category, String suggestionId) {
+    public void fireSuggestionInvalidated(@CategoryInt int category, String idWithinCategory) {
         for (SnippetArticle suggestion : mSuggestions.get(category)) {
-            if (suggestion.mId.equals(suggestionId)) {
+            if (suggestion.mIdWithinCategory.equals(idWithinCategory)) {
                 mSuggestions.get(category).remove(suggestion);
                 break;
             }
         }
-        mObserver.onSuggestionInvalidated(category, suggestionId);
+        mObserver.onSuggestionInvalidated(category, idWithinCategory);
     }
 
     /**
@@ -102,15 +102,15 @@ public class FakeSuggestionsSource implements SuggestionsSource {
 
     @Override
     public void fetchSuggestionImage(SnippetArticle suggestion, Callback<Bitmap> callback) {
-        if (mThumbnails.containsKey(suggestion.mId)) {
-            callback.onResult(mThumbnails.get(suggestion.mId));
+        if (mThumbnails.containsKey(suggestion.mIdWithinCategory)) {
+            callback.onResult(mThumbnails.get(suggestion.mIdWithinCategory));
         }
     }
 
     @Override
     public void getSuggestionVisited(
             SnippetArticle suggestion, Callback<Boolean> callback) {
-        throw new UnsupportedOperationException();
+        callback.onResult(false);
     }
 
     @Override

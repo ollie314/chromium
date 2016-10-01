@@ -209,6 +209,7 @@ LayerTreeHostImpl::LayerTreeHostImpl(
       wheel_scrolling_(false),
       scroll_affects_scroll_handler_(false),
       scroll_layer_id_when_mouse_over_scrollbar_(Layer::INVALID_ID),
+      captured_scrollbar_layer_id_(Layer::INVALID_ID),
       tile_priorities_dirty_(false),
       settings_(settings),
       visible_(false),
@@ -720,30 +721,6 @@ static void AppendQuadsForRenderSurfaceLayer(
   surface->AppendQuads(target_render_pass, draw_transform, occlusion,
                        debug_border_color, debug_border_width, mask_layer,
                        append_quads_data, contributing_render_pass->id);
-
-  // Add replica after the surface so that it appears below the surface.
-  if (surface->HasReplica()) {
-    const gfx::Transform& replica_draw_transform =
-        surface->replica_draw_transform();
-    Occlusion replica_occlusion = occlusion.GetOcclusionWithGivenDrawTransform(
-        surface->replica_draw_transform());
-    SkColor replica_debug_border_color = surface->GetReplicaDebugBorderColor();
-    float replica_debug_border_width = surface->GetReplicaDebugBorderWidth();
-    // TODO(danakj): By using the same RenderSurfaceImpl for both the
-    // content and its reflection, it's currently not possible to apply a
-    // separate mask to the reflection layer or correctly handle opacity in
-    // reflections (opacity must be applied after drawing both the layer and its
-    // reflection). The solution is to introduce yet another RenderSurfaceImpl
-    // to draw the layer and its reflection in. For now we only apply a separate
-    // reflection mask if the contents don't have a mask of their own.
-    LayerImpl* replica_mask_layer =
-        surface->HasMask() ? surface->MaskLayer() : surface->ReplicaMaskLayer();
-
-    surface->AppendQuads(target_render_pass, replica_draw_transform,
-                         replica_occlusion, replica_debug_border_color,
-                         replica_debug_border_width, replica_mask_layer,
-                         append_quads_data, contributing_render_pass->id);
-  }
 }
 
 static void AppendQuadsToFillScreen(const gfx::Rect& root_scroll_layer_rect,
@@ -2574,14 +2551,15 @@ LayerImpl* LayerTreeHostImpl::FindScrollLayerForDeviceViewportPoint(
     }
   }
 
-  // The outer viewport layer represents the viewport.
-  if (potentially_scrolling_layer_impl == InnerViewportScrollLayer())
-    potentially_scrolling_layer_impl = OuterViewportScrollLayer();
-
   // Falling back to the root scroll layer ensures generation of root overscroll
-  // notifications.
+  // notifications. The inner viewport layer represents the viewport during
+  // scrolling.
   if (!potentially_scrolling_layer_impl)
-    potentially_scrolling_layer_impl = OuterViewportScrollLayer();
+    potentially_scrolling_layer_impl = InnerViewportScrollLayer();
+
+  // The inner viewport layer represents the viewport.
+  if (potentially_scrolling_layer_impl == OuterViewportScrollLayer())
+    potentially_scrolling_layer_impl = InnerViewportScrollLayer();
 
   if (potentially_scrolling_layer_impl) {
     // Ensure that final layer scrolls on impl thread (crbug.com/625100)
@@ -2854,18 +2832,19 @@ InputHandler::ScrollStatus LayerTreeHostImpl::ScrollAnimated(
     if (scroll_node) {
       for (; scroll_tree.parent(scroll_node);
            scroll_node = scroll_tree.parent(scroll_node)) {
-        if (!scroll_node->scrollable)
+        if (!scroll_node->scrollable ||
+            scroll_node->is_outer_viewport_scroll_layer)
           continue;
 
-        if (scroll_node->is_outer_viewport_scroll_layer ||
-            scroll_node->is_inner_viewport_scroll_layer) {
+        if (scroll_node->is_inner_viewport_scroll_layer) {
           gfx::Vector2dF scrolled =
               viewport()->ScrollAnimated(pending_delta, delayed_by);
           // Viewport::ScrollAnimated returns pending_delta as long as it
           // starts an animation.
           if (scrolled == pending_delta)
             return scroll_status;
-          break;
+          pending_delta -= scrolled;
+          continue;
         }
 
         gfx::Vector2dF scroll_delta =
@@ -3008,7 +2987,7 @@ void LayerTreeHostImpl::ApplyScroll(ScrollNode* scroll_node,
   // details.
   const float kEpsilon = 0.1f;
 
-  if (scroll_node->is_outer_viewport_scroll_layer) {
+  if (scroll_node->is_inner_viewport_scroll_layer) {
     bool affect_top_controls = !wheel_scrolling_;
     Viewport::ScrollResult result = viewport()->ScrollBy(
         delta, viewport_point, scroll_state->is_direct_manipulation(),
@@ -3029,7 +3008,7 @@ void LayerTreeHostImpl::ApplyScroll(ScrollNode* scroll_node,
   bool scrolled = std::abs(applied_delta.x()) > kEpsilon;
   scrolled = scrolled || std::abs(applied_delta.y()) > kEpsilon;
 
-  if (scrolled && !scroll_node->is_outer_viewport_scroll_layer) {
+  if (scrolled && !scroll_node->is_inner_viewport_scroll_layer) {
     // If the applied delta is within 45 degrees of the input
     // delta, bail out to make it easier to scroll just one layer
     // in one direction without affecting any of its parents.
@@ -3066,9 +3045,11 @@ void LayerTreeHostImpl::DistributeScrollDelta(ScrollState* scroll_state) {
          scroll_node = scroll_tree.parent(scroll_node)) {
       if (scroll_node->is_outer_viewport_scroll_layer) {
         // Don't chain scrolls past the outer viewport scroll layer. Once we
-        // reach that, we're viewport scrolling which is special and handled by
-        // cc's Viewport class.
-        current_scroll_chain.push_front(scroll_node);
+        // reach that, we should scroll the viewport, which is represented by
+        // the inner viewport scroll layer.
+        ScrollNode* inner_viewport_scroll_node =
+            scroll_tree.Node(InnerViewportScrollLayer()->scroll_tree_index());
+        current_scroll_chain.push_front(inner_viewport_scroll_node);
         break;
       }
 
@@ -3228,6 +3209,28 @@ float LayerTreeHostImpl::DeviceSpaceDistanceToLayer(
       device_viewport_point);
 }
 
+void LayerTreeHostImpl::MouseDown() {
+  if (scroll_layer_id_when_mouse_over_scrollbar_ == Layer::INVALID_ID)
+    return;
+
+  captured_scrollbar_layer_id_ = scroll_layer_id_when_mouse_over_scrollbar_;
+  ScrollbarAnimationController* animation_controller =
+      ScrollbarAnimationControllerForId(captured_scrollbar_layer_id_);
+  if (animation_controller)
+    animation_controller->DidCaptureScrollbarBegin();
+}
+
+void LayerTreeHostImpl::MouseUp() {
+  if (captured_scrollbar_layer_id_ == Layer::INVALID_ID)
+    return;
+
+  ScrollbarAnimationController* animation_controller =
+      ScrollbarAnimationControllerForId(captured_scrollbar_layer_id_);
+  if (animation_controller)
+    animation_controller->DidCaptureScrollbarEnd();
+  captured_scrollbar_layer_id_ = Layer::INVALID_ID;
+}
+
 void LayerTreeHostImpl::MouseMoveAt(const gfx::Point& viewport_point) {
   gfx::PointF device_viewport_point = gfx::ScalePoint(
       gfx::PointF(viewport_point), active_tree_->device_scale_factor());
@@ -3242,6 +3245,8 @@ void LayerTreeHostImpl::MouseMoveAt(const gfx::Point& viewport_point) {
   LayerImpl* scroll_layer_impl = FindScrollLayerForDeviceViewportPoint(
       device_viewport_point, InputHandler::TOUCHSCREEN, layer_impl,
       &scroll_on_main_thread, &main_thread_scrolling_reasons);
+  if (scroll_layer_impl == InnerViewportScrollLayer())
+    scroll_layer_impl = OuterViewportScrollLayer();
   if (scroll_on_main_thread || !scroll_layer_impl)
     return;
 
@@ -3289,7 +3294,7 @@ void LayerTreeHostImpl::PinchGestureBegin() {
   client_->RenewTreePriority();
   pinch_gesture_end_should_clear_scrolling_layer_ = !CurrentlyScrollingLayer();
   active_tree_->SetCurrentlyScrollingLayer(
-      active_tree_->OuterViewportScrollLayer());
+      active_tree_->InnerViewportScrollLayer());
   top_controls_manager_->PinchBegin();
 }
 

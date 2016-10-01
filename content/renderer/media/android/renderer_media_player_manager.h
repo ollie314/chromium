@@ -46,7 +46,6 @@ class RendererMediaPlayerManager :
                   int player_id,
                   const GURL& url,
                   const GURL& first_party_for_cookies,
-                  int demuxer_client_id,
                   const GURL& frame_url,
                   bool allow_credentials,
                   int delegate_id) override;
@@ -85,11 +84,6 @@ class RendererMediaPlayerManager :
   // Requests the player to enter fullscreen.
   void EnterFullscreen(int player_id);
 
-  // Requests the player with |player_id| to use the CDM with |cdm_id|.
-  // Does nothing if |cdm_id| is kInvalidCdmId.
-  // TODO(xhwang): Update this when we implement setCdm(0).
-  void SetCdm(int player_id, int cdm_id);
-
   // Registers and unregisters a WebMediaPlayerAndroid object.
   int RegisterMediaPlayer(media::RendererMediaPlayerInterface* player) override;
   void UnregisterMediaPlayer(int player_id) override;
@@ -117,7 +111,6 @@ class RendererMediaPlayerManager :
   void OnTimeUpdate(int player_id,
                     base::TimeDelta current_timestamp,
                     base::TimeTicks current_time_ticks);
-  void OnWaitingForDecryptionKey(int player_id);
   void OnMediaPlayerReleased(int player_id);
   void OnConnectedToRemoteDevice(int player_id,
       const std::string& remote_playback_message);

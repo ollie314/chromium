@@ -20,12 +20,10 @@
 #include "components/sync/engine_impl/clear_server_data.h"
 #include "components/sync/engine_impl/commit.h"
 #include "components/sync/engine_impl/commit_processor.h"
-#include "components/sync/engine_impl/conflict_resolver.h"
 #include "components/sync/engine_impl/cycle/nudge_tracker.h"
 #include "components/sync/engine_impl/get_updates_delegate.h"
 #include "components/sync/engine_impl/get_updates_processor.h"
 #include "components/sync/engine_impl/net/server_connection_manager.h"
-#include "components/sync/engine_impl/syncer_types.h"
 #include "components/sync/syncable/directory.h"
 #include "components/sync/syncable/mutable_entry.h"
 
@@ -43,7 +41,7 @@ static const bool kCreateMobileBookmarksFolder = true;
 static const bool kCreateMobileBookmarksFolder = false;
 #endif
 
-Syncer::Syncer(syncer::CancelationSignal* cancelation_signal)
+Syncer::Syncer(CancelationSignal* cancelation_signal)
     : cancelation_signal_(cancelation_signal), is_syncing_(false) {}
 
 Syncer::~Syncer() {}

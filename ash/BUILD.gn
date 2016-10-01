@@ -113,6 +113,8 @@ component("ash") {
     "common/material_design/material_design_controller.cc",
     "common/material_design/material_design_controller.h",
     "common/metrics/gesture_action_type.h",
+    "common/metrics/pointer_metrics_recorder.cc",
+    "common/metrics/pointer_metrics_recorder.h",
     "common/metrics/user_metrics_action.h",
     "common/multi_profile_uma.cc",
     "common/multi_profile_uma.h",
@@ -163,7 +165,6 @@ component("ash") {
     "common/shelf/shelf_model_observer.h",
     "common/shelf/shelf_tooltip_manager.cc",
     "common/shelf/shelf_tooltip_manager.h",
-    "common/shelf/shelf_types.h",
     "common/shelf/shelf_view.cc",
     "common/shelf/shelf_view.h",
     "common/shelf/shelf_widget.cc",
@@ -784,8 +785,6 @@ component("ash") {
     "wm/session_state_animator_impl.h",
     "wm/stacking_controller.cc",
     "wm/stacking_controller.h",
-    "wm/stylus_metrics_recorder.cc",
-    "wm/stylus_metrics_recorder.h",
     "wm/system_gesture_event_filter.cc",
     "wm/system_gesture_event_filter.h",
     "wm/system_modal_container_event_filter.cc",
@@ -820,9 +819,11 @@ component("ash") {
     "//ash/common/strings",
     "//ash/resources",
     "//ash/resources/vector_icons",
+    "//ash/shared:app_types",
   ]
   deps = [
     "//ash/autoclick/common:autoclick",
+    "//ash/public/cpp",
     "//ash/touch_hud",
     "//base",
     "//base:i18n",
@@ -952,8 +953,6 @@ component("ash") {
       "touch/touchscreen_util.h",
       "virtual_keyboard_controller.cc",
       "virtual_keyboard_controller.h",
-      "wm/stylus_metrics_recorder.cc",
-      "wm/stylus_metrics_recorder.h",
     ]
   }
 
@@ -1004,6 +1003,22 @@ component("ash_with_content") {
   ]
 }
 
+# Used to test ash with an aura backend.
+source_set("ash_with_aura_test_support") {
+  testonly = true
+  sources = [
+    "test/ash_test_impl_aura.cc",
+    "test/ash_test_impl_aura.h",
+  ]
+  deps = [
+    ":ash",
+    ":test_support_common",
+    "//base",
+    "//skia",
+    "//ui/display",
+  ]
+}
+
 # Internal target consumed by |test_support_with_content| and
 # |test_support_without_content|. This target contains all the test support
 # files, with the exception of an implementation of AshTestEnvironment.
@@ -1013,6 +1028,9 @@ static_library("test_support_common") {
   testonly = true
   visibility = [ ":*" ]
   sources = [
+    "common/test/ash_test.cc",
+    "common/test/ash_test.h",
+    "common/test/ash_test_impl.h",
     "common/test/material_design_controller_test_api.cc",
     "common/test/material_design_controller_test_api.h",
     "common/test/test_palette_delegate.cc",
@@ -1235,6 +1253,7 @@ static_library("ash_shell_lib") {
     ":ash_with_content",
     ":test_support_without_content",
     "//ash/common/strings",
+    "//ash/public/cpp",
     "//ash/resources",
     "//base",
     "//base:i18n",
@@ -1317,8 +1336,10 @@ test("ash_content_unittests") {
 
   deps = [
     ":ash",
+    ":ash_with_aura_test_support",
     ":ash_with_content",
     ":test_support_with_content",
+    "//ash/public/cpp",
     "//base",
     "//base/test:test_support",
     "//components/signin/core/account_id",
@@ -1376,6 +1397,7 @@ test("ash_unittests") {
     "common/frame/custom_frame_view_ash_unittest.cc",
     "common/frame/default_header_painter_unittest.cc",
     "common/material_design/material_design_controller_unittest.cc",
+    "common/metrics/pointer_metrics_recorder_unittest.cc",
     "common/popup_message_unittest.cc",
     "common/shelf/shelf_background_animator_unittest.cc",
     "common/shelf/shelf_button_pressed_metric_tracker_unittest.cc",
@@ -1409,6 +1431,7 @@ test("ash_unittests") {
     "common/wm/overview/cleanup_animation_observer_unittest.cc",
     "common/wm/workspace/workspace_event_handler_test_helper.cc",
     "common/wm/workspace/workspace_event_handler_test_helper.h",
+    "common/wm_window_unittest.cc",
     "common/wm_window_user_data_unittest.cc",
     "dip_unittest.cc",
     "display/cursor_window_controller_unittest.cc",
@@ -1517,9 +1540,11 @@ test("ash_unittests") {
 
   deps = [
     ":ash",
+    ":ash_with_aura_test_support",
     ":test_support_without_content",
     "//ash/autoclick/common:autoclick",
     "//ash/common/strings",
+    "//ash/public/cpp",
     "//ash/resources",
     "//ash/touch_hud",
     "//base",

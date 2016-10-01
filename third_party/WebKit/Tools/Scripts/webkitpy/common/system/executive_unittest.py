@@ -167,6 +167,22 @@ class ExecutiveTest(unittest.TestCase):
         # Killing again should fail silently.
         executive.kill_process(process.pid)
 
+    def test_timeout_exceeded(self):
+        executive = Executive()
+
+        def timeout():
+            executive.run_command(command_line('sleep', 'infinity'), timeout_seconds=0.01)
+        self.assertRaises(ScriptError, timeout)
+
+    def test_timeout_exceeded_exit_code(self):
+        executive = Executive()
+        exit_code = executive.run_command(command_line('sleep', 'infinity'), timeout_seconds=0.01, return_exit_code=True)
+        self.assertNotEqual(exit_code, 0)
+
+    def test_timeout_satisfied(self):
+        executive = Executive()
+        executive.run_command(command_line('sleep', '0'), timeout_seconds=1000)
+
     def _assert_windows_image_name(self, name, expected_windows_name):
         executive = Executive()
         windows_name = executive._windows_image_name(name)
@@ -184,8 +200,9 @@ class ExecutiveTest(unittest.TestCase):
     def test_check_running_pid(self):
         executive = Executive()
         self.assertTrue(executive.check_running_pid(os.getpid()))
-        # Maximum pid number on Linux is 32768 by default
-        self.assertFalse(executive.check_running_pid(100000))
+        # According to the proc(5) man page, on 64-bit linux systems,
+        # pid_max can be set to any value up to 2^22 (approximately 4 million).
+        self.assertFalse(executive.check_running_pid(5000000))
 
     def test_running_pids(self):
         executive = Executive()

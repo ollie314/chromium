@@ -15,7 +15,7 @@
 #include "components/ntp_snippets/category.h"
 #include "components/ntp_snippets/category_status.h"
 #include "components/ntp_snippets/content_suggestions_service.h"
-#include "components/ntp_snippets/ntp_snippets_service.h"
+#include "components/ntp_snippets/remote/ntp_snippets_service.h"
 #include "content/public/browser/web_ui_message_handler.h"
 
 namespace base {
@@ -41,8 +41,8 @@ class SnippetsInternalsMessageHandler
   void OnCategoryStatusChanged(
       ntp_snippets::Category category,
       ntp_snippets::CategoryStatus new_status) override;
-  void OnSuggestionInvalidated(ntp_snippets::Category category,
-                               const std::string& suggestion_id) override;
+  void OnSuggestionInvalidated(
+      const ntp_snippets::ContentSuggestion::ID& suggestion_id) override;
   void ContentSuggestionsServiceShutdown() override;
 
   void HandleRefreshContent(const base::ListValue* args);

@@ -3327,12 +3327,16 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
     // Purge web view if last committed URL is different from the document URL.
     // This can happen if external URL was added to the navigation stack and was
     // loaded using Go Back or Go Forward navigation (in which case document URL
-    // will point to the previous page).
-    GURL lastCommittedURL =
-        self.webState->GetNavigationManager()->GetLastCommittedItem()->GetURL();
-    if (lastCommittedURL != _documentURL) {
-      [self requirePageReconstruction];
-      [self setDocumentURL:lastCommittedURL];
+    // will point to the previous page).  If this is the first load for a
+    // NavigationManager, there will be no last committed item, so check here.
+    web::NavigationItem* lastCommittedItem =
+        self.webState->GetNavigationManager()->GetLastCommittedItem();
+    if (lastCommittedItem) {
+      GURL lastCommittedURL = lastCommittedItem->GetURL();
+      if (lastCommittedURL != _documentURL) {
+        [self requirePageReconstruction];
+        [self setDocumentURL:lastCommittedURL];
+      }
     }
 
     if ([_delegate openExternalURL:requestURL
@@ -4796,6 +4800,13 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
   }
 
   GURL requestURL = net::GURLWithNSURL(action.request.URL);
+
+  // Don't create windows for non-empty invalid URLs.
+  if (!requestURL.is_empty() && !requestURL.is_valid()) {
+    DLOG(WARNING) << "Unable to open a window with invalid URL: "
+                  << requestURL.spec();
+    return nil;
+  }
 
   if (![self userIsInteracting]) {
     NSString* referer = [self refererFromNavigationAction:action];

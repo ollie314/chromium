@@ -83,6 +83,7 @@
 #include "content/common/input_messages.h"
 #include "content/common/page_messages.h"
 #include "content/common/page_state_serialization.h"
+#include "content/common/render_message_filter.mojom.h"
 #include "content/common/site_isolation_policy.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/ax_event_notification_details.h"
@@ -2002,7 +2003,7 @@ void WebContentsImpl::CreateNewWindow(
     int32_t route_id,
     int32_t main_frame_route_id,
     int32_t main_frame_widget_route_id,
-    const ViewHostMsg_CreateWindow_Params& params,
+    const mojom::CreateNewWindowParams& params,
     SessionStorageNamespace* session_storage_namespace) {
   // We usually create the new window in the same BrowsingInstance (group of
   // script-related windows), by passing in the current SiteInstance.  However,
@@ -3352,10 +3353,10 @@ void WebContentsImpl::RequestOpenURL(RenderFrameHostImpl* render_frame_host,
   }
 }
 
-bool WebContentsImpl::ShouldTransferNavigation() {
+bool WebContentsImpl::ShouldTransferNavigation(bool is_main_frame_navigation) {
   if (!delegate_)
     return true;
-  return delegate_->ShouldTransferNavigation();
+  return delegate_->ShouldTransferNavigation(is_main_frame_navigation);
 }
 
 bool WebContentsImpl::ShouldPreserveAbortedURLs() {
@@ -4497,6 +4498,12 @@ ScopedVector<NavigationThrottle> WebContentsImpl::CreateThrottlesForNavigation(
     NavigationHandle* navigation_handle) {
   return GetContentClient()->browser()->CreateThrottlesForNavigation(
       navigation_handle);
+}
+
+std::unique_ptr<NavigationUIData> WebContentsImpl::GetNavigationUIData(
+    NavigationHandle* navigation_handle) {
+  DCHECK(IsBrowserSideNavigationEnabled());
+  return GetContentClient()->browser()->GetNavigationUIData(navigation_handle);
 }
 
 void WebContentsImpl::DidCancelLoading() {

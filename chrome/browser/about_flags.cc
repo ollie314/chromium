@@ -904,6 +904,9 @@ const FeatureEntry kFeatureEntries[] = {
     {"allow-nacl-socket-api", IDS_FLAGS_ALLOW_NACL_SOCKET_API_NAME,
      IDS_FLAGS_ALLOW_NACL_SOCKET_API_DESCRIPTION, kOsDesktop,
      SINGLE_VALUE_TYPE_AND_VALUE(switches::kAllowNaClSocketAPI, "*")},
+    {"run-all-flash-in-allow-mode", IDS_FLAGS_RUN_ALL_FLASH_IN_ALLOW_MODE_NAME,
+     IDS_FLAGS_RUN_ALL_FLASH_IN_ALLOW_MODE_DESCRIPTION, kOsDesktop,
+     FEATURE_VALUE_TYPE(features::kRunAllFlashInAllowMode)},
 #endif  // ENABLE_PLUGINS
 #if defined(OS_CHROMEOS)
     {"mash", IDS_FLAGS_USE_MASH_NAME, IDS_FLAGS_USE_MASH_DESCRIPTION, kOsCrOS,
@@ -1557,11 +1560,11 @@ const FeatureEntry kFeatureEntries[] = {
     {"data-reduction-proxy-lo-fi", IDS_FLAGS_DATA_REDUCTION_PROXY_LO_FI_NAME,
      IDS_FLAGS_DATA_REDUCTION_PROXY_LO_FI_DESCRIPTION, kOsAll,
      MULTI_VALUE_TYPE(kDataReductionProxyLoFiChoices)},
-    {"enable-data-reduction-proxy-lo-fi-preview",
-     IDS_FLAGS_ENABLE_DATA_REDUCTION_PROXY_LO_FI_PREVIEW_NAME,
-     IDS_FLAGS_ENABLE_DATA_REDUCTION_PROXY_LO_FI_PREVIEW_DESCRIPTION, kOsAll,
-     SINGLE_VALUE_TYPE(
-         data_reduction_proxy::switches::kEnableDataReductionProxyLoFiPreview)},
+    {"enable-data-reduction-proxy-lite-page",
+     IDS_FLAGS_ENABLE_DATA_REDUCTION_PROXY_LITE_PAGE_NAME,
+     IDS_FLAGS_ENABLE_DATA_REDUCTION_PROXY_LITE_PAGE_DESCRIPTION,
+     kOsAll, SINGLE_VALUE_TYPE(data_reduction_proxy::switches::
+                                   kEnableDataReductionProxyLitePage)},
     {"clear-data-reduction-proxy-data-savings",
      IDS_FLAGS_DATA_REDUCTION_PROXY_RESET_SAVINGS_NAME,
      IDS_FLAGS_DATA_REDUCTION_PROXY_RESET_SAVINGS_DESCRIPTION, kOsAll,
@@ -2153,10 +2156,10 @@ bool SkipConditionalFeatureEntry(const FeatureEntry& entry) {
   }
 #endif  // OS_ANDROID
 
-  // data-reduction-proxy-lo-fi and enable-data-reduction-proxy-lo-fi-preview
+  // data-reduction-proxy-lo-fi and enable-data-reduction-proxy-lite-page
   // are only available for Chromium builds and the Canary/Dev/Beta channels.
   if ((!strcmp("data-reduction-proxy-lo-fi", entry.internal_name) ||
-       !strcmp("enable-data-reduction-proxy-lo-fi-preview",
+       !strcmp("enable-data-reduction-proxy-lite-page",
                entry.internal_name)) &&
       channel != version_info::Channel::BETA &&
       channel != version_info::Channel::DEV &&

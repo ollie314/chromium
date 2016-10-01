@@ -451,19 +451,48 @@ scoped_refptr<VideoFrame> DownShiftHighbitVideoFrame(
   VideoPixelFormat format;
   int shift = 1;
   switch (video_frame->format()) {
-    case PIXEL_FORMAT_YUV420P10:
-      shift = 2;
-    case PIXEL_FORMAT_YUV420P9:
+    case PIXEL_FORMAT_YUV420P12:
+      shift = 4;
       format = PIXEL_FORMAT_I420;
       break;
-    case PIXEL_FORMAT_YUV422P10:
+
+    case PIXEL_FORMAT_YUV420P10:
       shift = 2;
-    case PIXEL_FORMAT_YUV422P9:
+      format = PIXEL_FORMAT_I420;
+      break;
+
+    case PIXEL_FORMAT_YUV420P9:
+      shift = 1;
+      format = PIXEL_FORMAT_I420;
+      break;
+
+    case PIXEL_FORMAT_YUV422P12:
+      shift = 4;
       format = PIXEL_FORMAT_YV16;
       break;
+
+    case PIXEL_FORMAT_YUV422P10:
+      shift = 2;
+      format = PIXEL_FORMAT_YV16;
+      break;
+
+    case PIXEL_FORMAT_YUV422P9:
+      shift = 1;
+      format = PIXEL_FORMAT_YV16;
+      break;
+
+    case PIXEL_FORMAT_YUV444P12:
+      shift = 4;
+      format = PIXEL_FORMAT_YV24;
+      break;
+
     case PIXEL_FORMAT_YUV444P10:
       shift = 2;
+      format = PIXEL_FORMAT_YV24;
+      break;
+
     case PIXEL_FORMAT_YUV444P9:
+      shift = 1;
       format = PIXEL_FORMAT_YV24;
       break;
 
@@ -477,9 +506,7 @@ scoped_refptr<VideoFrame> DownShiftHighbitVideoFrame(
 
   // Copy all metadata.
   // (May be enough to copy color space)
-  base::DictionaryValue tmp;
-  video_frame->metadata()->MergeInternalValuesInto(&tmp);
-  ret->metadata()->MergeInternalValuesFrom(tmp);
+  ret->metadata()->MergeMetadataFrom(video_frame->metadata());
 
   for (int plane = VideoFrame::kYPlane; plane <= VideoFrame::kVPlane; ++plane) {
     int width = ret->row_bytes(plane);
@@ -592,7 +619,10 @@ void SkCanvasVideoRenderer::ConvertVideoFrameToRGBPixels(
     case PIXEL_FORMAT_YUV444P9:
     case PIXEL_FORMAT_YUV420P10:
     case PIXEL_FORMAT_YUV422P10:
-    case PIXEL_FORMAT_YUV444P10: {
+    case PIXEL_FORMAT_YUV444P10:
+    case PIXEL_FORMAT_YUV420P12:
+    case PIXEL_FORMAT_YUV422P12:
+    case PIXEL_FORMAT_YUV444P12: {
       scoped_refptr<VideoFrame> temporary_frame =
           DownShiftHighbitVideoFrame(video_frame);
       ConvertVideoFrameToRGBPixels(temporary_frame.get(), rgb_pixels,
@@ -610,6 +640,12 @@ void SkCanvasVideoRenderer::ConvertVideoFrameToRGBPixels(
     case PIXEL_FORMAT_RGB32:
     case PIXEL_FORMAT_MJPEG:
     case PIXEL_FORMAT_MT21:
+    // TODO(dshwang): Use either I400ToARGB or J400ToARGB depending if we want
+    // BT.601 constrained range of 16 to 240, or JPEG full range BT.601
+    // coefficients. Implement it when Y8/16 foramt is supported.
+    // crbug.com/624436
+    case PIXEL_FORMAT_Y8:
+    case PIXEL_FORMAT_Y16:
     case PIXEL_FORMAT_UNKNOWN:
       NOTREACHED();
   }

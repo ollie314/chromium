@@ -2,10 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "build/build_config.h"
 #include "components/sync/driver/pref_names.h"
 
-namespace sync_driver {
+namespace syncer {
 
 namespace prefs {
 
@@ -127,4 +126,4 @@ const char kSyncNigoriStateForPassphraseTransition[] =
 
 }  // namespace prefs
 
-}  // namespace sync_driver
+}  // namespace syncer

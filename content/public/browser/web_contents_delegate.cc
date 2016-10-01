@@ -27,7 +27,8 @@ WebContents* WebContentsDelegate::OpenURLFromTab(WebContents* source,
   return nullptr;
 }
 
-bool WebContentsDelegate::ShouldTransferNavigation() {
+bool WebContentsDelegate::ShouldTransferNavigation(
+    bool is_main_frame_navigation) {
   return true;
 }
 
@@ -207,6 +208,15 @@ void WebContentsDelegate::RequestMediaDecodePermission(
     WebContents* web_contents,
     const base::Callback<void(bool)>& callback) {
   callback.Run(false);
+}
+
+base::android::ScopedJavaLocalRef<jobject>
+WebContentsDelegate::GetContentVideoViewEmbedder() {
+  return base::android::ScopedJavaLocalRef<jobject>();
+}
+
+bool WebContentsDelegate::ShouldBlockMediaRequest(const GURL& url) {
+  return false;
 }
 #endif
 

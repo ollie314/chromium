@@ -199,6 +199,9 @@ struct StructTraits<gfx::mojom::NativePixmapPlaneDataView,
   static int32_t offset(const gfx::NativePixmapPlane& plane) {
     return plane.offset;
   }
+  static uint64_t size(const gfx::NativePixmapPlane& plane) {
+    return plane.size;
+  }
   static uint64_t modifier(const gfx::NativePixmapPlane& plane) {
     return plane.modifier;
   }
@@ -206,6 +209,7 @@ struct StructTraits<gfx::mojom::NativePixmapPlaneDataView,
                    gfx::NativePixmapPlane* out) {
     out->stride = data.stride();
     out->offset = data.offset();
+    out->size = data.size();
     out->modifier = data.modifier();
     return true;
   }
@@ -214,6 +218,12 @@ struct StructTraits<gfx::mojom::NativePixmapPlaneDataView,
 template <>
 struct StructTraits<gfx::mojom::NativePixmapHandleDataView,
                     gfx::NativePixmapHandle> {
+  using PixmapHandleFdList = std::vector<mojo::ScopedHandle>;
+
+  static void* SetUpContext(const gfx::NativePixmapHandle& handle);
+  static void TearDownContext(const gfx::NativePixmapHandle& handle,
+                              void* context);
+
   static bool IsNull(const gfx::NativePixmapHandle& handle) {
 #if defined(USE_OZONE)
     return false;
@@ -222,8 +232,8 @@ struct StructTraits<gfx::mojom::NativePixmapHandleDataView,
     return true;
 #endif
   }
-  static std::vector<mojo::ScopedHandle> fds(
-      const gfx::NativePixmapHandle& pixmap_handle);
+  static PixmapHandleFdList fds(const gfx::NativePixmapHandle& pixmap_handle,
+                                void* context);
 
   static const std::vector<gfx::NativePixmapPlane>& planes(
       const gfx::NativePixmapHandle& pixmap_handle) {

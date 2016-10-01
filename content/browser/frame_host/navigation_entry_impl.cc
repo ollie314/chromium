@@ -22,6 +22,7 @@
 #include "content/common/page_state_serialization.h"
 #include "content/common/resource_request_body_impl.h"
 #include "content/common/site_isolation_policy.h"
+#include "content/public/browser/reload_type.h"
 #include "content/public/common/browser_side_navigation_policy.h"
 #include "content/public/common/content_constants.h"
 #include "content/public/common/url_constants.h"
@@ -259,7 +260,9 @@ NavigationEntryImpl::NavigationEntryImpl(
       should_replace_entry_(false),
       should_clear_history_list_(false),
       can_load_local_resources_(false),
-      frame_tree_node_id_(-1) {
+      frame_tree_node_id_(-1),
+      reload_type_(ReloadType::NONE),
+      started_from_context_menu_(false) {
 #if defined(OS_ANDROID)
   has_user_gesture_ = false;
 #endif
@@ -639,6 +642,7 @@ std::unique_ptr<NavigationEntryImpl> NavigationEntryImpl::CloneAndReplace(
 #if defined(OS_ANDROID)
   copy->has_user_gesture_ = has_user_gesture_;
 #endif
+  // ResetForCommit: reload_type_
   copy->extra_data_ = extra_data_;
 
   return copy;
@@ -680,9 +684,6 @@ CommonNavigationParams NavigationEntryImpl::ConstructCommonNavigationParams(
 StartNavigationParams NavigationEntryImpl::ConstructStartNavigationParams()
     const {
   return StartNavigationParams(extra_headers(),
-#if defined(OS_ANDROID)
-                               has_user_gesture(),
-#endif
                                transferred_global_request_id().child_id,
                                transferred_global_request_id().request_id);
 }
@@ -691,7 +692,7 @@ RequestNavigationParams NavigationEntryImpl::ConstructRequestNavigationParams(
     const FrameNavigationEntry& frame_entry,
     bool is_same_document_history_load,
     bool is_history_navigation_in_new_child,
-    bool has_subtree_history_items,
+    const std::set<std::string>& subframe_unique_names,
     bool has_committed_real_load,
     bool intended_as_new_entry,
     int pending_history_list_offset,
@@ -716,13 +717,17 @@ RequestNavigationParams NavigationEntryImpl::ConstructRequestNavigationParams(
     current_length_to_send = 0;
   }
 
+  bool user_gesture = false;
+#if defined(OS_ANDROID)
+  user_gesture = has_user_gesture();
+#endif
   RequestNavigationParams request_params(
       GetIsOverridingUserAgent(), redirects, GetCanLoadLocalResources(),
       base::Time::Now(), frame_entry.page_state(), GetPageID(), GetUniqueID(),
       is_same_document_history_load, is_history_navigation_in_new_child,
-      has_subtree_history_items, has_committed_real_load, intended_as_new_entry,
+      subframe_unique_names, has_committed_real_load, intended_as_new_entry,
       pending_offset_to_send, current_offset_to_send, current_length_to_send,
-      IsViewSourceMode(), should_clear_history_list());
+      IsViewSourceMode(), should_clear_history_list(), user_gesture);
 #if defined(OS_ANDROID)
   if (GetDataURLAsString() &&
       GetDataURLAsString()->size() <= kMaxLengthOfDataURLString) {
@@ -753,6 +758,7 @@ void NavigationEntryImpl::ResetForCommit(FrameNavigationEntry* frame_entry) {
 
   set_should_clear_history_list(false);
   set_frame_tree_node_id(-1);
+  set_reload_type(ReloadType::NONE);
 
   if (frame_entry)
     frame_entry->set_source_site_instance(nullptr);
@@ -847,10 +853,16 @@ FrameNavigationEntry* NavigationEntryImpl::GetFrameEntry(
   return tree_node ? tree_node->frame_entry.get() : nullptr;
 }
 
-bool NavigationEntryImpl::HasSubtreeHistoryItems(
+std::set<std::string> NavigationEntryImpl::GetSubframeUniqueNames(
     FrameTreeNode* frame_tree_node) const {
+  std::set<std::string> names;
   NavigationEntryImpl::TreeNode* tree_node = FindFrameEntry(frame_tree_node);
-  return tree_node && !tree_node->children.empty();
+  if (tree_node) {
+    // Return the names of all immediate children.
+    for (TreeNode* child : tree_node->children)
+      names.insert(child->frame_entry->frame_unique_name());
+  }
+  return names;
 }
 
 void NavigationEntryImpl::ClearStaleFrameEntriesForNewFrame(

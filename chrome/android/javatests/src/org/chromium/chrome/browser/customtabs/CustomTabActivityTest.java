@@ -115,14 +115,13 @@ public class CustomTabActivityTest extends CustomTabActivityTestBase {
     @Override
     protected void setUp() throws Exception {
         super.setUp();
+        Context appContext = getInstrumentation().getTargetContext().getApplicationContext();
         mTestServer = EmbeddedTestServer.createAndStartFileServer(
-                getInstrumentation().getContext(), Environment.getExternalStorageDirectory());
+                appContext, Environment.getExternalStorageDirectory());
         mTestPage = mTestServer.getURL(TEST_PAGE);
         mTestPage2 = mTestServer.getURL(TEST_PAGE_2);
-        PathUtils.setPrivateDataDirectorySuffix(PRIVATE_DATA_DIRECTORY_SUFFIX,
-                getInstrumentation().getTargetContext().getApplicationContext());
-        LibraryLoader.get(LibraryProcessType.PROCESS_BROWSER)
-                .ensureInitialized(getInstrumentation().getTargetContext().getApplicationContext());
+        PathUtils.setPrivateDataDirectorySuffix(PRIVATE_DATA_DIRECTORY_SUFFIX, appContext);
+        LibraryLoader.get(LibraryProcessType.PROCESS_BROWSER).ensureInitialized();
     }
 
     @Override
@@ -165,7 +164,7 @@ public class CustomTabActivityTest extends CustomTabActivityTestBase {
     private PendingIntent addMenuEntriesToIntent(Intent intent, int numEntries) {
         PendingIntent pi = PendingIntent.getBroadcast(getInstrumentation().getTargetContext(), 0,
                 new Intent(), 0);
-        ArrayList<Bundle> menuItems = new ArrayList<Bundle>();
+        ArrayList<Bundle> menuItems = new ArrayList<>();
         for (int i = 0; i < numEntries; i++) {
             Bundle bundle = new Bundle();
             bundle.putString(CustomTabsIntent.KEY_MENU_ITEM_TITLE, TEST_MENU_TITLE);
@@ -1214,7 +1213,7 @@ public class CustomTabActivityTest extends CustomTabActivityTestBase {
      */
     @SmallTest
     @CommandLineFlags.Add({"enable-spdy-proxy-auth", "data-reduction-proxy-lo-fi=always-on",
-            "enable-data-reduction-proxy-lo-fi-preview"})
+            "enable-data-reduction-proxy-lite-page"})
     @RetryOnFailure
     public void testLaunchWebLiteURL() throws Exception {
         final String testUrl = WEBLITE_PREFIX + mTestPage;
@@ -1244,7 +1243,7 @@ public class CustomTabActivityTest extends CustomTabActivityTestBase {
      * Reduction Proxy is not using Lo-Fi.
      */
     @SmallTest
-    @CommandLineFlags.Add({"enable-spdy-proxy-auth", "enable-data-reduction-proxy-lo-fi-preview"})
+    @CommandLineFlags.Add({"enable-spdy-proxy-auth", "enable-data-reduction-proxy-lite-page"})
     @RetryOnFailure
     public void testLaunchWebLiteURLNoLoFi() throws Exception {
         final String testUrl = WEBLITE_PREFIX + mTestPage;
@@ -1260,7 +1259,7 @@ public class CustomTabActivityTest extends CustomTabActivityTestBase {
      */
     @SmallTest
     @CommandLineFlags.Add({"data-reduction-proxy-lo-fi=always-on",
-            "enable-data-reduction-proxy-lo-fi-preview"})
+            "enable-data-reduction-proxy-lite-page"})
     @RetryOnFailure
     public void testLaunchWebLiteURLNoDataReductionProxy() throws Exception {
         final String testUrl = WEBLITE_PREFIX + mTestPage;
@@ -1276,7 +1275,7 @@ public class CustomTabActivityTest extends CustomTabActivityTestBase {
      */
     @SmallTest
     @CommandLineFlags.Add({"enable-spdy-proxy-auth", "data-reduction-proxy-lo-fi=always-on",
-            "enable-data-reduction-proxy-lo-fi-preview"})
+            "enable-data-reduction-proxy-lite-page"})
     @RetryOnFailure
     public void testLaunchHttpsWebLiteURL() throws Exception {
         final String testUrl = WEBLITE_PREFIX + mTestPage.replaceFirst("http", "https");
@@ -1292,7 +1291,7 @@ public class CustomTabActivityTest extends CustomTabActivityTestBase {
      */
     @SmallTest
     @CommandLineFlags.Add({"enable-spdy-proxy-auth", "data-reduction-proxy-lo-fi=always-on",
-            "enable-data-reduction-proxy-lo-fi-preview"})
+            "enable-data-reduction-proxy-lite-page"})
     @RetryOnFailure
     public void testLaunchNonWebLiteURL() throws Exception {
         final String testUrl = mTestPage2 + "/?lite_url=" + mTestPage;

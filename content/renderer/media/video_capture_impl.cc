@@ -105,32 +105,23 @@ VideoCaptureImpl::ClientInfo::ClientInfo(const ClientInfo& other) = default;
 VideoCaptureImpl::ClientInfo::~ClientInfo() {}
 
 VideoCaptureImpl::VideoCaptureImpl(
-    const media::VideoCaptureSessionId session_id,
-    VideoCaptureMessageFilter* filter)
+    media::VideoCaptureSessionId session_id,
+    VideoCaptureMessageFilter* filter,
+    scoped_refptr<base::SingleThreadTaskRunner> io_task_runner)
     : message_filter_(filter),
       device_id_(0),
       session_id_(session_id),
       suspended_(false),
       state_(VIDEO_CAPTURE_STATE_STOPPED),
+      io_task_runner_(std::move(io_task_runner)),
       weak_factory_(this) {
   DCHECK(filter);
+  io_task_runner_->PostTask(FROM_HERE,
+                            base::Bind(&VideoCaptureMessageFilter::AddDelegate,
+                                       message_filter_, this));
 }
 
 VideoCaptureImpl::~VideoCaptureImpl() {
-  DCHECK(io_task_runner_->BelongsToCurrentThread());
-}
-
-void VideoCaptureImpl::Init() {
-  // For creating callbacks in unittest, this class may be constructed from a
-  // different thread than the IO thread, e.g. wherever unittest runs on.
-  // Therefore, this function should define the thread ownership.
-#if DCHECK_IS_ON()
-  io_task_runner_ = base::ThreadTaskRunnerHandle::Get();
-#endif
-  message_filter_->AddDelegate(this);
-}
-
-void VideoCaptureImpl::DeInit() {
   DCHECK(io_task_runner_->BelongsToCurrentThread());
   if (state_ == VIDEO_CAPTURE_STATE_STARTED)
     Send(new VideoCaptureHostMsg_Stop(device_id_));
@@ -448,8 +439,9 @@ void VideoCaptureImpl::OnStateChanged(VideoCaptureState state) {
         RestartCapture();
       break;
     case VIDEO_CAPTURE_STATE_PAUSED:
+    case VIDEO_CAPTURE_STATE_RESUMED:
       for (const auto& client : clients_)
-        client.second.state_update_cb.Run(VIDEO_CAPTURE_STATE_PAUSED);
+        client.second.state_update_cb.Run(state);
       break;
     case VIDEO_CAPTURE_STATE_ERROR:
       DVLOG(1) << "OnStateChanged: error!, device_id = " << device_id_;

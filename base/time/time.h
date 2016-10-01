@@ -21,9 +21,11 @@
 // ThreadTicks will "stand still" whenever the thread has been de-scheduled by
 // the operating system.
 //
-// All time classes are copyable, assignable, and occupy 64-bits per
-// instance. Thus, they can be efficiently passed by-value (as opposed to
-// by-reference).
+// All time classes are copyable, assignable, and occupy 64-bits per instance.
+// As a result, prefer passing them by value:
+//   void MyFunction(TimeDelta arg);
+// If circumstances require, you may also pass by const reference:
+//   void MyFunction(const TimeDelta& arg);  // Not preferred.
 //
 // Definitions of operator<< are provided to make these types work with
 // DCHECK_EQ() and other log macros. For human-readable formatting, see
@@ -115,6 +117,9 @@ class BASE_EXPORT TimeDelta {
   static constexpr TimeDelta FromSecondsD(double secs);
   static constexpr TimeDelta FromMillisecondsD(double ms);
   static constexpr TimeDelta FromMicroseconds(int64_t us);
+#if defined(OS_POSIX)
+  static TimeDelta FromTimeSpec(const timespec& ts);
+#endif
 #if defined(OS_WIN)
   static TimeDelta FromQPCValue(LONGLONG qpc_value);
 #endif
@@ -729,6 +734,10 @@ class BASE_EXPORT TimeTicks : public time_internal::TimeBase<TimeTicks> {
   // IsHighResolution() returns false.
   static TimeTicks FromQPCValue(LONGLONG qpc_value);
 #endif
+
+#if defined(OS_MACOSX) && !defined(OS_IOS)
+  static TimeTicks FromMachAbsoluteTime(uint64_t mach_absolute_time);
+#endif  // defined(OS_MACOSX) && !defined(OS_IOS)
 
   // Get an estimate of the TimeTick value at the time of the UnixEpoch. Because
   // Time and TimeTicks respond differently to user-set time and NTP

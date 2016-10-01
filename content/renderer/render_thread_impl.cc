@@ -119,6 +119,7 @@
 #include "content/renderer/renderer_blink_platform_impl.h"
 #include "content/renderer/scheduler/resource_dispatch_throttler.h"
 #include "content/renderer/service_worker/embedded_worker_dispatcher.h"
+#include "content/renderer/service_worker/embedded_worker_instance_client_impl.h"
 #include "content/renderer/service_worker/service_worker_context_client.h"
 #include "content/renderer/service_worker/service_worker_context_message_filter.h"
 #include "content/renderer/shared_worker/embedded_shared_worker_stub.h"
@@ -169,7 +170,6 @@
 #include <cpu-features.h>
 #include "content/renderer/android/synchronous_compositor_filter.h"
 #include "content/renderer/android/synchronous_compositor_frame_sink.h"
-#include "content/renderer/media/android/renderer_demuxer_android.h"
 #include "content/renderer/media/android/stream_texture_factory.h"
 #include "media/base/android/media_codec_util.h"
 #endif
@@ -247,6 +247,10 @@ const size_t kImageCacheSingleAllocationByteLimit = 64 * 1024 * 1024;
 
 // Unique identifier for each output surface created.
 uint32_t g_next_compositor_frame_sink_id = 1;
+
+// An implementation of mojom::RenderMessageFilter which can be mocked out
+// for tests which may indirectly send messages over this interface.
+mojom::RenderMessageFilter* g_render_message_filter_for_testing;
 
 // Keep the global RenderThreadImpl in a TLS slot so it is impossible to access
 // incorrectly from the wrong thread.
@@ -343,8 +347,9 @@ class FrameFactoryImpl : public mojom::FrameFactory {
 
     RenderFrameImpl* frame = RenderFrameImpl::FromRoutingID(frame_routing_id);
     // We can receive a GetServiceProviderForFrame message for a frame not yet
-    // created due to a race between the message and a ViewMsg_New IPC that
-    // triggers creation of the RenderFrame we want.
+    // created due to a race between the message and a
+    // mojom::Renderer::CreateView IPC that triggers creation of the RenderFrame
+    // we want.
     if (!frame) {
       RenderThreadImpl::current()->RegisterPendingFrameCreate(
           frame_routing_id, std::move(frame_request), std::move(frame_host));
@@ -570,8 +575,23 @@ RenderThreadImpl* RenderThreadImpl::Create(
                               std::move(renderer_scheduler));
 }
 
+// static
 RenderThreadImpl* RenderThreadImpl::current() {
   return lazy_tls.Pointer()->Get();
+}
+
+// static
+mojom::RenderMessageFilter* RenderThreadImpl::current_render_message_filter() {
+  if (g_render_message_filter_for_testing)
+    return g_render_message_filter_for_testing;
+  DCHECK(current());
+  return current()->render_message_filter();
+}
+
+// static
+void RenderThreadImpl::SetRenderMessageFilterForTesting(
+    mojom::RenderMessageFilter* render_message_filter) {
+  g_render_message_filter_for_testing = render_message_filter;
 }
 
 RenderThreadImpl::RenderThreadImpl(
@@ -586,7 +606,8 @@ RenderThreadImpl::RenderThreadImpl(
                           .Build()),
       renderer_scheduler_(std::move(scheduler)),
       time_zone_monitor_binding_(this),
-      categorized_worker_pool_(new CategorizedWorkerPool()) {
+      categorized_worker_pool_(new CategorizedWorkerPool()),
+      renderer_binding_(this) {
   Init(resource_task_queue);
 }
 
@@ -603,7 +624,8 @@ RenderThreadImpl::RenderThreadImpl(
       renderer_scheduler_(std::move(scheduler)),
       time_zone_monitor_binding_(this),
       main_message_loop_(std::move(main_message_loop)),
-      categorized_worker_pool_(new CategorizedWorkerPool()) {
+      categorized_worker_pool_(new CategorizedWorkerPool()),
+      renderer_binding_(this) {
   scoped_refptr<base::SingleThreadTaskRunner> test_task_counter;
   Init(test_task_counter);
 }
@@ -716,6 +738,10 @@ void RenderThreadImpl::Init(
   StartMojoShellConnection();
 
   GetContentClient()->renderer()->RenderThreadStarted();
+
+  GetAssociatedInterfaceRegistry()->AddInterface(
+      base::Bind(&RenderThreadImpl::OnRendererInterfaceRequest,
+                 base::Unretained(this)));
 
   InitSkiaEventTracer();
   base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(
@@ -848,8 +874,11 @@ void RenderThreadImpl::Init(
   GetContentClient()->renderer()->ExposeInterfacesToBrowser(
       GetInterfaceRegistry());
 
-  GetInterfaceRegistry()->AddInterface(base::Bind(CreateFrameFactory));
-  GetInterfaceRegistry()->AddInterface(base::Bind(CreateEmbeddedWorkerSetup));
+  GetInterfaceRegistry()->AddInterface(base::Bind(&CreateFrameFactory));
+  GetInterfaceRegistry()->AddInterface(base::Bind(&CreateEmbeddedWorkerSetup));
+  GetInterfaceRegistry()->AddInterface(
+      base::Bind(&EmbeddedWorkerInstanceClientImpl::Create,
+                 base::Unretained(embedded_worker_dispatcher_.get())));
 
   GetRemoteInterfaces()->GetInterface(
       mojo::GetProxy(&storage_partition_service_));
@@ -1543,6 +1572,12 @@ base::WaitableEvent* RenderThreadImpl::GetShutdownEvent() {
   return ChildProcess::current()->GetShutDownEvent();
 }
 
+void RenderThreadImpl::OnAssociatedInterfaceRequest(
+    const std::string& name,
+    mojo::ScopedInterfaceEndpointHandle handle) {
+  associated_interfaces_.BindRequest(name, std::move(handle));
+}
+
 bool RenderThreadImpl::IsGpuRasterizationForced() {
   return is_gpu_rasterization_forced_;
 }
@@ -1702,7 +1737,6 @@ bool RenderThreadImpl::OnControlMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER(FrameMsg_NewFrameProxy, OnCreateNewFrameProxy)
     // TODO(port): removed from render_messages_internal.h;
     // is there a new non-windows message I should add here?
-    IPC_MESSAGE_HANDLER(ViewMsg_New, OnCreateNewView)
     IPC_MESSAGE_HANDLER(ViewMsg_NetworkConnectionChanged,
                         OnNetworkConnectionChanged)
     IPC_MESSAGE_HANDLER(WorkerProcessMsg_CreateWorker, OnCreateNewSharedWorker)
@@ -1787,12 +1821,6 @@ void RenderThreadImpl::OnCreateNewFrameProxy(
   RenderFrameProxy::CreateFrameProxy(routing_id, render_view_routing_id,
                                      opener_routing_id, parent_routing_id,
                                      replicated_state);
-}
-
-void RenderThreadImpl::OnCreateNewView(const ViewMsg_New_Params& params) {
-  CompositorDependencies* compositor_deps = this;
-  // When bringing in render_view, also bring in webkit's glue and jsbindings.
-  RenderViewImpl::Create(compositor_deps, params, false);
 }
 
 scoped_refptr<gpu::GpuChannelHost> RenderThreadImpl::EstablishGpuChannelSync() {
@@ -1961,6 +1989,11 @@ RenderThreadImpl::CreateCompositorFrameSink(
       std::move(worker_context_provider), std::move(frame_swap_message_queue)));
 }
 
+AssociatedInterfaceRegistry*
+RenderThreadImpl::GetAssociatedInterfaceRegistry() {
+  return &associated_interfaces_;
+}
+
 std::unique_ptr<cc::SwapPromise>
 RenderThreadImpl::RequestCopyOfOutputForLayoutTest(
     int32_t routing_id,
@@ -2036,6 +2069,12 @@ void RenderThreadImpl::OnNetworkConnectionChanged(
       RenderThreadObserver, observers_, NetworkStateChanged(online));
   WebNetworkStateNotifier::setWebConnection(
       NetConnectionTypeToWebConnectionType(type), max_bandwidth_mbps);
+}
+
+void RenderThreadImpl::CreateView(mojom::CreateViewParamsPtr params) {
+  CompositorDependencies* compositor_deps = this;
+  // When bringing in render_view, also bring in webkit's glue and jsbindings.
+  RenderViewImpl::Create(compositor_deps, *params, false);
 }
 
 void RenderThreadImpl::OnTimeZoneChange(const std::string& zone_id) {
@@ -2128,11 +2167,6 @@ RenderThreadImpl::GetMediaThreadTaskRunner() {
   if (!media_thread_) {
     media_thread_.reset(new base::Thread("Media"));
     media_thread_->Start();
-
-#if defined(OS_ANDROID)
-    renderer_demuxer_ = new RendererDemuxerAndroid();
-    AddFilter(renderer_demuxer_.get());
-#endif
   }
   return media_thread_->task_runner();
 }
@@ -2297,5 +2331,10 @@ void RenderThreadImpl::OnTrimMemoryImmediately() {
   }
 }
 
+void RenderThreadImpl::OnRendererInterfaceRequest(
+    mojom::RendererAssociatedRequest request) {
+  DCHECK(!renderer_binding_.is_bound());
+  renderer_binding_.Bind(std::move(request));
+}
 
 }  // namespace content

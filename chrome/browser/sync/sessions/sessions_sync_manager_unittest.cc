@@ -42,9 +42,9 @@
 using content::WebContents;
 using sessions::SerializedNavigationEntry;
 using sessions::SerializedNavigationEntryTestHelper;
-using sync_driver::DeviceInfo;
-using sync_driver::LocalDeviceInfoProvider;
-using sync_driver::LocalDeviceInfoProviderMock;
+using syncer::DeviceInfo;
+using syncer::LocalDeviceInfoProvider;
+using syncer::LocalDeviceInfoProviderMock;
 using syncer::SyncChange;
 using syncer::SyncData;
 
@@ -172,12 +172,27 @@ class TestSyncProcessorStub : public syncer::SyncChangeProcessor {
 
     if (output_)
       output_->insert(output_->end(), change_list.begin(), change_list.end());
+    NotifyLocalChangeObservers();
 
     return syncer::SyncError();
   }
 
   syncer::SyncDataList GetAllSyncData(syncer::ModelType type) const override {
     return sync_data_to_return_;
+  }
+
+  void AddLocalChangeObserver(syncer::LocalChangeObserver* observer) override {
+    local_change_observers_.AddObserver(observer);
+  }
+  void RemoveLocalChangeObserver(
+      syncer::LocalChangeObserver* observer) override {
+    local_change_observers_.RemoveObserver(observer);
+  }
+
+  void NotifyLocalChangeObservers() {
+    const syncer::SyncChange empty_change;
+    FOR_EACH_OBSERVER(syncer::LocalChangeObserver, local_change_observers_,
+                      OnLocalChange(NULL, empty_change));
   }
 
   void FailProcessSyncChangesWith(const syncer::SyncError& error) {
@@ -192,6 +207,7 @@ class TestSyncProcessorStub : public syncer::SyncChangeProcessor {
   syncer::SyncError error_;
   syncer::SyncChangeList* output_;
   syncer::SyncDataList sync_data_to_return_;
+  base::ObserverList<syncer::LocalChangeObserver> local_change_observers_;
 };
 
 void ExpectAllOfChangesType(const syncer::SyncChangeList& changes,
@@ -316,7 +332,7 @@ class SessionsSyncManagerTest
         new NotificationServiceSessionsRouter(
             profile(), GetSyncSessionsClient(),
             syncer::SyncableService::StartSyncFlare()));
-    sync_prefs_.reset(new sync_driver::SyncPrefs(profile()->GetPrefs()));
+    sync_prefs_.reset(new syncer::SyncPrefs(profile()->GetPrefs()));
     manager_.reset(new SessionsSyncManager(
         GetSyncSessionsClient(), sync_prefs_.get(), local_device_.get(),
         std::unique_ptr<LocalSessionEventRouter>(router),
@@ -392,7 +408,7 @@ class SessionsSyncManagerTest
     return sessions_client_shim_.get();
   }
 
-  sync_driver::SyncPrefs* sync_prefs() { return sync_prefs_.get(); }
+  syncer::SyncPrefs* sync_prefs() { return sync_prefs_.get(); }
 
   SyncedWindowDelegatesGetter* get_synced_window_getter() {
     return manager()->synced_window_delegates_getter();
@@ -450,7 +466,7 @@ class SessionsSyncManagerTest
  private:
   std::unique_ptr<browser_sync::ChromeSyncClient> sync_client_;
   std::unique_ptr<SyncSessionsClientShim> sessions_client_shim_;
-  std::unique_ptr<sync_driver::SyncPrefs> sync_prefs_;
+  std::unique_ptr<syncer::SyncPrefs> sync_prefs_;
   SessionNotificationObserver observer_;
   std::unique_ptr<SessionsSyncManager> manager_;
   SessionSyncTestHelper helper_;

@@ -61,6 +61,8 @@ class WindowManager : public ui::WindowManagerDelegate,
 
   WmShellMus* shell() { return shell_.get(); }
 
+  display::ScreenBase* screen() { return screen_.get(); }
+
   ui::WindowTreeClient* window_tree_client() {
     return window_tree_client_.get();
   }
@@ -112,6 +114,11 @@ class WindowManager : public ui::WindowManagerDelegate,
       ui::Window* window);
 
   RootWindowController* GetPrimaryRootWindowController();
+
+  // Returns the RootWindowController where new top levels are created.
+  // |properties| is the properties supplied during window creation.
+  RootWindowController* GetRootWindowControllerForNewTopLevelWindow(
+      std::map<std::string, std::vector<uint8_t>>* properties);
 
   // WindowTreeClientDelegate:
   void OnEmbed(ui::Window* root) override;

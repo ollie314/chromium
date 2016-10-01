@@ -17,8 +17,8 @@ source_set("session") {
 
   public_deps = [
     "//blimp/client/core",
-    "//blimp/client/core:switches",
     "//blimp/client/core/geolocation",
+    "//blimp/client/core/switches",
     "//blimp/common/proto",
     "//device/geolocation",
     "//ui/events",
@@ -52,8 +52,8 @@ source_set("client") {
 
   public_deps = [
     ":session",
-    "//blimp/client/core:switches",
     "//blimp/client/core/compositor",
+    "//blimp/client/core/switches",
     "//blimp/client/support",
     "//cc",
     "//cc/surfaces",
@@ -117,10 +117,12 @@ source_set("test_support") {
 if (is_linux && !is_chromeos && use_x11) {
   executable("blimp_shell") {
     sources = [
-      "app/linux/blimp_client_session_linux.cc",
-      "app/linux/blimp_client_session_linux.h",
+      "app/linux/blimp_client_context_delegate_linux.cc",
+      "app/linux/blimp_client_context_delegate_linux.h",
       "app/linux/blimp_display_manager.cc",
       "app/linux/blimp_display_manager.h",
+      "app/linux/blimp_display_manager_delegate_main.cc",
+      "app/linux/blimp_display_manager_delegate_main.h",
       "app/linux/blimp_main.cc",
     ]
 
@@ -286,7 +288,7 @@ if (is_android) {
       ":blimp_java",
       "//base:base_java",
       "//base:base_java_test_support",
-      "//blimp/client/core:common_java",
+      "//blimp/client/core/common:common_java",
       "//blimp/client/core/contents:contents_java",
       "//blimp/client/core/settings:settings_java",
       "//blimp/client/public:public_headers_java",

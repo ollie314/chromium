@@ -11,7 +11,7 @@
 #include "components/flags_ui/pref_service_flags_storage.h"
 #include "components/gcm_driver/gcm_channel_status_syncer.h"
 #include "components/network_time/network_time_tracker.h"
-#include "components/ntp_snippets/ntp_snippets_service.h"
+#include "components/ntp_snippets/remote/ntp_snippets_service.h"
 #include "components/ntp_tiles/most_visited_sites.h"
 #include "components/ntp_tiles/popular_sites.h"
 #include "components/omnibox/browser/zero_suggest_provider.h"
@@ -93,7 +93,7 @@ void RegisterBrowserStatePrefs(user_prefs::PrefRegistrySyncable* registry) {
   ios::NotificationPromo::RegisterProfilePrefs(registry);
   password_manager::PasswordManager::RegisterProfilePrefs(registry);
   PrefProxyConfigTrackerImpl::RegisterProfilePrefs(registry);
-  sync_driver::SyncPrefs::RegisterProfilePrefs(registry);
+  syncer::SyncPrefs::RegisterProfilePrefs(registry);
   TemplateURLPrepopulateData::RegisterProfilePrefs(registry);
   translate::TranslatePrefs::RegisterProfilePrefs(registry);
   variations::VariationsService::RegisterProfilePrefs(registry);

@@ -28,6 +28,7 @@ struct FrameHostMsg_DidCommitProvisionalLoad_Params;
 
 namespace content {
 
+class NavigationUIData;
 class NavigatorDelegate;
 class ResourceRequestBodyImpl;
 class ServiceWorkerContextWrapper;
@@ -80,7 +81,8 @@ class CONTENT_EXPORT NavigationHandleImpl : public NavigationHandle {
       bool is_synchronous,
       bool is_srcdoc,
       const base::TimeTicks& navigation_start,
-      int pending_nav_entry_id);
+      int pending_nav_entry_id,
+      bool started_from_context_menu);
   ~NavigationHandleImpl() override;
 
   // NavigationHandle implementation:
@@ -125,6 +127,7 @@ class CONTENT_EXPORT NavigationHandleImpl : public NavigationHandle {
       RenderFrameHost* render_frame_host,
       const std::string& raw_response_header) override;
   void CallDidCommitNavigationForTesting(const GURL& url) override;
+  bool WasStartedFromContextMenu() const override;
 
   NavigationData* GetNavigationData() override;
 
@@ -272,6 +275,10 @@ class CONTENT_EXPORT NavigationHandleImpl : public NavigationHandle {
   // Called when the navigation is transferred to a different renderer.
   void Transfer();
 
+  NavigationUIData* navigation_ui_data() const {
+    return navigation_ui_data_.get();
+  }
+
  private:
   friend class NavigationHandleImplTest;
 
@@ -296,7 +303,8 @@ class CONTENT_EXPORT NavigationHandleImpl : public NavigationHandle {
                        bool is_synchronous,
                        bool is_srcdoc,
                        const base::TimeTicks& navigation_start,
-                       int pending_nav_entry_id);
+                       int pending_nav_entry_id,
+                       bool started_from_context_menu);
 
   NavigationThrottle::ThrottleCheckResult CheckWillStartRequest();
   NavigationThrottle::ThrottleCheckResult CheckWillRedirectRequest();
@@ -385,8 +393,12 @@ class CONTENT_EXPORT NavigationHandleImpl : public NavigationHandle {
   // corresponding ServiceWorkerNetworkProvider is created in the renderer.
   std::unique_ptr<ServiceWorkerNavigationHandle> service_worker_handle_;
 
-  // Embedder data tied to this navigation.
+  // Embedder data from the IO thread tied to this navigation.
   std::unique_ptr<NavigationData> navigation_data_;
+
+  // PlzNavigate
+  // Embedder data from the UI thread tied to this navigation.
+  std::unique_ptr<NavigationUIData> navigation_ui_data_;
 
   SSLStatus ssl_status_;
 
@@ -405,6 +417,9 @@ class CONTENT_EXPORT NavigationHandleImpl : public NavigationHandle {
   // Whether the navigation ended up being a download or a stream.
   bool is_download_;
   bool is_stream_;
+
+  // False by default unless the navigation started within a context menu.
+  bool started_from_context_menu_;
 
   base::WeakPtrFactory<NavigationHandleImpl> weak_factory_;
 

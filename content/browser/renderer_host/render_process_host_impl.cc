@@ -193,8 +193,6 @@
 
 #if defined(OS_ANDROID)
 #include "content/browser/android/child_process_launcher_android.h"
-#include "content/browser/media/android/browser_demuxer_android.h"
-#include "content/browser/mojo/interface_registrar_android.h"
 #include "content/browser/screen_orientation/screen_orientation_message_filter_android.h"
 #include "content/public/browser/android/java_interfaces.h"
 #include "ipc/ipc_sync_channel.h"
@@ -224,10 +222,6 @@
 
 #if defined(USE_OZONE)
 #include "ui/ozone/public/ozone_switches.h"
-#endif
-
-#if defined(ENABLE_BROWSER_CDMS)
-#include "content/browser/media/cdm/browser_cdm_manager.h"
 #endif
 
 #if defined(ENABLE_PLUGINS)
@@ -867,9 +861,10 @@ bool RenderProcessHostImpl::Init() {
   if (channel_)
     return true;
 
-  // Ensure that the RouteProvider proxy is re-initialized on next access since
-  // it's associated with a specific Channel instance.
+  // Ensure that the remote associated interfaces are re-initialized on next
+  // access since they're associated with a specific Channel instance.
   remote_route_provider_.reset();
+  renderer_interface_.reset();
 
   base::CommandLine::StringType renderer_prefix;
   // A command prefix is something prepended to the command line of the spawned
@@ -1147,12 +1142,6 @@ void RenderProcessHostImpl::CreateMessageFilters() {
   // GDI fonts (http://crbug.com/383227), even when using DirectWrite. This
   // should eventually be if (!ShouldUseDirectWrite()) guarded.
   channel_->AddFilter(new FontCacheDispatcher());
-#elif defined(OS_ANDROID)
-  browser_demuxer_android_ = new BrowserDemuxerAndroid();
-  AddFilter(browser_demuxer_android_.get());
-#endif
-#if defined(ENABLE_BROWSER_CDMS)
-  AddFilter(new BrowserCdmManager(GetID(), NULL));
 #endif
 
   message_port_message_filter_ = new MessagePortMessageFilter(
@@ -1219,12 +1208,6 @@ void RenderProcessHostImpl::CreateMessageFilters() {
 void RenderProcessHostImpl::RegisterMojoInterfaces() {
   std::unique_ptr<shell::InterfaceRegistry> registry(
       new shell::InterfaceRegistry);
-#if defined(OS_ANDROID)
-  interface_registry_android_ =
-      InterfaceRegistryAndroid::Create(registry.get());
-  InterfaceRegistrarAndroid::ExposeInterfacesToRenderer(
-      interface_registry_android_.get());
-#endif
 
   channel_->AddAssociatedInterface(
       base::Bind(&RenderProcessHostImpl::OnRouteProviderRequest,
@@ -1371,18 +1354,6 @@ const base::TimeTicks& RenderProcessHostImpl::GetInitTimeForNavigationMetrics()
   return init_time_;
 }
 
-#if defined(ENABLE_BROWSER_CDMS)
-scoped_refptr<media::MediaKeys> RenderProcessHostImpl::GetCdm(
-    int render_frame_id,
-    int cdm_id) const {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  BrowserCdmManager* manager = BrowserCdmManager::FromProcess(GetID());
-  if (!manager)
-    return nullptr;
-  return manager->GetCdm(render_frame_id, cdm_id);
-}
-#endif
-
 bool RenderProcessHostImpl::IsProcessBackgrounded() const {
   return is_process_backgrounded_;
 }
@@ -1447,6 +1418,14 @@ mojom::RouteProvider* RenderProcessHostImpl::GetRemoteRouteProvider() {
     channel_->GetRemoteAssociatedInterface(&remote_route_provider_);
   }
   return remote_route_provider_.get();
+}
+
+mojom::Renderer* RenderProcessHostImpl::GetRendererInterface() {
+  if (!renderer_interface_) {
+    DCHECK(channel_);
+    channel_->GetRemoteAssociatedInterface(&renderer_interface_);
+  }
+  return renderer_interface_.get();
 }
 
 void RenderProcessHostImpl::AddRoute(int32_t routing_id,
@@ -1745,6 +1724,7 @@ void RenderProcessHostImpl::PropagateBrowserCommandLineToRenderer(
     switches::kMaxUntiledLayerHeight,
     switches::kMemoryMetrics,
     switches::kMojoLocalStorage,
+    switches::kMojoServiceWorker,
     switches::kMSEAudioBufferSizeLimit,
     switches::kMSEVideoBufferSizeLimit,
     switches::kNoReferrers,
@@ -1793,7 +1773,6 @@ void RenderProcessHostImpl::PropagateBrowserCommandLineToRenderer(
     cc::switches::kShowFPSCounter,
     cc::switches::kShowLayerAnimationBounds,
     cc::switches::kShowPropertyChangedRects,
-    cc::switches::kShowReplicaScreenSpaceRects,
     cc::switches::kShowScreenSpaceRects,
     cc::switches::kShowSurfaceDamageRects,
     cc::switches::kSlowDownRasterScaleFactor,

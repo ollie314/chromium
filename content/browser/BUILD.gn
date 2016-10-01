@@ -57,6 +57,7 @@ source_set("browser") {
     "//content/public/common:common_sources",
     "//crypto",
     "//device/battery",
+    "//device/battery:mojo_bindings",
     "//device/bluetooth",
     "//device/gamepad",
     "//device/generic_sensor",
@@ -201,10 +202,6 @@ source_set("browser") {
     "android/content_video_view.cc",
     "android/content_video_view.h",
     "android/devtools_auth.cc",
-    "android/interface_provider_android_impl.cc",
-    "android/interface_provider_android_impl.h",
-    "android/interface_registry_android_impl.cc",
-    "android/interface_registry_android_impl.h",
     "android/java_interfaces_impl.cc",
     "android/java_interfaces_impl.h",
     "android/scoped_surface_request_manager.cc",
@@ -435,6 +432,8 @@ source_set("browser") {
     "devtools/protocol/storage_handler.h",
     "devtools/protocol/system_info_handler.cc",
     "devtools/protocol/system_info_handler.h",
+    "devtools/protocol/target_handler.cc",
+    "devtools/protocol/target_handler.h",
     "devtools/protocol/tethering_handler.cc",
     "devtools/protocol/tethering_handler.h",
     "devtools/protocol/tracing_handler.cc",
@@ -785,8 +784,6 @@ source_set("browser") {
     "mach_broker_mac.mm",
     "manifest/manifest_manager_host.cc",
     "manifest/manifest_manager_host.h",
-    "media/android/browser_demuxer_android.cc",
-    "media/android/browser_demuxer_android.h",
     "media/android/browser_media_player_manager.cc",
     "media/android/browser_media_player_manager.h",
     "media/android/browser_media_session_manager.cc",
@@ -882,8 +879,6 @@ source_set("browser") {
     "message_port_service.h",
     "mime_registry_impl.cc",
     "mime_registry_impl.h",
-    "mojo/interface_registrar_android.cc",
-    "mojo/interface_registrar_android.h",
     "mojo/merge_dictionary.cc",
     "mojo/merge_dictionary.h",
     "mojo/mojo_shell_context.cc",
@@ -1072,17 +1067,11 @@ source_set("browser") {
     "renderer_host/media/shared_memory_buffer_handle.h",
     "renderer_host/media/shared_memory_buffer_tracker.cc",
     "renderer_host/media/shared_memory_buffer_tracker.h",
-    "renderer_host/media/video_capture_buffer_handle.h",
-    "renderer_host/media/video_capture_buffer_pool.cc",
-    "renderer_host/media/video_capture_buffer_pool.h",
-    "renderer_host/media/video_capture_buffer_tracker.h",
-    "renderer_host/media/video_capture_buffer_tracker_factory.cc",
-    "renderer_host/media/video_capture_buffer_tracker_factory.h",
+    "renderer_host/media/video_capture_buffer_tracker_factory_impl.cc",
+    "renderer_host/media/video_capture_buffer_tracker_factory_impl.h",
     "renderer_host/media/video_capture_controller.cc",
     "renderer_host/media/video_capture_controller.h",
     "renderer_host/media/video_capture_controller_event_handler.h",
-    "renderer_host/media/video_capture_device_client.cc",
-    "renderer_host/media/video_capture_device_client.h",
     "renderer_host/media/video_capture_gpu_jpeg_decoder.cc",
     "renderer_host/media/video_capture_gpu_jpeg_decoder.h",
     "renderer_host/media/video_capture_host.cc",
@@ -1729,6 +1718,8 @@ source_set("browser") {
     sources -= [
       "browser_ipc_logging.cc",
       "device_sensors/data_fetcher_shared_memory_default.cc",
+      "media/session/audio_focus_manager.cc",
+      "media/session/audio_focus_manager.h",
       "media/session/media_session_delegate_default.cc",
       "power_usage_monitor_impl.cc",
       "power_usage_monitor_impl.h",
@@ -1908,13 +1899,6 @@ source_set("browser") {
 
   if (is_linux && use_dbus) {
     deps += [ "//dbus" ]
-  }
-
-  if (enable_browser_cdms) {
-    sources += [
-      "media/cdm/browser_cdm_manager.cc",
-      "media/cdm/browser_cdm_manager.h",
-    ]
   }
 
   if (is_linux) {

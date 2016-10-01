@@ -6,8 +6,9 @@ from gpu_tests.webgl_conformance_expectations import WebGLConformanceExpectation
 # See the GpuTestExpectations class for documentation.
 
 class WebGL2ConformanceExpectations(WebGLConformanceExpectations):
-  def __init__(self, conformance_path):
-    super(WebGL2ConformanceExpectations, self).__init__(conformance_path)
+  def __init__(self, conformance_path, url_prefixes=None):
+    super(WebGL2ConformanceExpectations, self).__init__(
+      conformance_path, url_prefixes=url_prefixes)
 
   def SetExpectations(self):
     # ===================================
@@ -16,13 +17,20 @@ class WebGL2ConformanceExpectations(WebGLConformanceExpectations):
     # It's expected that not all extensions will be available on all platforms.
     # Having a test listed here is not necessarily a problem.
 
-    self.Fail('WebglExtension.WEBGL_compressed_texture_astc',
+    # Skip these, rather than expect them to fail, to speed up test
+    # execution. The browser is restarted even after expected test
+    # failures.
+    self.Skip('WebglExtension_WEBGL_compressed_texture_astc',
         ['win', 'mac', 'linux'])
-    self.Fail('WebglExtension.WEBGL_compressed_texture_atc',
+    self.Skip('WebglExtension_WEBGL_compressed_texture_atc',
         ['win', 'mac', 'linux'])
-    self.Fail('WebglExtension.WEBGL_compressed_texture_etc1',
+    self.Skip('WebglExtension_WEBGL_compressed_texture_es3_0',
+        ['linux', 'mac'])
+    self.Skip('WebglExtension_WEBGL_compressed_texture_etc1',
         ['mac', 'linux'])
-    self.Fail('WebglExtension.WEBGL_compressed_texture_pvrtc',
+    self.Skip('WebglExtension_WEBGL_compressed_texture_pvrtc',
+        ['win', 'mac', 'linux'])
+    self.Skip('WebglExtension_WEBGL_compressed_texture_s3tc_srgb',
         ['win', 'mac', 'linux'])
 
     # ========================
@@ -511,7 +519,7 @@ class WebGL2ConformanceExpectations(WebGLConformanceExpectations):
                'tex-2d-rgb-rgb-unsigned_short_5_6_5.html',
                ['linux'], bug=627525)
 
-    # Multi-vendor failures.
+    # Linux Multi-vendor failures.
 
     self.Fail('deqp/data/gles3/shaders/functions.html',
         ['linux', 'amd', 'intel'], bug=483282)
@@ -524,12 +532,6 @@ class WebGL2ConformanceExpectations(WebGLConformanceExpectations):
         ['linux', 'amd', 'intel'], bug=483282)
     self.Fail('deqp/data/gles3/shaders/linkage.html',
         ['linux', 'amd', 'intel'], bug=483282)
-
-    # Linux with ANGLE only
-    self.Fail('conformance2/textures/misc/tex-unpack-params.html',
-        ['linux', 'opengl'], bug=483282)
-    self.Fail('conformance2/reading/read-pixels-pack-parameters.html',
-        ['linux', 'opengl'], bug=483282)
 
     # Linux without ANGLE only
     self.Flaky('conformance2/buffers/getBufferSubData.html',

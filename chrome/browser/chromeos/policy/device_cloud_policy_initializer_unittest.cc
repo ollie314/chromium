@@ -9,7 +9,7 @@
 #include "base/values.h"
 #include "chrome/browser/chromeos/policy/enrollment_config.h"
 #include "chrome/browser/chromeos/policy/server_backed_device_state.h"
-#include "chrome/browser/chromeos/policy/stub_enterprise_install_attributes.h"
+#include "chrome/browser/chromeos/settings/stub_install_attributes.h"
 #include "chrome/browser/prefs/browser_prefs.h"
 #include "chrome/common/pref_names.h"
 #include "chromeos/attestation/mock_attestation_flow.h"
@@ -47,16 +47,20 @@ class DeviceCloudPolicyInitializerTest
             nullptr,
             nullptr,
             nullptr,
-            base::MakeUnique<chromeos::attestation::MockAttestationFlow>()) {
+            base::MakeUnique<chromeos::attestation::MockAttestationFlow>(),
+            &statistics_provider_) {
     chrome::RegisterLocalState(local_state_.registry());
-    statistics_provider_.SetMachineStatistic("serial_number", "fake-serial");
+    statistics_provider_.SetMachineStatistic(
+        chromeos::system::kSerialNumberKey, "fake-serial");
+    statistics_provider_.SetMachineStatistic(
+        chromeos::system::kHardwareClassKey, "fake-hardware");
   }
 
   void SetupZeroTouchFlag();
 
   chromeos::system::ScopedFakeStatisticsProvider statistics_provider_;
   TestingPrefServiceSimple local_state_;
-  StubEnterpriseInstallAttributes install_attributes_;
+  chromeos::StubInstallAttributes install_attributes_;
   DeviceCloudPolicyInitializer device_cloud_policy_initializer_;
 };
 

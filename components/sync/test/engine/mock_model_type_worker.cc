@@ -4,15 +4,12 @@
 
 #include "components/sync/test/engine/mock_model_type_worker.h"
 
-#include <stddef.h>
-#include <stdint.h>
-
 #include "base/logging.h"
 #include "components/sync/base/model_type.h"
 #include "components/sync/syncable/syncable_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-namespace syncer_v2 {
+namespace syncer {
 
 namespace {
 
@@ -244,4 +241,4 @@ void MockModelTypeWorker::SetServerVersion(const std::string& tag_hash,
   server_versions_[tag_hash] = version;
 }
 
-}  // namespace syncer_v2
+}  // namespace syncer

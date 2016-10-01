@@ -60,10 +60,17 @@ const CGFloat kSeparatorHeight = 1.0f;
 const CGFloat kTableRowViewHorizontalPadding = 5.0f;
 const CGFloat kTableRowViewVerticalPadding = 1.0f;
 
+// Distance between the adapter off help link and the scroll view boundaries.
+const CGFloat kAdapterOffHelpLinkPadding = 5.0f;
+
 // The lookup table for signal strength level image.
 const int kSignalStrengthLevelImageIds[5] = {IDR_SIGNAL_0_BAR, IDR_SIGNAL_1_BAR,
                                              IDR_SIGNAL_2_BAR, IDR_SIGNAL_3_BAR,
                                              IDR_SIGNAL_4_BAR};
+const int kSignalStrengthLevelImageSelectedIds[5] = {
+    IDR_SIGNAL_0_BAR_SELECTED, IDR_SIGNAL_1_BAR_SELECTED,
+    IDR_SIGNAL_2_BAR_SELECTED, IDR_SIGNAL_3_BAR_SELECTED,
+    IDR_SIGNAL_4_BAR_SELECTED};
 
 // Creates a label with |text|.
 base::scoped_nsobject<NSTextField> CreateLabel(NSString* text) {
@@ -75,6 +82,7 @@ base::scoped_nsobject<NSTextField> CreateLabel(NSString* text) {
   [label setSelectable:NO];
   [label setStringValue:text];
   [label setFont:[NSFont systemFontOfSize:[NSFont systemFontSize]]];
+  [label setTextColor:[NSColor blackColor]];
   [label sizeToFit];
   return label;
 }
@@ -228,6 +236,7 @@ class ChooserContentViewController : public ChooserController::View {
  public:
   ChooserContentViewController(ChooserContentViewCocoa* chooser_content_view,
                                ChooserController* chooser_controller,
+                               NSButton* adapter_off_help_button,
                                NSTableView* table_view,
                                SpinnerView* spinner,
                                NSTextField* status,
@@ -247,6 +256,7 @@ class ChooserContentViewController : public ChooserController::View {
  private:
   ChooserContentViewCocoa* chooser_content_view_;
   ChooserController* chooser_controller_;
+  NSButton* adapter_off_help_button_;
   NSTableView* table_view_;
   SpinnerView* spinner_;
   NSTextField* status_;
@@ -258,17 +268,20 @@ class ChooserContentViewController : public ChooserController::View {
 ChooserContentViewController::ChooserContentViewController(
     ChooserContentViewCocoa* chooser_content_view,
     ChooserController* chooser_controller,
+    NSButton* adapter_off_help_button,
     NSTableView* table_view,
     SpinnerView* spinner,
     NSTextField* status,
     NSButton* rescan_button)
     : chooser_content_view_(chooser_content_view),
       chooser_controller_(chooser_controller),
+      adapter_off_help_button_(adapter_off_help_button),
       table_view_(table_view),
       spinner_(spinner),
       status_(status),
       rescan_button_(rescan_button) {
   DCHECK(chooser_controller_);
+  DCHECK(adapter_off_help_button_);
   DCHECK(table_view_);
   DCHECK(spinner_);
   DCHECK(status_);
@@ -298,12 +311,13 @@ void ChooserContentViewController::OnOptionRemoved(size_t index) {
   // be adjusted by one.
   NSInteger idx = static_cast<NSInteger>(index);
   NSInteger selected_row = [table_view_ selectedRow];
-  if (selected_row == idx)
+  if (selected_row == idx) {
     [table_view_ deselectRow:idx];
-  else if (selected_row > idx)
+  } else if (selected_row > idx) {
     [table_view_
             selectRowIndexes:[NSIndexSet indexSetWithIndex:selected_row - 1]
         byExtendingSelection:NO];
+  }
 
   UpdateTableView();
 }
@@ -318,7 +332,8 @@ void ChooserContentViewController::OnAdapterEnabledChanged(bool enabled) {
   // of a previously selected row.
   [table_view_ deselectAll:nil];
   UpdateTableView();
-  [table_view_ setHidden:NO];
+  [table_view_ setHidden:enabled ? NO : YES];
+  [adapter_off_help_button_ setHidden:enabled ? YES : NO];
 
   [spinner_ setHidden:YES];
 
@@ -403,6 +418,14 @@ void ChooserContentViewController::UpdateTableView() {
     titleView_ = [self createChooserTitle:chooserTitle];
     titleHeight_ = NSHeight([titleView_ frame]);
 
+    // Adapter turned off help button.
+    adapterOffHelpButton_ =
+        [self createHyperlinkButtonWithText:
+                  l10n_util::GetNSString(
+                      IDS_BLUETOOTH_DEVICE_CHOOSER_TURN_ADAPTER_OFF)];
+    CGFloat adapterOffHelpButtonHeight =
+        NSHeight([adapterOffHelpButton_ frame]);
+
     // Status.
     status_ = CreateLabel(
         l10n_util::GetNSString(IDS_BLUETOOTH_DEVICE_CHOOSER_SCANNING));
@@ -454,6 +477,7 @@ void ChooserContentViewController::UpdateTableView() {
     [scrollView_ setHasVerticalScroller:YES];
     [scrollView_ setHasHorizontalScroller:YES];
     [scrollView_ setAutohidesScrollers:YES];
+    [scrollView_ setDrawsBackground:NO];
 
     // TableView.
     tableView_.reset([[NSTableView alloc] initWithFrame:NSZeroRect]);
@@ -490,6 +514,19 @@ void ChooserContentViewController::UpdateTableView() {
     CGFloat titleOriginY = kChooserHeight - kMarginY - titleHeight_;
     [titleView_ setFrameOrigin:NSMakePoint(titleOriginX, titleOriginY)];
     [self addSubview:titleView_];
+
+    // Adapter turned off help button.
+    CGFloat adapterOffHelpButtonOriginX = kMarginX + kAdapterOffHelpLinkPadding;
+    CGFloat adapterOffHelpButtonOriginY = titleOriginY - kVerticalPadding -
+                                          adapterOffHelpButtonHeight -
+                                          kAdapterOffHelpLinkPadding;
+    [adapterOffHelpButton_
+        setFrameOrigin:NSMakePoint(adapterOffHelpButtonOriginX,
+                                   adapterOffHelpButtonOriginY)];
+    [adapterOffHelpButton_ setTarget:self];
+    [adapterOffHelpButton_ setAction:@selector(onAdapterOffHelp:)];
+    [adapterOffHelpButton_ setHidden:YES];
+    [self addSubview:adapterOffHelpButton_];
 
     // ScollView and Spinner. Only one of them is shown.
     [scrollView_ setDocumentView:tableView_];
@@ -560,8 +597,8 @@ void ChooserContentViewController::UpdateTableView() {
     rescanButtonOrigin_ = [self calculateRescanButtonOrigin:buttonRowHeight];
 
     chooserContentViewController_.reset(new ChooserContentViewController(
-        self, chooserController_.get(), tableView_.get(), spinner_.get(),
-        status_.get(), rescanButton_.get()));
+        self, chooserController_.get(), adapterOffHelpButton_.get(),
+        tableView_.get(), spinner_.get(), status_.get(), rescanButton_.get()));
   }
 
   return self;
@@ -729,6 +766,10 @@ void ChooserContentViewController::UpdateTableView() {
   [cancelButton_ setFrameOrigin:frameAndOrigin.cancel_button_origin];
 }
 
+- (NSButton*)adapterOffHelpButton {
+  return adapterOffHelpButton_.get();
+}
+
 - (NSTableView*)tableView {
   return tableView_.get();
 }
@@ -797,12 +838,60 @@ void ChooserContentViewController::UpdateTableView() {
   chooserController_->Close();
 }
 
+- (void)onAdapterOffHelp:(id)sender {
+  chooserController_->OpenAdapterOffHelpUrl();
+}
+
 - (void)onRescan:(id)sender {
   chooserController_->RefreshOptions();
 }
 
 - (void)onHelpPressed:(id)sender {
   chooserController_->OpenHelpCenterUrl();
+}
+
+- (void)updateContentRowColor {
+  NSInteger selectedRow = [tableView_ selectedRow];
+  NSInteger numOptions =
+      base::checked_cast<NSInteger>(chooserController_->NumOptions());
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+  for (NSInteger rowIndex = 0; rowIndex < numOptions; ++rowIndex) {
+    // Update the color of the text.
+    [[self tableRowViewText:rowIndex]
+        setTextColor:(rowIndex == selectedRow ? [NSColor whiteColor]
+                                              : [NSColor blackColor])];
+
+    // Update the color of the image.
+    if (chooserController_->ShouldShowIconBeforeText()) {
+      if (chooserController_->IsConnected(rowIndex)) {
+        [[self tableRowViewImage:rowIndex]
+            setImage:gfx::NSImageFromImageSkia(gfx::CreateVectorIcon(
+                         gfx::VectorIconId::BLUETOOTH_CONNECTED,
+                         rowIndex == selectedRow ? SK_ColorWHITE
+                                                 : gfx::kChromeIconGrey))];
+      } else {
+        int signalStrengthLevel =
+            chooserController_->GetSignalStrengthLevel(rowIndex);
+        if (signalStrengthLevel != -1) {
+          int imageId =
+              rowIndex == selectedRow
+                  ? kSignalStrengthLevelImageSelectedIds[signalStrengthLevel]
+                  : kSignalStrengthLevelImageIds[signalStrengthLevel];
+          [[self tableRowViewImage:rowIndex]
+              setImage:rb.GetNativeImageNamed(imageId).ToNSImage()];
+        }
+      }
+    }
+
+    // Update the color of paired status.
+    NSTextField* pairedStatusText = [self tableRowViewPairedStatus:rowIndex];
+    if (pairedStatusText) {
+      [pairedStatusText
+          setTextColor:(skia::SkColorToCalibratedNSColor(
+                           rowIndex == selectedRow ? gfx::kGoogleGreen300
+                                                   : gfx::kGoogleGreen700))];
+    }
+  }
 }
 
 - (NSImageView*)tableRowViewImage:(NSInteger)row {

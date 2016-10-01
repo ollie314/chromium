@@ -302,10 +302,6 @@ void ChromeMetricsServiceClient::SetMetricsClientId(
   crash_keys::SetMetricsClientIdFromGUID(client_id);
 }
 
-bool ChromeMetricsServiceClient::IsOffTheRecordSessionActive() {
-  return chrome::IsIncognitoSessionActive();
-}
-
 int32_t ChromeMetricsServiceClient::GetProduct() {
   return metrics::ChromeUserMetricsExtension::CHROME;
 }
@@ -549,7 +545,7 @@ void ChromeMetricsServiceClient::Initialize() {
 
   metrics_service_->RegisterMetricsProvider(
       std::unique_ptr<metrics::MetricsProvider>(
-          new sync_driver::DeviceCountMetricsProvider(base::Bind(
+          new syncer::DeviceCountMetricsProvider(base::Bind(
               &browser_sync::ChromeSyncClient::GetDeviceInfoTrackers))));
 
   metrics_service_->RegisterMetricsProvider(

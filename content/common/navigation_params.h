@@ -7,6 +7,7 @@
 
 #include <stdint.h>
 
+#include <set>
 #include <string>
 
 #include "base/memory/ref_counted.h"
@@ -180,9 +181,6 @@ struct CONTENT_EXPORT BeginNavigationParams {
 struct CONTENT_EXPORT StartNavigationParams {
   StartNavigationParams();
   StartNavigationParams(const std::string& extra_headers,
-#if defined(OS_ANDROID)
-                        bool has_user_gesture,
-#endif
                         int transferred_request_child_id,
                         int transferred_request_request_id);
   StartNavigationParams(const StartNavigationParams& other);
@@ -190,10 +188,6 @@ struct CONTENT_EXPORT StartNavigationParams {
 
   // Extra headers (separated by \n) to send during the request.
   std::string extra_headers;
-
-#if defined(OS_ANDROID)
-  bool has_user_gesture;
-#endif
 
   // The following two members identify a previous request that has been
   // created before this navigation is being transferred to a new process.
@@ -228,14 +222,15 @@ struct CONTENT_EXPORT RequestNavigationParams {
                           int nav_entry_id,
                           bool is_same_document_history_load,
                           bool is_history_navigation_in_new_child,
-                          bool has_subtree_history_items,
+                          std::set<std::string> subframe_unique_names,
                           bool has_committed_real_load,
                           bool intended_as_new_entry,
                           int pending_history_list_offset,
                           int current_history_list_offset,
                           int current_history_list_length,
                           bool is_view_source,
-                          bool should_clear_history_list);
+                          bool should_clear_history_list,
+                          bool has_user_gesture);
   RequestNavigationParams(const RequestNavigationParams& other);
   ~RequestNavigationParams();
 
@@ -279,13 +274,13 @@ struct CONTENT_EXPORT RequestNavigationParams {
   // a URL from a session history item.  Defaults to false.
   bool is_history_navigation_in_new_child;
 
-  // If this is a history navigation, this indicates whether the browser process
-  // is aware of any subframe history items for the given frame.  If not, the
-  // renderer does not need to check with the browser if any subframes are
-  // created during the navigation.
-  // TODO(creis): Expand this to a data structure of unique names and
-  // corresponding PageStates in https://crbug.com/639842.
-  bool has_subtree_history_items;
+  // If this is a history navigation, this contains a set of frame unique names
+  // for immediate children of the frame being navigated for which there are
+  // history items.  The renderer process only needs to check with the browser
+  // process for newly created subframes that have these unique names.
+  // TODO(creis): Expand this to a data structure including corresponding
+  // same-process PageStates as well in https://crbug.com/639842.
+  std::set<std::string> subframe_unique_names;
 
   // Whether the frame being navigated has already committed a real page, which
   // affects how new navigations are classified in the renderer process.
@@ -333,6 +328,9 @@ struct CONTENT_EXPORT RequestNavigationParams {
   // This parameter is not used in the current navigation architecture, where
   // it will always be equal to kInvalidServiceWorkerProviderId.
   int service_worker_provider_id;
+
+  // True if the navigation originated due to a user gesture.
+  bool has_user_gesture;
 
 #if defined(OS_ANDROID)
   // The real content of the data: URL. Only used in Android WebView for

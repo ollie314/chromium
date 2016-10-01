@@ -649,11 +649,6 @@ const char kMediaCacheSize[]                = "media-cache-size";
 // Enables Media Router.
 const char kMediaRouter[]                   = "media-router";
 
-// Enables histograming of tasks served by MessageLoop. See
-// about:histograms/Loop for results, which show frequency of messages on each
-// thread, including APC count, object signalling count, etc.
-const char kMessageLoopHistogrammer[]       = "message-loop-histogrammer";
-
 // Enables the recording of metrics reports but disables reporting. In contrast
 // to kDisableMetrics, this executes all the code that a normal client would
 // use for reporting, except the report is dropped rather than sent to the
@@ -1095,14 +1090,6 @@ const char kNtpSwitchToExistingTab[] = "ntp-switch-to-existing-tab";
 const char kProgressBarAnimation[]          = "progress-bar-animation";
 
 // Specifies a particular tab management experiment to enable.
-const char kTabManagementExperimentTypeAnise[] =
-    "tab-management-experiment-type-anise";
-const char kTabManagementExperimentTypeBasil[] =
-    "tab-management-experiment-type-basil";
-const char kTabManagementExperimentTypeChive[] =
-    "tab-management-experiment-type-chive";
-const char kTabManagementExperimentTypeDill[] =
-    "tab-management-experiment-type-dill";
 const char kTabManagementExperimentTypeDisabled[] =
     "tab-management-experiment-type-disabled";
 const char kTabManagementExperimentTypeElderberry[] =
@@ -1345,7 +1332,7 @@ bool PowerOverlayEnabled() {
 #endif
 
 // -----------------------------------------------------------------------------
-// DO NOT ADD YOUR CRAP TO THE BOTTOM OF THIS FILE.
+// DO NOT ADD YOUR VERY NICE FLAGS TO THE BOTTOM OF THIS FILE.
 //
 // You were going to just dump your switches here, weren't you? Instead, please
 // put them in alphabetical order above, or in order inside the appropriate

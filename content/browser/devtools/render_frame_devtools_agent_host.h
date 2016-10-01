@@ -52,6 +52,7 @@ namespace schema { class SchemaHandler; }
 namespace security { class SecurityHandler; }
 namespace service_worker { class ServiceWorkerHandler; }
 namespace storage { class StorageHandler; }
+namespace target { class TargetHandler; }
 namespace tracing { class TracingHandler; }
 }
 
@@ -161,6 +162,8 @@ class CONTENT_EXPORT RenderFrameDevToolsAgentHost
   void OnRequestNewWindow(RenderFrameHost* sender, int new_routing_id);
   void DestroyOnRenderFrameGone();
 
+  bool CheckConsistency();
+
   void CreatePowerSaveBlocker();
 
   class FrameHostHolder;
@@ -184,6 +187,7 @@ class CONTENT_EXPORT RenderFrameDevToolsAgentHost
       service_worker_handler_;
   std::unique_ptr<devtools::storage::StorageHandler>
       storage_handler_;
+  std::unique_ptr<devtools::target::TargetHandler> target_handler_;
   std::unique_ptr<devtools::tracing::TracingHandler> tracing_handler_;
   std::unique_ptr<devtools::emulation::EmulationHandler> emulation_handler_;
   std::unique_ptr<DevToolsFrameTraceRecorder> frame_trace_recorder_;
@@ -191,6 +195,7 @@ class CONTENT_EXPORT RenderFrameDevToolsAgentHost
   std::unique_ptr<device::PowerSaveBlocker> power_save_blocker_;
 #endif
   std::unique_ptr<DevToolsProtocolHandler> protocol_handler_;
+  RenderFrameHostImpl* handlers_frame_host_;
   bool current_frame_crashed_;
 
   // PlzNavigate

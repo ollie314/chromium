@@ -102,10 +102,6 @@ void IOSChromeMetricsServiceClient::SetMetricsClientId(
   crash_keys::SetMetricsClientIdFromGUID(client_id);
 }
 
-bool IOSChromeMetricsServiceClient::IsOffTheRecordSessionActive() {
-  return ::IsOffTheRecordSessionActive();
-}
-
 int32_t IOSChromeMetricsServiceClient::GetProduct() {
   return metrics::ChromeUserMetricsExtension::CHROME;
 }
@@ -237,7 +233,7 @@ void IOSChromeMetricsServiceClient::Initialize() {
 
   metrics_service_->RegisterMetricsProvider(
       std::unique_ptr<metrics::MetricsProvider>(
-          new sync_driver::DeviceCountMetricsProvider(
+          new syncer::DeviceCountMetricsProvider(
               base::Bind(&IOSChromeSyncClient::GetDeviceInfoTrackers))));
 
   metrics_service_->RegisterMetricsProvider(

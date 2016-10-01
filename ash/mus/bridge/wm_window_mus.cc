@@ -4,6 +4,7 @@
 
 #include "ash/mus/bridge/wm_window_mus.h"
 
+#include "ash/common/shelf/shelf_item_types.h"
 #include "ash/common/wm/container_finder.h"
 #include "ash/common/wm/window_positioning_utils.h"
 #include "ash/common/wm/window_state.h"
@@ -24,6 +25,7 @@
 #include "ui/aura/window.h"
 #include "ui/base/hit_test.h"
 #include "ui/display/display.h"
+#include "ui/resources/grit/ui_resources.h"
 #include "ui/views/view.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
@@ -43,9 +45,8 @@ namespace mus {
 
 namespace {
 
-// This classes is used so that the WindowState constructor can be made
-// protected. GetWindowState() is the only place that should be creating
-// WindowState.
+// This class is used so that the WindowState constructor can be made protected.
+// GetWindowState() is the only place that should be creating WindowState.
 class WindowStateMus : public wm::WindowState {
  public:
   explicit WindowStateMus(WmWindow* window) : wm::WindowState(window) {}
@@ -195,6 +196,10 @@ std::string WmWindowMus::GetName() const {
              : std::string();
 }
 
+void WmWindowMus::SetTitle(const base::string16& title) {
+  SetWindowTitle(window_, title);
+}
+
 base::string16 WmWindowMus::GetTitle() const {
   return GetWindowTitle(window_);
 }
@@ -213,6 +218,17 @@ ui::wm::WindowType WmWindowMus::GetType() const {
   // windows created in other ways, say from the client, then we need to get
   // the type from |window_| directly.
   return is_wm_window_type_set_ ? wm_window_type_ : GetWmWindowType(window_);
+}
+
+int WmWindowMus::GetAppType() const {
+  // TODO: Need support for window property kAppType: http://crbug.com/651206.
+  NOTIMPLEMENTED();
+  return 0;
+}
+
+void WmWindowMus::SetAppType(int app_type) const {
+  // TODO: Need support for window property kAppType: http://crbug.com/651206.
+  NOTIMPLEMENTED();
 }
 
 bool WmWindowMus::IsBubble() {
@@ -373,17 +389,6 @@ void WmWindowMus::SetColorProperty(WmWindowProperty key, SkColor value) {
 }
 
 int WmWindowMus::GetIntProperty(WmWindowProperty key) {
-  if (key == WmWindowProperty::SHELF_ID) {
-    NOTIMPLEMENTED();
-    return 0;
-  }
-
-  if (key == WmWindowProperty::TOP_VIEW_INSET) {
-    // TODO: need support for TOP_VIEW_INSET: http://crbug.com/615100.
-    NOTIMPLEMENTED();
-    return 0;
-  }
-
   if (key == WmWindowProperty::MODAL_TYPE) {
     // TODO: WindowTree::SetModalWindow() needs to route through WindowManager
     // so wm can position. http://crbug.com/645996.
@@ -391,13 +396,59 @@ int WmWindowMus::GetIntProperty(WmWindowProperty key) {
     return static_cast<int>(ui::MODAL_TYPE_NONE);
   }
 
+  if (key == WmWindowProperty::SHELF_ICON_RESOURCE_ID) {
+    if (window_->HasSharedProperty(
+            ui::mojom::WindowManager::kShelfIconResourceId_Property)) {
+      return window_->GetSharedProperty<int>(
+          ui::mojom::WindowManager::kShelfIconResourceId_Property);
+    }
+    // Mash provides a default shelf icon image.
+    // TODO(msw): Support icon resource ids and bitmaps:
+    // mojo::Array<uint8_t> app_icon = GetWindowAppIcon(window_);
+    return IDR_DEFAULT_FAVICON;
+  }
+
+  if (key == WmWindowProperty::SHELF_ID) {
+    NOTIMPLEMENTED();
+    return kInvalidShelfID;
+  }
+
+  if (key == WmWindowProperty::SHELF_ITEM_TYPE) {
+    if (window_->HasSharedProperty(
+            ui::mojom::WindowManager::kShelfItemType_Property)) {
+      return window_->GetSharedProperty<int>(
+          ui::mojom::WindowManager::kShelfItemType_Property);
+    }
+    // Mash provides a default shelf item type for non-ignored windows.
+    return GetWindowIgnoredByShelf(window_) ? TYPE_UNDEFINED
+                                            : TYPE_PLATFORM_APP;
+  }
+
+  if (key == WmWindowProperty::TOP_VIEW_INSET) {
+    // TODO: need support for TOP_VIEW_INSET: http://crbug.com/615100.
+    NOTIMPLEMENTED();
+    return 0;
+  }
+
   NOTREACHED();
   return 0;
 }
 
 void WmWindowMus::SetIntProperty(WmWindowProperty key, int value) {
+  if (key == WmWindowProperty::SHELF_ICON_RESOURCE_ID) {
+    window_->SetSharedProperty<int>(
+        ui::mojom::WindowManager::kShelfIconResourceId_Property, value);
+    return;
+  }
+
   if (key == WmWindowProperty::SHELF_ID) {
     NOTIMPLEMENTED();
+    return;
+  }
+
+  if (key == WmWindowProperty::SHELF_ITEM_TYPE) {
+    window_->SetSharedProperty<int>(
+        ui::mojom::WindowManager::kShelfItemType_Property, value);
     return;
   }
 
@@ -408,19 +459,6 @@ void WmWindowMus::SetIntProperty(WmWindowProperty key, int value) {
   }
 
   NOTREACHED();
-}
-
-ShelfItemDetails* WmWindowMus::GetShelfItemDetails() {
-  NOTIMPLEMENTED();  // TODO: Add support; see crbug.com/634150
-  return nullptr;
-}
-
-void WmWindowMus::SetShelfItemDetails(const ShelfItemDetails& details) {
-  NOTIMPLEMENTED();  // TODO: Add support; see crbug.com/634150
-}
-
-void WmWindowMus::ClearShelfItemDetails() {
-  NOTIMPLEMENTED();  // TODO: Add support; see crbug.com/634150
 }
 
 const wm::WindowState* WmWindowMus::GetWindowState() const {
@@ -920,6 +958,17 @@ void WmWindowMus::OnWindowDestroying(ui::Window* window) {
 
 void WmWindowMus::OnWindowDestroyed(ui::Window* window) {
   FOR_EACH_OBSERVER(WmWindowObserver, observers_, OnWindowDestroyed(this));
+}
+
+void WmWindowMus::OnWindowVisibilityChanging(ui::Window* window) {
+  DCHECK_EQ(window_, window);
+  FOR_EACH_OBSERVER(WmWindowObserver, observers_,
+                    OnWindowVisibilityChanging(this, !window->visible()));
+}
+
+void WmWindowMus::OnWindowVisibilityChanged(ui::Window* window) {
+  FOR_EACH_OBSERVER(WmWindowObserver, observers_,
+                    OnWindowVisibilityChanged(Get(window), window->visible()));
 }
 
 void WmWindowMus::OnTransientChildAdded(ui::Window* window,

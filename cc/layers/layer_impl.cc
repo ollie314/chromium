@@ -125,7 +125,14 @@ void LayerImpl::SetDebugInfo(
 void LayerImpl::DistributeScroll(ScrollState* scroll_state) {
   ScrollTree& scroll_tree = layer_tree_impl()->property_trees()->scroll_tree;
   ScrollNode* scroll_node = scroll_tree.Node(scroll_tree_index());
-  scroll_tree.DistributeScroll(scroll_node, scroll_state);
+  return scroll_tree.DistributeScroll(scroll_node, scroll_state);
+}
+
+void LayerImpl::ApplyScroll(ScrollState* scroll_state) {
+  DCHECK(scroll_state);
+  ScrollNode* node = layer_tree_impl()->property_trees()->scroll_tree.Node(
+      scroll_tree_index());
+  layer_tree_impl()->ApplyScroll(node, scroll_state);
 }
 
 void LayerImpl::SetTransformTreeIndex(int index) {
@@ -1071,21 +1078,6 @@ bool LayerImpl::IsHidden() const {
   EffectTree& effect_tree = layer_tree_impl_->property_trees()->effect_tree;
   EffectNode* node = effect_tree.Node(effect_tree_index_);
   return node->screen_space_opacity == 0.f;
-}
-
-bool LayerImpl::InsideReplica() const {
-  // There are very few render targets so this should be cheap to do for each
-  // layer instead of something more complicated.
-  EffectTree& effect_tree = layer_tree_impl_->property_trees()->effect_tree;
-  EffectNode* node = effect_tree.Node(effect_tree_index_);
-
-  while (node->id > 0) {
-    if (node->replica_layer_id != EffectTree::kInvalidNodeId)
-      return true;
-    node = effect_tree.Node(node->target_id);
-  }
-
-  return false;
 }
 
 float LayerImpl::GetIdealContentsScale() const {

@@ -77,6 +77,7 @@
 #include "content/common/view_messages.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/global_request_id.h"
+#include "content/public/browser/navigation_ui_data.h"
 #include "content/public/browser/plugin_service.h"
 #include "content/public/browser/resource_dispatcher_host_delegate.h"
 #include "content/public/browser/resource_request_details.h"
@@ -648,15 +649,17 @@ std::unique_ptr<ResourceHandler>
 ResourceDispatcherHostImpl::CreateResourceHandlerForDownload(
     net::URLRequest* request,
     bool is_content_initiated,
-    bool must_download) {
+    bool must_download,
+    bool is_new_request) {
   DCHECK(!create_download_handler_intercept_.is_null());
   // TODO(ananta)
   // Find a better way to create the download handler and notifying the
   // delegate of the download start.
   std::unique_ptr<ResourceHandler> handler =
       create_download_handler_intercept_.Run(request);
-  handler = HandleDownloadStarted(request, std::move(handler),
-                                  is_content_initiated, must_download);
+  handler =
+      HandleDownloadStarted(request, std::move(handler), is_content_initiated,
+                            must_download, is_new_request);
   return handler;
 }
 
@@ -2044,6 +2047,7 @@ void ResourceDispatcherHostImpl::FinishedWithResourcesForRequest(
 void ResourceDispatcherHostImpl::BeginNavigationRequest(
     ResourceContext* resource_context,
     const NavigationRequestInfo& info,
+    std::unique_ptr<NavigationUIData> navigation_ui_data,
     NavigationURLLoaderImplCore* loader,
     ServiceWorkerNavigationHandleCore* service_worker_handle_core) {
   // PlzNavigate: BeginNavigationRequest currently should only be used for the
@@ -2165,6 +2169,8 @@ void ResourceDispatcherHostImpl::BeginNavigationRequest(
       // If in the future this changes this should be updated to somehow get a
       // meaningful value.
       false);  // initiated_in_secure_context
+  extra_info->set_navigation_ui_data(std::move(navigation_ui_data));
+
   // Request takes ownership.
   extra_info->AssociateWithRequest(new_request.get());
 
@@ -2353,8 +2359,9 @@ void ResourceDispatcherHostImpl::BeginURLRequest(
           blob_context->context()->GetBlobDataFromPublicURL(
               request->original_url()));
     }
-    handler = HandleDownloadStarted(request.get(), std::move(handler),
-                                    is_content_initiated, true);
+    handler = HandleDownloadStarted(
+        request.get(), std::move(handler), is_content_initiated,
+        true /* force_download */, true /* is_new_request */);
   }
   BeginRequestInternal(std::move(request), std::move(handler));
 }
@@ -2368,6 +2375,7 @@ void ResourceDispatcherHostImpl::StartLoading(
           "456331 ResourceDispatcherHostImpl::StartLoading"));
 
   ResourceLoader* loader_ptr = loader.get();
+  DCHECK(pending_loaders_[info->GetGlobalRequestID()] == nullptr);
   pending_loaders_[info->GetGlobalRequestID()] = std::move(loader);
 
   loader_ptr->StartRequest();
@@ -2684,14 +2692,15 @@ ResourceDispatcherHostImpl::HandleDownloadStarted(
     net::URLRequest* request,
     std::unique_ptr<ResourceHandler> handler,
     bool is_content_initiated,
-    bool must_download) {
+    bool must_download,
+    bool is_new_request) {
   if (delegate()) {
     const ResourceRequestInfoImpl* request_info(
         ResourceRequestInfoImpl::ForRequest(request));
     ScopedVector<ResourceThrottle> throttles;
-    delegate()->DownloadStarting(
-        request, request_info->GetContext(), is_content_initiated, true,
-        &throttles);
+    delegate()->DownloadStarting(request, request_info->GetContext(),
+                                 is_content_initiated, true, is_new_request,
+                                 &throttles);
     if (!throttles.empty()) {
       handler.reset(new ThrottlingResourceHandler(std::move(handler), request,
                                                   std::move(throttles)));

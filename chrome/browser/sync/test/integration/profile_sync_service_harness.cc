@@ -8,9 +8,7 @@
 #include <iterator>
 #include <ostream>
 #include <sstream>
-#include <vector>
 
-#include "base/compiler_specific.h"
 #include "base/json/json_writer.h"
 #include "base/logging.h"
 #include "base/strings/stringprintf.h"
@@ -475,7 +473,7 @@ bool ProfileSyncServiceHarness::IsTypePreferred(syncer::ModelType type) {
 
 std::string ProfileSyncServiceHarness::GetServiceStatus() {
   std::unique_ptr<base::DictionaryValue> value(
-      sync_driver::sync_ui_util::ConstructAboutInformation(
+      syncer::sync_ui_util::ConstructAboutInformation(
           service(), service()->signin(), chrome::GetChannel()));
   std::string service_status;
   base::JSONWriter::WriteWithOptions(

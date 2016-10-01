@@ -259,7 +259,6 @@
       </if>
       <structure type="chrome_scaled_image" name="IDR_INFO" file="common/info_small.png" />
       <structure type="chrome_scaled_image" name="IDR_INFOBAR_3D_BLOCKED" file="common/infobar_3d_blocked.png" />
-      <structure type="chrome_scaled_image" name="IDR_INFOBAR_ALT_NAV_URL" file="common/infobar_alt_nav_url.png" />
       <structure type="chrome_scaled_image" name="IDR_INFOBAR_COOKIE" file="common/infobar_cookie.png" />
       <if expr="is_macosx">
         <structure type="chrome_scaled_image" name="IDR_INFOBAR_DESKTOP_NOTIFICATIONS" file="legacy/infobar_desktop_notifications.png" />
@@ -276,7 +275,6 @@
       <if expr="is_android">
         <structure type="chrome_scaled_image" name="IDR_INFOBAR_SAVE_PASSWORD" file="common/infobar_save_password.png" />
       </if>
-      <structure type="chrome_scaled_image" name="IDR_INFOBAR_THEME" file="common/infobar_theme.png" />
       <if expr="is_macosx or is_android">
         <structure type="chrome_scaled_image" name="IDR_INFOBAR_TRANSLATE" file="common/infobar_translate.png" />
       </if>
@@ -321,7 +319,7 @@
         <structure type="chrome_scaled_image" name="IDR_NETWORK_SHOW_PASSWORD" file="cros/network_show_password.png" />
         <structure type="chrome_scaled_image" name="IDR_NETWORK_SHOW_PASSWORD_HOVER" file="cros/network_show_password_hover.png" />
       </if>
-      <if expr="toolkit_views or is_macosx or is_ios">
+      <if expr="is_macosx or is_ios">
         <structure type="chrome_scaled_image" name="IDR_NEWTAB_BUTTON" file="common/newtab_normal.png" />
         <structure type="chrome_scaled_image" name="IDR_NEWTAB_BUTTON_H" file="common/newtab_hover.png" />
         <structure type="chrome_scaled_image" name="IDR_NEWTAB_BUTTON_MASK" file="common/newtab_button_mask.png" />
@@ -626,12 +624,6 @@
       <structure type="chrome_scaled_image" name="IDR_QUESTION_MARK" file="common/question_mark.png" />
       <structure type="chrome_scaled_image" name="IDR_PROFILE_SELECTED" file="common/profile_selected.png" />
       <structure type="chrome_scaled_image" name="IDR_REGISTER_PROTOCOL_HANDLER" file="register_protocol_handler.png" />
-      <if expr="toolkit_views or is_macosx or is_ios">
-        <structure type="chrome_scaled_image" name="IDR_RELOAD" file="common/browser_reload_normal.png" />
-        <structure type="chrome_scaled_image" name="IDR_RELOAD_D" file="common/browser_reload_disabled.png" />
-        <structure type="chrome_scaled_image" name="IDR_RELOAD_H" file="common/browser_reload_hover.png" />
-        <structure type="chrome_scaled_image" name="IDR_RELOAD_P" file="common/browser_reload_pressed.png" />
-      </if>
       <structure type="chrome_scaled_image" name="IDR_RESTORE_BUTTON_MASK" file="common/restore_button_mask.png" />
       <if expr="is_macosx">
         <structure type="chrome_scaled_image" name="IDR_SAFEBROWSING_WARNING" file="legacy/safebrowsing_warning.png" />
@@ -647,12 +639,6 @@
       <if expr="is_macosx">
         <structure type="chrome_scaled_image" name="IDR_STAR" file="common/star.png" />
         <structure type="chrome_scaled_image" name="IDR_STAR_LIT" file="common/star_lit.png" />
-      </if>
-      <if expr="toolkit_views or is_macosx or is_ios">
-        <structure type="chrome_scaled_image" name="IDR_STOP" file="common/browser_stop_normal.png" />
-        <structure type="chrome_scaled_image" name="IDR_STOP_D" file="common/browser_stop_disabled.png" />
-        <structure type="chrome_scaled_image" name="IDR_STOP_H" file="common/browser_stop_hover.png" />
-        <structure type="chrome_scaled_image" name="IDR_STOP_P" file="common/browser_stop_pressed.png" />
       </if>
       <if expr="chromeos">
         <structure type="chrome_scaled_image" name="IDR_SUPERVISED_ILLUSTRATION_START" file="cros/supervised_illustration_start.png" />
@@ -763,11 +749,6 @@
       <if expr="is_macosx or is_ios">
         <structure type="chrome_scaled_image" name="IDR_TOOLBAR_SHADE_TOP" file="mac/toolbar_shade_top.png" />
       </if>
-      <if expr="toolkit_views or is_macosx or is_ios">
-        <structure type="chrome_scaled_image" name="IDR_TOOLS" file="common/browser_tools_normal.png" />
-        <structure type="chrome_scaled_image" name="IDR_TOOLS_H" file="common/browser_tools_hover.png" />
-        <structure type="chrome_scaled_image" name="IDR_TOOLS_P" file="common/browser_tools_pressed.png" />
-      </if>
 
       <structure type="chrome_scaled_image" name="IDR_TOOLBAR_ACTION_HIGHLIGHT_BOTTOM_LEFT" file="common/toolbar_action_highlight_bottom_left.png" />
       <structure type="chrome_scaled_image" name="IDR_TOOLBAR_ACTION_HIGHLIGHT_BOTTOM" file="common/toolbar_action_highlight_bottom.png" />
@@ -778,13 +759,9 @@
       <structure type="chrome_scaled_image" name="IDR_TOOLBAR_ACTION_HIGHLIGHT_TOP_LEFT" file="common/toolbar_action_highlight_top_left.png" />
       <structure type="chrome_scaled_image" name="IDR_TOOLBAR_ACTION_HIGHLIGHT_TOP" file="common/toolbar_action_highlight_top.png" />
       <structure type="chrome_scaled_image" name="IDR_TOOLBAR_ACTION_HIGHLIGHT_TOP_RIGHT" file="common/toolbar_action_highlight_top_right.png" />
-
       <structure type="chrome_scaled_image" name="IDR_TOOLBAR_BEZEL_HOVER" file="common/browser_toolbar_bezel_hover.png" />
       <structure type="chrome_scaled_image" name="IDR_TOOLBAR_BEZEL_PRESSED" file="common/browser_toolbar_bezel_pressed.png" />
-      <structure type="chrome_scaled_image" name="IDR_TOOLS_BAR" file="common/browser_tools_bar.png" />
-      <structure type="chrome_scaled_image" name="IDR_TOOLS_BAR_LOW" file="common/browser_tools_bar_low.png" />
-      <structure type="chrome_scaled_image" name="IDR_TOOLS_BAR_MEDIUM" file="common/browser_tools_bar_medium.png" />
-      <structure type="chrome_scaled_image" name="IDR_TOOLS_BAR_HIGH" file="common/browser_tools_bar_high.png" />
+
       <if expr="is_macosx">
         <structure type="chrome_scaled_image" name="IDR_TRANSLATE" file="legacy/translate.png" />
         <structure type="chrome_scaled_image" name="IDR_TRANSLATE_ACTIVE" file="legacy/translate_active.png" />

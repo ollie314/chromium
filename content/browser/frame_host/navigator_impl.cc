@@ -184,17 +184,20 @@ void NavigatorImpl::DidStartProvisionalLoad(
   // should always have a pending NavigationEntry to distinguish them.
   bool is_renderer_initiated = true;
   int pending_nav_entry_id = 0;
+  bool started_from_context_menu = false;
   NavigationEntryImpl* pending_entry = controller_->GetPendingEntry();
   if (pending_entry) {
     is_renderer_initiated = pending_entry->is_renderer_initiated();
     pending_nav_entry_id = pending_entry->GetUniqueID();
+    started_from_context_menu = pending_entry->has_started_from_context_menu();
   }
+
   render_frame_host->SetNavigationHandle(NavigationHandleImpl::Create(
       validated_url, render_frame_host->frame_tree_node(),
       is_renderer_initiated,
       false,             // is_synchronous
       is_iframe_srcdoc,  // is_srcdoc
-      navigation_start, pending_nav_entry_id));
+      navigation_start, pending_nav_entry_id, started_from_context_menu));
 }
 
 void NavigatorImpl::DidFailProvisionalLoadWithError(
@@ -396,7 +399,7 @@ bool NavigatorImpl::NavigateToEntry(
           entry.ConstructRequestNavigationParams(
               frame_entry, is_same_document_history_load,
               is_history_navigation_in_new_child,
-              entry.HasSubtreeHistoryItems(frame_tree_node),
+              entry.GetSubframeUniqueNames(frame_tree_node),
               frame_tree_node->has_committed_real_load(),
               controller_->GetPendingEntryIndex() == -1,
               controller_->GetIndexOfEntry(&entry),
@@ -516,7 +519,7 @@ void NavigatorImpl::DidNavigate(
   // message, which is sent inside DidNavigateFrame().  SwapOut needs the
   // origin because it creates a RenderFrameProxy that needs this to initialize
   // its security context. This origin will also be sent to RenderFrameProxies
-  // created via ViewMsg_New and FrameMsg_NewFrameProxy.
+  // created via mojom::Renderer::CreateView and FrameMsg_NewFrameProxy.
   render_frame_host->frame_tree_node()->SetCurrentOrigin(
       params.origin, params.has_potentially_trustworthy_unique_origin);
 
@@ -562,8 +565,8 @@ void NavigatorImpl::DidNavigate(
 
   int old_entry_count = controller_->GetEntryCount();
   LoadCommittedDetails details;
-  bool did_navigate = controller_->RendererDidNavigate(render_frame_host,
-                                                       params, &details);
+  bool did_navigate = controller_->RendererDidNavigate(
+      render_frame_host, params, &details, is_navigation_within_page);
 
   // If the history length and/or offset changed, update other renderers in the
   // FrameTree.
@@ -756,7 +759,8 @@ void NavigatorImpl::RequestTransferURL(
          SiteIsolationPolicy::AreCrossProcessFramesPossible());
 
   // Allow the delegate to cancel the transfer.
-  if (!delegate_->ShouldTransferNavigation())
+  if (!delegate_->ShouldTransferNavigation(
+          render_frame_host->frame_tree_node()->IsMainFrame()))
     return;
 
   GURL dest_url(url);

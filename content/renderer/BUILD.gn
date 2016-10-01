@@ -198,10 +198,6 @@ target(link_target_type, "renderer") {
     "media/android/media_player_renderer_client.h",
     "media/android/media_player_renderer_client_factory.cc",
     "media/android/media_player_renderer_client_factory.h",
-    "media/android/media_source_delegate.cc",
-    "media/android/media_source_delegate.h",
-    "media/android/renderer_demuxer_android.cc",
-    "media/android/renderer_demuxer_android.h",
     "media/android/renderer_media_player_manager.cc",
     "media/android/renderer_media_player_manager.h",
     "media/android/renderer_media_session_manager.cc",
@@ -345,6 +341,8 @@ target(link_target_type, "renderer") {
     "service_worker/embedded_worker_devtools_agent.h",
     "service_worker/embedded_worker_dispatcher.cc",
     "service_worker/embedded_worker_dispatcher.h",
+    "service_worker/embedded_worker_instance_client_impl.cc",
+    "service_worker/embedded_worker_instance_client_impl.h",
     "service_worker/service_worker_context_client.cc",
     "service_worker/service_worker_context_client.h",
     "service_worker/service_worker_context_message_filter.cc",
@@ -418,6 +416,7 @@ target(link_target_type, "renderer") {
     "//content/public/common:feature_h264_with_openh264_ffmpeg",
     "//content/public/common:features",
     "//crypto:platform",
+    "//device/base/synchronization",
     "//device/battery:mojo_bindings",
     "//device/bluetooth",
     "//device/time_zone_monitor/public/interfaces",
@@ -867,15 +866,6 @@ target(link_target_type, "renderer") {
 
   if (enable_basic_printing || enable_print_preview) {
     deps += [ "//printing" ]
-  }
-
-  if (enable_browser_cdms) {
-    sources += [
-      "media/cdm/proxy_media_keys.cc",
-      "media/cdm/proxy_media_keys.h",
-      "media/cdm/renderer_cdm_manager.cc",
-      "media/cdm/renderer_cdm_manager.h",
-    ]
   }
 
   if (enable_mojo_media) {

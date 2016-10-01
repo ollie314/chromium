@@ -25,6 +25,7 @@
 #include "components/sync/driver/sync_prefs.h"
 #include "components/sync_sessions/favicon_cache.h"
 #include "components/sync_sessions/local_session_event_router.h"
+#include "components/sync_sessions/lost_navigations_recorder.h"
 #include "components/sync_sessions/open_tabs_ui_delegate.h"
 #include "components/sync_sessions/revisit/page_revisit_broadcaster.h"
 #include "components/sync_sessions/synced_session.h"
@@ -32,13 +33,10 @@
 #include "components/sync_sessions/tab_node_pool.h"
 
 namespace syncer {
-class SyncErrorFactory;
-}
-
-namespace sync_driver {
 class LocalDeviceInfoProvider;
+class SyncErrorFactory;
 class SyncPrefs;
-}
+}  // namespace syncer
 
 namespace sync_pb {
 class SessionHeader;
@@ -64,8 +62,8 @@ class SessionsSyncManager : public syncer::SyncableService,
                             public LocalSessionEventHandler {
  public:
   SessionsSyncManager(SyncSessionsClient* sessions_client,
-                      sync_driver::SyncPrefs* sync_prefs,
-                      sync_driver::LocalDeviceInfoProvider* local_device,
+                      syncer::SyncPrefs* sync_prefs,
+                      syncer::LocalDeviceInfoProvider* local_device,
                       std::unique_ptr<LocalSessionEventRouter> router,
                       const base::Closure& sessions_updated_callback,
                       const base::Closure& datatype_refresh_callback);
@@ -343,13 +341,13 @@ class SessionsSyncManager : public syncer::SyncableService,
   // proves that we are still relevant.
   bool local_tab_pool_out_of_sync_;
 
-  sync_driver::SyncPrefs* sync_prefs_;
+  syncer::SyncPrefs* sync_prefs_;
 
   std::unique_ptr<syncer::SyncErrorFactory> error_handler_;
   std::unique_ptr<syncer::SyncChangeProcessor> sync_processor_;
 
   // Local device info provider, owned by ProfileSyncService.
-  const sync_driver::LocalDeviceInfoProvider* const local_device_;
+  const syncer::LocalDeviceInfoProvider* const local_device_;
 
   // Unique client tag.
   std::string current_machine_tag_;
@@ -369,6 +367,9 @@ class SessionsSyncManager : public syncer::SyncableService,
 
   // Owns revisiting instrumentation logic for page visit events.
   PageRevisitBroadcaster page_revisit_broadcaster_;
+
+  std::unique_ptr<sync_sessions::LostNavigationsRecorder>
+      lost_navigations_recorder_;
 
   // Callback to inform interested observer that new sessions data has arrived.
   base::Closure sessions_updated_callback_;

@@ -9,7 +9,6 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "build/build_config.h"
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
@@ -32,7 +31,6 @@
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/themes/theme_syncable_service.h"
-#include "chrome/browser/ui/app_list/arc/arc_package_sync_data_type_controller.h"
 #include "chrome/browser/ui/sync/browser_synced_window_delegates_getter.h"
 #include "chrome/browser/undo/bookmark_undo_service_factory.h"
 #include "chrome/browser/web_data_service_factory.h"
@@ -104,6 +102,7 @@
 #endif
 
 #if defined(OS_CHROMEOS)
+#include "chrome/browser/ui/app_list/arc/arc_package_sync_data_type_controller.h"
 #include "chrome/browser/ui/app_list/arc/arc_package_syncable_service.h"
 #include "components/wifi_sync/wifi_credential_syncable_service.h"
 #include "components/wifi_sync/wifi_credential_syncable_service_factory.h"
@@ -115,7 +114,7 @@ using browser_sync::ExtensionDataTypeController;
 using browser_sync::ExtensionSettingDataTypeController;
 #endif
 using browser_sync::SearchEngineDataTypeController;
-using sync_driver::UIDataTypeController;
+using syncer::UIDataTypeController;
 
 namespace browser_sync {
 
@@ -200,7 +199,7 @@ void ChromeSyncClient::Initialize() {
 
   // Component factory may already be set in tests.
   if (!GetSyncApiComponentFactory()) {
-    const GURL sync_service_url = GetSyncServiceURL(
+    const GURL sync_service_url = syncer::GetSyncServiceURL(
         *base::CommandLine::ForCurrentProcess(), chrome::GetChannel());
     ProfileOAuth2TokenService* token_service =
         ProfileOAuth2TokenServiceFactory::GetForProfile(profile_);
@@ -221,7 +220,7 @@ void ChromeSyncClient::Initialize() {
   }
 }
 
-sync_driver::SyncService* ChromeSyncClient::GetSyncService() {
+syncer::SyncService* ChromeSyncClient::GetSyncService() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   return ProfileSyncServiceFactory::GetSyncServiceForBrowserContext(profile_);
 }
@@ -259,7 +258,7 @@ base::Closure ChromeSyncClient::GetPasswordStateChangedCallback() {
       base::Unretained(profile_));
 }
 
-sync_driver::SyncApiComponentFactory::RegisterDataTypesMethod
+syncer::SyncApiComponentFactory::RegisterDataTypesMethod
 ChromeSyncClient::GetRegisterPlatformTypesCallback() {
   return base::Bind(
 #if BUILDFLAG(ANDROID_JAVA_UI)
@@ -427,7 +426,7 @@ ChromeSyncClient::GetSyncableServiceForType(syncer::ModelType type) {
   }
 }
 
-base::WeakPtr<syncer_v2::ModelTypeService>
+base::WeakPtr<syncer::ModelTypeService>
 ChromeSyncClient::GetModelTypeServiceForType(syncer::ModelType type) {
   switch (type) {
     case syncer::DEVICE_INFO:
@@ -436,7 +435,7 @@ ChromeSyncClient::GetModelTypeServiceForType(syncer::ModelType type) {
           ->AsWeakPtr();
     default:
       NOTREACHED();
-      return base::WeakPtr<syncer_v2::ModelTypeService>();
+      return base::WeakPtr<syncer::ModelTypeService>();
   }
 }
 
@@ -447,15 +446,15 @@ ChromeSyncClient::CreateModelWorkerForGroup(
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   switch (group) {
     case syncer::GROUP_DB:
-      return new BrowserThreadModelWorker(
+      return new syncer::BrowserThreadModelWorker(
           BrowserThread::GetTaskRunnerForThread(BrowserThread::DB),
           syncer::GROUP_DB, observer);
     case syncer::GROUP_FILE:
-      return new BrowserThreadModelWorker(
+      return new syncer::BrowserThreadModelWorker(
           BrowserThread::GetTaskRunnerForThread(BrowserThread::FILE),
           syncer::GROUP_FILE, observer);
     case syncer::GROUP_UI:
-      return new UIModelWorker(
+      return new syncer::UIModelWorker(
           BrowserThread::GetTaskRunnerForThread(BrowserThread::UI), observer);
     case syncer::GROUP_PASSIVE:
       return new syncer::PassiveModelWorker(observer);
@@ -477,19 +476,19 @@ ChromeSyncClient::CreateModelWorkerForGroup(
   }
 }
 
-sync_driver::SyncApiComponentFactory*
+syncer::SyncApiComponentFactory*
 ChromeSyncClient::GetSyncApiComponentFactory() {
   return component_factory_.get();
 }
 
 void ChromeSyncClient::SetSyncApiComponentFactoryForTesting(
-    std::unique_ptr<sync_driver::SyncApiComponentFactory> component_factory) {
+    std::unique_ptr<syncer::SyncApiComponentFactory> component_factory) {
   component_factory_ = std::move(component_factory);
 }
 
 // static
 void ChromeSyncClient::GetDeviceInfoTrackers(
-    std::vector<const sync_driver::DeviceInfoTracker*>* trackers) {
+    std::vector<const syncer::DeviceInfoTracker*>* trackers) {
   DCHECK(trackers);
   ProfileManager* profile_manager = g_browser_process->profile_manager();
   std::vector<Profile*> profile_list = profile_manager->GetLoadedProfiles();
@@ -497,7 +496,7 @@ void ChromeSyncClient::GetDeviceInfoTrackers(
     const browser_sync::ProfileSyncService* profile_sync_service =
         ProfileSyncServiceFactory::GetForProfile(profile);
     if (profile_sync_service != nullptr) {
-      const sync_driver::DeviceInfoTracker* tracker =
+      const syncer::DeviceInfoTracker* tracker =
           profile_sync_service->GetDeviceInfoTracker();
       if (tracker != nullptr) {
         // Even when sync is disabled and/or user is signed out, a tracker will
@@ -510,11 +509,11 @@ void ChromeSyncClient::GetDeviceInfoTrackers(
 }
 
 void ChromeSyncClient::RegisterDesktopDataTypes(
-    sync_driver::SyncService* sync_service,
+    syncer::SyncService* sync_service,
     syncer::ModelTypeSet disabled_types,
     syncer::ModelTypeSet enabled_types) {
   base::Closure error_callback =
-      base::Bind(&ChromeReportUnrecoverableError, chrome::GetChannel());
+      base::Bind(&syncer::ChromeReportUnrecoverableError, chrome::GetChannel());
 
 #if defined(ENABLE_EXTENSIONS)
   // App sync is enabled by default.  Register unless explicitly
@@ -619,11 +618,11 @@ void ChromeSyncClient::RegisterDesktopDataTypes(
 }
 
 void ChromeSyncClient::RegisterAndroidDataTypes(
-    sync_driver::SyncService* sync_service,
+    syncer::SyncService* sync_service,
     syncer::ModelTypeSet disabled_types,
     syncer::ModelTypeSet enabled_types) {
   base::Closure error_callback =
-      base::Bind(&ChromeReportUnrecoverableError, chrome::GetChannel());
+      base::Bind(&syncer::ChromeReportUnrecoverableError, chrome::GetChannel());
 #if defined(ENABLE_SUPERVISED_USERS)
   sync_service->RegisterDataTypeController(
       base::MakeUnique<SupervisedUserSyncDataTypeController>(

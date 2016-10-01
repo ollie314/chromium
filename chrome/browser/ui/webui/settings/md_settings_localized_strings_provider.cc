@@ -91,7 +91,10 @@ void AddCommonStrings(content::WebUIDataSource* html_source, Profile* profile) {
 void AddA11yStrings(content::WebUIDataSource* html_source) {
   LocalizedString localized_strings[] = {
     {"a11yPageTitle", IDS_SETTINGS_ACCESSIBILITY},
+    {"a11yWebStore", IDS_SETTINGS_ACCESSIBILITY_WEB_STORE},
     {"moreFeaturesLink", IDS_SETTINGS_MORE_FEATURES_LINK},
+    {"moreFeaturesLinkDescription",
+      IDS_SETTINGS_MORE_FEATURES_LINK_DESCRIPTION},
 #if defined(OS_CHROMEOS)
     {"optionsInMenuLabel", IDS_SETTINGS_OPTIONS_IN_MENU_LABEL},
     {"largeMouseCursorLabel", IDS_SETTINGS_LARGE_MOUSE_CURSOR_LABEL},
@@ -153,8 +156,6 @@ void AddA11yStrings(content::WebUIDataSource* html_source) {
      IDS_OPTIONS_SETTINGS_ACCESSIBILITY_AUDIO_HEADING},
     {"additionalFeaturesTitle",
      IDS_OPTIONS_SETTINGS_ACCESSIBILITY_ADDITIONAL_FEATURES_TITLE},
-    {"additionalFeaturesDescription",
-     IDS_OPTIONS_SETTINGS_ACCESSIBILITY_ADDITIONAL_FEATURES_DESCRIPTION},
 #endif
   };
   AddLocalizedStringsBulk(html_source, localized_strings,
@@ -769,6 +770,7 @@ void AddLanguagesStrings(content::WebUIDataSource* html_source) {
        IDS_SETTINGS_LANGUAGES_EXPAND_ACCESSIBILITY_LABEL},
       {"orderLanguagesInstructions",
        IDS_SETTINGS_LANGUAGES_LANGUAGES_LIST_ORDERING_INSTRUCTIONS},
+      {"moveToTop", IDS_SETTINGS_LANGUAGES_LANGUAGES_LIST_MOVE_TO_TOP},
       {"moveUp", IDS_SETTINGS_LANGUAGES_LANGUAGES_LIST_MOVE_UP},
       {"moveDown", IDS_SETTINGS_LANGUAGES_LANGUAGES_LIST_MOVE_DOWN},
       {"removeLanguage", IDS_SETTINGS_LANGUAGES_LANGUAGES_LIST_REMOVE},
@@ -776,6 +778,7 @@ void AddLanguagesStrings(content::WebUIDataSource* html_source) {
 #if defined(OS_CHROMEOS)
       {"inputMethodsListTitle",
        IDS_SETTINGS_LANGUAGES_INPUT_METHODS_LIST_TITLE},
+      {"inputMethodEnabled", IDS_SETTINGS_LANGUAGES_INPUT_METHOD_ENABLED},
       {"inputMethodsExpandA11yLabel",
        IDS_SETTINGS_LANGUAGES_INPUT_METHODS_EXPAND_ACCESSIBILITY_LABEL},
       {"manageInputMethods", IDS_SETTINGS_LANGUAGES_INPUT_METHODS_MANAGE},
@@ -926,7 +929,11 @@ void AddPeopleStrings(content::WebUIDataSource* html_source) {
   LocalizedString localized_strings[] = {
     {"peoplePageTitle", IDS_SETTINGS_PEOPLE},
     {"manageOtherPeople", IDS_SETTINGS_PEOPLE_MANAGE_OTHER_PEOPLE},
+    {"manageOtherPeopleDescription",
+     IDS_SETTINGS_PEOPLE_MANAGE_OTHER_PEOPLE_DESCRIPTION},
     {"manageSupervisedUsers", IDS_SETTINGS_PEOPLE_MANAGE_SUPERVISED_USERS},
+    {"manageSupervisedUsersDescription",
+     IDS_SETTINGS_PEOPLE_MANAGE_SUPERVISED_USERS_DESCRIPTION},
 #if defined(OS_CHROMEOS)
     {"configurePinChoosePinTitle",
      IDS_SETTINGS_PEOPLE_CONFIGURE_PIN_CHOOSE_PIN_TITLE},
@@ -1040,6 +1047,7 @@ void AddPeopleStrings(content::WebUIDataSource* html_source) {
                            base::FormatNumber(int64_t{j}));
   }
 
+  html_source->AddString("syncLearnMoreUrl", chrome::kSyncLearnMoreURL);
   html_source->AddString("autofillHelpURL", autofill::kHelpURL);
   html_source->AddString("supervisedUsersUrl",
                          chrome::kLegacySupervisedUserManagementURL);
@@ -1067,7 +1075,11 @@ void AddPrintingStrings(content::WebUIDataSource* html_source) {
     {"printingNotificationsLabel", IDS_SETTINGS_PRINTING_NOTIFICATIONS_LABEL},
     {"printingManageCloudPrintDevices",
      IDS_SETTINGS_PRINTING_MANAGE_CLOUD_PRINT_DEVICES},
+    {"printingManageCloudPrintDevicesDescription",
+     IDS_SETTINGS_PRINTING_MANAGE_CLOUD_PRINT_DEVICES_DESCRIPTION},
     {"cloudPrintersTitle", IDS_SETTINGS_PRINTING_CLOUD_PRINTERS},
+    {"cloudPrintersTitleDescription",
+     IDS_SETTINGS_PRINTING_CLOUD_PRINTERS_DESCRIPTION},
 #if defined(OS_CHROMEOS)
     {"cupsPrintersTitle", IDS_SETTINGS_PRINTING_CUPS_PRINTERS},
     {"addCupsPrinter", IDS_SETTINGS_PRINTING_CUPS_PRINTERS_ADD_PRINTER},
@@ -1154,6 +1166,7 @@ void AddPrivacyStrings(content::WebUIDataSource* html_source) {
       {"siteSettings", IDS_SETTINGS_SITE_SETTINGS},
       {"siteSettingsDescription", IDS_SETTINGS_SITE_SETTINGS_DESCRIPTION},
       {"clearBrowsingData", IDS_SETTINGS_CLEAR_DATA},
+      {"clearBrowsingDataDescription", IDS_SETTINGS_CLEAR_DATA_DESCRIPTION},
       {"titleAndCount", IDS_SETTINGS_TITLE_AND_COUNT},
   };
   AddLocalizedStringsBulk(html_source, localized_strings,
@@ -1187,6 +1200,8 @@ void AddSearchStrings(content::WebUIDataSource* html_source) {
       {"searchPageTitle", IDS_SETTINGS_SEARCH},
       {"searchExplanation", IDS_SETTINGS_SEARCH_EXPLANATION},
       {"searchEnginesManage", IDS_SETTINGS_SEARCH_MANAGE_SEARCH_ENGINES},
+      {"searchEnginesManageDescription",
+       IDS_SETTINGS_SEARCH_MANAGE_SEARCH_ENGINES_DESCRIPTION},
       {"searchOkGoogleLabel", IDS_SETTINGS_SEARCH_OK_GOOGLE_LABEL},
       {"searchOkGoogleLearnMoreLink",
        IDS_SETTINGS_SEARCH_OK_GOOGLE_LEARN_MORE_LINK},

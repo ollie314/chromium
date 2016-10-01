@@ -33,40 +33,37 @@ class SVGElement;
 class SVGAnimationElement;
 
 class SVGAnimatedTypeAnimator final {
-    DISALLOW_NEW();
-public:
-    SVGAnimatedTypeAnimator(SVGAnimationElement*);
+  DISALLOW_NEW();
 
-    void clear();
-    void reset(SVGElement* contextElement);
+ public:
+  SVGAnimatedTypeAnimator(SVGAnimationElement*);
 
-    SVGPropertyBase* createAnimatedValue();
-    SVGPropertyBase* createAnimatedValueFromString(const String&);
+  void clear();
+  void reset(SVGElement* contextElement);
 
-    void calculateAnimatedValue(float percentage, unsigned repeatCount, SVGPropertyBase*, SVGPropertyBase*, SVGPropertyBase*, SVGPropertyBase*);
-    float calculateDistance(const String& fromString, const String& toString);
+  SVGPropertyBase* createAnimatedValue() const;
+  SVGPropertyBase* createPropertyForAnimation(const String&) const;
 
-    void calculateFromAndToValues(Member<SVGPropertyBase>& from, Member<SVGPropertyBase>& to, const String& fromString, const String& toString);
-    void calculateFromAndByValues(Member<SVGPropertyBase>& from, Member<SVGPropertyBase>& to, const String& fromString, const String& byString);
+  void setContextElement(SVGElement* contextElement) {
+    m_contextElement = contextElement;
+  }
+  AnimatedPropertyType type() const { return m_type; }
 
-    void setContextElement(SVGElement* contextElement) { m_contextElement = contextElement; }
-    AnimatedPropertyType type() const { return m_type; }
+  bool isAnimatingSVGDom() const { return m_animatedProperty; }
+  bool isAnimatingCSSProperty() const { return !m_animatedProperty; }
 
-    bool isAnimatingSVGDom() const { return m_animatedProperty; }
-    bool isAnimatingCSSProperty() const { return !m_animatedProperty; }
+  DECLARE_TRACE();
 
-    DECLARE_TRACE();
+ private:
+  SVGPropertyBase* createPropertyForAttributeAnimation(const String&) const;
+  SVGPropertyBase* createPropertyForCSSAnimation(const String&) const;
 
-private:
-    friend class ParsePropertyFromString;
-    SVGPropertyBase* createPropertyForAnimation(const String&);
-
-    Member<SVGAnimationElement> m_animationElement;
-    Member<SVGElement> m_contextElement;
-    Member<SVGAnimatedPropertyBase> m_animatedProperty;
-    AnimatedPropertyType m_type;
+  Member<SVGAnimationElement> m_animationElement;
+  Member<SVGElement> m_contextElement;
+  Member<SVGAnimatedPropertyBase> m_animatedProperty;
+  AnimatedPropertyType m_type;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // SVGAnimatedTypeAnimator_h
+#endif  // SVGAnimatedTypeAnimator_h

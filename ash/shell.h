@@ -10,8 +10,8 @@
 #include <vector>
 
 #include "ash/ash_export.h"
-#include "ash/common/shelf/shelf_types.h"
 #include "ash/metrics/user_metrics_recorder.h"
+#include "ash/public/cpp/shelf_types.h"
 #include "ash/wm/cursor_manager_chromeos.h"
 #include "ash/wm/system_modal_container_event_filter_delegate.h"
 #include "base/gtest_prod_util.h"
@@ -112,7 +112,6 @@ struct ShellInitParams;
 class SlowAnimationEventFilter;
 class StatusAreaWidget;
 class StickyKeysController;
-class StylusMetricsRecorder;
 class SystemGestureEventFilter;
 class SystemModalContainerEventFilter;
 class SystemTray;
@@ -536,8 +535,6 @@ class ASH_EXPORT Shell : public SystemModalContainerEventFilterDelegate,
 
   std::unique_ptr<ui::EventHandler> magnifier_key_scroll_handler_;
   std::unique_ptr<ui::EventHandler> speech_feedback_handler_;
-  std::unique_ptr<StylusMetricsRecorder> stylus_metrics_recorder_;
-
   std::unique_ptr<LaserPointerController> laser_pointer_controller_;
   std::unique_ptr<PartialMagnificationController>
       partial_magnification_controller_;

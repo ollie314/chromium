@@ -8,6 +8,7 @@
 #include "chrome/browser/sync/chrome_sync_client.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/sync/test/integration/profile_sync_service_harness.h"
+#include "chrome/browser/sync/test/integration/single_client_status_change_checker.h"
 #include "chrome/browser/sync/test/integration/status_change_checker.h"
 #include "chrome/browser/sync/test/integration/sync_integration_test_util.h"
 #include "chrome/browser/sync/test/integration/sync_test.h"
@@ -17,12 +18,13 @@
 
 using browser_sync::ChromeSyncClient;
 using browser_sync::ProfileSyncComponentsFactoryImpl;
-using syncer_v2::ConflictResolution;
-using syncer_v2::FakeModelTypeService;
-using syncer_v2::ModelTypeService;
-using syncer_v2::SharedModelTypeProcessor;
+using syncer::ConflictResolution;
+using syncer::FakeModelTypeService;
+using syncer::ModelTypeService;
+using syncer::SharedModelTypeProcessor;
 
 const char kKey1[] = "key1";
+const char kKey2[] = "key2";
 const char kValue1[] = "value1";
 const char kValue2[] = "value2";
 const char kValue3[] = "value3";
@@ -57,8 +59,8 @@ class TestModelTypeService : public FakeModelTypeService {
             base::Bind(&SharedModelTypeProcessor::CreateAsChangeProcessor)) {}
 
   syncer::SyncError ApplySyncChanges(
-      std::unique_ptr<syncer_v2::MetadataChangeList> metadata_changes,
-      syncer_v2::EntityChangeList entity_changes) override {
+      std::unique_ptr<syncer::MetadataChangeList> metadata_changes,
+      syncer::EntityChangeList entity_changes) override {
     syncer::SyncError error = FakeModelTypeService::ApplySyncChanges(
         std::move(metadata_changes), entity_changes);
     NotifyObservers();
@@ -90,7 +92,6 @@ class KeyChecker : public StatusChangeChecker,
  public:
   KeyChecker(TestModelTypeService* service, const std::string& key)
       : service_(service), key_(key) {}
-  ~KeyChecker() override {}
 
   void OnApplySyncChanges() override { CheckExitCondition(); }
 
@@ -118,7 +119,6 @@ class DataChecker : public KeyChecker {
               const std::string& key,
               const std::string& value)
       : KeyChecker(service, key), value_(value) {}
-  ~DataChecker() override {}
 
   bool IsExitConditionSatisfied() override {
     const auto& db = service_->db();
@@ -138,7 +138,6 @@ class DataAbsentChecker : public KeyChecker {
  public:
   DataAbsentChecker(TestModelTypeService* service, const std::string& key)
       : KeyChecker(service, key) {}
-  ~DataAbsentChecker() override {}
 
   bool IsExitConditionSatisfied() override {
     return !service_->db().HasData(key_);
@@ -154,7 +153,6 @@ class MetadataPresentChecker : public KeyChecker {
  public:
   MetadataPresentChecker(TestModelTypeService* service, const std::string& key)
       : KeyChecker(service, key) {}
-  ~MetadataPresentChecker() override {}
 
   bool IsExitConditionSatisfied() override {
     return service_->db().HasMetadata(key_);
@@ -170,7 +168,6 @@ class MetadataAbsentChecker : public KeyChecker {
  public:
   MetadataAbsentChecker(TestModelTypeService* service, const std::string& key)
       : KeyChecker(service, key) {}
-  ~MetadataAbsentChecker() override {}
 
   bool IsExitConditionSatisfied() override {
     return !service_->db().HasMetadata(key_);
@@ -178,6 +175,26 @@ class MetadataAbsentChecker : public KeyChecker {
 
   std::string GetDebugMessage() const override {
     return "Waiting for metadata for key '" + key_ + "' to be absent.";
+  }
+};
+
+// Wait for PREFERENCES to no longer be running.
+class PrefsNotRunningChecker : public SingleClientStatusChangeChecker {
+ public:
+  explicit PrefsNotRunningChecker(browser_sync::ProfileSyncService* service)
+      : SingleClientStatusChangeChecker(service) {}
+
+  bool Wait() {
+    SingleClientStatusChangeChecker::Wait();
+    return !TimedOut();
+  }
+
+  bool IsExitConditionSatisfied() override {
+    return !service()->IsDataTypeControllerRunning(syncer::PREFERENCES);
+  }
+
+  std::string GetDebugMessage() const override {
+    return "Waiting for prefs to be not running.";
   }
 };
 
@@ -204,7 +221,7 @@ class TwoClientUssSyncTest : public SyncTest {
   }
 
  protected:
-  std::unique_ptr<sync_driver::SyncClient> CreateSyncClient(Profile* profile) {
+  std::unique_ptr<syncer::SyncClient> CreateSyncClient(Profile* profile) {
     if (!first_client_ignored_) {
       // The test infra creates a profile before the two made for sync tests.
       first_client_ignored_ = true;
@@ -300,4 +317,25 @@ IN_PROC_BROWSER_TEST_F(TwoClientUssSyncTest, ConflictResolution) {
   // resolution logic in TestModelTypeService.
   ASSERT_TRUE(DataChecker(model1, kKey1, kValue3).Wait());
   ASSERT_TRUE(DataChecker(model2, kKey1, kValue3).Wait());
+}
+
+IN_PROC_BROWSER_TEST_F(TwoClientUssSyncTest, Error) {
+  ASSERT_TRUE(SetupSync());
+  TestModelTypeService* model1 = GetModelTypeService(0);
+  TestModelTypeService* model2 = GetModelTypeService(1);
+
+  // Add an entity.
+  model1->WriteItem(kKey1, kValue1);
+  ASSERT_TRUE(DataChecker(model2, kKey1, kValue1).Wait());
+
+  // Set an error in model 2 to trigger in the next GetUpdates.
+  model2->SetServiceError(syncer::SyncError::DATATYPE_ERROR);
+  // Write an item on model 1 to trigger a GetUpdates in model 2.
+  model1->WriteItem(kKey1, kValue2);
+
+  // The type should stop syncing but keep tracking metadata.
+  ASSERT_TRUE(PrefsNotRunningChecker(GetSyncService(1)).Wait());
+  ASSERT_EQ(1U, model2->db().metadata_count());
+  model2->WriteItem(kKey2, kValue2);
+  ASSERT_EQ(2U, model2->db().metadata_count());
 }

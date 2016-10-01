@@ -151,7 +151,6 @@ static_library("test_support") {
     "mock_webblob_registry_impl.h",
     "mock_webclipboard_impl.cc",
     "mock_webclipboard_impl.h",
-    "mock_webframeclient.h",
     "mock_weburlloader.cc",
     "mock_weburlloader.h",
     "net/url_request_abort_on_end_job.cc",
@@ -227,6 +226,7 @@ static_library("test_support") {
     "//content/renderer:for_content_tests",
     "//content/shell:pak",
     "//content/utility:for_content_tests",
+    "//device/base/synchronization",
     "//device/geolocation",
     "//device/nfc:mojo_bindings",
     "//ipc:test_support",
@@ -722,6 +722,7 @@ test("content_browsertests") {
     "//content/shell:content_shell_lib",
     "//content/shell:pak",
     "//content/test:test_support",
+    "//device/base/synchronization",
     "//device/battery",
     "//device/battery:mojo_bindings",
     "//device/power_save_blocker",
@@ -1005,6 +1006,7 @@ test("content_unittests") {
     "../browser/download/download_item_impl_unittest.cc",
     "../browser/download/download_manager_impl_unittest.cc",
     "../browser/download/quarantine_linux_unittest.cc",
+    "../browser/download/quarantine_mac_unittest.mm",
     "../browser/download/quarantine_win_unittest.cc",
     "../browser/download/rate_estimator_unittest.cc",
     "../browser/download/save_package_unittest.cc",
@@ -1281,7 +1283,6 @@ test("content_unittests") {
     "../common/mac/font_descriptor_unittest.mm",
     "../common/manifest_util_unittest.cc",
     "../common/navigation_params_unittest.cc",
-    "../common/one_writer_seqlock_unittest.cc",
     "../common/origin_trials/trial_token_unittest.cc",
     "../common/origin_trials/trial_token_validator_unittest.cc",
     "../common/origin_util_unittest.cc",
@@ -1598,6 +1599,7 @@ test("content_unittests") {
       "../renderer/media/android/webmediasession_android_unittest.cc",
     ]
     sources -= [
+      "../browser/media/session/audio_focus_manager_unittest.cc",
       "../browser/power_usage_monitor_impl_unittest.cc",
       "../browser/webui/url_data_manager_backend_unittest.cc",
     ]

@@ -38,6 +38,7 @@ class MockChooserController : public ChooserController {
   MOCK_METHOD0(Cancel, void());
   MOCK_METHOD0(Close, void());
   MOCK_CONST_METHOD0(OpenHelpCenterUrl, void());
+  MOCK_CONST_METHOD0(OpenAdapterOffHelpUrl, void());
 
   void OnAdapterPresenceChanged(
       content::BluetoothChooser::AdapterPresence presence);
@@ -58,6 +59,8 @@ class MockChooserController : public ChooserController {
   static const int kSignalStrengthLevel2Bar;
   static const int kSignalStrengthLevel3Bar;
   static const int kSignalStrengthLevel4Bar;
+  static const int kImageColorUnselected;
+  static const int kImageColorSelected;
 
  private:
   void ClearAllOptions();
@@ -70,7 +73,6 @@ class MockChooserController : public ChooserController {
   };
 
   std::vector<OptionInfo> options_;
-  base::string16 no_options_text_;
   base::string16 status_text_;
 
   DISALLOW_COPY_AND_ASSIGN(MockChooserController);

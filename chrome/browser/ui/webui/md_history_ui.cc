@@ -35,6 +35,8 @@
 
 namespace {
 
+constexpr char kShowMenuPromoKey[] = "showMenuPromo";
+
 content::WebUIDataSource* CreateMdHistoryUIHTMLSource(Profile* profile,
                                                       bool use_test_title) {
   content::WebUIDataSource* source =
@@ -117,7 +119,7 @@ content::WebUIDataSource* CreateMdHistoryUIHTMLSource(Profile* profile,
       prefs->GetBoolean(prefs::kAllowDeletingBrowserHistory);
   source->AddBoolean("allowDeletingHistory", allow_deleting_history);
 
-  source->AddBoolean("showMenuPromo",
+  source->AddBoolean(kShowMenuPromoKey,
       !prefs->GetBoolean(prefs::kMdHistoryMenuPromoShown));
 
   bool group_by_domain = base::CommandLine::ForCurrentProcess()->HasSwitch(
@@ -214,17 +216,16 @@ content::WebUIDataSource* CreateMdHistoryUIHTMLSource(Profile* profile,
 bool MdHistoryUI::use_test_title_ = false;
 
 MdHistoryUI::MdHistoryUI(content::WebUI* web_ui) : WebUIController(web_ui) {
-  Profile* profile = Profile::FromWebUI(web_ui);
   web_ui->AddMessageHandler(new BrowsingHistoryHandler());
   web_ui->AddMessageHandler(new MetricsHandler());
 
   if (search::IsInstantExtendedAPIEnabled()) {
     web_ui->AddMessageHandler(new browser_sync::ForeignSessionHandler());
-    web_ui->AddMessageHandler(new HistoryLoginHandler());
+    web_ui->AddMessageHandler(new HistoryLoginHandler(
+        base::Bind(&MdHistoryUI::CreateDataSource, base::Unretained(this))));
   }
 
-  data_source_ = CreateMdHistoryUIHTMLSource(profile, use_test_title_);
-  content::WebUIDataSource::Add(profile, data_source_);
+  CreateDataSource();
 
   web_ui->RegisterMessageCallback("menuPromoShown",
       base::Bind(&MdHistoryUI::HandleMenuPromoShown, base::Unretained(this)));
@@ -264,8 +265,17 @@ void MdHistoryUI::RegisterProfilePrefs(
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
 }
 
+// TODO(lshang): Change to not re-create data source every time after we use
+// unique_ptr instead of raw pointers for data source.
+void MdHistoryUI::CreateDataSource() {
+  Profile* profile = Profile::FromWebUI(web_ui());
+  content::WebUIDataSource* data_source =
+      CreateMdHistoryUIHTMLSource(profile, use_test_title_);
+  content::WebUIDataSource::Add(profile, data_source);
+}
+
 void MdHistoryUI::HandleMenuPromoShown(const base::ListValue* args) {
   Profile::FromWebUI(web_ui())->GetPrefs()->SetBoolean(
       prefs::kMdHistoryMenuPromoShown, true);
-  data_source_->AddBoolean("showMenuPromo", false);
+  CreateDataSource();
 }

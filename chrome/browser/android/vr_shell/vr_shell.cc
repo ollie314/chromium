@@ -60,9 +60,14 @@ static constexpr gvr::Vec3f kOrigin = {0.0f, 0.0f, 0.0f};
 // TODO(mthiesse): Handedness options.
 static constexpr gvr::Vec3f kHandPosition = {0.2f, -0.5f, -0.2f};
 
-// Fraction of the z-distance to the object the cursor is drawn at to avoid
+// Fraction of the distance to the object the cursor is drawn at to avoid
 // rounding errors drawing the cursor behind the object.
-static constexpr float kReticleZOffset = 0.99f;
+static constexpr float kReticleOffset = 0.99f;
+
+// Limit the rendering distance of the reticle to the distance to a corner of
+// the content quad, times this value.  This lets the rendering distance
+// adjust according to content quad placement.
+static constexpr float kReticleDistanceMultiplier = 1.5f;
 
 // UI element 0 is the browser content rectangle.
 static constexpr int kBrowserUiElementId = 0;
@@ -70,6 +75,37 @@ static constexpr int kBrowserUiElementId = 0;
 vr_shell::VrShell* g_instance;
 
 static const char kVrShellUIURL[] = "chrome://vr-shell-ui";
+
+float Distance(const gvr::Vec3f& vec1, const gvr::Vec3f& vec2) {
+  float xdiff = (vec1.x - vec2.x);
+  float ydiff = (vec1.y - vec2.y);
+  float zdiff = (vec1.z - vec2.z);
+  float scale = xdiff * xdiff + ydiff * ydiff + zdiff * zdiff;
+  return std::sqrt(scale);
+}
+
+// Generate a quaternion representing the rotation from the negative Z axis
+// (0, 0, -1) to a specified vector.  This is an optimized version of a more
+// general vector-to-vector calculation.
+gvr::Quatf GetRotationFromZAxis(gvr::Vec3f vec) {
+  vr_shell::NormalizeVector(vec);
+  gvr::Quatf quat;
+  quat.qw = 1.0f - vec.z;
+  if (quat.qw < 1e-6f) {
+    // Degenerate case: vectors are exactly opposite. Replace by an
+    // arbitrary 180 degree rotation to avoid invalid normalization.
+    quat.qx = 1.0f;
+    quat.qy = 0.0f;
+    quat.qz = 0.0f;
+    quat.qw = 0.0f;
+  } else {
+    quat.qx = vec.y;
+    quat.qy = -vec.x;
+    quat.qz = 0.0f;
+    vr_shell::NormalizeQuat(quat);
+  }
+  return quat;
+}
 
 }  // namespace
 
@@ -83,22 +119,21 @@ VrShell::VrShell(JNIEnv* env,
                  ui::WindowAndroid* ui_window)
     : desktop_screen_tilt_(kDesktopScreenTiltDefault),
       desktop_height_(kDesktopHeightDefault),
-      desktop_position_(kDesktopPositionDefault),
-      cursor_distance_(-kDesktopPositionDefault.z),
       content_cvc_(content_cvc),
       ui_cvc_(ui_cvc),
       delegate_(nullptr),
       weak_ptr_factory_(this) {
   g_instance = this;
   j_vr_shell_.Reset(env, obj);
-  content_compositor_.reset(new VrCompositor(content_window));
-  ui_compositor_.reset(new VrCompositor(ui_window));
+  content_compositor_.reset(new VrCompositor(content_window, false));
+  ui_compositor_.reset(new VrCompositor(ui_window, true));
 
   float screen_width = kScreenWidthRatio * desktop_height_;
   float screen_height = kScreenHeightRatio * desktop_height_;
   std::unique_ptr<ContentRectangle> rect(new ContentRectangle());
   rect->id = kBrowserUiElementId;
   rect->size = {screen_width, screen_height, 1.0f};
+  rect->translation = kDesktopPositionDefault;
   scene_.AddUiElement(rect);
 
   desktop_plane_ = scene_.GetUiElementById(kBrowserUiElementId);
@@ -171,56 +206,44 @@ void VrShell::InitializeGl(JNIEnv* env,
       new gvr::BufferViewport(gvr_api_->CreateBufferViewport()));
 }
 
-void VrShell::UpdateController() {
+void VrShell::UpdateController(const gvr::Vec3f& forward_vector) {
   if (!controller_active_) {
     // No controller detected, set up a gaze cursor that tracks the
     // forward direction.
-    //
-    // Make a rotation quaternion that rotates forward_vector_ to (0, 0, -1).
-    gvr::Quatf gaze_quat;
-    gaze_quat.qw = 1 - forward_vector_.z;
-    if (gaze_quat.qw < 1e-6) {
-      // Degenerate case: vectors are exactly opposite. Replace by an
-      // arbitrary 180 degree rotation to avoid invalid normalization.
-      gaze_quat.qx = 1.0f;
-      gaze_quat.qy = 0.0f;
-      gaze_quat.qz = 0.0f;
-      gaze_quat.qw = 0.0f;
-    } else {
-      gaze_quat.qx = forward_vector_.y;
-      gaze_quat.qy = -forward_vector_.x;
-      gaze_quat.qz = 0.0f;
-      NormalizeQuat(gaze_quat);
-    }
-    controller_quat_ = gaze_quat;
+    controller_quat_ = GetRotationFromZAxis(forward_vector);
   }
 
   gvr::Mat4f mat = QuatToMatrix(controller_quat_);
   gvr::Vec3f forward = MatrixVectorMul(mat, kNeutralPose);
-  gvr::Vec3f translation = getTranslation(mat);
+  gvr::Vec3f origin = kHandPosition;
 
-  // Use the eye midpoint as the origin for Cardboard mode, but apply an offset
-  // for the controller.
-  if (controller_active_) {
-    translation.x += kHandPosition.x;
-    translation.y += kHandPosition.y;
-    translation.z += kHandPosition.z;
+  target_element_ = nullptr;;
+  float distance = scene_.GetUiElementById(kBrowserUiElementId)
+      ->GetRayDistance(origin, forward);
+
+  // Find distance to a corner of the content quad, and limit the cursor
+  // distance to a multiple of that distance.  This lets us keep the reticle on
+  // the content plane near the content window, and on the surface of a sphere
+  // in other directions.
+  // TODO(cjgrant): Note that this approach uses distance from controller,
+  // rather than eye, for simplicity.  This will make the sphere slightly
+  // off-center.
+  gvr::Vec3f corner = {0.5f, 0.5f, 0.0f};
+  corner = MatrixVectorMul(desktop_plane_->transform.to_world, corner);
+  float max_distance = Distance(origin, corner) * kReticleDistanceMultiplier;
+  if (distance > max_distance || distance <= 0.0f) {
+    distance = max_distance;
   }
-
-  float desktop_dist = scene_.GetUiElementById(kBrowserUiElementId)
-      ->GetRayDistance(translation, forward);
-  gvr::Vec3f cursor_position = GetRayPoint(translation, forward, desktop_dist);
-  look_at_vector_ = cursor_position;
-  cursor_distance_ = desktop_dist;
+  target_point_ = GetRayPoint(origin, forward, distance);
 
   // Determine which UI element (if any) the cursor is pointing to.
   float closest_element = std::numeric_limits<float>::infinity();
-
   for (std::size_t i = 0; i < scene_.GetUiElements().size(); ++i) {
     const ContentRectangle& plane = *scene_.GetUiElements()[i].get();
-    float distance_to_plane = plane.GetRayDistance(kOrigin, cursor_position);
+    float distance_to_plane = plane.GetRayDistance(origin, forward);
     gvr::Vec3f plane_intersection_point =
-        GetRayPoint(kOrigin, cursor_position, distance_to_plane);
+        GetRayPoint(origin, forward, distance_to_plane);
+
     gvr::Vec3f rect_2d_point =
         MatrixVectorMul(plane.transform.from_world, plane_intersection_point);
     float x = rect_2d_point.x + 0.5f;
@@ -229,8 +252,8 @@ void VrShell::UpdateController() {
       bool is_inside = x >= 0.0f && x < 1.0f && y >= 0.0f && y < 1.0f;
       if (is_inside) {
         closest_element = distance_to_plane;
-        cursor_distance_ = desktop_dist * distance_to_plane;
-        look_at_vector_ = plane_intersection_point;
+        target_point_ = plane_intersection_point;
+        target_element_ = &plane;
       }
     }
   }
@@ -267,7 +290,19 @@ void VrShell::DrawFrame(JNIEnv* env, const JavaParamRef<jobject>& obj) {
   gvr::Frame frame = swap_chain_->AcquireFrame();
   gvr::ClockTimePoint target_time = gvr::GvrApi::GetTimePointNow();
   target_time.monotonic_system_time_nanos += kPredictionTimeWithoutVsyncNanos;
-  head_pose_ = gvr_api_->GetHeadPoseInStartSpace(target_time);
+
+  gvr::Mat4f head_pose =
+      gvr_api_->GetHeadPoseInStartSpace(target_time);
+
+  gvr::Vec3f position = GetTranslation(head_pose);
+  if (position.x == 0.0f && position.y == 0.0f && position.z == 0.0f) {
+    // This appears to be a 3DOF pose without a neck model. Add one.
+    // The head pose has redundant data. Assume we're only using the
+    // object_from_reference_matrix, we're not updating position_external.
+    // TODO: Not sure what object_from_reference_matrix is. The new api removed
+    // it. For now, removing it seems working fine.
+    ApplyNeckModel(head_pose);
+  }
 
   // Bind back to the default framebuffer.
   frame.BindBuffer(0);
@@ -275,40 +310,28 @@ void VrShell::DrawFrame(JNIEnv* env, const JavaParamRef<jobject>& obj) {
   if (webvr_mode_) {
     DrawWebVr();
   } else {
-    DrawVrShell(target_time.monotonic_system_time_nanos);
+    DrawVrShell(head_pose);
   }
 
   frame.Unbind();
-  frame.Submit(*buffer_viewport_list_, head_pose_);
+  frame.Submit(*buffer_viewport_list_, head_pose);
 }
 
-void VrShell::DrawVrShell(int64_t time) {
+void VrShell::DrawVrShell(const gvr::Mat4f& head_pose) {
   float screen_tilt = desktop_screen_tilt_ * M_PI / 180.0f;
 
-  gvr::Vec3f headPos = getTranslation(head_pose_);
-  if (headPos.x == 0.0f && headPos.y == 0.0f && headPos.z == 0.0f) {
-    // This appears to be a 3DOF pose without a neck model. Add one.
-    // The head pose has redundant data. Assume we're only using the
-    // object_from_reference_matrix, we're not updating position_external.
-    // TODO: Not sure what object_from_reference_matrix is. The new api removed
-    // it. For now, removing it seems working fine.
-    ApplyNeckModel(head_pose_);
-  }
-
-  forward_vector_ = getForwardVector(head_pose_);
-
-  desktop_plane_->translation = desktop_position_;
+  HandleQueuedTasks();
 
   // Update the render position of all UI elements (including desktop).
-  scene_.UpdateTransforms(screen_tilt, time);
+  scene_.UpdateTransforms(screen_tilt, UiScene::TimeInMicroseconds());
 
-  UpdateController();
+  UpdateController(GetForwardVector(head_pose));
 
   // Everything should be positioned now, ready for drawing.
   gvr::Mat4f left_eye_view_matrix =
-    MatrixMul(gvr_api_->GetEyeFromHeadMatrix(GVR_LEFT_EYE), head_pose_);
+    MatrixMul(gvr_api_->GetEyeFromHeadMatrix(GVR_LEFT_EYE), head_pose);
   gvr::Mat4f right_eye_view_matrix =
-      MatrixMul(gvr_api_->GetEyeFromHeadMatrix(GVR_RIGHT_EYE), head_pose_);
+      MatrixMul(gvr_api_->GetEyeFromHeadMatrix(GVR_RIGHT_EYE), head_pose);
 
   // Use culling to remove back faces.
   glEnable(GL_CULL_FACE);
@@ -338,27 +361,22 @@ void VrShell::DrawEye(const gvr::Mat4f& view_matrix,
             pixel_rect.right - pixel_rect.left,
             pixel_rect.top - pixel_rect.bottom);
 
-  view_matrix_ = view_matrix;
-
-  projection_matrix_ =
-      PerspectiveMatrixFromView(params.GetSourceFov(), kZNear, kZFar);
+  gvr::Mat4f render_matrix = MatrixMul(
+      PerspectiveMatrixFromView(params.GetSourceFov(), kZNear, kZFar),
+      view_matrix);
 
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
   // TODO(mthiesse): Draw order for transparency.
-  DrawUI();
-  DrawCursor();
+  DrawUI(render_matrix);
+  DrawCursor(render_matrix);
 }
 
-void VrShell::DrawUI() {
+void VrShell::DrawUI(const gvr::Mat4f& render_matrix) {
   for (const auto& rect : scene_.GetUiElements()) {
     if (!rect->visible) {
       continue;
     }
-
-    gvr::Mat4f combined_matrix = MatrixMul(view_matrix_,
-                                           rect->transform.to_world);
-    combined_matrix = MatrixMul(projection_matrix_, combined_matrix);
 
     Rectf copy_rect;
     jint texture_handle;
@@ -366,51 +384,64 @@ void VrShell::DrawUI() {
       copy_rect = {0, 0, 1, 1};
       texture_handle = content_texture_id_;
     } else {
-      // TODO(cjgrant): Populate UI texture and allow rendering.
-      continue;
+      copy_rect.x = static_cast<float>(rect->copy_rect.x) / ui_tex_width_;
+      copy_rect.y = static_cast<float>(rect->copy_rect.y) / ui_tex_height_;
+      copy_rect.width = static_cast<float>(rect->copy_rect.width) /
+          ui_tex_width_;
+      copy_rect.height = static_cast<float>(rect->copy_rect.height) /
+          ui_tex_height_;
+      texture_handle = ui_texture_id_;
     }
 
+    gvr::Mat4f transform = MatrixMul(render_matrix, rect->transform.to_world);
     vr_shell_renderer_->GetTexturedQuadRenderer()->Draw(
-        texture_handle, combined_matrix, copy_rect);
+        texture_handle, transform, copy_rect);
   }
 }
 
-void VrShell::DrawCursor() {
+void VrShell::DrawCursor(const gvr::Mat4f& render_matrix) {
   gvr::Mat4f mat;
   SetIdentityM(mat);
 
+  // Draw the reticle.
+
   // Scale the pointer to have a fixed FOV size at any distance.
-  ScaleM(mat, mat, kReticleWidth * cursor_distance_,
-         kReticleHeight * cursor_distance_, 1.0f);
+  const float eye_to_target = Distance(target_point_, kOrigin);
+  ScaleM(mat, mat, kReticleWidth * eye_to_target,
+         kReticleHeight * eye_to_target, 1.0f);
 
-  // Place the pointer at the screen plane intersection point.
-  TranslateM(mat, mat, look_at_vector_.x * kReticleZOffset,
-             look_at_vector_.y * kReticleZOffset,
-             look_at_vector_.z * kReticleZOffset);
-  gvr::Mat4f mv = MatrixMul(view_matrix_, mat);
-  gvr::Mat4f mvp = MatrixMul(projection_matrix_, mv);
-  vr_shell_renderer_->GetReticleRenderer()->Draw(mvp);
-
-  // Draw the laser only for controllers.
-  if (!controller_active_) {
-    return;
+  gvr::Quatf rotation;
+  if (target_element_ != nullptr) {
+    // Make the reticle planar to the element it's hitting.
+    rotation = GetRotationFromZAxis(target_element_->GetNormal());
+  } else {
+    // Rotate the cursor to directly face the eyes.
+    rotation = GetRotationFromZAxis(target_point_);
   }
+  mat = MatrixMul(QuatToMatrix(rotation), mat);
+
+  // Place the pointer slightly in front of the plane intersection point.
+  TranslateM(mat, mat, target_point_.x * kReticleOffset,
+             target_point_.y * kReticleOffset,
+             target_point_.z * kReticleOffset);
+
+  gvr::Mat4f transform = MatrixMul(render_matrix, mat);
+  vr_shell_renderer_->GetReticleRenderer()->Draw(transform);
+
+  // Draw the laser.
+
   // Find the length of the beam (from hand to target).
-  float xdiff = (kHandPosition.x - look_at_vector_.x);
-  float ydiff = (kHandPosition.y - look_at_vector_.y);
-  float zdiff = (kHandPosition.z - look_at_vector_.z);
-  float scale = xdiff * xdiff + ydiff * ydiff + zdiff * zdiff;
-  float laser_length = std::sqrt(scale);
+  float laser_length = Distance(kHandPosition, target_point_);
 
   // Build a beam, originating from the origin.
   SetIdentityM(mat);
 
   // Move the beam half its height so that its end sits on the origin.
-  TranslateM(mat, mat, 0, 0.5, 0);
+  TranslateM(mat, mat, 0.0f, 0.5f, 0.0f);
   ScaleM(mat, mat, kLaserWidth, laser_length, 1);
 
   // Tip back 90 degrees to flat, pointing at the scene.
-  auto q = QuatFromAxisAngle(1, 0, 0, -M_PI / 2);
+  auto q = QuatFromAxisAngle({1.0f, 0.0f, 0.0f}, -M_PI / 2);
   auto m = QuatToMatrix(q);
   mat = MatrixMul(m, mat);
 
@@ -420,9 +451,8 @@ void VrShell::DrawCursor() {
   // Move the beam origin to the hand.
   TranslateM(mat, mat, kHandPosition.x, kHandPosition.y, kHandPosition.z);
 
-  mv = MatrixMul(view_matrix_, mat);
-  mvp = MatrixMul(projection_matrix_, mv);
-  vr_shell_renderer_->GetLaserRenderer()->Draw(mvp);
+  transform = MatrixMul(render_matrix, mat);
+  vr_shell_renderer_->GetLaserRenderer()->Draw(transform);
 }
 
 void VrShell::DrawWebVr() {
@@ -438,6 +468,10 @@ void VrShell::DrawWebVr() {
 
   glViewport(0, 0, render_size_.width, render_size_.height);
   vr_shell_renderer_->GetWebVrRenderer()->Draw(content_texture_id_);
+
+  if (!webvr_secure_origin_) {
+    // TODO(klausw): Draw the insecure origin warning here.
+  }
 }
 
 void VrShell::OnPause(JNIEnv* env, const JavaParamRef<jobject>& obj) {
@@ -462,7 +496,15 @@ base::WeakPtr<VrShell> VrShell::GetWeakPtr() {
 }
 
 void VrShell::OnDomContentsLoaded() {
-  NOTIMPLEMENTED();
+  // TODO(mthiesse): Setting the background to transparent after the DOM content
+  // has loaded is a hack to work around the background not updating when we set
+  // it to transparent unless we perform a very specific sequence of events.
+  // First the page background must load as not transparent, then we set the
+  // background of the renderer to transparent, then we update the page
+  // background to be transparent. This is probably a bug in blink that we
+  // should fix.
+  ui_cvc_->GetWebContents()->GetRenderWidgetHostView()->SetBackgroundColor(
+      SK_ColorTRANSPARENT);
 }
 
 void VrShell::SetUiTextureSize(int width, int height) {
@@ -476,6 +518,10 @@ void VrShell::SetWebVrMode(JNIEnv* env,
                            const base::android::JavaParamRef<jobject>& obj,
                            bool enabled) {
   webvr_mode_ = enabled;
+}
+
+void VrShell::SetWebVRSecureOrigin(bool secure_origin) {
+  webvr_secure_origin_ = secure_origin;
 }
 
 void VrShell::SubmitWebVRFrame() {
@@ -505,6 +551,32 @@ void VrShell::UiSurfaceChanged(JNIEnv* env,
                                jint height,
                                const JavaParamRef<jobject>& surface) {
   ui_compositor_->SurfaceChanged((int)width, (int)height, surface);
+}
+
+UiScene* VrShell::GetScene() {
+  return &scene_;
+}
+
+void VrShell::QueueTask(base::Callback<void()>& callback) {
+  base::AutoLock lock(task_queue_lock_);
+  task_queue_.push(callback);
+}
+
+void VrShell::HandleQueuedTasks() {
+  // To protect a stream of tasks from blocking rendering indefinitely,
+  // process only the number of tasks present when first checked.
+  std::vector<base::Callback<void()>> tasks;
+  {
+    base::AutoLock lock(task_queue_lock_);
+    const size_t count = task_queue_.size();
+    for (size_t i = 0; i < count; i++) {
+      tasks.push_back(task_queue_.front());
+      task_queue_.pop();
+    }
+  }
+  for (auto &task : tasks) {
+    task.Run();
+  }
 }
 
 // ----------------------------------------------------------------------------

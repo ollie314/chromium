@@ -8,7 +8,7 @@
 #include "base/debug/leak_annotations.h"
 #include "base/files/file_util.h"
 #include "base/memory/ptr_util.h"
-#include "base/message_loop/message_loop.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "components/safe_browsing_db/v4_database.h"
 #include "content/public/browser/browser_thread.h"
 
@@ -28,8 +28,8 @@ void V4Database::Create(
   DCHECK(base_path.IsAbsolute());
   DCHECK(!list_infos.empty());
 
-  const scoped_refptr<base::SingleThreadTaskRunner>& callback_task_runner =
-      base::MessageLoop::current()->task_runner();
+  const scoped_refptr<base::SingleThreadTaskRunner> callback_task_runner =
+      base::ThreadTaskRunnerHandle::Get();
   db_task_runner->PostTask(
       FROM_HERE,
       base::Bind(&V4Database::CreateOnTaskRunner, db_task_runner, base_path,
@@ -107,8 +107,8 @@ void V4Database::ApplyUpdate(
 
   // Post the V4Store update task on the task runner but get the callback on the
   // current thread.
-  const scoped_refptr<base::SingleThreadTaskRunner>& current_task_runner =
-      base::MessageLoop::current()->task_runner();
+  const scoped_refptr<base::SingleThreadTaskRunner> current_task_runner =
+      base::ThreadTaskRunnerHandle::Get();
   for (std::unique_ptr<ListUpdateResponse>& response :
        *parsed_server_response) {
     ListIdentifier identifier(*response);
@@ -174,11 +174,11 @@ std::unique_ptr<StoreStateMap> V4Database::GetStoreStateMap() {
 
 void V4Database::GetStoresMatchingFullHash(
     const FullHash& full_hash,
-    const std::unordered_set<ListIdentifier>& stores_to_look,
+    const StoresToCheck& stores_to_check,
     StoreAndHashPrefixes* matched_store_and_hash_prefixes) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   matched_store_and_hash_prefixes->clear();
-  for (const ListIdentifier& identifier : stores_to_look) {
+  for (const ListIdentifier& identifier : stores_to_check) {
     const auto& store_pair = store_map_->find(identifier);
     DCHECK(store_pair != store_map_->end());
     const std::unique_ptr<V4Store>& store = store_pair->second;

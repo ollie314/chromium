@@ -22,7 +22,10 @@ cr.define('md_history', function() {
 Polymer({
   is: 'history-app',
 
-  behaviors: [Polymer.IronScrollTargetBehavior],
+  behaviors: [
+    Polymer.IronScrollTargetBehavior,
+    WebUIListenerBehavior,
+  ],
 
   properties: {
     // Used to display notices for profile sign-in status.
@@ -105,6 +108,12 @@ Polymer({
     document.addEventListener('command', this.onCommand_.bind(this));
   },
 
+  /** @override */
+  attached: function() {
+    this.addWebUIListener('sign-in-state-updated',
+                          this.updateSignInState.bind(this));
+  },
+
   onFirstRender: function() {
     setTimeout(function() {
       chrome.send(
@@ -114,8 +123,10 @@ Polymer({
 
     // Focus the search field on load. Done here to ensure the history page
     // is rendered before we try to take focus.
-    if (!this.hasDrawer_) {
-      this.focusToolbarSearchField();
+    var searchField =
+        /** @type {HistoryToolbarElement} */ (this.$.toolbar).searchField;
+    if (!searchField.narrow) {
+      searchField.getSearchInput().focus();
     }
 
     // Lazily load the remainder of the UI.
@@ -176,7 +187,7 @@ Polymer({
   },
 
   /**
-   * Focuses the search bar in the toolbar.
+   * Shows and focuses the search bar in the toolbar.
    */
   focusToolbarSearchField: function() { this.$.toolbar.showSearchField(); },
 

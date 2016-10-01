@@ -46,10 +46,6 @@
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/base/page_transition_types.h"
 
-#if defined(OS_ANDROID)
-#include "content/public/browser/android/interface_registry_android.h"
-#endif
-
 class GURL;
 struct AccessibilityHostMsg_EventParams;
 struct AccessibilityHostMsg_FindInPageResultParams;
@@ -713,7 +709,8 @@ class CONTENT_EXPORT RenderFrameHostImpl
   void OnSerializeAsMHTMLResponse(
       int job_id,
       bool success,
-      const std::set<std::string>& digests_of_uris_of_serialized_resources);
+      const std::set<std::string>& digests_of_uris_of_serialized_resources,
+      base::TimeDelta renderer_main_thread_time);
 
 #if defined(USE_EXTERNAL_POPUP_MENU)
   void OnShowPopup(const FrameHostMsg_ShowPopup_Params& params);
@@ -962,10 +959,6 @@ class CONTENT_EXPORT RenderFrameHostImpl
 
   std::unique_ptr<shell::InterfaceRegistry> interface_registry_;
   std::unique_ptr<shell::InterfaceProvider> remote_interfaces_;
-
-#if defined(OS_ANDROID)
-  std::unique_ptr<InterfaceRegistryAndroid> interface_registry_android_;
-#endif
 
   std::unique_ptr<WebBluetoothServiceImpl> web_bluetooth_service_;
 

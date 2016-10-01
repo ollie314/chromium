@@ -608,13 +608,14 @@ const char kNotificationWelcomeLearnMoreURL[] =
 // Add hosts here to be included in chrome://chrome-urls (about:about).
 // These hosts will also be suggested by BuiltinProvider.
 const char* const kChromeHostURLs[] = {
+  kChromeUIBluetoothInternalsHost,
   kChromeUICacheHost,
   kChromeUIChromeURLsHost,
   kChromeUIComponentsHost,
   kChromeUICrashesHost,
   kChromeUICreditsHost,
-  kChromeUIDeviceLogHost,
   kChromeUIDNSHost,
+  kChromeUIDeviceLogHost,
   kChromeUIFlagsHost,
   kChromeUIGCMInternalsHost,
   kChromeUIHistoryHost,
@@ -781,6 +782,13 @@ const char kWindowsXPVistaDeprecationURL[] =
 
 const char kChooserBluetoothOverviewURL[] =
     "https://support.google.com/chrome?p=bluetooth";
+
+const char kBluetoothAdapterOffHelpURL[] =
+#if defined(OS_CHROMEOS)
+    "chrome://settings/search#Bluetooth";
+#else
+    "https://support.google.com/chrome?p=bluetooth";
+#endif
 
 const char kChooserUsbOverviewURL[] =
     "https://support.google.com/chrome?p=webusb";

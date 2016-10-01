@@ -47,9 +47,10 @@ class _BattOrBenchmark(perf_benchmark.PerfBenchmark):
 
 # android: See battor.android.tough_video_cases below
 # win8: crbug.com/531618
+# mac: crbug.com/650411
 # crbug.com/565180: Only include cases that report time_to_play
 # Taken directly from media benchmark.
-@benchmark.Disabled('android', 'win8')
+@benchmark.Disabled('android', 'win8', 'mac')
 class BattOrToughVideoCases(_BattOrBenchmark):
   """Obtains media metrics for key user scenarios."""
   page_set = page_sets.ToughVideoCasesPageSet
@@ -108,6 +109,7 @@ class BattOrPowerCases(_BattOrBenchmark):
     return 'battor.power_cases'
 
 
+@benchmark.Disabled('all')  # crbug.com/651384.
 class BattOrPowerCasesNoChromeTrace(_BattOrBenchmark):
   page_set = page_sets.power_cases.PowerCasesPageSet
 
