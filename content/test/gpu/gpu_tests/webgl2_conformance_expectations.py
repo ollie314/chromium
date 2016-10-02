@@ -48,7 +48,9 @@ class WebGL2ConformanceExpectations(WebGLConformanceExpectations):
 
     # All platforms.
     self.Fail('conformance2/rendering/blitframebuffer-outside-readbuffer.html',
-        bug=664740)
+        bug=644740)
+    self.Fail('conformance2/rendering/blitframebuffer-filter-outofbounds.html',
+        bug=644740)
     self.Flaky('conformance2/query/occlusion-query.html', bug=603168)
 
     # Windows only.
@@ -532,10 +534,6 @@ class WebGL2ConformanceExpectations(WebGLConformanceExpectations):
         ['linux', 'amd', 'intel'], bug=483282)
     self.Fail('deqp/data/gles3/shaders/linkage.html',
         ['linux', 'amd', 'intel'], bug=483282)
-
-    # Linux without ANGLE only
-    self.Flaky('conformance2/buffers/getBufferSubData.html',
-               ['linux', 'no_angle'], bug=650123)
 
     # Linux NVIDIA
     # This test is flaky both with and without ANGLE.

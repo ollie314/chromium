@@ -39,11 +39,11 @@ vars = {
   # Three lines of non-changing comments so that
   # the commit queue can handle CLs rolling Skia
   # and whatever else without interference from each other.
-  'skia_revision': '7a02f019f25c13e95d5e021bc6d8ce8f9d99292a',
+  'skia_revision': 'f3c874a9848d7315b87ccdee7203dbff8d6cf774',
   # Three lines of non-changing comments so that
   # the commit queue can handle CLs rolling V8
   # and whatever else without interference from each other.
-  'v8_revision': '083ad4d4f89e83a6190f4902cacac1727c2d3a93',
+  'v8_revision': 'a1c5f756f86a3c8870520b713ebfe719169b0c4e',
   # Three lines of non-changing comments so that
   # the commit queue can handle CLs rolling swarming_client
   # and whatever else without interference from each other.
@@ -63,7 +63,7 @@ vars = {
   # Three lines of non-changing comments so that
   # the commit queue can handle CLs rolling PDFium
   # and whatever else without interference from each other.
-  'pdfium_revision': 'cd5bca472261cebc60b37d7bbc8b81b4091a6cd6',
+  'pdfium_revision': '3a88205e8ddce125d78fb6961f7eac2470bbcd55',
   # Three lines of non-changing comments so that
   # the commit queue can handle CLs rolling openmax_dl
   # and whatever else without interference from each other.
@@ -95,7 +95,7 @@ vars = {
   # Three lines of non-changing comments so that
   # the commit queue can handle CLs rolling catapult
   # and whatever else without interference from each other.
-  'catapult_revision': 'bbe2a3f0c1783720b38dbc7a3aaf2b46706a166e',
+  'catapult_revision': 'cfeb51ce8df34a24b2f080c2e338520a890be7ba',
   # Three lines of non-changing comments so that
   # the commit queue can handle CLs rolling libFuzzer
   # and whatever else without interference from each other.
@@ -186,13 +186,13 @@ deps = {
     Var('chromium_git') + '/external/bidichecker/lib.git' + '@' + '97f2aa645b74c28c57eca56992235c79850fa9e0',
 
   'src/third_party/webgl/src':
-    Var('chromium_git') + '/external/khronosgroup/webgl.git' + '@' + '1ded27141c669ecb41ff8776cb8756a33abaabf3',
+    Var('chromium_git') + '/external/khronosgroup/webgl.git' + '@' + '79ef088b112e32488da49057795e2333c749174f',
 
   'src/third_party/webdriver/pylib':
     Var('chromium_git') + '/external/selenium/py.git' + '@' + '5fd78261a75fe08d27ca4835fb6c5ce4b42275bd',
 
   'src/third_party/libvpx/source/libvpx':
-    Var('chromium_git') + '/webm/libvpx.git' + '@' +  '240726ac85c16792d2bcf656c20248ea24d4734c',
+    Var('chromium_git') + '/webm/libvpx.git' + '@' +  '691ef20272d398c5802b185859a797af3ce1e289',
 
   'src/third_party/ffmpeg':
     Var('chromium_git') + '/chromium/third_party/ffmpeg.git' + '@' + '3c7a09882102bfd6fecdb9d7296f43a8501db95e',
