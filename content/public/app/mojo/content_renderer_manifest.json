@@ -8,6 +8,7 @@
         "content::mojom::EmbeddedWorkerInstanceClient",
         "content::mojom::EmbeddedWorkerSetup",
         "content::mojom::FrameFactory",
+        "content::mojom::RenderWidgetWindowTreeClientFactory",
         "IPC::mojom::ChannelBootstrap",
         "mojom::ResourceUsageReporter",
         "visitedlink::mojom::VisitedLinkNotificationSink",
@@ -15,10 +16,7 @@
       ]
     },
     "required": {
-      // Remove this once http://crbug.com/632818 is fixed.
-      "exe:content_browser": {
-        "classes":  [ "renderer" ]
-      },
+      "exe:content_browser": { "classes":  [ "renderer" ] },
       "mojo:ui": {
         "interfaces": [
           "ui::mojom::Gpu",

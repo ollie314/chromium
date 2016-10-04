@@ -56,6 +56,32 @@ var UnitTest = {};
             console.log(text);
     }
 
+    UnitTest.runTests = function(tests)
+    {
+        nextTest();
+
+        function nextTest()
+        {
+            var test = tests.shift();
+            if (!test) {
+                UnitTest.completeTest();
+                return;
+            }
+            UnitTest.addResult("\ntest: " + test.name);
+            var testPromise = test();
+            if (!(testPromise instanceof Promise))
+                testPromise = Promise.resolve();
+            testPromise.then(nextTest);
+        }
+    }
+
+    function completeTestOnError(message, source, lineno, colno, error)
+    {
+        UnitTest.addResult("TEST ENDED IN ERROR: " + error.stack);
+        UnitTest.completeTest();
+    }
+    window.onerror = completeTestOnError;
+
     Runtime.startApplication("/inspector-unit/inspector-unit-test").then(runTest);
 
     function runTest()
@@ -84,11 +110,6 @@ var UnitTest = {};
         WebInspector.inspectorView.showInitialPanel();
         rootView.attachToDocument(document);
 
-        try {
-            test();
-        } catch (e) {
-            UnitTest.addResult("TEST ENDED IN ERROR: " + e.stack);
-            UnitTest.completeTest();
-        }
+        test();
     }
 })();

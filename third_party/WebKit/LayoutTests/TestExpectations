@@ -35,6 +35,9 @@ crbug.com/569901 crbug.com/24182 [ Debug ] jquery/manipulation.html [ Timeout Pa
 crbug.com/537409 virtual/spv2/ [ Skip ]
 crbug.com/563667 virtual/spv2/fast/block/basic/001.html [ Pass ]
 crbug.com/580355 virtual/spv2/fast/block/basic/018.html [ Pass ]
+# Begin whitlelisted paint invalidation tests
+crbug.com/647831 virtual/spv2/paint/invalidation/margin.html [ Pass ]
+# End whitlelisted paint invalidation tests
 crbug.com/596780 virtual/spv2/compositing/framesets/composited-frame-alignment.html [ Pass ]
 crbug.com/596780 virtual/spv2/compositing/geometry/outline-change.html [ Pass ]
 crbug.com/600618 virtual/spv2/svg/custom/object-current-scale.html [ Pass ]
@@ -100,7 +103,48 @@ crbug.com/636271 [ Win ] paint/invalidation/resize-iframe-text.html [ Pass Failu
 
 crbug.com/638293 [ Linux ] virtual/gpu-rasterization/fast/images/color-profile-reflection.html [ Failure ]
 
+# https://chromium.googlesource.com/skia.git/+/a3b45d4f7db953472df4f11ab1595964b65175f9
+crbug.com/630695 fast/borders/border-radius-with-box-shadow.html [ NeedsManualRebaseline ]
+
 crbug.com/639147 svg/wicd/test-rightsizing-b.xhtml [ Failure Pass ]
+
+# ====== LayoutNG-only failures from here ======
+# LayoutNG - is a new layout system for Blink.
+
+crbug.com/635619 virtual/layout_ng/fast/block/basic/001.html [ Failure ]
+crbug.com/635619 virtual/layout_ng/fast/block/basic/002.html [ Failure ]
+crbug.com/635619 virtual/layout_ng/fast/block/basic/003.html [ Failure ]
+crbug.com/635619 virtual/layout_ng/fast/block/basic/011.html [ Failure ]
+crbug.com/635619 virtual/layout_ng/fast/block/basic/012.html [ Failure ]
+crbug.com/635619 virtual/layout_ng/fast/block/basic/013.html [ Failure ]
+crbug.com/635619 virtual/layout_ng/fast/block/basic/014.html [ Failure ]
+crbug.com/635619 virtual/layout_ng/fast/block/basic/016.html [ Failure ]
+crbug.com/635619 virtual/layout_ng/fast/block/basic/018.html [ Failure ]
+crbug.com/635619 virtual/layout_ng/fast/block/basic/020.html [ Failure ]
+crbug.com/635619 virtual/layout_ng/fast/block/basic/adding-near-anonymous-block.html [ Failure ]
+crbug.com/635619 virtual/layout_ng/fast/block/basic/fieldset-stretch-to-legend.html [ Failure ]
+crbug.com/635619 virtual/layout_ng/fast/block/basic/min-pref-width-nowrap-floats.html [ Failure ]
+crbug.com/635619 virtual/layout_ng/fast/block/basic/minheight.html [ Failure ]
+crbug.com/635619 virtual/layout_ng/fast/block/basic/percent-height-inside-anonymous-block.html [ Failure ]
+crbug.com/635619 virtual/layout_ng/fast/block/basic/quirk-height.html [ Failure ]
+crbug.com/635619 virtual/layout_ng/fast/block/basic/quirk-percent-height-grandchild.html [ Failure ]
+crbug.com/635619 virtual/layout_ng/fast/block/basic/quirk-percent-height-table-cell.html [ Failure ]
+crbug.com/635619 virtual/layout_ng/fast/block/basic/text-indent-rtl.html [ Failure ]
+crbug.com/635619 virtual/layout_ng/fast/block/basic/truncation-rtl.html [ Failure ]
+crbug.com/635619 virtual/layout_ng/fast/block/basic/white-space-pre-wraps.html [ Failure ]
+# TODO(glebl) Update TestExpecations deleting the lines below once http://crrev.com/2389823003 is submitted
+crbug.com/635619 virtual/layout_ng/fast/block/basic/004.html [ Failure ]
+crbug.com/635619 virtual/layout_ng/fast/block/basic/005.html [ Failure ]
+crbug.com/635619 virtual/layout_ng/fast/block/basic/006.html [ Failure ]
+crbug.com/635619 virtual/layout_ng/fast/block/basic/007.html [ Failure ]
+crbug.com/635619 virtual/layout_ng/fast/block/basic/008.html [ Failure ]
+crbug.com/635619 virtual/layout_ng/fast/block/basic/009.html [ Failure ]
+crbug.com/635619 virtual/layout_ng/fast/block/basic/010.html [ Failure ]
+crbug.com/635619 virtual/layout_ng/fast/block/basic/015.html [ Failure ]
+crbug.com/635619 virtual/layout_ng/fast/block/basic/019.html [ Failure ]
+crbug.com/635619 virtual/layout_ng/fast/block/basic/021.html [ Failure ]
+
+# ====== LayoutNG-only failures until here ======
 
 # ====== Paint team owned tests to here ======
 
@@ -149,9 +193,6 @@ crbug.com/520611 [ Debug ] fast/filesystem/workers/file-writer-events-shared-wor
 crbug.com/520613 http/tests/cache/freshness-header.html [ Failure Pass ]
 crbug.com/520619 [ Android Mac Linux Win7 ] webexposed/global-interface-listing.html [ Pass Timeout ]
 crbug.com/520194 http/tests/xmlhttprequest/timeout/xmlhttprequest-timeout-worker-overridesexpires.html [ Failure Pass ]
-
-crbug.com/645938 fast/text/ellipsis-at-edge-of-ltr-text-in-rtl-flow.html [ NeedsRebaseline ]
-crbug.com/645938 fast/text/ellipsis-at-edge-of-rtl-text-in-ltr-flow.html [ NeedsRebaseline ]
 
 crbug.com/410974 fast/scroll-behavior/scroll-customization/scrollstate-basic.html [ Pass Failure ]
 crbug.com/410974 fast/scroll-behavior/scroll-customization/scrollstate-consume-deltas.html [ Pass Failure ]
@@ -226,36 +267,6 @@ crbug.com/248938 [ Linux ] virtual/threaded/transitions/unprefixed-perspective-o
 crbug.com/248938 [ Linux ] virtual/threaded/transitions/transition-not-interpolable.html [ Pass Timeout ]
 crbug.com/248938 [ Mac ] virtual/threaded/transitions/interrupted-all-transition.html [ Pass Failure ]
 
-crbug.com/637264 fast/hidpi/scrollbar-appearance-increase-device-scale-factor.html [ NeedsRebaseline ]
-crbug.com/637264 fast/hidpi/scrollbar-appearance-decrease-device-scale-factor.html  [ NeedsRebaseline ]
-crbug.com/640256 [ Linux ] compositing/tiled-layers-hidpi.html [ NeedsRebaseline ]
-crbug.com/640256 [ Linux ] css3/filters/effect-reference-hidpi-hw.html [ NeedsRebaseline ]
-crbug.com/640256 [ Linux ] css3/filters/effect-reference-hidpi.html [ NeedsRebaseline ]
-crbug.com/640256 [ Linux ] editing/spelling/grammar-markers-hidpi.html [ NeedsRebaseline ]
-crbug.com/640256 [ Linux ] editing/spelling/inline-spelling-markers-hidpi-composited.html [ NeedsRebaseline ]
-crbug.com/640256 [ Linux ] editing/spelling/inline-spelling-markers-hidpi.html [ NeedsRebaseline ]
-crbug.com/640256 [ Linux ] fast/backgrounds/gradient-background-leakage-hidpi.html [ NeedsRebaseline ]
-crbug.com/640256 [ Linux ] fast/canvas/canvas-hidpi-blurry.html [ NeedsRebaseline ]
-crbug.com/640256 [ Linux ] fast/hidpi/broken-image-icon-hidpi.html [ NeedsRebaseline ]
-crbug.com/640256 [ Linux ] fast/hidpi/broken-image-with-size-hidpi.html [ NeedsRebaseline ]
-crbug.com/640256 [ Linux ] fast/hidpi/clip-text-in-hidpi.html [ NeedsRebaseline ]
-crbug.com/640256 [ Linux ] fast/hidpi/device-scale-factor-paint.html [ NeedsRebaseline ]
-crbug.com/640256 [ Linux ] fast/hidpi/focus-rings.html [ NeedsRebaseline ]
-crbug.com/640256 [ Linux ] fast/hidpi/gradient-with-scaled-ancestor.html [ NeedsRebaseline ]
-crbug.com/640256 [ Linux ] fast/hidpi/image-srcset-intrinsic-size-zero.html [ NeedsRebaseline ]
-crbug.com/640256 [ Linux ] fast/hidpi/resize-corner-hidpi.html [ NeedsRebaseline ]
-crbug.com/640256 [ Linux ] fast/sub-pixel/shadows-hidpi.html [ NeedsRebaseline ]
-crbug.com/640256 [ Linux ] svg/as-image/image-respects-deviceScaleFactor.html [ NeedsRebaseline ]
-crbug.com/640256 [ Linux ] svg/custom/masking-clipping-hidpi.svg [ NeedsRebaseline ]
-crbug.com/640256 [ Linux ] virtual/display_list_2d_canvas/fast/canvas/canvas-hidpi-blurry.html [ NeedsRebaseline ]
-crbug.com/640256 [ Linux ] virtual/gpu/fast/canvas/canvas-hidpi-blurry.html [ NeedsRebaseline ]
-crbug.com/640256 [ Linux ] virtual/scalefactor150/fast/hidpi/static/calendar-picker-appearance.html [ NeedsRebaseline ]
-crbug.com/640256 [ Linux ] virtual/scalefactor150/fast/hidpi/static/data-suggestion-picker-appearance.html [ NeedsRebaseline ]
-crbug.com/640256 [ Linux ] virtual/scalefactor150/fast/hidpi/static/popup-menu-appearance.html [ NeedsRebaseline ]
-crbug.com/640256 [ Linux ] virtual/scalefactor200/fast/hidpi/static/calendar-picker-appearance.html [ NeedsRebaseline ]
-crbug.com/640256 [ Linux ] virtual/scalefactor200/fast/hidpi/static/data-suggestion-picker-appearance.html [ NeedsRebaseline ]
-crbug.com/640256 [ Linux ] virtual/scalefactor200/fast/hidpi/static/popup-menu-appearance.html [ NeedsRebaseline ]
-
 # TODO(oshima): Mac Android are currently not supported.
 crbug.com/567837 [ Mac Android ] virtual/scalefactor200withzoom/fast/hidpi/static [ Skip ]
 
@@ -316,7 +327,6 @@ crbug.com/475984 [ Mac Debug ] css2.1/t100801-c544-valgn-03-d-agi.html [ Failure
 # expectation files. The following tests with [ Failure ] don't have failure
 # expectation files because they contain local path names.
 # Use crbug.com/490511 for untriaged failures.
-crbug.com/490511 imported/wpt/html/dom/reflection-obsolete.html [ Failure ]
 crbug.com/490511 [ Linux Win ] imported/wpt/html/rendering/bindings/the-input-element-as-a-text-entry-widget/unrecognized-type-should-fallback-as-text-type.html [ Failure ]
 crbug.com/108417 imported/wpt/html/rendering/non-replaced-elements/tables/table-border-1.html [ Failure ]
 crbug.com/490511 imported/wpt/html/rendering/non-replaced-elements/the-hr-element-0/color.html [ Failure Pass ]
@@ -324,10 +334,6 @@ crbug.com/490511 imported/wpt/html/rendering/non-replaced-elements/the-hr-elemen
 crbug.com/490511 imported/wpt/html/rendering/replaced-elements/embedded-content-rendering-rules/canvas-fallback.html [ Failure ]
 crbug.com/490511 imported/wpt/html/semantics/document-metadata/styling/LinkStyle.html [ Failure Pass ]
 crbug.com/627706 imported/wpt/html/semantics/embedded-content/the-img-element/invalid-src.html [ Skip ]
-crbug.com/525889 imported/wpt/html/webappapis/scripting/processing-model-2/compile-error-in-setInterval.html [ Failure ]
-crbug.com/525889 imported/wpt/html/webappapis/scripting/processing-model-2/compile-error-in-setTimeout.html [ Failure ]
-crbug.com/525889 imported/wpt/html/webappapis/scripting/processing-model-2/runtime-error-in-setInterval.html [ Failure ]
-crbug.com/525889 imported/wpt/html/webappapis/scripting/processing-model-2/runtime-error-in-setTimeout.html [ Failure ]
 
 crbug.com/636961 [ Linux Debug ] virtual/threaded/fast/scroll-behavior/smooth-scroll/ongoing-smooth-scroll-vertical-rl-anchors.html [ Pass Failure ]
 
@@ -622,7 +628,7 @@ crbug.com/253763 fast/text-autosizing/first-line-scale-factor.html [ Failure ]
 crbug.com/390377 [ Release ] fast/dom/private_script_unittest.html [ Skip ]
 
 crbug.com/613887 http/tests/preload/meta-viewport-link-headers.html [ Failure Pass ]
-crbug.com/564403 http/tests/inspector/service-workers/service-worker-manager.html [ Failure Pass Crash Timeout ]
+crbug.com/564403 [ Win Debug ] http/tests/inspector/service-workers/service-worker-manager.html [ Failure Pass Timeout ]
 
 crbug.com/306222 fast/hidpi/image-srcset-relative-svg-canvas.html [ Skip ]
 crbug.com/306222 fast/hidpi/image-srcset-relative-svg-canvas-2x.html [ Skip ]
@@ -723,8 +729,7 @@ crbug.com/647470 [ Linux Debug ] virtual/threaded/fast/scroll-behavior/smooth-sc
 crbug.com/487880 virtual/threaded/fast/scroll-behavior/overflow-scroll-root-frame-animates.html [ Pass Timeout ]
 crbug.com/487880 virtual/threaded/fast/scroll-behavior/overflow-scroll-animates.html [ Pass Timeout ]
 crbug.com/552556 virtual/threaded/fast/scroll-behavior/smooth-scroll/mousewheel-scroll.html [ Pass Failure ]
-crbug.com/480769 http/tests/inspector/service-workers/service-workers-redundant.html [ Crash Pass Failure ]
-crbug.com/480769 http/tests/inspector/service-workers/service-worker-agents.html [ Crash Pass Timeout ]
+crbug.com/480769 http/tests/inspector/service-workers/service-workers-redundant.html [ Pass Failure ]
 
 crbug.com/569901 [ Debug ] http/tests/serviceworker/navigation-redirect.html [ Pass Failure ]
 
@@ -1009,8 +1014,6 @@ crbug.com/240576 virtual/android/fullscreen/api/element-ready-check-containing-i
 crbug.com/567230 [ Debug ] virtual/threaded/animations/restart-not-visible.html [ Timeout ]
 
 crbug.com/567419 inspector/elements/styles-2/metrics-box-sizing.html [ Skip ]
-
-crbug.com/623802 inspector/elements/elements-panel-correct-case.html [ Pass ]
 
 crbug.com/457273 [ Mac ] http/tests/websocket/close.html [ Pass Timeout ]
 

@@ -1338,6 +1338,8 @@ split_static_library("ui") {
       "ash/launcher/multi_profile_app_window_launcher_controller.h",
       "ash/launcher/multi_profile_browser_status_monitor.cc",
       "ash/launcher/multi_profile_browser_status_monitor.h",
+      "ash/launcher/settings_window_observer.cc",
+      "ash/launcher/settings_window_observer.h",
       "ash/media_delegate_chromeos.cc",
       "ash/media_delegate_chromeos.h",
       "ash/metrics/chrome_user_metrics_recorder.cc",
@@ -1366,6 +1368,8 @@ split_static_library("ui") {
       "ash/networking_config_delegate_chromeos.h",
       "ash/palette_delegate_chromeos.cc",
       "ash/palette_delegate_chromeos.h",
+      "ash/property_util.cc",
+      "ash/property_util.h",
       "ash/session_state_delegate_chromeos.cc",
       "ash/session_state_delegate_chromeos.h",
       "ash/session_util.cc",
@@ -1392,6 +1396,7 @@ split_static_library("ui") {
       "//ash/public/cpp",
       "//ash/public/interfaces",
       "//components/user_manager",
+      "//services/ui/public/cpp",
       "//ui/app_list/presenter",
       "//ui/app_list/presenter:mojom",
       "//ui/keyboard:mojom",
@@ -3358,16 +3363,9 @@ static_library("test_support") {
     "cocoa/cocoa_test_helper.mm",
     "cocoa/run_loop_testing.h",
     "cocoa/run_loop_testing.mm",
-    "exclusive_access/fullscreen_controller_state_test.cc",
-    "exclusive_access/fullscreen_controller_state_test.h",
-    "exclusive_access/fullscreen_controller_state_tests.h",
-    "exclusive_access/fullscreen_controller_test.cc",
-    "exclusive_access/fullscreen_controller_test.h",
     "find_bar/find_bar_host_unittest_util.h",
     "login/login_handler_test_utils.cc",
     "login/login_handler_test_utils.h",
-    "test/test_confirm_bubble_model.cc",
-    "test/test_confirm_bubble_model.h",
     "toolbar/test_toolbar_action_view_controller.cc",
     "toolbar/test_toolbar_action_view_controller.h",
   ]
@@ -3409,24 +3407,21 @@ static_library("test_support") {
     ]
   }
 
-  if (is_android) {
-    sources -= [
+  if (!is_android) {
+    sources += [
       "exclusive_access/fullscreen_controller_state_test.cc",
       "exclusive_access/fullscreen_controller_state_test.h",
       "exclusive_access/fullscreen_controller_state_tests.h",
       "exclusive_access/fullscreen_controller_test.cc",
       "exclusive_access/fullscreen_controller_test.h",
-      "test/test_confirm_bubble_model.cc",
-      "test/test_confirm_bubble_model.h",
-    ]
-  } else {
-    sources += [
       "passwords/manage_passwords_ui_controller_mock.cc",
       "passwords/manage_passwords_ui_controller_mock.h",
       "passwords/password_dialog_controller_mock.cc",
       "passwords/password_dialog_controller_mock.h",
       "passwords/passwords_model_delegate_mock.cc",
       "passwords/passwords_model_delegate_mock.h",
+      "test/test_confirm_bubble_model.cc",
+      "test/test_confirm_bubble_model.h",
     ]
     deps += [ "//chrome/test:test_support_ui" ]
   }

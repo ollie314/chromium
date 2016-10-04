@@ -46,7 +46,7 @@ DesktopAutomationHandler = function(node) {
   var e = EventType;
   this.addListener_(e.activedescendantchanged, this.onActiveDescendantChanged);
   this.addListener_(e.alert, this.onAlert);
-  this.addListener_(e.ariaAttributeChanged, this.onEventIfInRange);
+  this.addListener_(e.ariaAttributeChanged, this.onAriaAttributeChanged);
   this.addListener_(e.autocorrectionOccured, this.onEventIfInRange);
   this.addListener_(e.checkedStateChanged, this.onCheckedStateChanged);
   this.addListener_(e.childrenChanged, this.onActiveDescendantChanged);
@@ -182,6 +182,15 @@ DesktopAutomationHandler.prototype = {
   /**
    * @param {!AutomationEvent} evt
    */
+  onAriaAttributeChanged: function(evt) {
+    if (evt.target.state.editable)
+      return;
+    this.onEventIfInRange(evt);
+  },
+
+  /**
+   * @param {!AutomationEvent} evt
+   */
   onHover: function(evt) {
     if (ChromeVoxState.instance.currentRange &&
         evt.target == ChromeVoxState.instance.currentRange.start.node)
@@ -244,8 +253,8 @@ DesktopAutomationHandler.prototype = {
 
     var node = evt.target;
 
-    // Discard focus events on embeddedObject and client nodes.
-    if (node.role == RoleType.embeddedObject || node.role == RoleType.client)
+    // Discard focus events on embeddedObject.
+    if (node.role == RoleType.embeddedObject)
       return;
 
     this.createTextEditHandlerIfNeeded_(evt.target);
@@ -331,10 +340,11 @@ DesktopAutomationHandler.prototype = {
         ChromeVoxState.instance.mode === ChromeVoxMode.CLASSIC)
       return;
 
+    var topRoot = AutomationUtil.getTopLevelRoot(evt.target);
     if (!evt.target.state.focused ||
-        (evt.target.root.role != RoleType.desktop &&
-            evt.target.root.parent &&
-            !evt.target.root.parent.state.focused))
+        (topRoot &&
+            topRoot.parent &&
+            !topRoot.parent.state.focused))
       return;
 
     if (!ChromeVoxState.instance.currentRange) {

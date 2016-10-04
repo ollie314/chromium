@@ -100,6 +100,17 @@ ui::mojom::ShowState MojomWindowShowStateFromUI(ui::WindowShowState state) {
   return ui::mojom::ShowState::DEFAULT;
 }
 
+// Returns the WmWindowProperty enum value for the given ui::Window key name.
+WmWindowProperty WmWindowPropertyFromUI(const std::string& ui_window_key) {
+  if (ui_window_key == ui::mojom::WindowManager::kAlwaysOnTop_Property)
+    return WmWindowProperty::ALWAYS_ON_TOP;
+  if (ui_window_key == ui::mojom::WindowManager::kShelfIconResourceId_Property)
+    return WmWindowProperty::SHELF_ICON_RESOURCE_ID;
+  if (ui_window_key == ui::mojom::WindowManager::kShelfItemType_Property)
+    return WmWindowProperty::SHELF_ITEM_TYPE;
+  return WmWindowProperty::INVALID_PROPERTY;
+}
+
 }  // namespace
 
 WmWindowMus::WmWindowMus(ui::Window* window)
@@ -409,7 +420,12 @@ int WmWindowMus::GetIntProperty(WmWindowProperty key) {
   }
 
   if (key == WmWindowProperty::SHELF_ID) {
-    NOTIMPLEMENTED();
+    if (window_->HasSharedProperty(
+            ui::mojom::WindowManager::kShelfId_Property)) {
+      return window_->GetSharedProperty<int>(
+          ui::mojom::WindowManager::kShelfId_Property);
+    }
+
     return kInvalidShelfID;
   }
 
@@ -442,7 +458,8 @@ void WmWindowMus::SetIntProperty(WmWindowProperty key, int value) {
   }
 
   if (key == WmWindowProperty::SHELF_ID) {
-    NOTIMPLEMENTED();
+    window_->SetSharedProperty<int>(ui::mojom::WindowManager::kShelfId_Property,
+                                    value);
     return;
   }
 
@@ -620,15 +637,16 @@ gfx::Rect WmWindowMus::GetTargetBounds() {
 }
 
 void WmWindowMus::ClearRestoreBounds() {
-  restore_bounds_in_screen_.reset();
+  window_->ClearSharedProperty(
+      ui::mojom::WindowManager::kRestoreBounds_Property);
 }
 
 void WmWindowMus::SetRestoreBoundsInScreen(const gfx::Rect& bounds) {
-  restore_bounds_in_screen_.reset(new gfx::Rect(bounds));
+  SetRestoreBounds(window_, bounds);
 }
 
 gfx::Rect WmWindowMus::GetRestoreBoundsInScreen() const {
-  return *restore_bounds_in_screen_;
+  return GetRestoreBounds(window_);
 }
 
 bool WmWindowMus::Contains(const WmWindow* other) const {
@@ -678,7 +696,8 @@ void WmWindowMus::ReleaseCapture() {
 }
 
 bool WmWindowMus::HasRestoreBounds() const {
-  return restore_bounds_in_screen_.get() != nullptr;
+  return window_->HasSharedProperty(
+      ui::mojom::WindowManager::kRestoreBounds_Property);
 }
 
 bool WmWindowMus::CanMaximize() const {
@@ -934,10 +953,16 @@ void WmWindowMus::OnWindowSharedPropertyChanged(
     GetWindowState()->OnWindowShowStateChanged();
     return;
   }
-  if (name == ui::mojom::WindowManager::kAlwaysOnTop_Property) {
-    FOR_EACH_OBSERVER(
-        WmWindowObserver, observers_,
-        OnWindowPropertyChanged(this, WmWindowProperty::ALWAYS_ON_TOP));
+  if (name == ui::mojom::WindowManager::kWindowTitle_Property) {
+    FOR_EACH_OBSERVER(WmWindowObserver, observers_, OnWindowTitleChanged(this));
+    return;
+  }
+
+  // Notify WmWindowObserver of certain white-listed property changes.
+  WmWindowProperty wm_property = WmWindowPropertyFromUI(name);
+  if (wm_property != WmWindowProperty::INVALID_PROPERTY) {
+    FOR_EACH_OBSERVER(WmWindowObserver, observers_,
+                      OnWindowPropertyChanged(this, wm_property));
     return;
   }
 
@@ -960,15 +985,15 @@ void WmWindowMus::OnWindowDestroyed(ui::Window* window) {
   FOR_EACH_OBSERVER(WmWindowObserver, observers_, OnWindowDestroyed(this));
 }
 
-void WmWindowMus::OnWindowVisibilityChanging(ui::Window* window) {
+void WmWindowMus::OnWindowVisibilityChanging(ui::Window* window, bool visible) {
   DCHECK_EQ(window_, window);
   FOR_EACH_OBSERVER(WmWindowObserver, observers_,
-                    OnWindowVisibilityChanging(this, !window->visible()));
+                    OnWindowVisibilityChanging(this, visible));
 }
 
-void WmWindowMus::OnWindowVisibilityChanged(ui::Window* window) {
+void WmWindowMus::OnWindowVisibilityChanged(ui::Window* window, bool visible) {
   FOR_EACH_OBSERVER(WmWindowObserver, observers_,
-                    OnWindowVisibilityChanged(Get(window), window->visible()));
+                    OnWindowVisibilityChanged(Get(window), visible));
 }
 
 void WmWindowMus::OnTransientChildAdded(ui::Window* window,

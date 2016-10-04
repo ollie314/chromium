@@ -172,7 +172,7 @@ class PersistentBase {
   }
 
  private:
-  NO_LAZY_SWEEP_SANITIZE_ADDRESS
+  NO_SANITIZE_ADDRESS
   void assign(T* ptr) {
     if (crossThreadnessConfiguration == CrossThreadPersistentConfiguration)
       releaseStore(reinterpret_cast<void* volatile*>(&m_raw), ptr);
@@ -203,7 +203,7 @@ class PersistentBase {
     }
   }
 
-  NO_LAZY_SWEEP_SANITIZE_ADDRESS
+  NO_SANITIZE_ADDRESS
   void initialize() {
     ASSERT(!m_persistentNode);
     if (!m_raw || isHashTableDeletedValue())
@@ -539,8 +539,9 @@ class CrossThreadWeakPersistent
 
 template <typename Collection>
 class PersistentHeapCollectionBase : public Collection {
-  // We overload the various new and delete operators with using the WTF PartitionAllocator to ensure persistent
-  // heap collections are always allocated off-heap. This allows persistent collections to be used in
+  // We overload the various new and delete operators with using the WTF
+  // PartitionAllocator to ensure persistent heap collections are always
+  // allocated off-heap. This allows persistent collections to be used in
   // DEFINE_STATIC_LOCAL et. al.
   WTF_USE_ALLOCATOR(PersistentHeapCollectionBase, WTF::PartitionAllocator);
   IS_PERSISTENT_REFERENCE_TYPE();
@@ -589,7 +590,7 @@ class PersistentHeapCollectionBase : public Collection {
     collection->clear();
   }
 
-  NO_LAZY_SWEEP_SANITIZE_ADDRESS
+  NO_SANITIZE_ADDRESS
   void initialize() {
     // FIXME: Derive affinity based on the collection.
     ThreadState* state = ThreadState::current();

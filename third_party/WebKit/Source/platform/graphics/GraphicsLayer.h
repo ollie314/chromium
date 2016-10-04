@@ -218,17 +218,17 @@ class PLATFORM_EXPORT GraphicsLayer : public WebLayerScrollClient,
 
   std::unique_ptr<JSONObject> layerTreeAsJSON(LayerTreeFlags) const;
 
-  void setTracksPaintInvalidations(bool);
-  bool isTrackingOrCheckingPaintInvalidations() const {
+  void setTracksRasterInvalidations(bool);
+  bool isTrackingOrCheckingRasterInvalidations() const {
     return RuntimeEnabledFeatures::paintUnderInvalidationCheckingEnabled() ||
-           m_isTrackingPaintInvalidations;
+           m_isTrackingRasterInvalidations;
   }
 
-  void resetTrackedPaintInvalidations();
-  bool hasTrackedPaintInvalidations() const;
-  void trackPaintInvalidation(const DisplayItemClient&,
-                              const IntRect&,
-                              PaintInvalidationReason);
+  void resetTrackedRasterInvalidations();
+  bool hasTrackedRasterInvalidations() const;
+  void trackRasterInvalidation(const DisplayItemClient&,
+                               const IntRect&,
+                               PaintInvalidationReason);
 
   void addLinkHighlight(LinkHighlight*);
   void removeLinkHighlight(LinkHighlight*);
@@ -315,6 +315,12 @@ class PLATFORM_EXPORT GraphicsLayer : public WebLayerScrollClient,
   std::unique_ptr<JSONObject> layerTreeAsJSONInternal(
       LayerTreeFlags,
       RenderingContextMap&) const;
+  // Outputs the layer tree rooted at |this| as a JSON array, in paint order.
+  void layersAsJSONArray(LayerTreeFlags,
+                         RenderingContextMap&,
+                         JSONArray*) const;
+  std::unique_ptr<JSONObject> layerAsJSONInternal(LayerTreeFlags,
+                                                  RenderingContextMap&) const;
 
   sk_sp<SkPicture> capturePicture();
   void checkPaintUnderInvalidations(const SkPicture&);
@@ -349,7 +355,7 @@ class PLATFORM_EXPORT GraphicsLayer : public WebLayerScrollClient,
 
   bool m_painted : 1;
 
-  bool m_isTrackingPaintInvalidations : 1;
+  bool m_isTrackingRasterInvalidations : 1;
 
   GraphicsLayerPaintingPhase m_paintingPhase;
 

@@ -1,7 +1,8 @@
 /*
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2003, 2004, 2005, 2006, 2007, 2008, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2003, 2004, 2005, 2006, 2007, 2008, 2009 Apple Inc. All rights
+ * reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -191,12 +192,13 @@ String Text::wholeText() const {
 Text* Text::replaceWholeText(const String& newText) {
   // Remove all adjacent text nodes, and replace the contents of this one.
 
-  // Protect startText and endText against mutation event handlers removing the last ref
+  // Protect startText and endText against mutation event handlers removing the
+  // last ref
   Text* startText = const_cast<Text*>(earliestLogicallyAdjacentTextNode(this));
   Text* endText = const_cast<Text*>(latestLogicallyAdjacentTextNode(this));
 
-  ContainerNode* parent =
-      parentNode();  // Protect against mutation handlers moving this node during traversal
+  ContainerNode* parent = parentNode();  // Protect against mutation handlers
+                                         // moving this node during traversal
   for (Node* n = startText;
        n && n != this && n->isTextNode() && n->parentNode() == parent;) {
     Node* nodeToRemove = n;
@@ -279,12 +281,18 @@ bool Text::textLayoutObjectIsNeeded(const ComputedStyle& style,
   if (style.preserveNewline())
     return true;
 
-  // childNeedsDistributionRecalc() here is rare, only happens JS calling surroundContents() etc. from DOMNodeInsertedIntoDocument etc.
+  // childNeedsDistributionRecalc() here is rare, only happens JS calling
+  // surroundContents() etc. from DOMNodeInsertedIntoDocument etc.
   if (document().childNeedsDistributionRecalc())
     return true;
 
+  // Avoiding creation of a layoutObject for the text node is a non-essential memory optimization.
+  // So to avoid blowing up on very wide DOMs, we limit the number of siblings to visit.
+  unsigned maxSiblingsToVisit = 50;
+
   const LayoutObject* prev =
-      LayoutTreeBuilderTraversal::previousSiblingLayoutObject(*this);
+      LayoutTreeBuilderTraversal::previousSiblingLayoutObject(
+          *this, maxSiblingsToVisit);
   if (prev && prev->isBR())  // <span><br/> <br/></span>
     return false;
 
@@ -297,18 +305,22 @@ bool Text::textLayoutObjectIsNeeded(const ComputedStyle& style,
         (!prev || !prev->isInline()))
       return false;
 
-    // Avoiding creation of a layoutObject for the text node is a non-essential memory optimization.
-    // So to avoid blowing up on very wide DOMs, we limit the number of siblings to visit.
+    // Avoiding creation of a layoutObject for the text node is a non-essential
+    // memory optimization.  So to avoid blowing up on very wide DOMs, we limit
+    // the number of siblings to visit.
     unsigned maxSiblingsToVisit = 50;
 
     LayoutObject* first = parent.slowFirstChild();
-    while (first && first->isFloatingOrOutOfFlowPositioned() &&
-           maxSiblingsToVisit--)
-      first = first->nextSibling();
+    for (; first && first->isFloatingOrOutOfFlowPositioned() &&
+           maxSiblingsToVisit;
+         first = first->nextSibling(), --maxSiblingsToVisit) {
+    }
     if (!first || first == layoutObject() ||
-        LayoutTreeBuilderTraversal::nextSiblingLayoutObject(*this) == first) {
-      // If we're adding children to this flow our previous siblings are not in the layout tree yet so we
-      // cannot know if we will be the first child in the line and collapse away. We have to assume we need a layout object.
+        LayoutTreeBuilderTraversal::nextSiblingLayoutObject(
+            *this, maxSiblingsToVisit) == first) {
+      // If we're adding children to this flow our previous siblings are not in
+      // the layout tree yet so we cannot know if we will be the first child in
+      // the line and collapse away. We have to assume we need a layout object.
       Node* firstChildNode =
           parent.node() ? LayoutTreeBuilderTraversal::firstChild(*parent.node())
                         : nullptr;
@@ -367,8 +379,9 @@ void Text::reattachLayoutTreeIfNeeded(const AttachContext& context) {
   if (layoutObjectIsNeeded == !!layoutObject())
     return;
 
-  // The following is almost the same as Node::reattachLayoutTree() except that we create a layoutObject only if needed.
-  // Not calling reattachLayoutTree() to avoid repeated calls to Text::textLayoutObjectIsNeeded().
+  // The following is almost the same as Node::reattachLayoutTree() except that
+  // we create a layoutObject only if needed.  Not calling reattachLayoutTree()
+  // to avoid repeated calls to Text::textLayoutObjectIsNeeded().
   AttachContext reattachContext(context);
   reattachContext.performingReattach = true;
 
@@ -394,8 +407,8 @@ void Text::recalcTextStyle(StyleRecalcChange change, Text* nextTextSibling) {
   }
 }
 
-// If a whitespace node had no layoutObject and goes through a recalcStyle it may
-// need to create one if the parent style now has white-space: pre.
+// If a whitespace node had no layoutObject and goes through a recalcStyle it
+// may need to create one if the parent style now has white-space: pre.
 bool Text::needsWhitespaceLayoutObject() {
   DCHECK(!layoutObject());
   if (const ComputedStyle* style = parentComputedStyle())

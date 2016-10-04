@@ -88,7 +88,7 @@ class PLATFORM_EXPORT TimerBase {
 
   virtual WebTaskRunner* timerTaskRunner() const;
 
-  NO_LAZY_SWEEP_SANITIZE_ADDRESS
+  NO_SANITIZE_ADDRESS
   virtual bool canFire() const { return true; }
 
   double timerMonotonicallyIncreasingTime() const;
@@ -141,7 +141,7 @@ class TaskRunnerTimer : public TimerBase {
  protected:
   void fired() override { (m_object->*m_function)(this); }
 
-  NO_LAZY_SWEEP_SANITIZE_ADDRESS
+  NO_SANITIZE_ADDRESS
   bool canFire() const override {
     // Oilpan: if a timer fires while Oilpan heaps are being lazily
     // swept, it is not safe to proceed if the object is about to
@@ -151,8 +151,9 @@ class TaskRunnerTimer : public TimerBase {
   }
 
  private:
-  // FIXME: Oilpan: TimerBase should be moved to the heap and m_object should be traced.
-  // This raw pointer is safe as long as Timer<X> is held by the X itself (That's the case
+  // FIXME: Oilpan: TimerBase should be moved to the heap and m_object should be
+  // traced.  This raw pointer is safe as long as Timer<X> is held by the X
+  // itself (That's the case
   // in the current code base).
   GC_PLUGIN_IGNORE("363031")
   TimerFiredClass* m_object;
@@ -175,8 +176,9 @@ class Timer : public TaskRunnerTimer<TimerFiredClass> {
                                          timerFiredFunction) {}
 };
 
-// This subclass of Timer posts its tasks on the current thread's default task runner.
-// Tasks posted on there are not throttled when the tab is in the background.
+// This subclass of Timer posts its tasks on the current thread's default task
+// runner.  Tasks posted on there are not throttled when the tab is in the
+// background.
 template <typename TimerFiredClass>
 class UnthrottledThreadTimer : public TaskRunnerTimer<TimerFiredClass> {
  public:
@@ -192,7 +194,7 @@ class UnthrottledThreadTimer : public TaskRunnerTimer<TimerFiredClass> {
                                          timerFiredFunction) {}
 };
 
-NO_LAZY_SWEEP_SANITIZE_ADDRESS
+NO_SANITIZE_ADDRESS
 inline bool TimerBase::isActive() const {
   ASSERT(m_thread == currentThread());
   return m_weakPtrFactory.hasWeakPtrs();

@@ -58,7 +58,9 @@ static void SetRuntimeFeatureDefaultsForPlatform() {
 
 void SetRuntimeFeaturesDefaultsAndUpdateFromArgs(
     const base::CommandLine& command_line) {
-  if (command_line.HasSwitch(switches::kEnableExperimentalWebPlatformFeatures))
+  bool enableExperimentalWebPlatformFeatures = command_line.HasSwitch(
+      switches::kEnableExperimentalWebPlatformFeatures);
+  if (enableExperimentalWebPlatformFeatures)
     WebRuntimeFeatures::enableExperimentalFeatures(true);
 
   WebRuntimeFeatures::enableOriginTrials(
@@ -164,8 +166,7 @@ void SetRuntimeFeaturesDefaultsAndUpdateFromArgs(
     WebRuntimeFeatures::enablePreciseMemoryInfo(true);
 
   if (command_line.HasSwitch(switches::kEnableNetworkInformation) ||
-      command_line.HasSwitch(
-          switches::kEnableExperimentalWebPlatformFeatures)) {
+      enableExperimentalWebPlatformFeatures) {
     WebRuntimeFeatures::enableNetworkInformation(true);
   }
 
@@ -231,7 +232,8 @@ void SetRuntimeFeaturesDefaultsAndUpdateFromArgs(
     WebRuntimeFeatures::enableWebFontsInterventionTrigger(true);
 
   WebRuntimeFeatures::enableScrollAnchoring(
-      base::FeatureList::IsEnabled(features::kScrollAnchoring));
+      base::FeatureList::IsEnabled(features::kScrollAnchoring) ||
+      enableExperimentalWebPlatformFeatures);
 
   if (command_line.HasSwitch(switches::kEnableSlimmingPaintV2))
     WebRuntimeFeatures::enableSlimmingPaintV2(true);

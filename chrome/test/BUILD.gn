@@ -1323,6 +1323,7 @@ test("browser_tests") {
       "../browser/browsing_data/history_counter_browsertest.cc",
       "../browser/browsing_data/media_licenses_counter_browsertest.cc",
       "../browser/browsing_data/passwords_counter_browsertest.cc",
+      "../browser/budget_service/budget_manager_browsertest.cc",
       "../browser/chrome_content_browser_client_browsertest.cc",
       "../browser/chrome_main_browsertest.cc",
       "../browser/chrome_navigation_browsertest.cc",
@@ -3490,10 +3491,6 @@ test("unit_tests") {
     android_manifest =
         "//chrome/test/android/unit_tests_apk/AndroidManifest.xml"
     enable_multidex = true
-
-    # Some android targets still depend on --gc-sections to link.
-    # TODO: remove --gc-sections for Debug builds (crbug.com/159847).
-    ldflags = [ "-Wl,--gc-sections" ]
   } else {
     sources += [
       # Bookmark export/import are handled via the BookmarkColumns

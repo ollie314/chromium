@@ -58,6 +58,9 @@ enum {
   LayerTreeIncludesRootLayer = 1 << 3,
   LayerTreeIncludesClipAndScrollParents = 1 << 4,
   LayerTreeIncludesCompositingReasons = 1 << 5,
+  OutputChildrenAsLayerList =
+      1
+      << 6,  // Outputs all children of the given layer as a layer list, in paint order.
 };
 typedef unsigned LayerTreeFlags;
 
@@ -81,7 +84,7 @@ class PLATFORM_EXPORT GraphicsLayerClient {
                              GraphicsLayerPaintingPhase,
                              const IntRect& interestRect) const = 0;
 
-  virtual bool isTrackingPaintInvalidations() const { return false; }
+  virtual bool isTrackingRasterInvalidations() const { return false; }
 
   virtual String debugName(const GraphicsLayer*) const = 0;
 

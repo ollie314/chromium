@@ -262,8 +262,8 @@ class WmWindowMus : public WmWindow, public ui::WindowObserver {
                              const gfx::Rect& new_bounds) override;
   void OnWindowDestroying(ui::Window* window) override;
   void OnWindowDestroyed(ui::Window* window) override;
-  void OnWindowVisibilityChanging(ui::Window* window) override;
-  void OnWindowVisibilityChanged(ui::Window* window) override;
+  void OnWindowVisibilityChanging(ui::Window* window, bool visible) override;
+  void OnWindowVisibilityChanged(ui::Window* window, bool visible) override;
   void OnTransientChildAdded(ui::Window* window,
                              ui::Window* transient) override;
   void OnTransientChildRemoved(ui::Window* window,
@@ -284,8 +284,6 @@ class WmWindowMus : public WmWindow, public ui::WindowObserver {
   base::ObserverList<WmWindowObserver> observers_;
 
   std::unique_ptr<MusLayoutManagerAdapter> layout_manager_adapter_;
-
-  std::unique_ptr<gfx::Rect> restore_bounds_in_screen_;
 
   ui::WindowShowState restore_show_state_ = ui::SHOW_STATE_DEFAULT;
 

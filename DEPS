@@ -39,11 +39,11 @@ vars = {
   # Three lines of non-changing comments so that
   # the commit queue can handle CLs rolling Skia
   # and whatever else without interference from each other.
-  'skia_revision': 'f3c874a9848d7315b87ccdee7203dbff8d6cf774',
+  'skia_revision': '2ebd0c80a2a9d90a2c2c653f40a2a7205bd2d31b',
   # Three lines of non-changing comments so that
   # the commit queue can handle CLs rolling V8
   # and whatever else without interference from each other.
-  'v8_revision': 'a1c5f756f86a3c8870520b713ebfe719169b0c4e',
+  'v8_revision': 'ca6b6b1631d582ab89da0cda030bb6db230c2dd2',
   # Three lines of non-changing comments so that
   # the commit queue can handle CLs rolling swarming_client
   # and whatever else without interference from each other.
@@ -63,7 +63,7 @@ vars = {
   # Three lines of non-changing comments so that
   # the commit queue can handle CLs rolling PDFium
   # and whatever else without interference from each other.
-  'pdfium_revision': '3a88205e8ddce125d78fb6961f7eac2470bbcd55',
+  'pdfium_revision': '76383db4906c9357292846ace77566b34eb47de9',
   # Three lines of non-changing comments so that
   # the commit queue can handle CLs rolling openmax_dl
   # and whatever else without interference from each other.
@@ -95,7 +95,7 @@ vars = {
   # Three lines of non-changing comments so that
   # the commit queue can handle CLs rolling catapult
   # and whatever else without interference from each other.
-  'catapult_revision': 'cfeb51ce8df34a24b2f080c2e338520a890be7ba',
+  'catapult_revision': '2363045762a7114bb456d370dade07dd414f7d15',
   # Three lines of non-changing comments so that
   # the commit queue can handle CLs rolling libFuzzer
   # and whatever else without interference from each other.
@@ -930,6 +930,7 @@ hooks = [
                '--output-dir=src/third_party/syzygy/binaries',
                '--revision=ba2ce2c31c16fe53b337121ec480fc5d4dfb4eec',
                '--overwrite',
+               '--copy-dia-binaries',
     ],
   },
   # TODO(pmonette): Move include files out of binaries folder.

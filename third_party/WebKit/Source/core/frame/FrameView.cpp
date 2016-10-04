@@ -2817,7 +2817,17 @@ void FrameView::pushPaintArtifactToCompositor() {
 
   SCOPED_BLINK_UMA_HISTOGRAM_TIMER("Blink.Compositing.UpdateTime");
 
-  m_paintArtifactCompositor->update(m_paintController->paintArtifact());
+  m_paintArtifactCompositor->update(
+      m_paintController->paintArtifact(),
+      m_paintController->paintChunksRasterInvalidationTrackingMap());
+}
+
+std::unique_ptr<JSONObject> FrameView::compositedLayersAsJSON(
+    LayerTreeFlags flags) {
+  return frame()
+      .localFrameRoot()
+      ->view()
+      ->m_paintArtifactCompositor->layersAsJSON(flags);
 }
 
 void FrameView::updateStyleAndLayoutIfNeededRecursive() {
@@ -3204,8 +3214,15 @@ void FrameView::setTracksPaintInvalidations(bool trackPaintInvalidations) {
       layoutView.frameView()->m_trackedObjectPaintInvalidations = wrapUnique(
           trackPaintInvalidations ? new Vector<ObjectPaintInvalidation>
                                   : nullptr);
-      layoutView.compositor()->setTracksPaintInvalidations(
-          trackPaintInvalidations);
+      if (RuntimeEnabledFeatures::slimmingPaintV2Enabled()) {
+        m_paintController->setTracksRasterInvalidations(
+            trackPaintInvalidations);
+        m_paintArtifactCompositor->setTracksRasterInvalidations(
+            trackPaintInvalidations);
+      } else {
+        layoutView.compositor()->setTracksRasterInvalidations(
+            trackPaintInvalidations);
+      }
     }
   }
 
@@ -3387,8 +3404,7 @@ void FrameView::addChild(Widget* child) {
 }
 
 void FrameView::setHasHorizontalScrollbar(bool hasBar) {
-  DCHECK(m_frame->settings());
-  if (m_frame->settings()->hideScrollbars())
+  if (m_frame->settings() && m_frame->settings()->hideScrollbars())
     hasBar = false;
 
   if (hasBar == !!m_horizontalScrollbar)
@@ -3414,8 +3430,7 @@ void FrameView::setHasHorizontalScrollbar(bool hasBar) {
 }
 
 void FrameView::setHasVerticalScrollbar(bool hasBar) {
-  DCHECK(m_frame->settings());
-  if (m_frame->settings()->hideScrollbars())
+  if (m_frame->settings() && m_frame->settings()->hideScrollbars())
     hasBar = false;
 
   if (hasBar == !!m_verticalScrollbar)
