@@ -286,21 +286,23 @@ def _Download(resource):
   return tmp[1]
 
 
-def _CopyDIABinaries(options, contents):
-  """Copy the DIA DLL to the binaries exe directory."""
+def _MaybeCopyDIABinaries(options, contents):
+  """Try to copy the DIA DLL to the binaries exe directory."""
   toolchain_data_file = os.path.join(os.path.dirname(__file__),
                                      'win_toolchain.json')
   if not os.path.exists(toolchain_data_file):
-    raise Exception('Toolchain JSON data file doesn\'t exist.')
-
+    _LOGGER.debug('Toolchain JSON data file doesn\'t exist, skipping.')
+    return
   with open(toolchain_data_file) as temp_f:
     toolchain_data = json.load(temp_f)
   if not os.path.isdir(toolchain_data['path']):
-    raise Exception('The toolchain JSON file is invalid.')
+    _LOGGER.error('The toolchain JSON file is invalid.')
+    return
   dia_sdk_binaries_dir = os.path.join(toolchain_data['path'], 'DIA SDK', 'bin')
   dia_dll = os.path.join(dia_sdk_binaries_dir, _DIA_DLL_NAME)
   if not os.path.exists(dia_dll):
-    raise Exception('%s is missing.')
+    _LOGGER.debug('%s is missing, skipping.')
+    return
   dia_dll_dest = os.path.join(options.output_dir, 'exe', _DIA_DLL_NAME)
   _LOGGER.debug('Copying %s to %s.' % (dia_dll, dia_dll_dest))
   if not options.dry_run:
@@ -364,8 +366,8 @@ def _InstallBinaries(options, deleted={}):
     os.remove(path)
 
   if options.copy_dia_binaries:
-    # Copy the DIA binaries to the binaries directory.
-    _CopyDIABinaries(options, contents)
+    # Try to copy the DIA binaries to the binaries directory.
+    _MaybeCopyDIABinaries(options, contents)
 
   return state
 
@@ -400,7 +402,7 @@ def _ParseCommandLine():
       help='Disables all output except for errors.')
   option_parser.add_option('--copy-dia-binaries', action='store_true',
       default=False, help='If true then the DIA dll will get copied into the '
-                          'binaries directory.')
+                          'binaries directory if it\'s available.')
   options, args = option_parser.parse_args()
   if args:
     option_parser.error('Unexpected arguments: %s' % args)

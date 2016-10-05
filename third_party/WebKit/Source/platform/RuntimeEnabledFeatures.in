@@ -105,6 +105,7 @@ GamepadExtensions
 GeometryInterfaces status=experimental, implied_by=CompositorWorker
 GetUserMedia status=stable
 GlobalCacheStorage status=stable
+GpuCompositing
 IDBObserver status=experimental
 ImageCapture status=experimental
 ImageOrientation status=test
@@ -118,7 +119,7 @@ IntersectionObserver status=stable
 LangAttributeAwareFormControlUI
 LayoutNG
 LinkServiceWorker status=experimental, origin_trial_feature_name=ForeignFetch
-LongTaskObserver status=test
+LongTaskObserver status=experimental, origin_trial_feature_name=LongTaskObserver
 FractionalScrollOffsets
 LoadingWithMojo
 MediaCapture
@@ -257,7 +258,7 @@ WebFontsInterventionV2With2G
 WebFontsInterventionV2With3G
 WebFontsInterventionV2WithSlow2G
 WebFontsInterventionTrigger
-WebShare status=experimental, origin_trial_feature_name=WebShare
+WebShare status=experimental, origin_trial_feature_name=WebShare, origin_trial_os=android
 Worklet status=experimental
 ParseHTMLOnMainThread status=test
 SendBeaconThrowForBlobWithNonSimpleType status=experimental

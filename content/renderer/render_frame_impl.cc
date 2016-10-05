@@ -911,7 +911,7 @@ void RenderFrameImpl::CreateFrame(
     int previous_sibling_routing_id,
     const FrameReplicationState& replicated_state,
     CompositorDependencies* compositor_deps,
-    const FrameMsg_NewFrame_WidgetParams& widget_params,
+    const mojom::CreateFrameWidgetParams& widget_params,
     const FrameOwnerProperties& frame_owner_properties) {
   blink::WebLocalFrame* web_frame;
   RenderFrameImpl* render_frame;
@@ -2937,10 +2937,8 @@ void RenderFrameImpl::frameFocused() {
 void RenderFrameImpl::willCommitProvisionalLoad(blink::WebLocalFrame* frame) {
   DCHECK_EQ(frame_, frame);
 
-  // TODO(dcheng): Rename observer to FrameWillCommitProvisionalLoad.
-  FOR_EACH_OBSERVER(RenderFrameObserver, observers_, FrameWillClose());
-  FOR_EACH_OBSERVER(RenderViewObserver, render_view_->observers(),
-                    FrameWillClose(frame));
+  FOR_EACH_OBSERVER(RenderFrameObserver, observers_,
+                    WillCommitProvisionalLoad());
 }
 
 void RenderFrameImpl::didChangeName(const blink::WebString& name,
@@ -4868,6 +4866,8 @@ void RenderFrameImpl::OnCommitNavigation(
       new StreamOverrideParameters());
   stream_override->stream_url = stream_url;
   stream_override->response = response;
+  stream_override->redirects = request_params.redirects;
+  stream_override->redirect_responses = request_params.redirect_response;
 
   // If the request was initiated in the context of a user gesture then make
   // sure that the navigation also executes in the context of a user gesture.
@@ -5545,10 +5545,14 @@ void RenderFrameImpl::NavigateInternal(
   request.setHasUserGesture(request_params.has_user_gesture);
 #endif
 
-  // PlzNavigate: Make sure that Blink's loader will not try to use browser side
-  // navigation for this request (since it already went to the browser).
-  if (browser_side_navigation)
+  if (browser_side_navigation) {
+    // PlzNavigate: Make sure that Blink's loader will not try to use browser
+    // side navigation for this request (since it already went to the browser).
     request.setCheckForBrowserSideNavigation(false);
+
+    request.setNavigationStartTime(
+        ConvertToBlinkTime(common_params.navigation_start));
+  }
 
   // If we are reloading, then use the history state of the current frame.
   // Otherwise, if we have history state, then we need to navigate to it, which

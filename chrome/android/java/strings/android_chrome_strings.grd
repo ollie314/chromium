@@ -1051,7 +1051,7 @@ To obtain new licenses, connect to the internet and play your downloaded content
         Sync your bookmarks
       </message>
       <message name="IDS_BOOKMARK_SIGN_IN_PROMO_DESCRIPTION" desc="Description for bookmark UI sign-in promotion.">
-        To get your bookmarks your other devices, sign in to Chrome.
+        To get your bookmarks on all your devices, sign in to Chrome.
       </message>
       <message name="IDS_RECENT_TABS_SIGN_IN_PROMO_DESCRIPTION" desc="Description for recent tabs UI sign-in promotion.">
         To get your tabs from your other devices, sign in to Chrome.
@@ -2591,6 +2591,17 @@ You can control the Physical Web in Chrome Settings.
       </message>
       <message name="IDS_TAB_SWITCHER_CALLOUT_BODY" desc="Indicates that clicking the tab switcher button gives you quick access to your tabs.">
         Tap this button for quick access to your tabs.
+      </message>
+
+      <!-- Special locale UI strings -->
+      <message name="IDS_SEARCH_WITH_SOGOU" desc="Text telling the user that the search engine will be switched to Sogou.">
+        Search with Sogou
+      </message>
+      <message name="IDS_SOGOU_EXPLANATION" desc="Text explaining why Sogou should be used as default search engine.">
+        Chrome can use Sogou for search in China. You can change this in <ph name="BEGIN_LINK">&lt;link&gt;</ph>Settings<ph name="END_LINK">&lt;/link&gt;</ph>.
+      </message>
+      <message name="IDS_KEEP_GOOGLE" desc="Text representing the option that the user wants to keep Google as the default search engine.">
+        Keep Google
       </message>
 
       <!-- Item Chooser UI strings -->

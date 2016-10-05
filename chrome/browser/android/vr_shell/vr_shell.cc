@@ -8,7 +8,9 @@
 
 #include "chrome/browser/android/vr_shell/ui_scene.h"
 #include "chrome/browser/android/vr_shell/vr_compositor.h"
+#include "chrome/browser/android/vr_shell/vr_controller.h"
 #include "chrome/browser/android/vr_shell/vr_gl_util.h"
+#include "chrome/browser/android/vr_shell/vr_input_manager.h"
 #include "chrome/browser/android/vr_shell/vr_math.h"
 #include "chrome/browser/android/vr_shell/vr_shell_delegate.h"
 #include "chrome/browser/android/vr_shell/vr_shell_renderer.h"
@@ -65,7 +67,7 @@ static constexpr gvr::Vec3f kHandPosition = {0.2f, -0.5f, -0.2f};
 static constexpr float kReticleOffset = 0.99f;
 
 // Limit the rendering distance of the reticle to the distance to a corner of
-// the content quad, times this value.  This lets the rendering distance
+// the content quad, times this value. This lets the rendering distance
 // adjust according to content quad placement.
 static constexpr float kReticleDistanceMultiplier = 1.5f;
 
@@ -102,7 +104,7 @@ float Distance(const gvr::Vec3f& vec1, const gvr::Vec3f& vec2) {
 }
 
 // Generate a quaternion representing the rotation from the negative Z axis
-// (0, 0, -1) to a specified vector.  This is an optimized version of a more
+// (0, 0, -1) to a specified vector. This is an optimized version of a more
 // general vector-to-vector calculation.
 gvr::Quatf GetRotationFromZAxis(gvr::Vec3f vec) {
   vr_shell::NormalizeVector(vec);
@@ -198,6 +200,10 @@ void VrShell::GvrInit(JNIEnv* env,
 
   if (delegate_)
     delegate_->OnVrShellReady(this);
+  controller_.reset(
+      new VrController(reinterpret_cast<gvr_context*>(native_gvr_api)));
+  content_input_manager_ = new VrInputManager(content_cvc_->GetWebContents());
+  ui_input_manager_ = new VrInputManager(ui_cvc_->GetWebContents());
 }
 
 void VrShell::InitializeGl(JNIEnv* env,
@@ -214,7 +220,7 @@ void VrShell::InitializeGl(JNIEnv* env,
   std::vector<gvr::BufferSpec> specs;
   specs.push_back(gvr_api_->CreateBufferSpec());
   render_size_ = specs[0].GetSize();
-  swap_chain_.reset(new gvr::SwapChain(gvr_api_->CreateSwapchain(specs)));
+  swap_chain_.reset(new gvr::SwapChain(gvr_api_->CreateSwapChain(specs)));
 
   vr_shell_renderer_.reset(new VrShellRenderer());
   buffer_viewport_list_.reset(
@@ -224,26 +230,49 @@ void VrShell::InitializeGl(JNIEnv* env,
 }
 
 void VrShell::UpdateController(const gvr::Vec3f& forward_vector) {
-  if (!controller_active_) {
+  controller_->UpdateState();
+  std::unique_ptr<VrGesture> gesture = controller_->DetectGesture();
+
+  // TODO(asimjour) for now, scroll is sent to the main content.
+  if (gesture->type == WebInputEvent::GestureScrollBegin ||
+      gesture->type == WebInputEvent::GestureScrollUpdate ||
+      gesture->type == WebInputEvent::GestureScrollEnd) {
+    content_input_manager_->ProcessUpdatedGesture(*gesture.get());
+  }
+
+  WebInputEvent::Type original_type = gesture->type;
+  if (!controller_->IsConnected()) {
     // No controller detected, set up a gaze cursor that tracks the
     // forward direction.
     controller_quat_ = GetRotationFromZAxis(forward_vector);
+  } else {
+    controller_quat_ = controller_->Orientation();
   }
 
   gvr::Mat4f mat = QuatToMatrix(controller_quat_);
   gvr::Vec3f forward = MatrixVectorMul(mat, kNeutralPose);
   gvr::Vec3f origin = kHandPosition;
 
-  target_element_ = nullptr;;
+  target_element_ = nullptr;
   float distance = scene_.GetUiElementById(kBrowserUiElementId)
       ->GetRayDistance(origin, forward);
 
+  // If we place the reticle based on elements intersecting the controller beam,
+  // we can end up with the reticle hiding behind elements, or jumping laterally
+  // in the field of view. This is physically correct, but hard to use. For
+  // usability, do the following instead:
+  //
+  // - Project the controller laser onto an outer surface, which is the
+  //   closer of the desktop plane, or a distance-limiting sphere.
+  // - Create a vector between the eyes and the outer surface point.
+  // - If any UI elements intersect this vector, choose the closest to the eyes,
+  //   and place the reticle at the intersection point.
+
   // Find distance to a corner of the content quad, and limit the cursor
-  // distance to a multiple of that distance.  This lets us keep the reticle on
+  // distance to a multiple of that distance. This lets us keep the reticle on
   // the content plane near the content window, and on the surface of a sphere
-  // in other directions.
-  // TODO(cjgrant): Note that this approach uses distance from controller,
-  // rather than eye, for simplicity.  This will make the sphere slightly
+  // in other directions. Note that this approach uses distance from controller,
+  // rather than eye, for simplicity. This will make the sphere slightly
   // off-center.
   gvr::Vec3f corner = {0.5f, 0.5f, 0.0f};
   corner = MatrixVectorMul(desktop_plane_->transform.to_world, corner);
@@ -252,53 +281,70 @@ void VrShell::UpdateController(const gvr::Vec3f& forward_vector) {
     distance = max_distance;
   }
   target_point_ = GetRayPoint(origin, forward, distance);
+  gvr::Vec3f eye_to_target = target_point_;
+  NormalizeVector(eye_to_target);
 
-  // Determine which UI element (if any) the cursor is pointing to.
-  float closest_element = std::numeric_limits<float>::infinity();
+  // Determine which UI element (if any) intersects the line between the eyes
+  // and the controller target position.
+  float closest_element_distance = std::numeric_limits<float>::infinity();
+  int pixel_x = 0;
+  int pixel_y = 0;
+  VrInputManager* input_target = nullptr;
+
   for (std::size_t i = 0; i < scene_.GetUiElements().size(); ++i) {
     const ContentRectangle& plane = *scene_.GetUiElements()[i].get();
-    float distance_to_plane = plane.GetRayDistance(origin, forward);
+    if (!plane.visible) {
+      continue;
+    }
+    float distance_to_plane = plane.GetRayDistance(kOrigin, eye_to_target);
     gvr::Vec3f plane_intersection_point =
-        GetRayPoint(origin, forward, distance_to_plane);
+        GetRayPoint(kOrigin, eye_to_target, distance_to_plane);
 
     gvr::Vec3f rect_2d_point =
         MatrixVectorMul(plane.transform.from_world, plane_intersection_point);
-    float x = rect_2d_point.x + 0.5f;
-    float y = 0.5f - rect_2d_point.y;
-    if (distance_to_plane > 0 && distance_to_plane < closest_element) {
+    if (distance_to_plane > 0 && distance_to_plane < closest_element_distance) {
+      float x = rect_2d_point.x + 0.5f;
+      float y = 0.5f - rect_2d_point.y;
       bool is_inside = x >= 0.0f && x < 1.0f && y >= 0.0f && y < 1.0f;
       if (is_inside) {
-        closest_element = distance_to_plane;
+        closest_element_distance = distance_to_plane;
+        pixel_x =
+            static_cast<int>(plane.copy_rect.width * x + plane.copy_rect.x);
+        pixel_y =
+            static_cast<int>(plane.copy_rect.height * y + plane.copy_rect.y);
+
         target_point_ = plane_intersection_point;
         target_element_ = &plane;
+        input_target = (plane.id == kBrowserUiElementId)
+            ? content_input_manager_.get() : ui_input_manager_.get();
       }
     }
   }
-}
+  bool new_target = input_target != current_input_target_;
+  if (new_target && current_input_target_ != nullptr) {
+    // Send a move event indicating that the pointer moved off of an element.
+    gesture->type = WebInputEvent::MouseLeave;
+    gesture->details.move.delta.x = 0;
+    gesture->details.move.delta.y = 0;
+    current_input_target_->ProcessUpdatedGesture(*gesture.get());
+  }
+  current_input_target_ = input_target;
+  if (current_input_target_ == nullptr) {
+    return;
+  }
 
-void ApplyNeckModel(gvr::Mat4f& mat_forward) {
-  // This assumes that the input matrix is a pure rotation matrix. The
-  // input object_from_reference matrix has the inverse rotation of
-  // the head rotation. Invert it (this is just a transpose).
-  gvr::Mat4f mat = MatrixTranspose(mat_forward);
+  gesture->type = new_target ? WebInputEvent::MouseEnter
+                             : WebInputEvent::MouseMove;
+  gesture->details.move.delta.x = pixel_x;
+  gesture->details.move.delta.y = pixel_y;
+  current_input_target_->ProcessUpdatedGesture(*gesture.get());
 
-  // Position of the point between the eyes, relative to the neck pivot:
-  const float kNeckHorizontalOffset = -0.080f;  // meters in Z
-  const float kNeckVerticalOffset = 0.075f;     // meters in Y
-
-  std::array<float, 4> neckOffset = {
-      {0.0f, kNeckVerticalOffset, kNeckHorizontalOffset, 1.0f}};
-
-  // Rotate eyes around neck pivot point.
-  auto offset = MatrixVectorMul(mat, neckOffset);
-
-  // Measure new position relative to original center of head, because
-  // applying a neck model should not elevate the camera.
-  offset[1] -= kNeckVerticalOffset;
-
-  // Right-multiply the inverse translation onto the
-  // object_from_reference_matrix.
-  TranslateMRight(mat_forward, mat_forward, -offset[0], -offset[1], -offset[2]);
+  if (original_type == WebInputEvent::GestureTap) {
+    gesture->type = WebInputEvent::GestureTap;
+    gesture->details.buttons.pos.x = pixel_x;
+    gesture->details.buttons.pos.y = pixel_y;
+    current_input_target_->ProcessUpdatedGesture(*gesture.get());
+  }
 }
 
 void VrShell::DrawFrame(JNIEnv* env, const JavaParamRef<jobject>& obj) {
@@ -309,7 +355,7 @@ void VrShell::DrawFrame(JNIEnv* env, const JavaParamRef<jobject>& obj) {
   target_time.monotonic_system_time_nanos += kPredictionTimeWithoutVsyncNanos;
 
   gvr::Mat4f head_pose =
-      gvr_api_->GetHeadPoseInStartSpace(target_time);
+      gvr_api_->GetHeadSpaceFromStartSpaceRotation(target_time);
 
   gvr::Vec3f position = GetTranslation(head_pose);
   if (position.x == 0.0f && position.y == 0.0f && position.z == 0.0f) {
@@ -318,7 +364,7 @@ void VrShell::DrawFrame(JNIEnv* env, const JavaParamRef<jobject>& obj) {
     // object_from_reference_matrix, we're not updating position_external.
     // TODO: Not sure what object_from_reference_matrix is. The new api removed
     // it. For now, removing it seems working fine.
-    ApplyNeckModel(head_pose);
+    gvr_api_->ApplyNeckModel(head_pose, 1.0f);
   }
 
   // Bind back to the default framebuffer.
@@ -498,6 +544,7 @@ void VrShell::DrawWebVr() {
   glDisable(GL_POLYGON_OFFSET_FILL);
 
   // Don't need to clear, since we're drawing over the entire render target.
+  glClear(GL_COLOR_BUFFER_BIT);
 
   glViewport(0, 0, render_size_.width, render_size_.height);
   vr_shell_renderer_->GetWebVrRenderer()->Draw(content_texture_id_);
@@ -586,6 +633,7 @@ void VrShell::DrawWebVrEye(const gvr::Mat4f& view_matrix,
 void VrShell::OnPause(JNIEnv* env, const JavaParamRef<jobject>& obj) {
   if (gvr_api_ == nullptr)
     return;
+  controller_->OnPause();
   gvr_api_->PauseTracking();
 }
 
@@ -595,11 +643,15 @@ void VrShell::OnResume(JNIEnv* env, const JavaParamRef<jobject>& obj) {
 
   gvr_api_->RefreshViewerProfile();
   gvr_api_->ResumeTracking();
+  controller_->OnResume();
 }
 
-base::WeakPtr<VrShell> VrShell::GetWeakPtr() {
-  // TODO: Ensure that only ui webcontents can request this weak ptr.
-  if (g_instance != nullptr)
+base::WeakPtr<VrShell> VrShell::GetWeakPtr(
+    const content::WebContents* web_contents) {
+  // Ensure that the WebContents requesting the VrShell instance is the one
+  // we created.
+  if (g_instance != nullptr &&
+      g_instance->ui_cvc_->GetWebContents() == web_contents)
     return g_instance->weak_ptr_factory_.GetWeakPtr();
   return base::WeakPtr<VrShell>(nullptr);
 }

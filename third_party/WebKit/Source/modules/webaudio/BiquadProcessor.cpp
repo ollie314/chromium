@@ -10,16 +10,17 @@
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
  *
- * THIS SOFTWARE IS PROVIDED BY APPLE INC. AND ITS CONTRIBUTORS ``AS IS'' AND ANY
- * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- * DISCLAIMED. IN NO EVENT SHALL APPLE INC. OR ITS CONTRIBUTORS BE LIABLE FOR ANY
- * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
- * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
- * ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY APPLE INC. AND ITS CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL APPLE INC. OR ITS CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+ * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
+ * DAMAGE.
  */
 
 #include "modules/webaudio/BiquadDSPKernel.h"
@@ -54,9 +55,11 @@ std::unique_ptr<AudioDSPKernel> BiquadProcessor::createKernel() {
 }
 
 void BiquadProcessor::checkForDirtyCoefficients() {
-  // Deal with smoothing / de-zippering. Start out assuming filter parameters are not changing.
+  // Deal with smoothing / de-zippering. Start out assuming filter parameters
+  // are not changing.
 
-  // The BiquadDSPKernel objects rely on this value to see if they need to re-compute their internal filter coefficients.
+  // The BiquadDSPKernel objects rely on this value to see if they need to
+  // re-compute their internal filter coefficients.
   m_filterCoefficientsDirty = false;
   m_hasSampleAccurateValues = false;
 
@@ -68,7 +71,8 @@ void BiquadProcessor::checkForDirtyCoefficients() {
     m_hasSampleAccurateValues = true;
   } else {
     if (m_hasJustReset) {
-      // Snap to exact values first time after reset, then smooth for subsequent changes.
+      // Snap to exact values first time after reset, then smooth for subsequent
+      // changes.
       m_parameter1->resetSmoothedValue();
       m_parameter2->resetSmoothedValue();
       m_parameter3->resetSmoothedValue();
@@ -76,7 +80,8 @@ void BiquadProcessor::checkForDirtyCoefficients() {
       m_filterCoefficientsDirty = true;
       m_hasJustReset = false;
     } else {
-      // Smooth all of the filter parameters. If they haven't yet converged to their target value then mark coefficients as dirty.
+      // Smooth all of the filter parameters. If they haven't yet converged to
+      // their target value then mark coefficients as dirty.
       bool isStable1 = m_parameter1->smooth();
       bool isStable2 = m_parameter2->smooth();
       bool isStable3 = m_parameter3->smooth();
@@ -105,7 +110,8 @@ void BiquadProcessor::process(const AudioBus* source,
 
   checkForDirtyCoefficients();
 
-  // For each channel of our input, process using the corresponding BiquadDSPKernel into the output channel.
+  // For each channel of our input, process using the corresponding
+  // BiquadDSPKernel into the output channel.
   for (unsigned i = 0; i < m_kernels.size(); ++i)
     m_kernels[i]->process(source->channel(i)->data(),
                           destination->channel(i)->mutableData(),

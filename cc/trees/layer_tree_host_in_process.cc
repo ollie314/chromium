@@ -214,7 +214,6 @@ LayerTreeHostInProcess::LayerTreeHostInProcess(
       gpu_rasterization_histogram_recorded_(false),
       did_complete_scale_animation_(false),
       id_(s_layer_tree_host_sequence_number.GetNext() + 1),
-      next_commit_forces_redraw_(false),
       shared_bitmap_manager_(params->shared_bitmap_manager),
       gpu_memory_buffer_manager_(params->gpu_memory_buffer_manager),
       task_graph_runner_(params->task_graph_runner),
@@ -444,6 +443,10 @@ void LayerTreeHostInProcess::FinishCommitOnImplThread(
     sync_tree->ForceRedrawNextActivation();
     next_commit_forces_redraw_ = false;
   }
+  if (next_commit_forces_recalculate_raster_scales_) {
+    sync_tree->ForceRecalculateRasterScales();
+    next_commit_forces_recalculate_raster_scales_ = false;
+  }
 
   sync_tree->set_source_frame_number(SourceFrameNumber());
 
@@ -602,6 +605,11 @@ void LayerTreeHostInProcess::SetNeedsUpdateLayers() {
 void LayerTreeHostInProcess::SetNeedsCommit() {
   proxy_->SetNeedsCommit();
   swap_promise_manager_.NotifySwapPromiseMonitorsOfSetNeedsCommit();
+}
+
+void LayerTreeHostInProcess::SetNeedsRecalculateRasterScales() {
+  next_commit_forces_recalculate_raster_scales_ = true;
+  proxy_->SetNeedsCommit();
 }
 
 void LayerTreeHostInProcess::SetNeedsRedraw() {
@@ -983,7 +991,10 @@ void LayerTreeHostInProcess::ToProtobufForCommit(
   // Serialize the LayerTree before serializing the properties. During layer
   // property serialization, we clear the list |layer_that_should_properties_|
   // from the LayerTree.
-  layer_tree_->ToProtobuf(proto->mutable_layer_tree());
+  // The serialization code here need to serialize the complete state, including
+  // the result of the main frame update.
+  const bool inputs_only = false;
+  layer_tree_->ToProtobuf(proto->mutable_layer_tree(), inputs_only);
 
   LayerProtoConverter::SerializeLayerProperties(this,
                                                 proto->mutable_layer_updates());

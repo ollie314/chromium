@@ -4,15 +4,47 @@
 
 package org.chromium.chrome.browser.locale;
 
+import android.content.Context;
+import android.content.SharedPreferences;
+
+import org.chromium.base.ContextUtils;
+import org.chromium.base.ThreadUtils;
+import org.chromium.chrome.browser.ChromeApplication;
 import org.chromium.chrome.browser.ChromeFeatureList;
 
 /**
  * Manager for some locale specific logics.
  */
 public class LocaleManager {
+    public static final String PREF_PROMO_SHOWN = "LocaleManager_PREF_PROMO_SHOWN";
+    public static final String PREF_WAS_IN_SPECIAL_LOCALE = "LocaleManager_WAS_IN_SPECIAL_LOCALE";
     public static final String SPECIAL_LOCALE_ID = "US";
 
+    private static LocaleManager sInstance;
+
     private SpecialLocaleHandler mLocaleHandler;
+
+    /**
+     * Starts listening to state changes of the phone.
+     */
+    public void startObservingPhoneChanges() {}
+
+    /**
+     * Stops listening to state changes of the phone.
+     */
+    public void stopObservingPhoneChanges() {}
+
+    /**
+     * @return An instance of the {@link LocaleManager}. This should only be called on UI thread.
+     */
+    public static LocaleManager getInstance() {
+        assert ThreadUtils.runningOnUiThread();
+        if (sInstance == null) {
+            sInstance = ((ChromeApplication) ContextUtils.getApplicationContext())
+                    .createLocaleManager();
+        }
+        return sInstance;
+    }
 
     /**
      * Starts recording metrics in deferred startup.
@@ -28,7 +60,10 @@ public class LocaleManager {
             return false;
         }
         boolean inSpecialLocale = ChromeFeatureList.isEnabled("SpecialLocale");
-        return isReallyInSpecialLocale(inSpecialLocale);
+        inSpecialLocale = isReallyInSpecialLocale(inSpecialLocale);
+        ContextUtils.getAppSharedPreferences().edit()
+                .putBoolean(PREF_WAS_IN_SPECIAL_LOCALE, inSpecialLocale).apply();
+        return inSpecialLocale;
     }
 
     /**
@@ -42,7 +77,6 @@ public class LocaleManager {
      * Adds local search engines for special locale.
      */
     public void addSpecialSearchEngines() {
-        // TODO(ianwen): Let this method be called in ChromeActivity#finishNativeInitialization().
         if (!isSpecialLocaleEnabled()) return;
         getSpecialLocaleHandler().loadTemplateUrls();
     }
@@ -52,7 +86,6 @@ public class LocaleManager {
      * no-op if the user has changed DSP settings before.
      */
     public void overrideDefaultSearchEngine() {
-        // TODO(ianwen): Let this method be called in promotion.
         // TODO(ianwen): Implement search engine auto switching.
         if (!isSpecialLocaleEnabled()) return;
         getSpecialLocaleHandler().overrideDefaultSearchProvider();
@@ -62,9 +95,27 @@ public class LocaleManager {
      * Removes local search engines for special locale.
      */
     public void removeSpecialSearchEngines() {
-        // TODO(ianwen): Let this method be called when device configuration changes.
         if (isSpecialLocaleEnabled()) return;
         getSpecialLocaleHandler().removeTemplateUrls();
+    }
+
+    /**
+     * Shows a promotion dialog saying the default search engine will be set to Sogou. No-op if
+     * device is not in special locale.
+     *
+     * @return Whether such dialog is needed.
+     */
+    public boolean showSearchEnginePromoIfNeeded(Context context) {
+        if (!isSpecialLocaleEnabled()) return false;
+        SharedPreferences preferences = ContextUtils.getAppSharedPreferences();
+        if (preferences.getBoolean(PREF_PROMO_SHOWN, false)) {
+            return false;
+        }
+
+        new SearchEnginePromoDialog(context, this).show();
+
+        preferences.edit().putBoolean(PREF_PROMO_SHOWN, true).apply();
+        return true;
     }
 
     /**

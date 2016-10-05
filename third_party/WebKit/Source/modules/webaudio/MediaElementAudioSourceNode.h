@@ -10,16 +10,17 @@
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
  *
- * THIS SOFTWARE IS PROVIDED BY APPLE INC. AND ITS CONTRIBUTORS ``AS IS'' AND ANY
- * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- * DISCLAIMED. IN NO EVENT SHALL APPLE INC. OR ITS CONTRIBUTORS BE LIABLE FOR ANY
- * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
- * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
- * ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY APPLE INC. AND ITS CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL APPLE INC. OR ITS CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+ * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
+ * DAMAGE.
  */
 
 #ifndef MediaElementAudioSourceNode_h
@@ -68,7 +69,8 @@ class MediaElementAudioSourceHandler final : public AudioHandler {
   // Must be called only on the main thread.
   bool passesCurrentSrcCORSAccessCheck(const KURL& currentSrc);
 
-  // Print warning if CORS restrictions cause MediaElementAudioSource to output zeroes.
+  // Print warning if CORS restrictions cause MediaElementAudioSource to output
+  // zeroes.
   void printCORSMessage(const String& message);
 
   // This Persistent doesn't make a reference cycle. The reference from
@@ -83,18 +85,19 @@ class MediaElementAudioSourceHandler final : public AudioHandler {
   std::unique_ptr<MultiChannelResampler> m_multiChannelResampler;
 
   // |m_passesCurrentSrcCORSAccessCheck| holds the value of
-  // context()->getSecurityOrigin() && context()->getSecurityOrigin()->canRequest(mediaElement()->currentSrc()),
-  // updated in the ctor and onCurrentSrcChanged() on the main thread and
-  // used in passesCORSAccessCheck() on the audio thread,
-  // protected by |m_processLock|.
+  // context()->getSecurityOrigin() &&
+  // context()->getSecurityOrigin()->canRequest(mediaElement()->currentSrc()),
+  // updated in the ctor and onCurrentSrcChanged() on the main thread and used
+  // in passesCORSAccessCheck() on the audio thread, protected by
+  // |m_processLock|.
   bool m_passesCurrentSrcCORSAccessCheck;
 
-  // Indicates if we need to print a CORS message if the current source has changed and we have no
-  // access to it. Must be protected by |m_processLock|.
+  // Indicates if we need to print a CORS message if the current source has
+  // changed and we have no access to it. Must be protected by |m_processLock|.
   bool m_maybePrintCORSMessage;
 
-  // The value of mediaElement()->currentSrc().string() in the ctor and onCurrentSrcChanged().
-  // Protected by |m_processLock|.
+  // The value of mediaElement()->currentSrc().string() in the ctor and
+  // onCurrentSrcChanged().  Protected by |m_processLock|.
   String m_currentSrcString;
 };
 

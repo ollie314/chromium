@@ -10,16 +10,17 @@
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
  *
- * THIS SOFTWARE IS PROVIDED BY APPLE INC. AND ITS CONTRIBUTORS ``AS IS'' AND ANY
- * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- * DISCLAIMED. IN NO EVENT SHALL APPLE INC. OR ITS CONTRIBUTORS BE LIABLE FOR ANY
- * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
- * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
- * ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY APPLE INC. AND ITS CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL APPLE INC. OR ITS CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+ * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
+ * DAMAGE.
  */
 
 #ifndef AudioBufferSourceNode_h
@@ -40,8 +41,10 @@ namespace blink {
 class AudioBufferSourceOptions;
 class BaseAudioContext;
 
-// AudioBufferSourceNode is an AudioNode representing an audio source from an in-memory audio asset represented by an AudioBuffer.
-// It generally will be used for short sounds which require a high degree of scheduling flexibility (can playback in rhythmically perfect ways).
+// AudioBufferSourceNode is an AudioNode representing an audio source from an
+// in-memory audio asset represented by an AudioBuffer.  It generally will be
+// used for short sounds which require a high degree of scheduling flexibility
+// (can playback in rhythmically perfect ways).
 
 class AudioBufferSourceHandler final : public AudioScheduledSourceHandler {
  public:
@@ -55,12 +58,14 @@ class AudioBufferSourceHandler final : public AudioScheduledSourceHandler {
   // AudioHandler
   void process(size_t framesToProcess) override;
 
-  // setBuffer() is called on the main thread. This is the buffer we use for playback.
+  // setBuffer() is called on the main thread. This is the buffer we use for
+  // playback.
   void setBuffer(AudioBuffer*, ExceptionState&);
   AudioBuffer* buffer() { return m_buffer.get(); }
 
-  // numberOfChannels() returns the number of output channels.  This value equals the number of channels from the buffer.
-  // If a new buffer is set with a different number of channels, then this value will dynamically change.
+  // numberOfChannels() returns the number of output channels.  This value
+  // equals the number of channels from the buffer.  If a new buffer is set with
+  // a different number of channels, then this value will dynamically change.
   unsigned numberOfChannels();
 
   // Play-state
@@ -71,9 +76,10 @@ class AudioBufferSourceHandler final : public AudioScheduledSourceHandler {
              double grainDuration,
              ExceptionState&);
 
-  // Note: the attribute was originally exposed as .looping, but to be more consistent in naming with <audio>
-  // and with how it's described in the specification, the proper attribute name is .loop
-  // The old attribute is kept for backwards compatibility.
+  // Note: the attribute was originally exposed as |.looping|, but to be more
+  // consistent in naming with <audio> and with how it's described in the
+  // specification, the proper attribute name is |.loop|. The old attribute is
+  // kept for backwards compatibility.
   bool loop() const { return m_isLooping; }
   void setLoop(bool looping) {
     m_isLooping = looping;
@@ -127,8 +133,10 @@ class AudioBufferSourceHandler final : public AudioScheduledSourceHandler {
   RefPtr<AudioParamHandler> m_playbackRate;
   RefPtr<AudioParamHandler> m_detune;
 
-  // If m_isLooping is false, then this node will be done playing and become inactive after it reaches the end of the sample data in the buffer.
-  // If true, it will wrap around to the start of the buffer each time it reaches the end.
+  // If m_isLooping is false, then this node will be done playing and become
+  // inactive after it reaches the end of the sample data in the buffer.  If
+  // true, it will wrap around to the start of the buffer each time it reaches
+  // the end.
   bool m_isLooping;
 
   // True if the source .loop attribute was ever set.
@@ -137,8 +145,9 @@ class AudioBufferSourceHandler final : public AudioScheduledSourceHandler {
   double m_loopStart;
   double m_loopEnd;
 
-  // m_virtualReadIndex is a sample-frame index into our buffer representing the current playback position.
-  // Since it's floating-point, it has sub-sample accuracy.
+  // m_virtualReadIndex is a sample-frame index into our buffer representing the
+  // current playback position.  Since it's floating-point, it has sub-sample
+  // accuracy.
   double m_virtualReadIndex;
 
   // Granular playback

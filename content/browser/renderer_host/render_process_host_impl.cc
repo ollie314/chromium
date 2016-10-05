@@ -175,6 +175,7 @@
 #include "ipc/ipc_switches.h"
 #include "media/base/media_switches.h"
 #include "mojo/edk/embedder/embedder.h"
+#include "mojo/public/cpp/bindings/associated_interface_ptr.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "ppapi/shared_impl/ppapi_switches.h"
 #include "services/shell/public/cpp/connection.h"
@@ -249,6 +250,7 @@
 namespace content {
 namespace {
 
+const char kRendererInterfaceKeyName[] = "mojom_renderer_interface";
 const char kSiteProcessMapKeyName[] = "content_site_process_map";
 
 #ifdef ENABLE_WEBRTC
@@ -364,6 +366,21 @@ SiteProcessMap* GetSiteProcessMapForBrowserContext(BrowserContext* context) {
   }
   return map;
 }
+
+// Holds a Mojo associated interface proxy in an RPH's user data.
+template <typename Interface>
+class AssociatedInterfaceHolder : public base::SupportsUserData::Data {
+ public:
+  AssociatedInterfaceHolder() {}
+  ~AssociatedInterfaceHolder() override {}
+
+  mojo::AssociatedInterfacePtr<Interface>& proxy() { return proxy_; }
+
+ private:
+  mojo::AssociatedInterfacePtr<Interface> proxy_;
+
+  DISALLOW_COPY_AND_ASSIGN(AssociatedInterfaceHolder);
+};
 
 #if defined(OS_POSIX) && !defined(OS_ANDROID) && !defined(OS_MACOSX)
 // This static member variable holds the zygote communication information for
@@ -835,11 +852,6 @@ bool RenderProcessHostImpl::Init() {
   if (channel_)
     return true;
 
-  // Ensure that the remote associated interfaces are re-initialized on next
-  // access since they're associated with a specific Channel instance.
-  remote_route_provider_.reset();
-  renderer_interface_.reset();
-
   base::CommandLine::StringType renderer_prefix;
   // A command prefix is something prepended to the command line of the spawned
   // process.
@@ -868,6 +880,27 @@ bool RenderProcessHostImpl::Init() {
   const std::string channel_id =
       IPC::Channel::GenerateVerifiedChannelID(std::string());
   channel_ = CreateChannelProxy(channel_id);
+
+  // Note that Channel send is effectively paused and unpaused at various points
+  // during startup, and existing code relies on a fragile relative message
+  // ordering resulting from some early messages being queued until process
+  // launch while others are sent immediately.
+  //
+  // We acquire a few associated interface proxies here -- before the channel is
+  // paused -- to ensure that subsequent initialization messages on those
+  // interfaces behave properly. Specifically, this avoids the risk of an
+  // interface being requested while the Channel is paused, effectively
+  // blocking the transmission of a subsequent message on the interface which
+  // may be sent while the Channel is unpaused.
+  //
+  // See OnProcessLaunched() for some additional details of this somewhat
+  // surprising behavior.
+  channel_->GetRemoteAssociatedInterface(&remote_route_provider_);
+
+  std::unique_ptr<AssociatedInterfaceHolder<mojom::Renderer>> holder =
+      base::MakeUnique<AssociatedInterfaceHolder<mojom::Renderer>>();
+  channel_->GetRemoteAssociatedInterface(&holder->proxy());
+  SetUserData(kRendererInterfaceKeyName, holder.release());
 
   // Call the embedder first so that their IPC filters have priority.
   GetContentClient()->browser()->RenderProcessWillLaunch(this);
@@ -939,9 +972,7 @@ bool RenderProcessHostImpl::Init() {
     child_process_launcher_.reset(new ChildProcessLauncher(
         new RendererSandboxedProcessLauncherDelegate(channel_.get()), cmd_line,
         GetID(), this, child_token_,
-        base::Bind(&RenderProcessHostImpl::OnMojoError,
-                   weak_factory_.GetWeakPtr(),
-                   base::ThreadTaskRunnerHandle::Get())));
+        base::Bind(&RenderProcessHostImpl::OnMojoError, id_)));
     channel_->Pause();
 
     fast_shutdown_started_ = false;
@@ -1387,19 +1418,25 @@ void RenderProcessHostImpl::PurgeAndSuspend() {
 }
 
 mojom::RouteProvider* RenderProcessHostImpl::GetRemoteRouteProvider() {
-  if (!remote_route_provider_) {
-    DCHECK(channel_);
-    channel_->GetRemoteAssociatedInterface(&remote_route_provider_);
-  }
   return remote_route_provider_.get();
 }
 
-mojom::Renderer* RenderProcessHostImpl::GetRendererInterface() {
-  if (!renderer_interface_) {
-    DCHECK(channel_);
-    channel_->GetRemoteAssociatedInterface(&renderer_interface_);
+// static
+mojom::Renderer* RenderProcessHostImpl::GetRendererInterface(
+    RenderProcessHost* host) {
+  AssociatedInterfaceHolder<mojom::Renderer>* holder =
+      static_cast<AssociatedInterfaceHolder<mojom::Renderer>*>(
+          host->GetUserData(kRendererInterfaceKeyName));
+  if (!holder) {
+    // In tests, MockRenderProcessHost will not have initialized this key on its
+    // own. We do it with a dead-end endpoint so outgoing requests are silently
+    // dropped.
+    holder = new AssociatedInterfaceHolder<mojom::Renderer>;
+    host->SetUserData(kRendererInterfaceKeyName, holder);
+    mojo::GetDummyProxyForTesting(&holder->proxy());
   }
-  return renderer_interface_.get();
+
+  return holder->proxy().get();
 }
 
 void RenderProcessHostImpl::AddRoute(int32_t routing_id,
@@ -1424,7 +1461,8 @@ void RenderProcessHostImpl::RemoveObserver(
   observers_.RemoveObserver(observer);
 }
 
-void RenderProcessHostImpl::ShutdownForBadMessage() {
+void RenderProcessHostImpl::ShutdownForBadMessage(
+    CrashReportMode crash_report_mode) {
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   if (command_line->HasSwitch(switches::kDisableKillAfterBadIPC))
     return;
@@ -1439,8 +1477,10 @@ void RenderProcessHostImpl::ShutdownForBadMessage() {
   // browser to try to survive when it gets illegal messages from the renderer.
   Shutdown(RESULT_CODE_KILLED_BAD_MESSAGE, false);
 
-  // Report a crash, since none will be generated by the killed renderer.
-  base::debug::DumpWithoutCrashing();
+  if (crash_report_mode == CrashReportMode::GENERATE_CRASH_DUMP) {
+    // Report a crash, since none will be generated by the killed renderer.
+    base::debug::DumpWithoutCrashing();
+  }
 
   // Log the renderer kill to the histogram tracking all kills.
   BrowserChildProcessHostImpl::HistogramBadMessageTerminated(
@@ -2653,6 +2693,11 @@ void RenderProcessHostImpl::ProcessDied(bool already_dead,
   channel_.reset();
   queued_messages_ = MessageQueue{};
 
+  // Clear all cached associated interface proxies as well, since these are
+  // effectively bound to the lifetime of the Channel.
+  remote_route_provider_.reset();
+  RemoveUserData(kRendererInterfaceKeyName);
+
   UpdateProcessPriority();
   DCHECK(!is_process_backgrounded_);
 
@@ -2987,24 +3032,14 @@ void RenderProcessHostImpl::RecomputeAndUpdateWebKitPreferences() {
 }
 
 // static
-void RenderProcessHostImpl::OnMojoError(
-    base::WeakPtr<RenderProcessHostImpl> process,
-    scoped_refptr<base::SingleThreadTaskRunner> task_runner,
-    const std::string& error) {
-  if (!task_runner->BelongsToCurrentThread()) {
-    task_runner->PostTask(FROM_HERE,
-                          base::Bind(&RenderProcessHostImpl::OnMojoError,
-                                     process, task_runner, error));
-    return;
-  }
-  if (!process)
-    return;
+void RenderProcessHostImpl::OnMojoError(int render_process_id,
+                                        const std::string& error) {
   LOG(ERROR) << "Terminating render process for bad Mojo message: " << error;
 
   // The ReceivedBadMessage call below will trigger a DumpWithoutCrashing. Alias
   // enough information here so that we can determine what the bad message was.
   base::debug::Alias(&error);
-  bad_message::ReceivedBadMessage(process.get(),
+  bad_message::ReceivedBadMessage(render_process_id,
                                   bad_message::RPH_MOJO_PROCESS_ERROR);
 }
 

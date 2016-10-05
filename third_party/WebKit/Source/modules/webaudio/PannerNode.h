@@ -10,16 +10,17 @@
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
  *
- * THIS SOFTWARE IS PROVIDED BY APPLE INC. AND ITS CONTRIBUTORS ``AS IS'' AND ANY
- * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- * DISCLAIMED. IN NO EVENT SHALL APPLE INC. OR ITS CONTRIBUTORS BE LIABLE FOR ANY
- * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
- * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
- * ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY APPLE INC. AND ITS CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL APPLE INC. OR ITS CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+ * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
+ * DAMAGE.
  */
 
 #ifndef PannerNode_h
@@ -42,11 +43,13 @@ class BaseAudioContext;
 class PannerOptions;
 
 // PannerNode is an AudioNode with one input and one output.
-// It positions a sound in 3D space, with the exact effect dependent on the panning model.
-// It has a position and an orientation in 3D space which is relative to the position and orientation of the context's AudioListener.
-// A distance effect will attenuate the gain as the position moves away from the listener.
-// A cone effect will attenuate the gain as the orientation moves away from the listener.
-// All of these effects follow the OpenAL specification very closely.
+// It positions a sound in 3D space, with the exact effect dependent on the
+// panning model.  It has a position and an orientation in 3D space which is
+// relative to the position and orientation of the context's AudioListener.  A
+// distance effect will attenuate the gain as the position moves away from the
+// listener.  A cone effect will attenuate the gain as the orientation moves
+// away from the listener.  All of these effects follow the OpenAL specification
+// very closely.
 
 class PannerHandler final : public AudioHandler {
  public:
@@ -197,7 +200,8 @@ class PannerHandler final : public AudioHandler {
   FloatPoint3D m_lastPosition;
   FloatPoint3D m_lastOrientation;
 
-  // Synchronize process() with setting of the panning model, source's location information, listener, distance parameters and sound cones.
+  // Synchronize process() with setting of the panning model, source's location
+  // information, listener, distance parameters and sound cones.
   mutable Mutex m_processLock;
 };
 

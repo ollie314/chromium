@@ -10,16 +10,17 @@
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
  *
- * THIS SOFTWARE IS PROVIDED BY APPLE INC. AND ITS CONTRIBUTORS ``AS IS'' AND ANY
- * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- * DISCLAIMED. IN NO EVENT SHALL APPLE INC. OR ITS CONTRIBUTORS BE LIABLE FOR ANY
- * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
- * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
- * ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY APPLE INC. AND ITS CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL APPLE INC. OR ITS CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+ * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
+ * DAMAGE.
  */
 
 #include "modules/webaudio/WaveShaperDSPKernel.h"
@@ -95,9 +96,9 @@ void WaveShaperDSPKernel::processCurve(const float* source,
   for (unsigned i = 0; i < framesToProcess; ++i) {
     const float input = source[i];
 
-    // Calculate a virtual index based on input -1 -> +1 with -1 being curve[0], +1 being
-    // curve[curveLength - 1], and 0 being at the center of the curve data. Then linearly
-    // interpolate between the two points in the curve.
+    // Calculate a virtual index based on input -1 -> +1 with -1 being curve[0],
+    // +1 being curve[curveLength - 1], and 0 being at the center of the curve
+    // data. Then linearly interpolate between the two points in the curve.
     double virtualIndex = 0.5 * (input + 1) * (curveLength - 1);
     double output;
 
@@ -108,8 +109,9 @@ void WaveShaperDSPKernel::processCurve(const float* source,
       // input >= 1, so use last curve value
       output = curveData[curveLength - 1];
     } else {
-      // The general case where -1 <= input < 1, where 0 <= virtualIndex < curveLength - 1,
-      // so interpolate between the nearest samples on the curve.
+      // The general case where -1 <= input < 1, where 0 <= virtualIndex <
+      // curveLength - 1, so interpolate between the nearest samples on the
+      // curve.
       unsigned index1 = static_cast<unsigned>(virtualIndex);
       unsigned index2 = index1 + 1;
       double interpolationFactor = virtualIndex - index1;

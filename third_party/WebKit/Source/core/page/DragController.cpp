@@ -42,6 +42,7 @@
 #include "core/editing/EditingUtilities.h"
 #include "core/editing/Editor.h"
 #include "core/editing/FrameSelection.h"
+#include "core/editing/commands/DragAndDropCommand.h"
 #include "core/editing/serializers/Serialization.h"
 #include "core/events/TextEvent.h"
 #include "core/fetch/ImageResource.h"
@@ -143,13 +144,14 @@ DragController* DragController::create(Page* page) {
   return new DragController(page);
 }
 
-static DocumentFragment* documentFragmentFromDragData(DragData* dragData,
-                                                      LocalFrame* frame,
-                                                      Range* context,
-                                                      bool allowPlainText,
-                                                      bool& chosePlainText) {
-  ASSERT(dragData);
-  chosePlainText = false;
+static DocumentFragment* documentFragmentFromDragData(
+    DragData* dragData,
+    LocalFrame* frame,
+    Range* context,
+    bool allowPlainText,
+    DragSourceType& dragSourceType) {
+  DCHECK(dragData);
+  dragSourceType = DragSourceType::HTMLSource;
 
   Document& document = context->ownerDocument();
   if (dragData->containsCompatibleContent()) {
@@ -178,7 +180,7 @@ static DocumentFragment* documentFragmentFromDragData(DragData* dragData,
     }
   }
   if (allowPlainText && dragData->containsPlainText()) {
-    chosePlainText = true;
+    dragSourceType = DragSourceType::PlainTextSource;
     return createFragmentFromText(EphemeralRange(context),
                                   dragData->asPlainText());
   }
@@ -460,8 +462,11 @@ static bool setSelectionToDragCaret(LocalFrame* frame,
                                     const IntPoint& point) {
   frame->selection().setSelection(dragCaret);
   if (frame->selection().isNone()) {
-    dragCaret =
-        createVisibleSelectionDeprecated(frame->positionForPoint(point));
+    // TODO(xiaochengh): The use of updateStyleAndLayoutIgnorePendingStylesheets
+    // needs to be audited.  See http://crbug.com/590369 for more details.
+    frame->document()->updateStyleAndLayoutIgnorePendingStylesheets();
+
+    dragCaret = createVisibleSelection(frame->positionForPoint(point));
     frame->selection().setSelection(dragCaret);
     range = createRange(dragCaret.toNormalizedEphemeralRange());
   }
@@ -471,13 +476,14 @@ static bool setSelectionToDragCaret(LocalFrame* frame,
 DispatchEventResult DragController::dispatchTextInputEventFor(
     LocalFrame* innerFrame,
     DragData* dragData) {
+  // Layout should be clean due to a hit test performed in |elementUnderMouse|.
+  DCHECK(!innerFrame->document()->needsLayoutTreeUpdate());
   ASSERT(m_page->dragCaretController().hasCaret());
   String text = m_page->dragCaretController().isContentRichlyEditable()
                     ? ""
                     : dragData->asPlainText();
-  Element* target =
-      innerFrame->editor().findEventTargetFrom(createVisibleSelectionDeprecated(
-          m_page->dragCaretController().caretPosition()));
+  Element* target = innerFrame->editor().findEventTargetFrom(
+      createVisibleSelection(m_page->dragCaretController().caretPosition()));
   return target->dispatchEvent(
       TextEvent::createForDrop(innerFrame->domWindow(), text));
 }
@@ -522,8 +528,18 @@ bool DragController::concludeEditDrag(DragData* dragData) {
     return false;
   }
 
-  VisibleSelection dragCaret = createVisibleSelectionDeprecated(
-      m_page->dragCaretController().caretPosition());
+  if (m_page->dragCaretController().hasCaret()) {
+    // TODO(xiaochengh): The use of updateStyleAndLayoutIgnorePendingStylesheets
+    // needs to be audited.  See http://crbug.com/590369 for more details.
+    m_page->dragCaretController()
+        .caretPosition()
+        .position()
+        .document()
+        ->updateStyleAndLayoutIgnorePendingStylesheets();
+  }
+
+  VisibleSelection dragCaret =
+      createVisibleSelection(m_page->dragCaretController().caretPosition());
   m_page->dragCaretController().clear();
   // |innerFrame| can be removed by event handler called by
   // |dispatchTextInputEventFor()|.
@@ -541,29 +557,55 @@ bool DragController::concludeEditDrag(DragData* dragData) {
     return false;
   ResourceFetcher* fetcher = range->ownerDocument().fetcher();
   ResourceCacheValidationSuppressor validationSuppressor(fetcher);
+
+  // Start new Drag&Drop command group, invalidate previous command group.
+  // Assume no other places is firing |DeleteByDrag| and |InsertFromDrop|.
+  innerFrame->editor().registerCommandGroup(
+      DragAndDropCommand::create(*innerFrame->document()));
+
   if (dragIsMove(innerFrame->selection(), dragData) ||
       dragCaret.isContentRichlyEditable()) {
-    bool chosePlainText = false;
+    DragSourceType dragSourceType = DragSourceType::HTMLSource;
     DocumentFragment* fragment = documentFragmentFromDragData(
-        dragData, innerFrame, range, true, chosePlainText);
+        dragData, innerFrame, range, true, dragSourceType);
     if (!fragment)
       return false;
 
     if (dragIsMove(innerFrame->selection(), dragData)) {
       // NSTextView behavior is to always smart delete on moving a selection,
       // but only to smart insert if the selection granularity is word granularity.
-      bool smartDelete = innerFrame->editor().smartInsertDeleteEnabled();
-      bool smartInsert =
-          smartDelete &&
-          innerFrame->selection().granularity() == WordGranularity &&
-          dragData->canSmartReplace();
-      innerFrame->editor().moveSelectionAfterDragging(
-          fragment, dragCaret.base(), smartInsert, smartDelete);
+      const DeleteMode deleteMode =
+          innerFrame->editor().smartInsertDeleteEnabled() ? DeleteMode::Smart
+                                                          : DeleteMode::Simple;
+      const InsertMode insertMode =
+          (deleteMode == DeleteMode::Smart &&
+           innerFrame->selection().granularity() == WordGranularity &&
+           dragData->canSmartReplace())
+              ? InsertMode::Smart
+              : InsertMode::Simple;
+
+      if (!innerFrame->editor().deleteSelectionAfterDraggingWithEvents(
+              innerFrame->editor().findEventTargetFromSelection(), deleteMode,
+              dragCaret.base()))
+        return false;
+
+      innerFrame->selection().setSelection(createVisibleSelectionDeprecated(
+          range->startPosition(), range->endPosition()));
+      if (innerFrame->selection().isAvailable()) {
+        DCHECK(m_documentUnderMouse);
+        if (!innerFrame->editor().replaceSelectionAfterDraggingWithEvents(
+                element, dragData, fragment, range, insertMode, dragSourceType))
+          return false;
+      }
     } else {
       if (setSelectionToDragCaret(innerFrame, dragCaret, range, point)) {
-        ASSERT(m_documentUnderMouse);
-        m_documentUnderMouse->frame()->editor().replaceSelectionAfterDragging(
-            fragment, dragData->canSmartReplace(), chosePlainText);
+        DCHECK(m_documentUnderMouse);
+        if (!innerFrame->editor().replaceSelectionAfterDraggingWithEvents(
+                element, dragData, fragment, range,
+                dragData->canSmartReplace() ? InsertMode::Smart
+                                            : InsertMode::Simple,
+                dragSourceType))
+          return false;
       }
     }
   } else {
@@ -572,12 +614,12 @@ bool DragController::concludeEditDrag(DragData* dragData) {
       return false;
 
     if (setSelectionToDragCaret(innerFrame, dragCaret, range, point)) {
-      const bool canSmartReplace = false;
-      const bool chosePlainText = true;
-      ASSERT(m_documentUnderMouse);
-      m_documentUnderMouse->frame()->editor().replaceSelectionAfterDragging(
-          createFragmentFromText(EphemeralRange(range), text), canSmartReplace,
-          chosePlainText);
+      DCHECK(m_documentUnderMouse);
+      if (!innerFrame->editor().replaceSelectionAfterDraggingWithEvents(
+              element, dragData,
+              createFragmentFromText(EphemeralRange(range), text), range,
+              InsertMode::Simple, DragSourceType::PlainTextSource))
+        return false;
     }
   }
 
@@ -787,7 +829,7 @@ static void prepareDataTransferForImageDrag(LocalFrame* source,
     Range* range = source->document()->createRange();
     range->selectNode(node, ASSERT_NO_EXCEPTION);
     source->selection().setSelection(
-        createVisibleSelectionDeprecated(EphemeralRange(range)));
+        createVisibleSelection(EphemeralRange(range)));
   }
   dataTransfer->declareAndWriteDragImage(
       node, !linkURL.isEmpty() ? linkURL : imageURL, label);

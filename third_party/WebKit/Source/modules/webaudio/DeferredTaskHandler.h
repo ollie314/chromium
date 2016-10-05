@@ -10,16 +10,17 @@
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
  *
- * THIS SOFTWARE IS PROVIDED BY APPLE INC. AND ITS CONTRIBUTORS ``AS IS'' AND ANY
- * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- * DISCLAIMED. IN NO EVENT SHALL APPLE INC. OR ITS CONTRIBUTORS BE LIABLE FOR ANY
- * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
- * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
- * ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY APPLE INC. AND ITS CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL APPLE INC. OR ITS CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+ * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
+ * DAMAGE.
  */
 
 #ifndef DeferredTaskHandler_h
@@ -46,10 +47,11 @@ class AudioSummingJunction;
 
 // DeferredTaskHandler manages the major part of pre- and post- rendering tasks,
 // and provides a lock mechanism against the audio rendering graph. A
-// DeferredTaskHandler object is created when an BaseAudioContext object is created.
+// DeferredTaskHandler object is created when an BaseAudioContext object is
+// created.
 //
-// DeferredTaskHandler outlives the BaseAudioContext only if all of the following
-// conditions match:
+// DeferredTaskHandler outlives the BaseAudioContext only if all of the
+// following conditions match:
 // - An audio rendering thread is running,
 // - It is requested to stop,
 // - The audio rendering thread calls requestToDeleteHandlersOnMainThread(),
@@ -65,8 +67,8 @@ class MODULES_EXPORT DeferredTaskHandler final
   void handleDeferredTasks();
   void contextWillBeDestroyed();
 
-  // BaseAudioContext can pull node(s) at the end of each render quantum even when
-  // they are not connected to any downstream nodes.  These two methods are
+  // BaseAudioContext can pull node(s) at the end of each render quantum even
+  // when they are not connected to any downstream nodes.  These two methods are
   // called by the nodes who want to add/remove themselves into/from the
   // automatic pull lists.
   void addAutomaticPullNode(AudioHandler*);
@@ -87,7 +89,8 @@ class MODULES_EXPORT DeferredTaskHandler final
 
   // Only accessed when the graph lock is held.
   void markSummingJunctionDirty(AudioSummingJunction*);
-  // Only accessed when the graph lock is held. Must be called on the main thread.
+  // Only accessed when the graph lock is held. Must be called on the main
+  // thread.
   void removeMarkedSummingJunction(AudioSummingJunction*);
 
   void markAudioNodeOutputDirty(AudioNodeOutput*);
@@ -176,7 +179,8 @@ class MODULES_EXPORT DeferredTaskHandler final
   // very start or end of the rendering quantum.
   HashSet<AudioHandler*> m_automaticPullNodes;
   Vector<AudioHandler*> m_renderingAutomaticPullNodes;
-  // m_automaticPullNodesNeedUpdating keeps track if m_automaticPullNodes is modified.
+  // m_automaticPullNodesNeedUpdating keeps track if m_automaticPullNodes is
+  // modified.
   bool m_automaticPullNodesNeedUpdating;
 
   // Collection of nodes where the channel count mode has changed. We want the

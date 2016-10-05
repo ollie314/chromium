@@ -21,7 +21,6 @@
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "device/bluetooth/bluetooth_advertisement.h"
-#include "device/bluetooth/bluetooth_audio_sink.h"
 #include "device/bluetooth/bluetooth_device.h"
 #include "device/bluetooth/bluetooth_export.h"
 
@@ -241,8 +240,6 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapter
       base::Callback<void(scoped_refptr<BluetoothSocket>)>;
   using CreateServiceErrorCallback =
       base::Callback<void(const std::string& message)>;
-  using AcquiredCallback =
-      base::Callback<void(scoped_refptr<BluetoothAudioSink>)>;
   using CreateAdvertisementCallback =
       base::Callback<void(scoped_refptr<BluetoothAdvertisement>)>;
   using AdvertisementErrorCallback =
@@ -422,16 +419,6 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapter
       const CreateServiceCallback& callback,
       const CreateServiceErrorCallback& error_callback) = 0;
 
-  // Creates and registers a BluetoothAudioSink with |options|. If the fields in
-  // |options| are not specified, the default values will be used. |callback|
-  // will be called on success with a BluetoothAudioSink which is to be owned by
-  // the caller of this method. |error_callback| will be called on failure with
-  // a message indicating the cause.
-  virtual void RegisterAudioSink(
-      const BluetoothAudioSink::Options& options,
-      const AcquiredCallback& callback,
-      const BluetoothAudioSink::ErrorCallback& error_callback) = 0;
-
   // Creates and registers an advertisement for broadcast over the LE channel.
   // The created advertisement will be returned via the success callback. An
   // advertisement can unregister itself at any time by calling its unregister
@@ -444,6 +431,10 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapter
 #if defined(OS_CHROMEOS) || defined(OS_LINUX)
   // Sets the interval between two consecutive advertisements. Valid ranges
   // for the interval are from 20ms to 10.24 seconds, with min <= max.
+  // Note: This is a best effort. The actual interval may vary non-trivially
+  // from the requested intervals. On some hardware, there is a minimum
+  // interval of 100ms. The minimum and maximum values are specified by the
+  // Core 4.2 Spec, Vol 2, Part E, Section 7.8.5.
   virtual void SetAdvertisingInterval(
       const base::TimeDelta& min,
       const base::TimeDelta& max,

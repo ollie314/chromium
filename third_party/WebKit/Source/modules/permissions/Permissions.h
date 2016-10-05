@@ -16,7 +16,6 @@ class Dictionary;
 class ScriptPromiseResolver;
 class ScriptState;
 class ScriptValue;
-class WebPermissionClient;
 
 class Permissions final : public GarbageCollectedFinalized<Permissions>,
                           public ScriptWrappable {
@@ -24,10 +23,6 @@ class Permissions final : public GarbageCollectedFinalized<Permissions>,
 
  public:
   DEFINE_INLINE_TRACE() {}
-
-  // TODO(mlamouri): Find better place for this. https://crbug.com/510948
-  static bool connectToService(ExecutionContext*,
-                               mojom::blink::PermissionServiceRequest);
 
   ScriptPromise query(ScriptState*, const Dictionary&);
   ScriptPromise request(ScriptState*, const Dictionary&);
@@ -38,10 +33,10 @@ class Permissions final : public GarbageCollectedFinalized<Permissions>,
   mojom::blink::PermissionService* getService(ExecutionContext*);
   void serviceConnectionError();
   void taskComplete(ScriptPromiseResolver*,
-                    mojom::blink::PermissionName,
+                    mojom::blink::PermissionDescriptorPtr,
                     mojom::blink::PermissionStatus);
   void batchTaskComplete(ScriptPromiseResolver*,
-                         Vector<mojom::blink::PermissionName>,
+                         Vector<mojom::blink::PermissionDescriptorPtr>,
                          Vector<int>,
                          const Vector<mojom::blink::PermissionStatus>&);
 

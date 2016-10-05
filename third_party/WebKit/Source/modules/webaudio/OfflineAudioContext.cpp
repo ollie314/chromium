@@ -10,16 +10,17 @@
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
  *
- * THIS SOFTWARE IS PROVIDED BY APPLE INC. AND ITS CONTRIBUTORS ``AS IS'' AND ANY
- * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- * DISCLAIMED. IN NO EVENT SHALL APPLE INC. OR ITS CONTRIBUTORS BE LIABLE FOR ANY
- * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
- * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
- * ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY APPLE INC. AND ITS CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL APPLE INC. OR ITS CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+ * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
+ * DAMAGE.
  */
 
 #include "modules/webaudio/OfflineAudioContext.h"
@@ -176,7 +177,8 @@ ScriptPromise OfflineAudioContext::startOfflineRendering(
                              "OfflineAudioContext in a stopped state."));
   }
 
-  // If the context is not in the suspended state (i.e. running), reject the promise.
+  // If the context is not in the suspended state (i.e. running), reject the
+  // promise.
   if (contextState() != AudioContextState::Suspended) {
     return ScriptPromise::rejectWithDOMException(
         scriptState,
@@ -396,8 +398,8 @@ void OfflineAudioContext::resolveSuspendOnMainThread(size_t frame) {
   // Wait until the suspend map is available for the removal.
   AutoLocker locker(this);
 
-  // If the context is going away, m_scheduledSuspends could have had all its entries removed.
-  // Check for that here.
+  // If the context is going away, m_scheduledSuspends could have had all its
+  // entries removed.  Check for that here.
   if (m_scheduledSuspends.size()) {
     // |frame| must exist in the map.
     DCHECK(m_scheduledSuspends.contains(frame));
@@ -415,7 +417,8 @@ void OfflineAudioContext::rejectPendingResolvers() {
   // Wait until the suspend map is available for removal.
   AutoLocker locker(this);
 
-  // Offline context is going away so reject any promises that are still pending.
+  // Offline context is going away so reject any promises that are still
+  // pending.
 
   for (auto& pendingSuspendResolver : m_scheduledSuspends) {
     pendingSuspendResolver.value->reject(

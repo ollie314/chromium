@@ -12,9 +12,8 @@
 #include "base/memory/ref_counted.h"
 #include "base/observer_list.h"
 #include "base/time/time.h"
-#include "cc/animation/animation.h"
-#include "cc/animation/animation_curve.h"
-#include "cc/animation/animation_events.h"
+#include "cc/animation/element_id.h"
+#include "cc/animation/property_animation_state.h"
 #include "cc/animation/target_property.h"
 #include "cc/base/cc_export.h"
 #include "ui/gfx/geometry/scroll_offset.h"
@@ -31,9 +30,8 @@ class AnimationEvents;
 class AnimationHost;
 class AnimationPlayer;
 class FilterOperations;
-class KeyframeValueList;
 enum class ElementListType;
-enum class AnimationChangeType;
+struct AnimationEvent;
 
 // An ElementAnimations owns a list of all AnimationPlayers, attached to
 // the element.
@@ -70,13 +68,6 @@ class CC_EXPORT ElementAnimations : public base::RefCounted<ElementAnimations> {
   void PushPropertiesTo(
       scoped_refptr<ElementAnimations> element_animations_impl);
 
-  void AddAnimation(std::unique_ptr<Animation> animation);
-  void PauseAnimation(int animation_id, base::TimeDelta time_offset);
-  void RemoveAnimation(int animation_id);
-  void AbortAnimation(int animation_id);
-  void AbortAnimations(TargetProperty::Type target_property,
-                       bool needs_completion = false);
-
   void Animate(base::TimeTicks monotonic_time);
 
   void UpdateState(bool start_ready_animations, AnimationEvents* events);
@@ -86,19 +77,14 @@ class CC_EXPORT ElementAnimations : public base::RefCounted<ElementAnimations> {
   // are deleted.
   void ActivateAnimations();
 
-  // Returns the active animation animating the given property that is either
-  // running, or is next to run, if such an animation exists.
-  Animation* GetAnimation(TargetProperty::Type target_property) const;
-
-  // Returns the active animation for the given unique animation id.
-  Animation* GetAnimationById(int animation_id) const;
-
   // Returns true if there are any animations that have neither finished nor
   // aborted.
   bool HasActiveAnimation() const;
 
   // Returns true if there are any animations at all to process.
   bool HasAnyAnimation() const;
+
+  bool HasAnyAnimationTargetingProperty(TargetProperty::Type property) const;
 
   // Returns true if there is an animation that is either currently animating
   // the given property or scheduled to animate this property in the future, and
@@ -172,16 +158,11 @@ class CC_EXPORT ElementAnimations : public base::RefCounted<ElementAnimations> {
   }
   void SetScrollOffsetAnimationWasInterrupted();
 
-  // TODO(loyso): Erase it, use AnimationPlayer's one.
-  bool needs_to_start_animations_for_testing() const;
-
   void SetNeedsPushProperties();
   bool needs_push_properties() const { return needs_push_properties_; }
 
-  // TODO(loyso): Rework UpdateClientAnimationState to use bitset.
-  void UpdateClientAnimationState(TargetProperty::Type target_property);
-  void UpdateClientAnimationState(bool transform, bool opacity, bool filter);
-  void SetNeedsUpdateImplClientState(bool transform, bool opacity, bool filter);
+  void UpdateClientAnimationState();
+  void SetNeedsUpdateImplClientState();
 
   void UpdateActivationNormal();
 
@@ -208,14 +189,6 @@ class CC_EXPORT ElementAnimations : public base::RefCounted<ElementAnimations> {
   enum class ActivationType { NORMAL, FORCE };
   void UpdateActivation(ActivationType type);
 
-  void UpdateClientAnimationStateInternal(TargetProperty::Type property);
-
-  void NotifyClientAnimationChanged(
-      TargetProperty::Type property,
-      ElementListType list_type,
-      bool notify_elements_about_potential_animation,
-      bool notify_elements_about_running_animation);
-
   void OnFilterAnimated(ElementListType list_type,
                         const FilterOperations& filters);
   void OnOpacityAnimated(ElementListType list_type, float opacity);
@@ -223,12 +196,8 @@ class CC_EXPORT ElementAnimations : public base::RefCounted<ElementAnimations> {
                            const gfx::Transform& transform);
   void OnScrollOffsetAnimated(ElementListType list_type,
                               const gfx::ScrollOffset& scroll_offset);
-  void IsAnimatingChanged(ElementListType list_type,
-                          TargetProperty::Type property,
-                          AnimationChangeType change_type,
-                          bool is_animating);
 
-  void ClearNeedsUpdateImplClientState();
+  static TargetProperties GetPropertiesMaskForAnimationState();
 
   std::unique_ptr<PlayersList> players_list_;
   AnimationHost* animation_host_;
@@ -246,26 +215,10 @@ class CC_EXPORT ElementAnimations : public base::RefCounted<ElementAnimations> {
 
   bool needs_push_properties_;
 
-  struct PropertyAnimationState {
-    bool currently_running_for_active_elements = false;
-    bool currently_running_for_pending_elements = false;
-    bool potentially_animating_for_active_elements = false;
-    bool potentially_animating_for_pending_elements = false;
-    void Clear() {
-      currently_running_for_active_elements = false;
-      currently_running_for_pending_elements = false;
-      potentially_animating_for_active_elements = false;
-      potentially_animating_for_pending_elements = false;
-    }
-  };
+  PropertyAnimationState active_state_;
+  PropertyAnimationState pending_state_;
 
-  struct PropertyAnimationState filter_animation_state_;
-  struct PropertyAnimationState opacity_animation_state_;
-  struct PropertyAnimationState transform_animation_state_;
-
-  bool needs_update_impl_client_state_transform_ : 1;
-  bool needs_update_impl_client_state_opacity_ : 1;
-  bool needs_update_impl_client_state_filter_ : 1;
+  bool needs_update_impl_client_state_;
 
   DISALLOW_COPY_AND_ASSIGN(ElementAnimations);
 };

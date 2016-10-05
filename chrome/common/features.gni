@@ -2,9 +2,6 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-# This is the GN version of //chrome/chrome_features.gypi.
-# Please keep in sync!
-
 import("//build/config/chrome_build.gni")
 import("//build/config/chromecast_build.gni")
 import("//build/config/compiler/compiler.gni")
@@ -32,6 +29,10 @@ declare_args() {
   # will download a closed-source NaCl module at startup.) Chrome-branded
   # ChromeOS builds have this enabled by default.
   enable_hotwording = is_chrome_branded && is_chromeos
+
+  # Enable the printing system dialog for platforms that support printing
+  # and have a system dialog.
+  enable_basic_print_dialog = enable_basic_printing && !is_chromeos
 
   # Set to true to bundle all the mash related mojo services into chrome.
   # Specify --mash to chrome to have chrome start the mash environment.

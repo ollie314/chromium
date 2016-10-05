@@ -10,16 +10,17 @@
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
  *
- * THIS SOFTWARE IS PROVIDED BY APPLE INC. AND ITS CONTRIBUTORS ``AS IS'' AND ANY
- * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- * DISCLAIMED. IN NO EVENT SHALL APPLE INC. OR ITS CONTRIBUTORS BE LIABLE FOR ANY
- * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
- * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
- * ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY APPLE INC. AND ITS CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL APPLE INC. OR ITS CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+ * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
+ * DAMAGE.
  */
 
 #ifndef BaseAudioContext_h
@@ -79,8 +80,9 @@ class SecurityOrigin;
 class StereoPannerNode;
 class WaveShaperNode;
 
-// BaseAudioContext is the cornerstone of the web audio API and all AudioNodes are created from it.
-// For thread safety between the audio thread and the main thread, it has a rendering graph locking mechanism.
+// BaseAudioContext is the cornerstone of the web audio API and all AudioNodes
+// are created from it.  For thread safety between the audio thread and the main
+// thread, it has a rendering graph locking mechanism.
 
 class MODULES_EXPORT BaseAudioContext : public EventTargetWithInlineData,
                                         public ActiveScriptWrappable,
@@ -89,10 +91,11 @@ class MODULES_EXPORT BaseAudioContext : public EventTargetWithInlineData,
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  // The state of an audio context.  On creation, the state is Suspended. The state is Running if
-  // audio is being processed (audio graph is being pulled for data). The state is Closed if the
-  // audio context has been closed.  The valid transitions are from Suspended to either Running or
-  // Closed; Running to Suspended or Closed. Once Closed, there are no valid transitions.
+  // The state of an audio context.  On creation, the state is Suspended. The
+  // state is Running if audio is being processed (audio graph is being pulled
+  // for data). The state is Closed if the audio context has been closed.  The
+  // valid transitions are from Suspended to either Running or Closed; Running
+  // to Suspended or Closed. Once Closed, there are no valid transitions.
   enum AudioContextState { Suspended, Running, Closed };
 
   // Create an AudioContext for rendering to the audio hardware.
@@ -116,8 +119,8 @@ class MODULES_EXPORT BaseAudioContext : public EventTargetWithInlineData,
   AudioDestinationNode* destination() const;
 
   size_t currentSampleFrame() const {
-    // TODO: What is the correct value for the current frame if the destination node has gone
-    // away?  0 is a valid frame.
+    // TODO: What is the correct value for the current frame if the destination
+    // node has gone away?  0 is a valid frame.
     return m_destinationNode
                ? m_destinationNode->audioDestinationHandler()
                      .currentSampleFrame()
@@ -125,8 +128,8 @@ class MODULES_EXPORT BaseAudioContext : public EventTargetWithInlineData,
   }
 
   double currentTime() const {
-    // TODO: What is the correct value for the current time if the destination node has gone
-    // away? 0 is a valid time.
+    // TODO: What is the correct value for the current time if the destination
+    // node has gone away? 0 is a valid time.
     return m_destinationNode
                ? m_destinationNode->audioDestinationHandler().currentTime()
                : 0;
@@ -152,7 +155,8 @@ class MODULES_EXPORT BaseAudioContext : public EventTargetWithInlineData,
                                 AudioBufferCallback* errorCallback,
                                 ExceptionState&);
 
-  // Handles the promise and callbacks when |decodeAudioData| is finished decoding.
+  // Handles the promise and callbacks when |decodeAudioData| is finished
+  // decoding.
   void handleDecodeAudioData(AudioBuffer*,
                              ScriptPromiseResolver*,
                              AudioBufferCallback* successCallback,
@@ -162,7 +166,8 @@ class MODULES_EXPORT BaseAudioContext : public EventTargetWithInlineData,
 
   virtual bool hasRealtimeConstraint() = 0;
 
-  // The AudioNode create methods are called on the main thread (from JavaScript).
+  // The AudioNode create methods are called on the main thread (from
+  // JavaScript).
   AudioBufferSourceNode* createBufferSource(ExceptionState&);
   MediaElementAudioSourceNode* createMediaElementSource(HTMLMediaElement*,
                                                         ExceptionState&);
@@ -288,8 +293,8 @@ class MODULES_EXPORT BaseAudioContext : public EventTargetWithInlineData,
   // Get the security origin for this audio context.
   SecurityOrigin* getSecurityOrigin() const;
 
-  // Get the PeriodicWave for the specified oscillator type.  The table is initialized internally
-  // if necessary.
+  // Get the PeriodicWave for the specified oscillator type.  The table is
+  // initialized internally if necessary.
   PeriodicWave* periodicWave(int type);
 
  protected:
@@ -306,17 +311,18 @@ class MODULES_EXPORT BaseAudioContext : public EventTargetWithInlineData,
 
   virtual void didClose() {}
 
-  // Tries to handle AudioBufferSourceNodes that were started but became disconnected or was never
-  // connected. Because these never get pulled anymore, they will stay around forever. So if we
-  // can, try to stop them so they can be collected.
+  // Tries to handle AudioBufferSourceNodes that were started but became
+  // disconnected or was never connected. Because these never get pulled
+  // anymore, they will stay around forever. So if we can, try to stop them so
+  // they can be collected.
   void handleStoppableSourceNodes();
 
   Member<AudioDestinationNode> m_destinationNode;
 
   // FIXME(dominicc): Move m_resumeResolvers to AudioContext, because only
   // it creates these Promises.
-  // Vector of promises created by resume(). It takes time to handle them, so we collect all of
-  // the promises here until they can be resolved or rejected.
+  // Vector of promises created by resume(). It takes time to handle them, so we
+  // collect all of the promises here until they can be resolved or rejected.
   HeapVector<Member<ScriptPromiseResolver>> m_resumeResolvers;
 
   void setClosedContextSampleRate(float newSampleRate) {
@@ -371,12 +377,13 @@ class MODULES_EXPORT BaseAudioContext : public EventTargetWithInlineData,
   void resolvePromisesForResume();
   void resolvePromisesForResumeOnMainThread();
 
-  // When the context is going away, reject any pending script promise resolvers.
+  // When the context is going away, reject any pending script promise
+  // resolvers.
   virtual void rejectPendingResolvers();
 
-  // True if we're in the process of resolving promises for resume().  Resolving can take some
-  // time and the audio context process loop is very fast, so we don't want to call resolve an
-  // excessive number of times.
+  // True if we're in the process of resolving promises for resume().  Resolving
+  // can take some time and the audio context process loop is very fast, so we
+  // don't want to call resolve an excessive number of times.
   bool m_isResolvingResumePromises;
 
   // Whether a user gesture is required to start this AudioContext.
@@ -392,18 +399,19 @@ class MODULES_EXPORT BaseAudioContext : public EventTargetWithInlineData,
 
   AsyncAudioDecoder m_audioDecoder;
 
-  // When a context is closed, the sample rate is cleared.  But decodeAudioData can be called
-  // after the context has been closed and it needs the sample rate.  When the context is closed,
-  // the sample rate is saved here.
+  // When a context is closed, the sample rate is cleared.  But decodeAudioData
+  // can be called after the context has been closed and it needs the sample
+  // rate.  When the context is closed, the sample rate is saved here.
   float m_closedContextSampleRate;
 
-  // Vector of promises created by decodeAudioData.  This keeps the resolvers alive until
-  // decodeAudioData finishes decoding and can tell the main thread to resolve them.
+  // Vector of promises created by decodeAudioData.  This keeps the resolvers
+  // alive until decodeAudioData finishes decoding and can tell the main thread
+  // to resolve them.
   HeapHashSet<Member<ScriptPromiseResolver>> m_decodeAudioResolvers;
 
-  // PeriodicWave's for the builtin oscillator types.  These only depend on the sample rate. so
-  // they can be shared with all OscillatorNodes in the context.  To conserve memory, these are
-  // lazily initiialized on first use.
+  // PeriodicWave's for the builtin oscillator types.  These only depend on the
+  // sample rate. so they can be shared with all OscillatorNodes in the context.
+  // To conserve memory, these are lazily initialized on first use.
   Member<PeriodicWave> m_periodicWaveSine;
   Member<PeriodicWave> m_periodicWaveSquare;
   Member<PeriodicWave> m_periodicWaveSawtooth;

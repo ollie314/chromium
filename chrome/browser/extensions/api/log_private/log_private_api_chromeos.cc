@@ -14,6 +14,7 @@
 #include "base/json/json_writer.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
+#include "base/memory/ptr_util.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/download/download_prefs.h"
@@ -34,6 +35,7 @@
 #include "extensions/browser/extension_function.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/granted_file_entry.h"
+#include "net/log/net_log_entry.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/system_logs/debug_log_writer.h"
@@ -213,7 +215,7 @@ LogPrivateAPI::GetFactoryInstance() {
   return g_factory.Pointer();
 }
 
-void LogPrivateAPI::OnAddEntry(const net::NetLog::Entry& entry) {
+void LogPrivateAPI::OnAddEntry(const net::NetLogEntry& entry) {
   // We could receive events on whatever thread they happen to be generated,
   // since we are only interested in network events, we should ignore any
   // other thread than BrowserThread::IO.
@@ -536,13 +538,13 @@ void LogPrivateDumpLogsFunction::OnStoreLogsCompleted(
           log_path,
           false);
 
-  base::DictionaryValue* entry = new base::DictionaryValue();
+  auto entry = base::MakeUnique<base::DictionaryValue>();
   entry->SetString("fileSystemId", file_entry.filesystem_id);
   entry->SetString("baseName", file_entry.registered_name);
   entry->SetString("id", file_entry.id);
   entry->SetBoolean("isDirectory", false);
   base::ListValue* entry_list = new base::ListValue();
-  entry_list->Append(entry);
+  entry_list->Append(std::move(entry));
   response->Set("entries", entry_list);
   response->SetBoolean("multiple", false);
   SetResult(std::move(response));

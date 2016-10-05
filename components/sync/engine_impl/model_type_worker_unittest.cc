@@ -4,7 +4,6 @@
 
 #include "components/sync/engine_impl/model_type_worker.h"
 
-#include <stddef.h>
 #include <stdint.h>
 
 #include <utility>
@@ -13,13 +12,9 @@
 #include "base/memory/ptr_util.h"
 #include "base/strings/stringprintf.h"
 #include "components/sync/base/fake_encryptor.h"
-#include "components/sync/base/model_type.h"
 #include "components/sync/core/model_type_processor.h"
-#include "components/sync/core/non_blocking_sync_common.h"
 #include "components/sync/engine_impl/commit_contribution.h"
 #include "components/sync/engine_impl/cycle/status_controller.h"
-#include "components/sync/protocol/data_type_state.pb.h"
-#include "components/sync/protocol/sync.pb.h"
 #include "components/sync/syncable/syncable_util.h"
 #include "components/sync/test/engine/mock_model_type_processor.h"
 #include "components/sync/test/engine/mock_nudge_handler.h"
@@ -147,7 +142,7 @@ class ModelTypeWorkerTest : public ::testing::Test {
   // significant server action until we receive an update response that
   // contains the type root node for this type.
   void FirstInitialize() {
-    sync_pb::DataTypeState initial_state;
+    sync_pb::ModelTypeState initial_state;
     initial_state.mutable_progress_marker()->set_data_type_id(
         GetSpecificsFieldNumberFromModelType(kModelType));
 
@@ -163,7 +158,7 @@ class ModelTypeWorkerTest : public ::testing::Test {
   // Initialize with some saved pending updates from the model thread.
   void InitializeWithPendingUpdates(
       const UpdateResponseDataList& initial_pending_updates) {
-    sync_pb::DataTypeState initial_state;
+    sync_pb::ModelTypeState initial_state;
     initial_state.mutable_progress_marker()->set_data_type_id(
         GetSpecificsFieldNumberFromModelType(kModelType));
     initial_state.mutable_progress_marker()->set_token(
@@ -176,9 +171,9 @@ class ModelTypeWorkerTest : public ::testing::Test {
     mock_nudge_handler_.ClearCounters();
   }
 
-  // Initialize with a custom initial DataTypeState and pending updates.
+  // Initialize with a custom initial ModelTypeState and pending updates.
   void InitializeWithState(
-      const sync_pb::DataTypeState& state,
+      const sync_pb::ModelTypeState& state,
       const UpdateResponseDataList& initial_pending_updates) {
     DCHECK(!worker_);
 
@@ -600,7 +595,7 @@ TEST_F(ModelTypeWorkerTest, SendInitialSyncDone) {
   // The update contains no entities.
   EXPECT_EQ(0U, processor()->GetNthUpdateResponse(0).size());
 
-  const sync_pb::DataTypeState& state = processor()->GetNthUpdateState(0);
+  const sync_pb::ModelTypeState& state = processor()->GetNthUpdateState(0);
   EXPECT_FALSE(state.progress_marker().token().empty());
   EXPECT_TRUE(state.initial_sync_done());
   EXPECT_TRUE(worker()->IsInitialSyncEnded());

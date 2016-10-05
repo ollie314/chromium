@@ -10,16 +10,17 @@
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
  *
- * THIS SOFTWARE IS PROVIDED BY APPLE INC. AND ITS CONTRIBUTORS ``AS IS'' AND ANY
- * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- * DISCLAIMED. IN NO EVENT SHALL APPLE INC. OR ITS CONTRIBUTORS BE LIABLE FOR ANY
- * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
- * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
- * ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY APPLE INC. AND ITS CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL APPLE INC. OR ITS CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+ * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
+ * DAMAGE.
  */
 
 #ifndef AudioDestinationNode_h
@@ -45,8 +46,9 @@ class AudioDestinationHandler : public AudioHandler, public AudioIOCallback {
   void process(size_t) final {
   }  // we're pulled by hardware so this is never called
 
-  // The audio hardware calls render() to get the next render quantum of audio into destinationBus.
-  // It will optionally give us local/live audio input in sourceBus (if it's not 0).
+  // The audio hardware calls render() to get the next render quantum of audio
+  // into destinationBus.  It will optionally give us local/live audio input in
+  // sourceBus (if it's not 0).
   void render(AudioBus* sourceBus,
               AudioBus* destinationBus,
               size_t numberOfFrames) final;
@@ -64,8 +66,9 @@ class AudioDestinationHandler : public AudioHandler, public AudioIOCallback {
   virtual void stopRendering() = 0;
 
  protected:
-  // LocalAudioInputProvider allows us to expose an AudioSourceProvider for local/live audio input.
-  // If there is local/live audio input, we call set() with the audio input data every render quantum.
+  // LocalAudioInputProvider allows us to expose an AudioSourceProvider for
+  // local/live audio input.  If there is local/live audio input, we call set()
+  // with the audio input data every render quantum.
   class LocalAudioInputProvider final : public AudioSourceProvider {
    public:
     LocalAudioInputProvider()

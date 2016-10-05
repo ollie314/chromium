@@ -9,7 +9,6 @@
 #include <memory>
 
 #include "ash/test/ash_test_base.h"
-#include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
@@ -23,7 +22,6 @@
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
 #include "components/browser_sync/profile_sync_service_mock.h"
-#include "components/sync/driver/sync_error_controller.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/message_center/notification.h"
@@ -49,11 +47,10 @@ namespace test {
 
 namespace {
 
-static const char kTestAccountId[] = "testuser@test.com";
+const char kTestAccountId[] = "testuser@test.com";
 
 // Notification ID corresponding to kProfileSyncNotificationId + kTestAccountId.
-static const std::string kNotificationId =
-    "chrome://settings/sync/testuser@test.com";
+const char kNotificationId[] = "chrome://settings/sync/testuser@test.com";
 
 class FakeLoginUIService: public LoginUIService {
  public:
@@ -130,7 +127,6 @@ class SyncErrorNotifierTest : public AshTestBase  {
     display::Screen::SetScreenInstance(nullptr);
     test_screen_.reset();
 #endif
-
   }
 
  protected:

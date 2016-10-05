@@ -12,11 +12,13 @@
         "blink::mojom::BackgroundSyncService",
         "blink::mojom::BroadcastChannelProvider",
         "blink::mojom::BudgetService",
+        "blink::mojom::Hyphenation",
         "blink::mojom::MimeRegistry",
         "blink::mojom::NotificationService",
         "blink::mojom::OffscreenCanvasCompositorFrameSinkProvider",
         "blink::mojom::OffscreenCanvasSurface",
         "blink::mojom::PermissionService",
+        "blink::mojom::ShapeDetection",
         "blink::mojom::WebSocket",
         "content::mojom::MemoryCoordinatorHandle",
         "content::mojom::StoragePartitionService",
@@ -32,6 +34,9 @@
     },
     "required": {
       "*": { "classes": [ "app" ] },
+
+      // In classic ash, the browser supplies ash interfaces to itself.
+      "exe:content_browser": { "classes": [ "ash" ] },
 
       "exe:content_gpu": { "classes": [ "browser" ] },
       "exe:content_plugin": { "classes": [ "browser" ] },

@@ -10,16 +10,17 @@
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
  *
- * THIS SOFTWARE IS PROVIDED BY APPLE INC. AND ITS CONTRIBUTORS ``AS IS'' AND ANY
- * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- * DISCLAIMED. IN NO EVENT SHALL APPLE INC. OR ITS CONTRIBUTORS BE LIABLE FOR ANY
- * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
- * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
- * ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY APPLE INC. AND ITS CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL APPLE INC. OR ITS CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+ * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
+ * DAMAGE.
  */
 
 #include "modules/webaudio/MediaElementAudioSourceNode.h"
@@ -134,9 +135,9 @@ void MediaElementAudioSourceHandler::onCurrentSrcChanged(
   m_passesCurrentSrcCORSAccessCheck =
       passesCurrentSrcCORSAccessCheck(currentSrc);
 
-  // Make a note if we need to print a console message and save the |curentSrc| for use in the
-  // message.  Need to wait until later to print the message in case HTMLMediaElement allows
-  // access.
+  // Make a note if we need to print a console message and save the |curentSrc|
+  // for use in the message.  Need to wait until later to print the message in
+  // case HTMLMediaElement allows access.
   m_maybePrintCORSMessage = !m_passesCurrentSrcCORSAccessCheck;
   m_currentSrcString = currentSrc.getString();
 }
@@ -162,8 +163,9 @@ void MediaElementAudioSourceHandler::process(size_t numberOfFrames) {
   AudioBus* outputBus = output(0).bus();
 
   // Use a tryLock() to avoid contention in the real-time audio thread.
-  // If we fail to acquire the lock then the HTMLMediaElement must be in the middle of
-  // reconfiguring its playback engine, so we output silence in this case.
+  // If we fail to acquire the lock then the HTMLMediaElement must be in the
+  // middle of reconfiguring its playback engine, so we output silence in this
+  // case.
   MutexTryLocker tryLocker(m_processLock);
   if (tryLocker.locked()) {
     if (!mediaElement() || !m_sourceNumberOfChannels || !m_sourceSampleRate) {
@@ -171,21 +173,22 @@ void MediaElementAudioSourceHandler::process(size_t numberOfFrames) {
       return;
     }
     AudioSourceProvider& provider = mediaElement()->getAudioSourceProvider();
-    // Grab data from the provider so that the element continues to make progress, even if
-    // we're going to output silence anyway.
+    // Grab data from the provider so that the element continues to make
+    // progress, even if we're going to output silence anyway.
     if (m_multiChannelResampler.get()) {
       DCHECK_NE(m_sourceSampleRate, sampleRate());
       m_multiChannelResampler->process(&provider, outputBus, numberOfFrames);
     } else {
-      // Bypass the resampler completely if the source is at the context's sample-rate.
+      // Bypass the resampler completely if the source is at the context's
+      // sample-rate.
       DCHECK_EQ(m_sourceSampleRate, sampleRate());
       provider.provideInput(outputBus, numberOfFrames);
     }
     // Output silence if we don't have access to the element.
     if (!passesCORSAccessCheck()) {
       if (m_maybePrintCORSMessage) {
-        // Print a CORS message, but just once for each change in the current media
-        // element source, and only if we have a document to print to.
+        // Print a CORS message, but just once for each change in the current
+        // media element source, and only if we have a document to print to.
         m_maybePrintCORSMessage = false;
         if (context()->getExecutionContext()) {
           context()->getExecutionContext()->postTask(

@@ -1464,7 +1464,7 @@ void WebContentsImpl::AttachToOuterWebContentsFrame(
 
   static_cast<RenderWidgetHostViewChildFrame*>(
       render_manager->GetRenderWidgetHostView())
-      ->RegisterSurfaceNamespaceId();
+      ->RegisterFrameSinkId();
 
   // At this point, we should destroy the TextInputManager which will notify all
   // the RWHV in this WebContents. The RWHV in this WebContents should use the
@@ -4621,11 +4621,10 @@ void WebContentsImpl::UpdateTitle(RenderFrameHost* render_frame_host,
     // navigations in other processes, so we must use nav_entry_id.
     // TODO(creis): Switch to use this as the default.
     entry = new_entry;
-  } else {
-    // In modes that have no out-of-process iframes, nav_entry_id and page_id
-    // should agree on which entry to update.
-    DCHECK_EQ(entry, new_entry);
   }
+  // (In modes that have no out-of-process iframes, nav_entry_id and page_id
+  // will usually agree on which entry to update, but may disagree if commits
+  // from a previous RFH have been ignored, resetting the RFH's nav_entry_id.)
 
   // We can handle title updates when we don't have an entry in
   // UpdateTitleForEntry, but only if the update is from the current RVH.

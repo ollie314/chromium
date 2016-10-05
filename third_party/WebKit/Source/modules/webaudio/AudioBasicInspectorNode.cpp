@@ -10,16 +10,17 @@
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
  *
- * THIS SOFTWARE IS PROVIDED BY APPLE INC. AND ITS CONTRIBUTORS ``AS IS'' AND ANY
- * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- * DISCLAIMED. IN NO EVENT SHALL APPLE INC. OR ITS CONTRIBUTORS BE LIABLE FOR ANY
- * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
- * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
- * ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY APPLE INC. AND ITS CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL APPLE INC. OR ITS CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+ * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
+ * DAMAGE.
  */
 
 #include "modules/webaudio/AudioBasicInspectorNode.h"
@@ -39,11 +40,13 @@ AudioBasicInspectorHandler::AudioBasicInspectorHandler(
   addOutput(outputChannelCount);
 }
 
-// We override pullInputs() as an optimization allowing this node to take advantage of in-place processing,
-// where the input is simply passed through unprocessed to the output.
+// We override pullInputs() as an optimization allowing this node to take
+// advantage of in-place processing, where the input is simply passed through
+// unprocessed to the output.
 // Note: this only applies if the input and output channel counts match.
 void AudioBasicInspectorHandler::pullInputs(size_t framesToProcess) {
-  // Render input stream - try to render directly into output bus for pass-through processing where process() doesn't need to do anything...
+  // Render input stream - try to render directly into output bus for
+  // pass-through processing where process() doesn't need to do anything...
   input(0).pull(output(0).bus(), framesToProcess);
 }
 
@@ -83,7 +86,8 @@ void AudioBasicInspectorHandler::checkNumberOfChannelsForInput(
   unsigned numberOfChannels = input->numberOfChannels();
 
   if (numberOfChannels != output(0).numberOfChannels()) {
-    // This will propagate the channel count to any nodes connected further downstream in the graph.
+    // This will propagate the channel count to any nodes connected further
+    // downstream in the graph.
     output(0).setNumberOfChannels(numberOfChannels);
   }
 
@@ -96,8 +100,9 @@ void AudioBasicInspectorHandler::updatePullStatus() {
   ASSERT(context()->isGraphOwner());
 
   if (output(0).isConnected()) {
-    // When an AudioBasicInspectorNode is connected to a downstream node, it will get pulled by the
-    // downstream node, thus remove it from the context's automatic pull list.
+    // When an AudioBasicInspectorNode is connected to a downstream node, it
+    // will get pulled by the downstream node, thus remove it from the context's
+    // automatic pull list.
     if (m_needAutomaticPull) {
       context()->deferredTaskHandler().removeAutomaticPullNode(this);
       m_needAutomaticPull = false;
@@ -105,12 +110,14 @@ void AudioBasicInspectorHandler::updatePullStatus() {
   } else {
     unsigned numberOfInputConnections = input(0).numberOfRenderingConnections();
     if (numberOfInputConnections && !m_needAutomaticPull) {
-      // When an AudioBasicInspectorNode is not connected to any downstream node while still connected from
-      // upstream node(s), add it to the context's automatic pull list.
+      // When an AudioBasicInspectorNode is not connected to any downstream node
+      // while still connected from upstream node(s), add it to the context's
+      // automatic pull list.
       context()->deferredTaskHandler().addAutomaticPullNode(this);
       m_needAutomaticPull = true;
     } else if (!numberOfInputConnections && m_needAutomaticPull) {
-      // The AudioBasicInspectorNode is connected to nothing, remove it from the context's automatic pull list.
+      // The AudioBasicInspectorNode is connected to nothing, remove it from the
+      // context's automatic pull list.
       context()->deferredTaskHandler().removeAutomaticPullNode(this);
       m_needAutomaticPull = false;
     }

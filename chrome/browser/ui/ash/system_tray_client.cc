@@ -6,18 +6,44 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/logging.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_process_platform_part.h"
+#include "chrome/browser/chromeos/accessibility/accessibility_util.h"
+#include "chrome/browser/chromeos/login/ui/login_display_host.h"
 #include "chrome/browser/chromeos/system/system_clock.h"
-#include "chrome/browser/ui/ash/system_tray_common.h"
+#include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/ui/ash/ash_util.h"
+#include "chrome/browser/ui/chrome_pages.h"
+#include "chrome/browser/ui/scoped_tabbed_browser_displayer.h"
+#include "chrome/browser/ui/singleton_tabs.h"
+#include "chrome/common/url_constants.h"
+#include "chrome/grit/generated_resources.h"
+#include "chromeos/login/login_state.h"
+#include "content/public/browser/user_metrics.h"
 #include "content/public/common/mojo_shell_connection.h"
 #include "services/shell/public/cpp/connector.h"
+#include "ui/base/l10n/l10n_util.h"
+
+using chromeos::LoginState;
 
 namespace {
 
+const char kPaletteSettingsSubPageName[] = "stylus-overlay";
+
 SystemTrayClient* g_instance = nullptr;
 
+void ShowSettingsSubPageForActiveUser(const std::string& sub_page) {
+  chrome::ShowSettingsSubPageForProfile(ProfileManager::GetActiveUserProfile(),
+                                        sub_page);
+}
+
 }  // namespace
+
+// static
+const char SystemTrayClient::kDisplaySettingsSubPageName[] = "display";
+const char SystemTrayClient::kDisplayOverscanSettingsSubPageName[] =
+    "displayOverscan";
 
 SystemTrayClient::SystemTrayClient() {
   // If this observes clock setting changes before ash comes up the IPCs will
@@ -44,9 +70,14 @@ void SystemTrayClient::ConnectToSystemTray() {
   if (system_tray_.is_bound())
     return;
 
-  content::MojoShellConnection::GetForProcess()
-      ->GetConnector()
-      ->ConnectToInterface("mojo:ash", &system_tray_);
+  shell::Connector* connector =
+      content::MojoShellConnection::GetForProcess()->GetConnector();
+  // Under mash the SystemTray interface is in the ash process. In classic ash
+  // we provide it to ourself.
+  if (chrome::IsRunningInMash())
+    connector->ConnectToInterface("mojo:ash", &system_tray_);
+  else
+    connector->ConnectToInterface("exe:content_browser", &system_tray_);
 
   // Tolerate ash crashing and coming back up.
   system_tray_.set_connection_error_handler(base::Bind(
@@ -61,55 +92,83 @@ void SystemTrayClient::OnClientConnectionError() {
 // ash::mojom::SystemTrayClient:
 
 void SystemTrayClient::ShowSettings() {
-  SystemTrayCommon::ShowSettings();
+  ShowSettingsSubPageForActiveUser(std::string());
 }
 
 void SystemTrayClient::ShowDateSettings() {
-  SystemTrayCommon::ShowDateSettings();
+  content::RecordAction(base::UserMetricsAction("ShowDateOptions"));
+  std::string sub_page =
+      std::string(chrome::kSearchSubPage) + "#" +
+      l10n_util::GetStringUTF8(IDS_OPTIONS_SETTINGS_SECTION_TITLE_DATETIME);
+  // Everybody can change the time zone (even though it is a device setting).
+  chrome::ShowSettingsSubPageForProfile(ProfileManager::GetActiveUserProfile(),
+                                        sub_page);
 }
 
 void SystemTrayClient::ShowDisplaySettings() {
-  SystemTrayCommon::ShowDisplaySettings();
+  content::RecordAction(base::UserMetricsAction("ShowDisplayOptions"));
+  ShowSettingsSubPageForActiveUser(kDisplaySettingsSubPageName);
 }
 
 void SystemTrayClient::ShowPowerSettings() {
-  SystemTrayCommon::ShowPowerSettings();
+  content::RecordAction(base::UserMetricsAction("Tray_ShowPowerOptions"));
+  ShowSettingsSubPageForActiveUser(chrome::kPowerOptionsSubPage);
 }
 
 void SystemTrayClient::ShowChromeSlow() {
-  SystemTrayCommon::ShowChromeSlow();
+  chrome::ScopedTabbedBrowserDisplayer displayer(
+      ProfileManager::GetPrimaryUserProfile());
+  chrome::ShowSlow(displayer.browser());
 }
 
 void SystemTrayClient::ShowIMESettings() {
-  SystemTrayCommon::ShowIMESettings();
+  content::RecordAction(base::UserMetricsAction("OpenLanguageOptionsDialog"));
+  ShowSettingsSubPageForActiveUser(chrome::kLanguageOptionsSubPage);
 }
 
 void SystemTrayClient::ShowHelp() {
-  SystemTrayCommon::ShowHelp();
+  chrome::ShowHelpForProfile(ProfileManager::GetActiveUserProfile(),
+                             chrome::HELP_SOURCE_MENU);
 }
 
 void SystemTrayClient::ShowAccessibilityHelp() {
-  SystemTrayCommon::ShowAccessibilityHelp();
+  chrome::ScopedTabbedBrowserDisplayer displayer(
+      ProfileManager::GetActiveUserProfile());
+  chromeos::accessibility::ShowAccessibilityHelp(displayer.browser());
 }
 
 void SystemTrayClient::ShowAccessibilitySettings() {
-  SystemTrayCommon::ShowAccessibilitySettings();
+  content::RecordAction(base::UserMetricsAction("ShowAccessibilitySettings"));
+  std::string sub_page = std::string(chrome::kSearchSubPage) + "#" +
+                         l10n_util::GetStringUTF8(
+                             IDS_OPTIONS_SETTINGS_SECTION_TITLE_ACCESSIBILITY);
+  ShowSettingsSubPageForActiveUser(sub_page);
 }
 
 void SystemTrayClient::ShowPaletteHelp() {
-  SystemTrayCommon::ShowPaletteHelp();
+  chrome::ScopedTabbedBrowserDisplayer displayer(
+      ProfileManager::GetActiveUserProfile());
+  chrome::ShowSingletonTab(displayer.browser(),
+                           GURL(chrome::kChromePaletteHelpURL));
 }
 
 void SystemTrayClient::ShowPaletteSettings() {
-  SystemTrayCommon::ShowPaletteSettings();
+  content::RecordAction(base::UserMetricsAction("ShowPaletteOptions"));
+  ShowSettingsSubPageForActiveUser(kPaletteSettingsSubPageName);
 }
 
 void SystemTrayClient::ShowPublicAccountInfo() {
-  SystemTrayCommon::ShowPublicAccountInfo();
+  chrome::ScopedTabbedBrowserDisplayer displayer(
+      ProfileManager::GetActiveUserProfile());
+  chrome::ShowPolicy(displayer.browser());
 }
 
 void SystemTrayClient::ShowProxySettings() {
-  SystemTrayCommon::ShowProxySettings();
+  LoginState* login_state = LoginState::Get();
+  // User is not logged in.
+  CHECK(!login_state->IsUserLoggedIn() ||
+        login_state->GetLoggedInUserType() == LoginState::LOGGED_IN_USER_NONE);
+  chromeos::LoginDisplayHost::default_host()->OpenProxySettings();
 }
 
 ////////////////////////////////////////////////////////////////////////////////

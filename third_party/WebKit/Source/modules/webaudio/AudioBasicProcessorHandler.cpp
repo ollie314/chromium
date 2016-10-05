@@ -10,16 +10,17 @@
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
  *
- * THIS SOFTWARE IS PROVIDED BY APPLE INC. AND ITS CONTRIBUTORS ``AS IS'' AND ANY
- * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- * DISCLAIMED. IN NO EVENT SHALL APPLE INC. OR ITS CONTRIBUTORS BE LIABLE FOR ANY
- * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
- * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
- * ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY APPLE INC. AND ITS CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL APPLE INC. OR ITS CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+ * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
+ * DAMAGE.
  */
 
 #include "modules/webaudio/AudioBasicProcessorHandler.h"
@@ -85,7 +86,8 @@ void AudioBasicProcessorHandler::process(size_t framesToProcess) {
   } else {
     AudioBus* sourceBus = input(0).bus();
 
-    // FIXME: if we take "tail time" into account, then we can avoid calling processor()->process() once the tail dies down.
+    // FIXME: if we take "tail time" into account, then we can avoid calling
+    // processor()->process() once the tail dies down.
     if (!input(0).isConnected())
       sourceBus->zero();
 
@@ -95,13 +97,15 @@ void AudioBasicProcessorHandler::process(size_t framesToProcess) {
 
 // Nice optimization in the very common case allowing for "in-place" processing
 void AudioBasicProcessorHandler::pullInputs(size_t framesToProcess) {
-  // Render input stream - suggest to the input to render directly into output bus for in-place processing in process() if possible.
+  // Render input stream - suggest to the input to render directly into output
+  // bus for in-place processing in process() if possible.
   input(0).pull(output(0).bus(), framesToProcess);
 }
 
 // As soon as we know the channel count of our input, we can lazily initialize.
-// Sometimes this may be called more than once with different channel counts, in which case we must safely
-// uninitialize and then re-initialize with the new channel count.
+// Sometimes this may be called more than once with different channel counts, in
+// which case we must safely uninitialize and then re-initialize with the new
+// channel count.
 void AudioBasicProcessorHandler::checkNumberOfChannelsForInput(
     AudioNodeInput* input) {
   DCHECK(context()->isAudioThread());
@@ -123,7 +127,8 @@ void AudioBasicProcessorHandler::checkNumberOfChannelsForInput(
   }
 
   if (!isInitialized()) {
-    // This will propagate the channel count to any nodes connected further down the chain...
+    // This will propagate the channel count to any nodes connected further down
+    // the chain...
     output(0).setNumberOfChannels(numberOfChannels);
 
     // Re-initialize the processor with the new channel count.

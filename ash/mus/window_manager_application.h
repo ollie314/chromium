@@ -11,7 +11,6 @@
 #include <set>
 
 #include "ash/public/interfaces/shelf.mojom.h"
-#include "ash/public/interfaces/system_tray.mojom.h"
 #include "ash/public/interfaces/wallpaper.mojom.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
@@ -55,7 +54,6 @@ class WindowManager;
 class WindowManagerApplication
     : public shell::Service,
       public shell::InterfaceFactory<mojom::ShelfController>,
-      public shell::InterfaceFactory<mojom::SystemTray>,
       public shell::InterfaceFactory<mojom::WallpaperController>,
       public shell::InterfaceFactory<ui::mojom::AcceleratorRegistrar>,
       public mash::session::mojom::ScreenlockStateListener {
@@ -77,6 +75,10 @@ class WindowManagerApplication
       std::unique_ptr<ui::WindowTreeClient> window_tree_client,
       const scoped_refptr<base::SequencedWorkerPool>& blocking_pool);
 
+  // Initializes lower-level OS-specific components (e.g. D-Bus services).
+  void InitializeComponents();
+  void ShutdownComponents();
+
   // shell::Service:
   void OnStart(const shell::Identity& identity) override;
   bool OnConnect(const shell::Identity& remote_identity,
@@ -85,10 +87,6 @@ class WindowManagerApplication
   // InterfaceFactory<mojom::ShelfController>:
   void Create(const shell::Identity& remote_identity,
               mojom::ShelfControllerRequest request) override;
-
-  // InterfaceFactory<mojom::SystemTray>:
-  void Create(const shell::Identity& remote_identity,
-              mojom::SystemTrayRequest request) override;
 
   // InterfaceFactory<mojom::WallpaperController>:
   void Create(const shell::Identity& remote_identity,
@@ -114,7 +112,6 @@ class WindowManagerApplication
   scoped_refptr<base::SequencedWorkerPool> blocking_pool_;
 
   mojo::BindingSet<mojom::ShelfController> shelf_controller_bindings_;
-  mojo::BindingSet<mojom::SystemTray> system_tray_bindings_;
   mojo::BindingSet<mojom::WallpaperController> wallpaper_controller_bindings_;
 
   std::set<AcceleratorRegistrarImpl*> accelerator_registrars_;
@@ -125,6 +122,8 @@ class WindowManagerApplication
       screenlock_state_listener_binding_;
 
 #if defined(OS_CHROMEOS)
+  class StubNetworkConnectDelegate;
+  std::unique_ptr<StubNetworkConnectDelegate> network_connect_delegate_;
   std::unique_ptr<chromeos::system::ScopedFakeStatisticsProvider>
       statistics_provider_;
 #endif

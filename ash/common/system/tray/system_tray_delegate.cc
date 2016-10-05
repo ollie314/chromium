@@ -77,45 +77,17 @@ void SystemTrayDelegate::GetSystemUpdateInfo(UpdateInfo* info) const {
   info->factory_reset_required = false;
 }
 
-base::HourClockType SystemTrayDelegate::GetHourClockType() const {
-  return base::k24HourClock;
-}
-
-void SystemTrayDelegate::ShowSettings() {}
-
 bool SystemTrayDelegate::ShouldShowSettings() {
   return false;
 }
-
-void SystemTrayDelegate::ShowDateSettings() {}
 
 void SystemTrayDelegate::ShowSetTimeDialog() {}
 
 void SystemTrayDelegate::ShowNetworkSettingsForGuid(const std::string& guid) {}
 
-void SystemTrayDelegate::ShowDisplaySettings() {}
-
-void SystemTrayDelegate::ShowPowerSettings() {}
-
-void SystemTrayDelegate::ShowChromeSlow() {}
-
 bool SystemTrayDelegate::ShouldShowDisplayNotification() {
   return false;
 }
-
-void SystemTrayDelegate::ShowIMESettings() {}
-
-void SystemTrayDelegate::ShowHelp() {}
-
-void SystemTrayDelegate::ShowAccessibilityHelp() {}
-
-void SystemTrayDelegate::ShowAccessibilitySettings() {}
-
-void SystemTrayDelegate::ShowPaletteHelp() {}
-
-void SystemTrayDelegate::ShowPaletteSettings() {}
-
-void SystemTrayDelegate::ShowPublicAccountInfo() {}
 
 void SystemTrayDelegate::ShowEnterpriseInfo() {}
 
@@ -167,8 +139,6 @@ bool SystemTrayDelegate::GetBluetoothEnabled() {
 bool SystemTrayDelegate::GetBluetoothDiscovering() {
   return false;
 }
-
-void SystemTrayDelegate::ShowProxySettings() {}
 
 CastConfigDelegate* SystemTrayDelegate::GetCastConfigDelegate() {
   return nullptr;

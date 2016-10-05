@@ -7,8 +7,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <map>
-#include <memory>
 #include <utility>
 #include <vector>
 
@@ -19,18 +17,16 @@
 #include "base/run_loop.h"
 #include "components/sync/api/data_type_error_handler_mock.h"
 #include "components/sync/api/fake_model_type_service.h"
-#include "components/sync/base/model_type.h"
 #include "components/sync/base/time.h"
 #include "components/sync/core/activation_context.h"
 #include "components/sync/core/simple_metadata_change_list.h"
 #include "components/sync/engine/commit_queue.h"
-#include "components/sync/protocol/sync.pb.h"
 #include "components/sync/test/engine/mock_model_type_worker.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using sync_pb::EntitySpecifics;
 using sync_pb::EntityMetadata;
-using sync_pb::DataTypeState;
+using sync_pb::ModelTypeState;
 
 namespace syncer {
 
@@ -84,9 +80,9 @@ class SharedModelTypeProcessorTest : public ::testing::Test,
 
   void InitializeToMetadataLoaded() {
     CreateChangeProcessor();
-    DataTypeState data_type_state(db_.data_type_state());
-    data_type_state.set_initial_sync_done(true);
-    db_.set_data_type_state(data_type_state);
+    ModelTypeState model_type_state(db_.model_type_state());
+    model_type_state.set_initial_sync_done(true);
+    db_.set_model_type_state(model_type_state);
     OnMetadataLoaded();
   }
 
@@ -212,7 +208,7 @@ class SharedModelTypeProcessorTest : public ::testing::Test,
     }
 
     std::unique_ptr<MockModelTypeWorker> worker(
-        new MockModelTypeWorker(context->data_type_state, type_processor()));
+        new MockModelTypeWorker(context->model_type_state, type_processor()));
     // Keep an unsafe pointer to the commit queue the processor will use.
     worker_ = worker.get();
     // The context contains a proxy to the processor, but this call is

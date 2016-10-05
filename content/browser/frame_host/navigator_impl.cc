@@ -520,7 +520,8 @@ void NavigatorImpl::DidNavigate(
   // message, which is sent inside DidNavigateFrame().  SwapOut needs the
   // origin because it creates a RenderFrameProxy that needs this to initialize
   // its security context. This origin will also be sent to RenderFrameProxies
-  // created via mojom::Renderer::CreateView and FrameMsg_NewFrameProxy.
+  // created via mojom::Renderer::CreateView and
+  // mojom::Renderer::CreateFrameProxy.
   render_frame_host->frame_tree_node()->SetCurrentOrigin(
       params.origin, params.has_potentially_trustworthy_unique_origin);
 
@@ -821,8 +822,9 @@ void NavigatorImpl::RequestTransferURL(
     }
     entry->AddOrUpdateFrameEntry(
         node, -1, -1, nullptr,
-        static_cast<SiteInstanceImpl*>(source_site_instance), dest_url,
-        referrer_to_use, PageState(), method, -1);
+        static_cast<SiteInstanceImpl*>(source_site_instance),
+        dest_url, referrer_to_use, redirect_chain, PageState(), method,
+        -1);
   } else {
     // Main frame case.
     entry = NavigationEntryImpl::FromNavigationEntry(
@@ -831,9 +833,9 @@ void NavigatorImpl::RequestTransferURL(
             std::string(), controller_->GetBrowserContext()));
     entry->root_node()->frame_entry->set_source_site_instance(
         static_cast<SiteInstanceImpl*>(source_site_instance));
+    entry->SetRedirectChain(redirect_chain);
   }
 
-  entry->SetRedirectChain(redirect_chain);
   // Don't allow an entry replacement if there is no entry to replace.
   // http://crbug.com/457149
   if (should_replace_current_entry && controller_->GetEntryCount() > 0)

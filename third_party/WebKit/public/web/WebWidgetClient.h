@@ -65,14 +65,16 @@ class WebWidgetClient {
   // Return a compositing view used for this widget. This is owned by the
   // WebWidgetClient.
   virtual WebLayerTreeView* layerTreeView() { return 0; }
-  // FIXME: Remove all overrides of this and change layerTreeView() above to ASSERT_NOT_REACHED.
+  // FIXME: Remove all overrides of this and change layerTreeView() above to
+  // ASSERT_NOT_REACHED.
   virtual bool allowsBrokenNullLayerTreeView() const { return false; }
 
   // Called when a call to WebWidget::animate is required
   virtual void scheduleAnimation() {}
 
-  // Called immediately following the first compositor-driven (frame-generating) layout that
-  // happened after an interesting document lifecyle change (see WebMeaningfulLayout for details.)
+  // Called immediately following the first compositor-driven (frame-generating)
+  // layout that happened after an interesting document lifecyle change (see
+  // WebMeaningfulLayout for details.)
   virtual void didMeaningfulLayout(WebMeaningfulLayout) {}
 
   virtual void didFirstLayoutAfterFinishedParsing() {}
@@ -87,9 +89,15 @@ class WebWidgetClient {
   // Called to show the widget according to the given policy.
   virtual void show(WebNavigationPolicy) {}
 
-  // Called to get/set the position of the widget in screen coordinates.
+  // Called to get/set the position of the widget's window in screen
+  // coordinates. Note, the window includes any decorations such as borders,
+  // scrollbars, URL bar, tab strip, etc. if they exist.
   virtual WebRect windowRect() { return WebRect(); }
   virtual void setWindowRect(const WebRect&) {}
+
+  // Called to get the view rect in screen coordinates. This is the actual
+  // content view area, i.e. doesn't include any window decorations.
+  virtual WebRect viewRect() { return WebRect(); }
 
   // Called when a tooltip should be shown at the current cursor position.
   virtual void setToolTipText(const WebString&, WebTextDirection hint) {}
@@ -134,8 +142,8 @@ class WebWidgetClient {
   // Called to update if touch events should be sent.
   virtual void hasTouchEventHandlers(bool) {}
 
-  // Called during WebWidget::HandleInputEvent for a TouchStart event to inform the embedder
-  // of the touch actions that are permitted for this touch.
+  // Called during WebWidget::HandleInputEvent for a TouchStart event to inform
+  // the embedder of the touch actions that are permitted for this touch.
   virtual void setTouchAction(WebTouchAction touchAction) {}
 
   // Called when value of focused text field gets dirty, e.g. value is

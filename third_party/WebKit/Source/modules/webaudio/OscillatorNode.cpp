@@ -10,16 +10,17 @@
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
  *
- * THIS SOFTWARE IS PROVIDED BY APPLE INC. AND ITS CONTRIBUTORS ``AS IS'' AND ANY
- * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- * DISCLAIMED. IN NO EVENT SHALL APPLE INC. OR ITS CONTRIBUTORS BE LIABLE FOR ANY
- * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
- * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
- * ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY APPLE INC. AND ITS CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL APPLE INC. OR ITS CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+ * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
+ * DAMAGE.
  */
 
 #include "modules/webaudio/OscillatorNode.h"
@@ -125,8 +126,8 @@ bool OscillatorHandler::setType(unsigned type) {
       break;
     case CUSTOM:
     default:
-      // Return false for invalid types, including CUSTOM since setPeriodicWave() method must be
-      // called explicitly.
+      // Return false for invalid types, including CUSTOM since
+      // setPeriodicWave() method must be called explicitly.
       ASSERT_NOT_REACHED();
       return false;
   }
@@ -165,7 +166,8 @@ bool OscillatorHandler::calculateSampleAccuratePhaseIncrements(
     m_frequency->calculateSampleAccurateValues(phaseIncrements,
                                                framesToProcess);
   } else {
-    // Handle ordinary parameter smoothing/de-zippering if there are no scheduled changes.
+    // Handle ordinary parameter smoothing/de-zippering if there are no
+    // scheduled changes.
     m_frequency->smooth();
     float frequency = m_frequency->smoothedValue();
     finalScale *= frequency;
@@ -192,7 +194,8 @@ bool OscillatorHandler::calculateSampleAccuratePhaseIncrements(
            framesToProcess);
     }
   } else {
-    // Handle ordinary parameter smoothing/de-zippering if there are no scheduled changes.
+    // Handle ordinary parameter smoothing/de-zippering if there are no
+    // scheduled changes.
     m_detune->smooth();
     float detune = m_detune->smoothedValue();
     float detuneScale = powf(2, detune / 1200);
@@ -222,7 +225,8 @@ void OscillatorHandler::process(size_t framesToProcess) {
   // The audio thread can't block on this lock, so we call tryLock() instead.
   MutexTryLocker tryLocker(m_processLock);
   if (!tryLocker.locked()) {
-    // Too bad - the tryLock() failed. We must be in the middle of changing wave-tables.
+    // Too bad - the tryLock() failed. We must be in the middle of changing
+    // wave-tables.
     outputBus->zero();
     return;
   }
@@ -317,7 +321,8 @@ void OscillatorHandler::process(size_t framesToProcess) {
 
     *destP++ = sample;
 
-    // Increment virtual read index and wrap virtualReadIndex into the range 0 -> periodicWaveSize.
+    // Increment virtual read index and wrap virtualReadIndex into the range
+    // 0 -> periodicWaveSize.
     virtualReadIndex += incr;
     virtualReadIndex -=
         floor(virtualReadIndex * invPeriodicWaveSize) * periodicWaveSize;

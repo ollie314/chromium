@@ -10,16 +10,17 @@
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
  *
- * THIS SOFTWARE IS PROVIDED BY APPLE INC. AND ITS CONTRIBUTORS ``AS IS'' AND ANY
- * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- * DISCLAIMED. IN NO EVENT SHALL APPLE INC. OR ITS CONTRIBUTORS BE LIABLE FOR ANY
- * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
- * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
- * ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY APPLE INC. AND ITS CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL APPLE INC. OR ITS CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+ * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
+ * DAMAGE.
  */
 
 #include "modules/webaudio/AudioNodeInput.h"
@@ -69,11 +70,13 @@ void AudioNodeOutput::setNumberOfChannels(unsigned numberOfChannels) {
   m_desiredNumberOfChannels = numberOfChannels;
 
   if (deferredTaskHandler().isAudioThread()) {
-    // If we're in the audio thread then we can take care of it right away (we should be at the very start or end of a rendering quantum).
+    // If we're in the audio thread then we can take care of it right away (we
+    // should be at the very start or end of a rendering quantum).
     updateNumberOfChannels();
   } else {
     DCHECK(!m_didCallDispose);
-    // Let the context take care of it in the audio thread in the pre and post render tasks.
+    // Let the context take care of it in the audio thread in the pre and post
+    // render tasks.
     deferredTaskHandler().markAudioNodeOutputDirty(this);
   }
 }
@@ -108,7 +111,8 @@ void AudioNodeOutput::propagateChannelCount() {
   ASSERT(deferredTaskHandler().isGraphOwner());
 
   if (isChannelCountKnown()) {
-    // Announce to any nodes we're connected to that we changed our channel count for its input.
+    // Announce to any nodes we're connected to that we changed our channel
+    // count for its input.
     for (AudioNodeInput* i : m_inputs)
       i->handler().checkNumberOfChannelsForInput(i);
   }
@@ -118,11 +122,13 @@ AudioBus* AudioNodeOutput::pull(AudioBus* inPlaceBus, size_t framesToProcess) {
   DCHECK(deferredTaskHandler().isAudioThread());
   DCHECK(m_renderingFanOutCount > 0 || m_renderingParamFanOutCount > 0);
 
-  // Causes our AudioNode to process if it hasn't already for this render quantum.
-  // We try to do in-place processing (using inPlaceBus) if at all possible,
-  // but we can't process in-place if we're connected to more than one input (fan-out > 1).
-  // In this case pull() is called multiple times per rendering quantum, and the processIfNecessary() call below will
-  // cause our node to process() only the first time, caching the output in m_internalOutputBus for subsequent calls.
+  // Causes our AudioNode to process if it hasn't already for this render
+  // quantum.  We try to do in-place processing (using inPlaceBus) if at all
+  // possible, but we can't process in-place if we're connected to more than one
+  // input (fan-out > 1).  In this case pull() is called multiple times per
+  // rendering quantum, and the processIfNecessary() call below will cause our
+  // node to process() only the first time, caching the output in
+  // m_internalOutputBus for subsequent calls.
 
   m_isInPlace = inPlaceBus &&
                 inPlaceBus->numberOfChannels() == numberOfChannels() &&

@@ -20,6 +20,7 @@
 #include "device/bluetooth/bluetooth_socket_win.h"
 #include "device/bluetooth/bluetooth_task_manager_win.h"
 #include "device/bluetooth/bluetooth_uuid.h"
+#include "net/log/net_log_source.h"
 
 namespace device {
 
@@ -186,14 +187,6 @@ void BluetoothAdapterWin::CreateL2capService(
   NOTIMPLEMENTED();
 }
 
-void BluetoothAdapterWin::RegisterAudioSink(
-    const BluetoothAudioSink::Options& options,
-    const AcquiredCallback& callback,
-    const BluetoothAudioSink::ErrorCallback& error_callback) {
-  NOTIMPLEMENTED();
-  error_callback.Run(BluetoothAudioSink::ERROR_UNSUPPORTED_PLATFORM);
-}
-
 void BluetoothAdapterWin::RegisterAdvertisement(
     std::unique_ptr<BluetoothAdvertisement::Data> advertisement_data,
     const CreateAdvertisementCallback& callback,
@@ -282,7 +275,7 @@ void BluetoothAdapterWin::DevicesPolled(
     if (added_devices.find(device_state->address) != added_devices.end()) {
       BluetoothDeviceWin* device_win =
           new BluetoothDeviceWin(this, *device_state, ui_task_runner_,
-                                 socket_thread_, NULL, net::NetLog::Source());
+                                 socket_thread_, NULL, net::NetLogSource());
       devices_.set(device_state->address,
                    std::unique_ptr<BluetoothDevice>(device_win));
       FOR_EACH_OBSERVER(BluetoothAdapter::Observer,
