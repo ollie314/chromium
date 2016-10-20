@@ -61,6 +61,7 @@ import org.chromium.chrome.browser.firstrun.FirstRunActivity;
 import org.chromium.chrome.browser.firstrun.FirstRunFlowSequencer;
 import org.chromium.chrome.browser.firstrun.FirstRunSignInProcessor;
 import org.chromium.chrome.browser.firstrun.FirstRunStatus;
+import org.chromium.chrome.browser.fullscreen.ChromeFullscreenManager;
 import org.chromium.chrome.browser.incognito.IncognitoNotificationManager;
 import org.chromium.chrome.browser.infobar.DataReductionPromoInfoBar;
 import org.chromium.chrome.browser.locale.LocaleManager;
@@ -358,6 +359,8 @@ public class ChromeTabbedActivity extends ChromeActivity implements OverviewMode
 
             launchFirstRunExperience();
 
+            refreshSignIn();
+
             ChromePreferenceManager preferenceManager = ChromePreferenceManager.getInstance(this);
             // Promos can only be shown when we start with ACTION_MAIN intent and
             // after FRE is complete.
@@ -374,8 +377,6 @@ public class ChromeTabbedActivity extends ChromeActivity implements OverviewMode
                     preferenceManager.setPromosSkippedOnFirstStart(true);
                 }
             }
-
-            refreshSignIn();
 
             initializeUI();
 
@@ -403,6 +404,7 @@ public class ChromeTabbedActivity extends ChromeActivity implements OverviewMode
     @Override
     public void onResumeWithNative() {
         super.onResumeWithNative();
+
         CookiesFetcher.restoreCookies(this);
         StartupMetrics.getInstance().recordHistogram(false);
 
@@ -415,14 +417,21 @@ public class ChromeTabbedActivity extends ChromeActivity implements OverviewMode
             }
             mMergeTabsOnResume = false;
         }
-        if (mVrShellDelegate.isInVR()) mVrShellDelegate.resumeVR();
+        mVrShellDelegate.maybeResumeVR();
+
+        mLocaleManager.setSnackbarManager(getSnackbarManager());
+        mLocaleManager.startObservingPhoneChanges();
     }
 
     @Override
     public void onPauseWithNative() {
         mTabModelSelectorImpl.commitAllTabClosures();
         CookiesFetcher.persistCookies(this);
-        if (mVrShellDelegate.isInVR()) mVrShellDelegate.pauseVR();
+        mVrShellDelegate.maybePauseVR();
+
+        mLocaleManager.setSnackbarManager(null);
+        mLocaleManager.stopObservingPhoneChanges();
+
         super.onPauseWithNative();
     }
 
@@ -435,8 +444,6 @@ public class ChromeTabbedActivity extends ChromeActivity implements OverviewMode
         mTabModelSelectorImpl.saveState();
         StartupMetrics.getInstance().recordHistogram(true);
         mActivityStopMetrics.onStopWithNative(this);
-
-        mLocaleManager.stopObservingPhoneChanges();
     }
 
     @Override
@@ -450,8 +457,6 @@ public class ChromeTabbedActivity extends ChromeActivity implements OverviewMode
         super.onStartWithNative();
         // If we don't have a current tab, show the overview mode.
         if (getActivityTab() == null) mLayoutManager.showOverview(false);
-
-        mLocaleManager.startObservingPhoneChanges();
 
         resetSavedInstanceState();
     }
@@ -543,12 +548,6 @@ public class ChromeTabbedActivity extends ChromeActivity implements OverviewMode
                 float controlHeight = getResources().getDimension(R.dimen.control_container_height);
                 ((FrameLayout.LayoutParams) mContentContainer.getLayoutParams()).topMargin =
                         (int) controlHeight;
-            }
-
-            // Bootstrap the first tab as it may have been created before initializing the
-            // fullscreen manager.
-            if (mTabModelSelectorImpl != null && mTabModelSelectorImpl.getCurrentTab() != null) {
-                mTabModelSelectorImpl.getCurrentTab().setFullscreenManager(getFullscreenManager());
             }
 
             mFindToolbarManager = new FindToolbarManager(this,
@@ -933,7 +932,18 @@ public class ChromeTabbedActivity extends ChromeActivity implements OverviewMode
 
     @Override
     protected int getControlContainerLayoutId() {
+        if (FeatureUtilities.isChromeHomeEnabled()) {
+            return R.layout.bottom_control_container;
+        }
         return R.layout.control_container;
+    }
+
+    @Override
+    protected int getToolbarLayoutId() {
+        if (DeviceFormFactor.isTablet(getApplicationContext())) return R.layout.toolbar_tablet;
+
+        if (FeatureUtilities.isChromeHomeEnabled()) return R.layout.bottom_toolbar_phone;
+        return R.layout.toolbar_phone;
     }
 
     @Override
@@ -1028,8 +1038,10 @@ public class ChromeTabbedActivity extends ChromeActivity implements OverviewMode
         boolean startIncognito = savedInstanceState != null
                 && savedInstanceState.getBoolean("is_incognito_selected", false);
         int index = savedInstanceState != null ? savedInstanceState.getInt(WINDOW_INDEX, 0) : 0;
+
         mTabModelSelectorImpl = (TabModelSelectorImpl)
-                TabWindowManager.getInstance().requestSelector(this, getWindowAndroid(), index);
+                TabWindowManager.getInstance().requestSelector(this, this, getFullscreenManager(),
+                        index);
         if (mTabModelSelectorImpl == null) {
             Toast.makeText(this, getString(R.string.unsupported_number_of_windows),
                     Toast.LENGTH_LONG).show();
@@ -1176,7 +1188,7 @@ public class ChromeTabbedActivity extends ChromeActivity implements OverviewMode
         Intent intent = new Intent(this, targetActivity);
         MultiWindowUtils.setOpenInOtherWindowIntentExtras(intent, this, targetActivity);
 
-        tab.detachAndStartReparenting(intent, null, null, true);
+        tab.detachAndStartReparenting(intent, null, null);
     }
 
     @Override
@@ -1626,6 +1638,16 @@ public class ChromeTabbedActivity extends ChromeActivity implements OverviewMode
         } catch (Exception e) {
             e.printStackTrace();
         }
+    }
 
+    public VrShellDelegate getVrShellDelegate() {
+        return mVrShellDelegate;
+    }
+
+    @Override
+    protected ChromeFullscreenManager createFullscreenManager() {
+        return new ChromeFullscreenManager(this,
+                (ToolbarControlContainer) findViewById(R.id.control_container),
+                getControlContainerHeightResource(), true);
     }
 }

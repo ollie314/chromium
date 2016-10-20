@@ -119,7 +119,7 @@ class CONTENT_EXPORT DelegatedFrameHost
 
   // cc::SurfaceFactoryClient implementation.
   void ReturnResources(const cc::ReturnedResourceArray& resources) override;
-  void WillDrawSurface(const cc::SurfaceId& id,
+  void WillDrawSurface(const cc::LocalFrameId& id,
                        const gfx::Rect& damage_rect) override;
   void SetBeginFrameSource(cc::BeginFrameSource* begin_frame_source) override;
 
@@ -161,22 +161,30 @@ class CONTENT_EXPORT DelegatedFrameHost
 
   // Given the SurfaceID of a Surface that is contained within this class'
   // Surface, find the relative transform between the Surfaces and apply it
-  // to a point. If a Surface has not yet been created this returns the
-  // same point with no transform applied.
-  gfx::Point TransformPointToLocalCoordSpace(
-      const gfx::Point& point,
-      const cc::SurfaceId& original_surface);
+  // to a point. Returns false if a Surface has not yet been created or if
+  // |original_surface| is not embedded within our current Surface.
+  bool TransformPointToLocalCoordSpace(const gfx::Point& point,
+                                       const cc::SurfaceId& original_surface,
+                                       gfx::Point* transformed_point);
 
   // Given a RenderWidgetHostViewBase that renders to a Surface that is
   // contained within this class' Surface, find the relative transform between
-  // the Surfaces and apply it to a point. If a Surface has not yet been
-  // created this returns the same point with no transform applied.
-  gfx::Point TransformPointToCoordSpaceForView(
-      const gfx::Point& point,
-      RenderWidgetHostViewBase* target_view);
+  // the Surfaces and apply it to a point. Returns false if a Surface has not
+  // yet been created or if |target_view| is not a descendant RWHV from our
+  // client.
+  bool TransformPointToCoordSpaceForView(const gfx::Point& point,
+                                         RenderWidgetHostViewBase* target_view,
+                                         gfx::Point* transformed_point);
 
   // Exposed for tests.
-  cc::SurfaceId SurfaceIdForTesting() const { return surface_id_; }
+  cc::SurfaceId SurfaceIdForTesting() const {
+    return cc::SurfaceId(frame_sink_id_, local_frame_id_);
+  }
+
+  const cc::LocalFrameId& LocalFrameIdForTesting() const {
+    return local_frame_id_;
+  }
+
   void OnCompositingDidCommitForTesting(ui::Compositor* compositor) {
     OnCompositingDidCommit(compositor);
   }
@@ -249,6 +257,7 @@ class CONTENT_EXPORT DelegatedFrameHost
   void AttemptFrameSubscriberCapture(const gfx::Rect& damage_rect);
 
   const cc::FrameSinkId frame_sink_id_;
+  cc::LocalFrameId local_frame_id_;
   DelegatedFrameHostClient* const client_;
   ui::Compositor* compositor_;
 
@@ -286,7 +295,6 @@ class CONTENT_EXPORT DelegatedFrameHost
   // State for rendering into a Surface.
   std::unique_ptr<cc::SurfaceIdAllocator> id_allocator_;
   std::unique_ptr<cc::SurfaceFactory> surface_factory_;
-  cc::SurfaceId surface_id_;
   gfx::Size current_surface_size_;
   float current_scale_factor_;
   cc::ReturnedResourceArray surface_returned_resources_;

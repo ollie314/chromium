@@ -26,7 +26,7 @@ namespace blink {
 class WebBluetoothRemoteGATTCharacteristic;
 }
 
-namespace shell {
+namespace service_manager {
 class InterfaceProvider;
 }
 
@@ -41,7 +41,7 @@ class CONTENT_EXPORT WebBluetoothImpl
     : NON_EXPORTED_BASE(public blink::mojom::WebBluetoothServiceClient),
       NON_EXPORTED_BASE(public blink::WebBluetooth) {
  public:
-  WebBluetoothImpl(shell::InterfaceProvider* remote_interfaces);
+  WebBluetoothImpl(service_manager::InterfaceProvider* remote_interfaces);
   ~WebBluetoothImpl() override;
 
   // blink::WebBluetooth interface:
@@ -94,34 +94,34 @@ class CONTENT_EXPORT WebBluetoothImpl
   // Callbacks for WebBluetoothService calls:
   void OnRequestDeviceComplete(
       std::unique_ptr<blink::WebBluetoothRequestDeviceCallbacks> callbacks,
-      const blink::mojom::WebBluetoothError error,
+      const blink::mojom::WebBluetoothResult result,
       blink::mojom::WebBluetoothDevicePtr device);
   void OnConnectComplete(
       std::unique_ptr<blink::WebBluetoothRemoteGATTServerConnectCallbacks>
           callbacks,
-      blink::mojom::WebBluetoothError error);
+      blink::mojom::WebBluetoothResult result);
   void OnGetPrimaryServicesComplete(
       const blink::WebString& device_id,
       std::unique_ptr<blink::WebBluetoothGetPrimaryServicesCallbacks> callbacks,
-      blink::mojom::WebBluetoothError error,
+      blink::mojom::WebBluetoothResult result,
       mojo::Array<blink::mojom::WebBluetoothRemoteGATTServicePtr> services);
   void OnGetCharacteristicsComplete(
       const blink::WebString& service_instance_id,
       std::unique_ptr<blink::WebBluetoothGetCharacteristicsCallbacks> callbacks,
-      blink::mojom::WebBluetoothError error,
+      blink::mojom::WebBluetoothResult result,
       mojo::Array<blink::mojom::WebBluetoothRemoteGATTCharacteristicPtr>
           characteristics);
   void OnReadValueComplete(
       std::unique_ptr<blink::WebBluetoothReadValueCallbacks> callbacks,
-      blink::mojom::WebBluetoothError error,
+      blink::mojom::WebBluetoothResult result,
       mojo::Array<uint8_t> value);
   void OnWriteValueComplete(
       const blink::WebVector<uint8_t>& value,
       std::unique_ptr<blink::WebBluetoothWriteValueCallbacks> callbacks,
-      blink::mojom::WebBluetoothError error);
+      blink::mojom::WebBluetoothResult result);
   void OnStartNotificationsComplete(
       std::unique_ptr<blink::WebBluetoothNotificationsCallbacks> callbacks,
-      blink::mojom::WebBluetoothError error);
+      blink::mojom::WebBluetoothResult result);
   void OnStopNotificationsComplete(
       std::unique_ptr<blink::WebBluetoothNotificationsCallbacks> callbacks);
 
@@ -130,7 +130,7 @@ class CONTENT_EXPORT WebBluetoothImpl
       const std::vector<uint8_t>& value);
 
   blink::mojom::WebBluetoothService& GetWebBluetoothService();
-  shell::InterfaceProvider* const remote_interfaces_;
+  service_manager::InterfaceProvider* const remote_interfaces_;
   blink::mojom::WebBluetoothServicePtr web_bluetooth_service_;
 
   // Map of characteristic_instance_ids to

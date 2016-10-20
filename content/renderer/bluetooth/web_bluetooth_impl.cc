@@ -16,7 +16,7 @@
 #include "content/renderer/bluetooth/bluetooth_type_converters.h"
 #include "ipc/ipc_message.h"
 #include "mojo/public/cpp/bindings/array.h"
-#include "services/shell/public/cpp/interface_provider.h"
+#include "services/service_manager/public/cpp/interface_provider.h"
 #include "third_party/WebKit/public/platform/modules/bluetooth/WebBluetoothDevice.h"
 #include "third_party/WebKit/public/platform/modules/bluetooth/WebBluetoothDeviceInit.h"
 #include "third_party/WebKit/public/platform/modules/bluetooth/WebBluetoothRemoteGATTCharacteristic.h"
@@ -28,15 +28,16 @@ namespace content {
 
 namespace {
 
-// Blink can't use non-blink mojo enums like blink::mojom::WebBluetoothError, so
-// we pass it as an int32 across the boundary.
-int32_t ToInt32(blink::mojom::WebBluetoothError error) {
-  return static_cast<int32_t>(error);
+// Blink can't use non-blink mojo enums like blink::mojom::WebBluetoothResult,
+// so we pass it as an int32 across the boundary.
+int32_t ToInt32(blink::mojom::WebBluetoothResult result) {
+  return static_cast<int32_t>(result);
 }
 
 }  // namespace
 
-WebBluetoothImpl::WebBluetoothImpl(shell::InterfaceProvider* remote_interfaces)
+WebBluetoothImpl::WebBluetoothImpl(
+    service_manager::InterfaceProvider* remote_interfaces)
     : remote_interfaces_(remote_interfaces), binding_(this) {}
 
 WebBluetoothImpl::~WebBluetoothImpl() {
@@ -182,9 +183,9 @@ void WebBluetoothImpl::RemoteCharacteristicValueChanged(
 
 void WebBluetoothImpl::OnRequestDeviceComplete(
     std::unique_ptr<blink::WebBluetoothRequestDeviceCallbacks> callbacks,
-    const blink::mojom::WebBluetoothError error,
+    const blink::mojom::WebBluetoothResult result,
     blink::mojom::WebBluetoothDevicePtr device) {
-  if (error == blink::mojom::WebBluetoothError::SUCCESS) {
+  if (result == blink::mojom::WebBluetoothResult::SUCCESS) {
     blink::WebVector<blink::WebString> uuids(device->uuids.size());
     for (size_t i = 0; i < device->uuids.size(); ++i)
       uuids[i] = blink::WebString::fromUTF8(device->uuids[i]);
@@ -195,7 +196,7 @@ void WebBluetoothImpl::OnRequestDeviceComplete(
                                : blink::WebString::fromUTF8(device->name),
         uuids));
   } else {
-    callbacks->onError(ToInt32(error));
+    callbacks->onError(ToInt32(result));
   }
 }
 
@@ -215,20 +216,20 @@ void WebBluetoothImpl::GattServerDisconnected(
 void WebBluetoothImpl::OnConnectComplete(
     std::unique_ptr<blink::WebBluetoothRemoteGATTServerConnectCallbacks>
         callbacks,
-    blink::mojom::WebBluetoothError error) {
-  if (error == blink::mojom::WebBluetoothError::SUCCESS) {
+    blink::mojom::WebBluetoothResult result) {
+  if (result == blink::mojom::WebBluetoothResult::SUCCESS) {
     callbacks->onSuccess();
   } else {
-    callbacks->onError(ToInt32(error));
+    callbacks->onError(ToInt32(result));
   }
 }
 
 void WebBluetoothImpl::OnGetPrimaryServicesComplete(
     const blink::WebString& device_id,
     std::unique_ptr<blink::WebBluetoothGetPrimaryServicesCallbacks> callbacks,
-    blink::mojom::WebBluetoothError error,
+    blink::mojom::WebBluetoothResult result,
     mojo::Array<blink::mojom::WebBluetoothRemoteGATTServicePtr> services) {
-  if (error == blink::mojom::WebBluetoothError::SUCCESS) {
+  if (result == blink::mojom::WebBluetoothResult::SUCCESS) {
     // TODO(dcheng): This WebVector should use smart pointers.
     blink::WebVector<blink::WebBluetoothRemoteGATTService*> promise_services(
         services.size());
@@ -241,17 +242,17 @@ void WebBluetoothImpl::OnGetPrimaryServicesComplete(
     }
     callbacks->onSuccess(promise_services);
   } else {
-    callbacks->onError(ToInt32(error));
+    callbacks->onError(ToInt32(result));
   }
 }
 
 void WebBluetoothImpl::OnGetCharacteristicsComplete(
     const blink::WebString& service_instance_id,
     std::unique_ptr<blink::WebBluetoothGetCharacteristicsCallbacks> callbacks,
-    blink::mojom::WebBluetoothError error,
+    blink::mojom::WebBluetoothResult result,
     mojo::Array<blink::mojom::WebBluetoothRemoteGATTCharacteristicPtr>
         characteristics) {
-  if (error == blink::mojom::WebBluetoothError::SUCCESS) {
+  if (result == blink::mojom::WebBluetoothResult::SUCCESS) {
     // TODO(dcheng): This WebVector should use smart pointers.
     blink::WebVector<blink::WebBluetoothRemoteGATTCharacteristicInit*>
         promise_characteristics(characteristics.size());
@@ -266,39 +267,39 @@ void WebBluetoothImpl::OnGetCharacteristicsComplete(
     }
     callbacks->onSuccess(promise_characteristics);
   } else {
-    callbacks->onError(ToInt32(error));
+    callbacks->onError(ToInt32(result));
   }
 }
 
 void WebBluetoothImpl::OnReadValueComplete(
     std::unique_ptr<blink::WebBluetoothReadValueCallbacks> callbacks,
-    blink::mojom::WebBluetoothError error,
+    blink::mojom::WebBluetoothResult result,
     mojo::Array<uint8_t> value) {
-  if (error == blink::mojom::WebBluetoothError::SUCCESS) {
+  if (result == blink::mojom::WebBluetoothResult::SUCCESS) {
     callbacks->onSuccess(value.PassStorage());
   } else {
-    callbacks->onError(ToInt32(error));
+    callbacks->onError(ToInt32(result));
   }
 }
 
 void WebBluetoothImpl::OnWriteValueComplete(
     const blink::WebVector<uint8_t>& value,
     std::unique_ptr<blink::WebBluetoothWriteValueCallbacks> callbacks,
-    blink::mojom::WebBluetoothError error) {
-  if (error == blink::mojom::WebBluetoothError::SUCCESS) {
+    blink::mojom::WebBluetoothResult result) {
+  if (result == blink::mojom::WebBluetoothResult::SUCCESS) {
     callbacks->onSuccess(value);
   } else {
-    callbacks->onError(ToInt32(error));
+    callbacks->onError(ToInt32(result));
   }
 }
 
 void WebBluetoothImpl::OnStartNotificationsComplete(
     std::unique_ptr<blink::WebBluetoothNotificationsCallbacks> callbacks,
-    blink::mojom::WebBluetoothError error) {
-  if (error == blink::mojom::WebBluetoothError::SUCCESS) {
+    blink::mojom::WebBluetoothResult result) {
+  if (result == blink::mojom::WebBluetoothResult::SUCCESS) {
     callbacks->onSuccess();
   } else {
-    callbacks->onError(ToInt32(error));
+    callbacks->onError(ToInt32(result));
   }
 }
 

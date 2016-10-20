@@ -162,6 +162,7 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
   void EndFrameSubscription() override;
   bool HasAcceleratedSurface(const gfx::Size& desired_size) override;
   gfx::Rect GetBoundsInRootWindow() override;
+  void OnSetNeedsFlushInput() override;
   void WheelEventAck(const blink::WebMouseWheelEvent& event,
                      InputEventAckState ack_result) override;
   void GestureEventAck(const blink::WebGestureEvent& event,
@@ -197,12 +198,13 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
                          const ui::LatencyInfo& latency) override;
   void ProcessGestureEvent(const blink::WebGestureEvent& event,
                            const ui::LatencyInfo& latency) override;
-  gfx::Point TransformPointToLocalCoordSpace(
+  bool TransformPointToLocalCoordSpace(const gfx::Point& point,
+                                       const cc::SurfaceId& original_surface,
+                                       gfx::Point* transformed_point) override;
+  bool TransformPointToCoordSpaceForView(
       const gfx::Point& point,
-      const cc::SurfaceId& original_surface) override;
-  gfx::Point TransformPointToCoordSpaceForView(
-      const gfx::Point& point,
-      RenderWidgetHostViewBase* target_view) override;
+      RenderWidgetHostViewBase* target_view,
+      gfx::Point* transformed_point) override;
 
   void FocusedNodeChanged(bool is_editable_node,
                           const gfx::Rect& node_bounds_in_screen) override;
@@ -424,7 +426,10 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
 
   // This method computes movementX/Y and keeps track of mouse location for
   // mouse lock on all mouse move events.
-  void ModifyEventMovementAndCoords(blink::WebMouseEvent* event);
+  // |ui_mouse_event| contains the mouse event received.
+  // |event| contains the WebMouseEvent being modified.
+  void ModifyEventMovementAndCoords(const ui::MouseEvent& ui_mouse_event,
+                                    blink::WebMouseEvent* event);
 
   // Sends an IPC to the renderer process to communicate whether or not
   // the mouse cursor is visible anywhere on the screen.
@@ -532,6 +537,9 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
   // Forwards a mouse event to this view's parent window delegate.
   void ForwardMouseEventToParent(ui::MouseEvent* event);
 
+  // Adds/Removes frame observer based on state.
+  void UpdateNeedsBeginFramesInternal();
+
   // Returns the RenderViewHostDelegateView instance for this view. Returns
   // NULL on failure.
   RenderViewHostDelegateView* GetRenderViewHostDelegateView();
@@ -592,7 +600,15 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
   // The begin frame source being observed.  Null if none.
   cc::BeginFrameSource* begin_frame_source_;
   cc::BeginFrameArgs last_begin_frame_args_;
+
+  // Whether a request for begin frames has been issued.
   bool needs_begin_frames_;
+
+  // Whether a request to flush input has been issued.
+  bool needs_flush_input_;
+
+  // Whether or not a frame observer has been added.
+  bool added_frame_observer_;
 
   // Used to record the last position of the mouse.
   // While the mouse is locked, they store the last known position just as mouse

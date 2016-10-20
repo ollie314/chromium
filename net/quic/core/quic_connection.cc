@@ -210,6 +210,7 @@ QuicConnection::QuicConnection(QuicConnectionId connection_id,
       current_packet_data_(nullptr),
       last_decrypted_packet_level_(ENCRYPTION_NONE),
       should_last_packet_instigate_acks_(false),
+      was_last_packet_missing_(false),
       largest_seen_packet_with_ack_(0),
       largest_seen_packet_with_stop_waiting_(0),
       max_undecryptable_packets_(0),
@@ -280,7 +281,6 @@ QuicConnection::QuicConnection(QuicConnectionId connection_id,
       packets_between_mtu_probes_(kPacketsBetweenMtuProbesBase),
       next_mtu_probe_at_(kPacketsBetweenMtuProbesBase),
       largest_received_packet_size_(0),
-      largest_packet_size_supported_(std::numeric_limits<QuicByteCount>::max()),
       goaway_sent_(false),
       goaway_received_(false),
       multipath_enabled_(false),
@@ -289,7 +289,9 @@ QuicConnection::QuicConnection(QuicConnectionId connection_id,
            << "Created connection with connection_id: " << connection_id;
   framer_.set_visitor(this);
   framer_.set_received_entropy_calculator(&received_packet_manager_);
-  last_stop_waiting_frame_.least_unacked = 0;
+  if (!FLAGS_quic_receive_packet_once_decrypted) {
+    last_stop_waiting_frame_.least_unacked = 0;
+  }
   stats_.connection_creation_time = clock_->ApproximateNow();
   if (FLAGS_quic_enable_multipath) {
     sent_packet_manager_.reset(new QuicMultipathSentPacketManager(
@@ -310,7 +312,6 @@ QuicConnection::~QuicConnection() {
   if (owns_writer_) {
     delete writer_;
   }
-  base::STLDeleteElements(&undecryptable_packets_);
   ClearQueuedPackets();
 }
 
@@ -661,6 +662,17 @@ bool QuicConnection::OnPacketHeader(const QuicPacketHeader& header) {
   --stats_.packets_dropped;
   DVLOG(1) << ENDPOINT << "Received packet header: " << header;
   last_header_ = header;
+  if (FLAGS_quic_receive_packet_once_decrypted) {
+    // An ack will be sent if a missing retransmittable packet was received;
+    was_last_packet_missing_ =
+        received_packet_manager_.IsMissing(last_header_.packet_number);
+
+    // Record received to populate ack info correctly before processing stream
+    // frames, since the processing may result in a response packet with a
+    // bundled ack.
+    received_packet_manager_.RecordPacketReceived(
+        last_header_, time_of_last_received_packet_);
+  }
   DCHECK(connected_);
   return true;
 }
@@ -778,7 +790,11 @@ bool QuicConnection::OnStopWaitingFrame(const QuicStopWaitingFrame& frame) {
     debug_visitor_->OnStopWaitingFrame(frame);
   }
 
-  last_stop_waiting_frame_ = frame;
+  if (FLAGS_quic_receive_packet_once_decrypted) {
+    ProcessStopWaitingFrame(frame);
+  } else {
+    last_stop_waiting_frame_ = frame;
+  }
   return connected_;
 }
 
@@ -986,27 +1002,39 @@ void QuicConnection::OnPacketComplete() {
   DVLOG(1) << ENDPOINT << "Got packet " << last_header_.packet_number << " for "
            << last_header_.public_header.connection_id;
 
-  // An ack will be sent if a missing retransmittable packet was received;
-  const bool was_missing =
-      should_last_packet_instigate_acks_ &&
-      received_packet_manager_.IsMissing(last_header_.packet_number);
+  if (FLAGS_quic_receive_packet_once_decrypted) {
+    // An ack will be sent if a missing retransmittable packet was received;
+    const bool was_missing =
+        should_last_packet_instigate_acks_ && was_last_packet_missing_;
 
-  // Record received to populate ack info correctly before processing stream
-  // frames, since the processing may result in a response packet with a bundled
-  // ack.
-  received_packet_manager_.RecordPacketReceived(last_size_, last_header_,
-                                                time_of_last_received_packet_);
-
-  // Process stop waiting frames here, instead of inline, because the packet
-  // needs to be considered 'received' before the entropy can be updated.
-  if (last_stop_waiting_frame_.least_unacked > 0) {
-    ProcessStopWaitingFrame(last_stop_waiting_frame_);
-    if (!connected_) {
-      return;
+    // It's possible the ack frame was sent along with response data, so it
+    // no longer needs to be sent.
+    if (ack_frame_updated()) {
+      MaybeQueueAck(was_missing);
     }
-  }
+  } else {
+    // An ack will be sent if a missing retransmittable packet was received;
+    const bool was_missing =
+        should_last_packet_instigate_acks_ &&
+        received_packet_manager_.IsMissing(last_header_.packet_number);
 
-  MaybeQueueAck(was_missing);
+    // Record received to populate ack info correctly before processing stream
+    // frames, since the processing may result in a response packet with a
+    // bundled ack.
+    received_packet_manager_.RecordPacketReceived(
+        last_header_, time_of_last_received_packet_);
+
+    // Process stop waiting frames here, instead of inline, because the packet
+    // needs to be considered 'received' before the entropy can be updated.
+    if (last_stop_waiting_frame_.least_unacked > 0) {
+      ProcessStopWaitingFrame(last_stop_waiting_frame_);
+      if (!connected_) {
+        return;
+      }
+    }
+
+    MaybeQueueAck(was_missing);
+  }
 
   ClearLastFrames();
   MaybeCloseIfTooManyOutstandingPackets();
@@ -1078,7 +1106,9 @@ void QuicConnection::MaybeQueueAck(bool was_missing) {
 
 void QuicConnection::ClearLastFrames() {
   should_last_packet_instigate_acks_ = false;
-  last_stop_waiting_frame_.least_unacked = 0;
+  if (!FLAGS_quic_receive_packet_once_decrypted) {
+    last_stop_waiting_frame_.least_unacked = 0;
+  }
 }
 
 void QuicConnection::MaybeCloseIfTooManyOutstandingPackets() {
@@ -1386,11 +1416,6 @@ void QuicConnection::WriteAndBundleAcksIfNotBlocked() {
 }
 
 bool QuicConnection::ProcessValidatedPacket(const QuicPacketHeader& header) {
-  if (header.fec_flag) {
-    // Drop any FEC packet.
-    return false;
-  }
-
   if (perspective_ == Perspective::IS_SERVER &&
       IsInitializedIPEndPoint(self_address_) &&
       IsInitializedIPEndPoint(last_packet_destination_address_) &&
@@ -1712,22 +1737,14 @@ bool QuicConnection::WritePacket(SerializedPacket* packet) {
   }
   if (packet->transmission_type == NOT_RETRANSMISSION) {
     time_of_last_sent_new_packet_ = packet_send_time;
-    if (!FLAGS_quic_better_last_send_for_timeout) {
-      if (IsRetransmittable(*packet) == HAS_RETRANSMITTABLE_DATA &&
-          last_send_for_timeout_ <= time_of_last_received_packet_) {
-        last_send_for_timeout_ = packet_send_time;
-      }
-    }
   }
-  if (FLAGS_quic_better_last_send_for_timeout) {
-    // Only adjust the last sent time (for the purpose of tracking the idle
-    // timeout) if this is the first retransmittable packet sent after a
-    // packet is received. If it were updated on every sent packet, then
-    // sending into a black hole might never timeout.
-    if (IsRetransmittable(*packet) == HAS_RETRANSMITTABLE_DATA &&
-        last_send_for_timeout_ <= time_of_last_received_packet_) {
-      last_send_for_timeout_ = packet_send_time;
-    }
+  // Only adjust the last sent time (for the purpose of tracking the idle
+  // timeout) if this is the first retransmittable packet sent after a
+  // packet is received. If it were updated on every sent packet, then
+  // sending into a black hole might never timeout.
+  if (IsRetransmittable(*packet) == HAS_RETRANSMITTABLE_DATA &&
+      last_send_for_timeout_ <= time_of_last_received_packet_) {
+    last_send_for_timeout_ = packet_send_time;
   }
   SetPingAlarm();
   MaybeSetMtuAlarm();
@@ -2020,7 +2037,7 @@ void QuicConnection::MaybeProcessUndecryptablePackets() {
 
   while (connected_ && !undecryptable_packets_.empty()) {
     DVLOG(1) << ENDPOINT << "Attempting to process undecryptable packet";
-    QuicEncryptedPacket* packet = undecryptable_packets_.front();
+    QuicEncryptedPacket* packet = undecryptable_packets_.front().get();
     if (!framer_.ProcessPacket(*packet) &&
         framer_.error() == QUIC_DECRYPTION_FAILURE) {
       DVLOG(1) << ENDPOINT << "Unable to process undecryptable packet...";
@@ -2028,7 +2045,6 @@ void QuicConnection::MaybeProcessUndecryptablePackets() {
     }
     DVLOG(1) << ENDPOINT << "Processed undecryptable packet!";
     ++stats_.packets_processed;
-    delete packet;
     undecryptable_packets_.pop_front();
   }
 
@@ -2044,7 +2060,7 @@ void QuicConnection::MaybeProcessUndecryptablePackets() {
         debug_visitor_->OnUndecryptablePacket();
       }
     }
-    base::STLDeleteElements(&undecryptable_packets_);
+    undecryptable_packets_.clear();
   }
 }
 
@@ -2236,10 +2252,8 @@ void QuicConnection::CheckForTimeout() {
 void QuicConnection::SetTimeoutAlarm() {
   QuicTime time_of_last_packet =
       max(time_of_last_received_packet_, time_of_last_sent_new_packet_);
-  if (FLAGS_quic_better_last_send_for_timeout) {
-    time_of_last_packet =
-        max(time_of_last_received_packet_, last_send_for_timeout_);
-  }
+  time_of_last_packet =
+      max(time_of_last_received_packet_, last_send_for_timeout_);
 
   QuicTime deadline = time_of_last_packet + idle_network_timeout_;
   if (!handshake_timeout_.IsInfinite()) {
@@ -2432,8 +2446,14 @@ QuicByteCount QuicConnection::GetLimitedMaxPacketSize(
 
   const QuicByteCount writer_limit = writer_->GetMaxPacketSize(peer_address());
 
-  return std::min({suggested_max_packet_size, writer_limit, kMaxPacketSize,
-                   largest_packet_size_supported_});
+  QuicByteCount max_packet_size = suggested_max_packet_size;
+  if (max_packet_size > writer_limit) {
+    max_packet_size = writer_limit;
+  }
+  if (max_packet_size > kMaxPacketSize) {
+    max_packet_size = kMaxPacketSize;
+  }
+  return max_packet_size;
 }
 
 void QuicConnection::SendMtuDiscoveryPacket(QuicByteCount target_mtu) {

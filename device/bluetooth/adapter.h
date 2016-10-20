@@ -5,26 +5,30 @@
 #ifndef DEVICE_BLUETOOTH_ADAPTER_H_
 #define DEVICE_BLUETOOTH_ADAPTER_H_
 
+#include <string>
+
 #include "base/macros.h"
+#include "base/memory/ref_counted.h"
 #include "device/bluetooth/bluetooth_adapter.h"
 #include "device/bluetooth/public/interfaces/adapter.mojom.h"
+#include "device/bluetooth/public/interfaces/device.mojom.h"
 
 namespace bluetooth {
 
-// Implementation of Mojo BluetoothAdapter located in
-// device/bluetooth/public/interfaces/bluetooth.mojom.
+// Implementation of Mojo Adapter located in
+// device/bluetooth/public/interfaces/adapter.mojom.
 // It handles requests for Bluetooth adapter capabilities
 // and devices and uses the platform abstraction of device/bluetooth.
 class Adapter : public mojom::Adapter,
                 public device::BluetoothAdapter::Observer {
  public:
-  Adapter();
+  explicit Adapter(scoped_refptr<device::BluetoothAdapter> adapter);
   ~Adapter() override;
 
-  // Creates an Adapter with a strong Mojo binding to |request|
-  static void Create(mojom::AdapterRequest request);
-
   // mojom::Adapter overrides:
+  void GetInfo(const GetInfoCallback& callback) override;
+  void GetDevice(const std::string& address,
+                 const GetDeviceCallback& callback) override;
   void GetDevices(const GetDevicesCallback& callback) override;
   void SetClient(mojom::AdapterClientPtr client) override;
 
@@ -35,13 +39,6 @@ class Adapter : public mojom::Adapter,
                      device::BluetoothDevice* device) override;
 
  private:
-  mojom::DeviceInfoPtr ConstructDeviceInfoStruct(
-      const device::BluetoothDevice* device) const;
-
-  void GetDevicesImpl(const GetDevicesCallback& callback);
-
-  void OnGetAdapter(const base::Closure& continuation,
-                    scoped_refptr<device::BluetoothAdapter> adapter);
   // The current Bluetooth adapter.
   scoped_refptr<device::BluetoothAdapter> adapter_;
 

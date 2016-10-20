@@ -14,6 +14,7 @@
 #include "base/threading/thread.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
+#include "gpu/command_buffer/service/progress_reporter.h"
 #include "gpu/gpu_export.h"
 #include "ui/gfx/native_widget_types.h"
 
@@ -31,27 +32,28 @@ namespace gpu {
 
 // A thread that intermitently sends tasks to a group of watched message loops
 // and deliberately crashes if one of them does not respond after a timeout.
-class GPU_EXPORT GpuWatchdogThread
-    : public base::Thread,
-      public base::PowerObserver,
-      public base::RefCountedThreadSafe<GpuWatchdogThread> {
+class GPU_EXPORT GpuWatchdogThread : public base::Thread,
+                                     public base::PowerObserver,
+                                     public gles2::ProgressReporter {
  public:
-  static scoped_refptr<GpuWatchdogThread> Create();
+  ~GpuWatchdogThread() override;
 
-  void PostAcknowledge();
+  static std::unique_ptr<GpuWatchdogThread> Create();
+
   void CheckArmed();
 
   // Must be called after a PowerMonitor has been created. Can be called from
   // any thread.
   void AddPowerObserver();
 
+  // gles2::ProgressReporter implementation:
+  void ReportProgress() override;
+
  protected:
   void Init() override;
   void CleanUp() override;
 
  private:
-  friend class base::RefCountedThreadSafe<GpuWatchdogThread>;
-
   // An object of this type intercepts the reception and completion of all tasks
   // on the watched thread and checks whether the watchdog is armed.
   class GpuWatchdogTaskObserver : public base::MessageLoop::TaskObserver {
@@ -68,7 +70,6 @@ class GPU_EXPORT GpuWatchdogThread
   };
 
   GpuWatchdogThread();
-  ~GpuWatchdogThread() override;
 
   void OnAcknowledge();
   void OnCheck(bool after_suspend);

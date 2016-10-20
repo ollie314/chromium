@@ -26,13 +26,13 @@
 #include "platform/graphics/ContentLayerDelegate.h"
 
 #include "platform/RuntimeEnabledFeatures.h"
-#include "platform/TraceEvent.h"
-#include "platform/TracedValue.h"
 #include "platform/geometry/IntRect.h"
 #include "platform/graphics/GraphicsContext.h"
 #include "platform/graphics/GraphicsLayer.h"
 #include "platform/graphics/paint/PaintArtifactToSkCanvas.h"
 #include "platform/graphics/paint/PaintController.h"
+#include "platform/tracing/TraceEvent.h"
+#include "platform/tracing/TracedValue.h"
 #include "public/platform/WebDisplayItemList.h"
 #include "public/platform/WebRect.h"
 #include "third_party/skia/include/core/SkPicture.h"
@@ -84,8 +84,9 @@ void ContentLayerDelegate::paintContents(
   if (paintingControl == WebContentLayerClient::PartialInvalidation)
     m_graphicsLayer->client()->invalidateTargetElementForTesting();
 
-  // We also disable caching when Painting or Construction are disabled. In both cases we would like
-  // to compare assuming the full cost of recording, not the cost of re-using cached content.
+  // We also disable caching when Painting or Construction are disabled. In both
+  // cases we would like to compare assuming the full cost of recording, not the
+  // cost of re-using cached content.
   if (paintingControl != WebContentLayerClient::PaintDefaultBehavior &&
       paintingControl != WebContentLayerClient::PaintDefaultBehaviorForTest &&
       paintingControl != WebContentLayerClient::SubsequenceCachingDisabled)
@@ -96,9 +97,10 @@ void ContentLayerDelegate::paintContents(
       paintingControl == WebContentLayerClient::DisplayListConstructionDisabled)
     disabledMode = GraphicsContext::FullyDisabled;
 
-  // Anything other than PaintDefaultBehavior is for testing. In non-testing scenarios,
-  // it is an error to call GraphicsLayer::paint. Actual painting occurs in FrameView::synchronizedPaint;
-  // this method merely copies the painted output to the WebDisplayItemList.
+  // Anything other than PaintDefaultBehavior is for testing. In non-testing
+  // scenarios, it is an error to call GraphicsLayer::paint. Actual painting
+  // occurs in FrameView::synchronizedPaint; this method merely copies the
+  // painted output to the WebDisplayItemList.
   if (paintingControl != PaintDefaultBehavior)
     m_graphicsLayer->paint(nullptr, disabledMode);
 

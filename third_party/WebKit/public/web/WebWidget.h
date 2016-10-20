@@ -38,11 +38,11 @@
 #include "../platform/WebPoint.h"
 #include "../platform/WebRect.h"
 #include "../platform/WebSize.h"
+#include "../platform/WebTextInputInfo.h"
 #include "../platform/WebTopControlsState.h"
 #include "WebCompositionUnderline.h"
 #include "WebRange.h"
 #include "WebTextDirection.h"
-#include "WebTextInputInfo.h"
 
 namespace blink {
 
@@ -234,12 +234,6 @@ class WebWidget {
   // request via WebWidgetClient::requestPointerUnlock(), or for other
   // reasons such as the user exiting lock, window focus changing, etc.
   virtual void didLosePointerLock() {}
-
-  // Informs the WebWidget that the resizer rect changed. Happens for example
-  // on mac, when a widget appears below the WebWidget without changing the
-  // WebWidget's size (WebWidget::resize() automatically checks the resizer
-  // rect.)
-  virtual void didChangeWindowResizerRect() {}
 
   // The page background color. Can be used for filling in areas without
   // content.

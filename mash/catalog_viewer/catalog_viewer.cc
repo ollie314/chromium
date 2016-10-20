@@ -14,8 +14,8 @@
 #include "base/strings/utf_string_conversions.h"
 #include "mojo/public/cpp/bindings/binding.h"
 #include "services/catalog/public/interfaces/catalog.mojom.h"
-#include "services/shell/public/cpp/connection.h"
-#include "services/shell/public/cpp/connector.h"
+#include "services/service_manager/public/cpp/connection.h"
+#include "services/service_manager/public/cpp/connector.h"
 #include "ui/base/models/table_model.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/resources/grit/ui_resources.h"
@@ -72,7 +72,6 @@ class CatalogViewerContents : public views::WidgetDelegateView,
 
 
   // Overridden from views::WidgetDelegate:
-  views::View* GetContentsView() override { return this; }
   base::string16 GetWindowTitle() const override {
     // TODO(beng): use resources.
     return base::ASCIIToUTF16("Applications");
@@ -166,7 +165,7 @@ void CatalogViewer::RemoveWindow(views::Widget* window) {
     base::MessageLoop::current()->QuitWhenIdle();
 }
 
-void CatalogViewer::OnStart(const shell::Identity& identity) {
+void CatalogViewer::OnStart(const service_manager::Identity& identity) {
   tracing_.Initialize(connector(), identity.name());
 
   aura_init_.reset(
@@ -175,8 +174,8 @@ void CatalogViewer::OnStart(const shell::Identity& identity) {
       views::WindowManagerConnection::Create(connector(), identity);
 }
 
-bool CatalogViewer::OnConnect(const shell::Identity& remote_identity,
-                              shell::InterfaceRegistry* registry) {
+bool CatalogViewer::OnConnect(const service_manager::Identity& remote_identity,
+                              service_manager::InterfaceRegistry* registry) {
   registry->AddInterface<mojom::Launchable>(this);
   return true;
 }
@@ -189,7 +188,7 @@ void CatalogViewer::Launch(uint32_t what, mojom::LaunchMode how) {
     return;
   }
   catalog::mojom::CatalogPtr catalog;
-  connector()->ConnectToInterface("mojo:catalog", &catalog);
+  connector()->ConnectToInterface("service:catalog", &catalog);
 
   views::Widget* window = views::Widget::CreateWindowWithContextAndBounds(
       new CatalogViewerContents(this, std::move(catalog)), nullptr,
@@ -198,7 +197,7 @@ void CatalogViewer::Launch(uint32_t what, mojom::LaunchMode how) {
   windows_.push_back(window);
 }
 
-void CatalogViewer::Create(const shell::Identity& remote_identity,
+void CatalogViewer::Create(const service_manager::Identity& remote_identity,
                            mojom::LaunchableRequest request) {
   bindings_.AddBinding(this, std::move(request));
 }

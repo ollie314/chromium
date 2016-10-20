@@ -7,23 +7,23 @@
 #include "base/macros.h"
 #include "base/run_loop.h"
 #include "services/navigation/public/interfaces/view.mojom.h"
-#include "services/shell/public/cpp/service.h"
-#include "services/shell/public/cpp/service_test.h"
+#include "services/service_manager/public/cpp/service.h"
+#include "services/service_manager/public/cpp/service_test.h"
 
 namespace navigation {
 
-class NavigationTest : public shell::test::ServiceTest,
+class NavigationTest : public service_manager::test::ServiceTest,
                        public mojom::ViewClient {
  public:
   NavigationTest()
-      : shell::test::ServiceTest("exe:navigation_unittests"),
+      : service_manager::test::ServiceTest("exe:navigation_unittests"),
         binding_(this) {}
   ~NavigationTest() override {}
 
  protected:
    void SetUp() override {
-     shell::test::ServiceTest::SetUp();
-     window_manager_connection_ = connector()->Connect("mojo:test_wm");
+     service_manager::test::ServiceTest::SetUp();
+     window_manager_connection_ = connector()->Connect("service:test_wm");
    }
 
   mojom::ViewClientPtr GetViewClient() {
@@ -65,7 +65,7 @@ class NavigationTest : public shell::test::ServiceTest,
   int load_count_ = 0;
   mojo::Binding<mojom::ViewClient> binding_;
   base::RunLoop* loop_ = nullptr;
-  std::unique_ptr<shell::Connection> window_manager_connection_;
+  std::unique_ptr<service_manager::Connection> window_manager_connection_;
 
   DISALLOW_COPY_AND_ASSIGN(NavigationTest);
 };

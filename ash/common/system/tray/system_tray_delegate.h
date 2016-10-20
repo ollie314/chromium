@@ -25,6 +25,10 @@ class TimeDelta;
 class TimeTicks;
 }
 
+namespace device {
+enum class BluetoothDeviceType;
+}
+
 namespace ash {
 struct IMEInfo;
 struct IMEPropertyInfo;
@@ -55,6 +59,7 @@ struct ASH_EXPORT NetworkIconInfo {
 
 struct ASH_EXPORT BluetoothDeviceInfo {
   BluetoothDeviceInfo();
+  BluetoothDeviceInfo(const BluetoothDeviceInfo& other);
   ~BluetoothDeviceInfo();
 
   std::string address;
@@ -62,6 +67,7 @@ struct ASH_EXPORT BluetoothDeviceInfo {
   bool connected;
   bool connecting;
   bool paired;
+  device::BluetoothDeviceType device_type;
 };
 
 using BluetoothDeviceList = std::vector<BluetoothDeviceInfo>;
@@ -110,9 +116,6 @@ class ASH_EXPORT SystemTrayDelegate {
   // Called after SystemTray has been instantiated.
   virtual void Initialize();
 
-  // Returns true if system tray should be visible on startup.
-  virtual bool GetTrayVisibilityOnStartup();
-
   // Gets information about the active user.
   virtual LoginStatus GetUserLoginStatus() const;
 
@@ -149,14 +152,6 @@ class ASH_EXPORT SystemTrayDelegate {
 
   // Shows the dialog to set system time, date, and timezone.
   virtual void ShowSetTimeDialog();
-
-  // Shows the settings related to network. If |guid| is not empty,
-  // show the settings for the corresponding network.
-  virtual void ShowNetworkSettingsForGuid(const std::string& guid);
-
-  // Returns true if the notification for the display configuration change
-  // should appear.
-  virtual bool ShouldShowDisplayNotification();
 
   // Shows information about enterprise enrolled devices.
   virtual void ShowEnterpriseInfo();

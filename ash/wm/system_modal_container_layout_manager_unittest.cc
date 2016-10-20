@@ -8,10 +8,10 @@
 
 #include "ash/aura/wm_window_aura.h"
 #include "ash/common/session/session_state_delegate.h"
-#include "ash/common/shell_window_ids.h"
 #include "ash/common/wm/container_finder.h"
 #include "ash/common/wm_root_window_controller.h"
 #include "ash/common/wm_shell.h"
+#include "ash/public/cpp/shell_window_ids.h"
 #include "ash/root_window_controller.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
@@ -84,7 +84,6 @@ class TestWindow : public views::WidgetDelegateView {
   gfx::Size GetPreferredSize() const override { return gfx::Size(50, 50); }
 
   // Overridden from views::WidgetDelegate:
-  views::View* GetContentsView() override { return this; }
   ui::ModalType GetModalType() const override {
     return modal_ ? ui::MODAL_TYPE_SYSTEM : ui::MODAL_TYPE_NONE;
   }

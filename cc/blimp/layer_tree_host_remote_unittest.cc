@@ -10,6 +10,7 @@
 #include "cc/animation/animation_host.h"
 #include "cc/layers/layer.h"
 #include "cc/output/begin_frame_args.h"
+#include "cc/test/fake_image_serialization_processor.h"
 #include "cc/test/fake_remote_compositor_bridge.h"
 #include "cc/test/stub_layer_tree_host_client.h"
 #include "cc/trees/layer_tree_settings.h"
@@ -31,7 +32,7 @@ using testing::StrictMock;
 #define EXPECT_BEGIN_MAIN_FRAME_AND_COMMIT(client, num)    \
   EXPECT_BEGIN_MAIN_FRAME(client, num)                     \
   EXPECT_CALL(client, DidCommitAndDrawFrame()).Times(num); \
-  EXPECT_CALL(client, DidCompleteSwapBuffers()).Times(num);
+  EXPECT_CALL(client, DidReceiveCompositorFrameAck()).Times(num);
 
 namespace cc {
 namespace {
@@ -48,6 +49,11 @@ class UpdateTrackingRemoteCompositorBridge : public FakeRemoteCompositorBridge {
       std::unique_ptr<CompositorProtoState> compositor_proto_state) override {
     num_updates_received_++;
   };
+
+  bool SendUpdates(const std::unordered_map<int, gfx::ScrollOffset>& scroll_map,
+                   float page_scale) {
+    return client_->ApplyScrollAndScaleUpdateFromClient(scroll_map, page_scale);
+  }
 
   int num_updates_received() const { return num_updates_received_; }
 
@@ -78,10 +84,16 @@ class MockLayerTreeHostClient : public StubLayerTreeHostClient {
   MOCK_METHOD0(DidBeginMainFrame, void());
   MOCK_METHOD0(DidReceiveBeginMainFrame, void());
   MOCK_METHOD0(DidUpdateLayerTreeHost, void());
+  MOCK_METHOD5(ApplyViewportDeltas,
+               void(const gfx::Vector2dF&,
+                    const gfx::Vector2dF&,
+                    const gfx::Vector2dF&,
+                    float,
+                    float));
   MOCK_METHOD0(WillCommit, void());
   MOCK_METHOD0(DidCommit, void());
   MOCK_METHOD0(DidCommitAndDrawFrame, void());
-  MOCK_METHOD0(DidCompleteSwapBuffers, void());
+  MOCK_METHOD0(DidReceiveCompositorFrameAck, void());
 
  private:
   base::Closure update_host_callback_;
@@ -146,6 +158,8 @@ class LayerTreeHostRemoteTest : public testing::Test {
                 main_task_runner);
     remote_compositor_bridge_ = remote_compositor_bridge.get();
     params.remote_compositor_bridge = std::move(remote_compositor_bridge);
+    params.engine_picture_cache =
+        image_serialization_processor_.CreateEnginePictureCache();
     LayerTreeSettings settings;
     params.settings = &settings;
 
@@ -186,6 +200,7 @@ class LayerTreeHostRemoteTest : public testing::Test {
   StrictMock<MockLayerTreeHostClient> mock_layer_tree_host_client_;
   UpdateTrackingRemoteCompositorBridge* remote_compositor_bridge_ = nullptr;
   scoped_refptr<MockLayer> root_layer_;
+  FakeImageSerializationProcessor image_serialization_processor_;
 
   bool needs_animate_during_main_frame_ = false;
   bool needs_commit_during_main_frame_ = false;
@@ -341,6 +356,61 @@ TEST_F(LayerTreeHostRemoteTest, RequestCommitDuringLayerUpdates) {
   base::RunLoop().RunUntilIdle();
   EXPECT_TRUE(root_layer_->did_update());
   EXPECT_EQ(1, remote_compositor_bridge_->num_updates_received());
+}
+
+TEST_F(LayerTreeHostRemoteTest, ScrollAndScaleSync) {
+  scoped_refptr<Layer> child_layer1 = make_scoped_refptr(new MockLayer(false));
+  root_layer_->AddChild(child_layer1);
+
+  scoped_refptr<Layer> child_layer2 = make_scoped_refptr(new MockLayer(false));
+  child_layer1->AddChild(child_layer2);
+
+  scoped_refptr<Layer> inner_viewport_layer =
+      make_scoped_refptr(new MockLayer(false));
+  inner_viewport_layer->SetScrollOffset(gfx::ScrollOffset(5, 10));
+  root_layer_->AddChild(inner_viewport_layer);
+  layer_tree_host_->GetLayerTree()->RegisterViewportLayers(
+      nullptr, nullptr, inner_viewport_layer, nullptr);
+
+  // Send scroll and scale updates from client.
+  std::unordered_map<int, gfx::ScrollOffset> scroll_updates;
+  gfx::ScrollOffset child1_offset(4, 5);
+  gfx::ScrollOffset child2_offset(3, 10);
+  gfx::Vector2dF inner_viewport_delta(-2, 5);
+  gfx::ScrollOffset inner_viewport_offset = gfx::ScrollOffsetWithDelta(
+      inner_viewport_layer->scroll_offset(), inner_viewport_delta);
+  scroll_updates[child_layer1->id()] = child1_offset;
+  scroll_updates[child_layer2->id()] = child2_offset;
+  scroll_updates[inner_viewport_layer->id()] = inner_viewport_offset;
+
+  float page_scale_delta = 0.3f;
+  float current_scale_factor = 0.5f;
+  layer_tree_host_->GetLayerTree()->SetPageScaleFactorAndLimits(
+      current_scale_factor, 0.0f, 1.0f);
+  float new_scale_factor = current_scale_factor * page_scale_delta;
+
+  EXPECT_CALL(mock_layer_tree_host_client_,
+              ApplyViewportDeltas(inner_viewport_delta, gfx::Vector2dF(),
+                                  gfx::Vector2dF(), page_scale_delta, 1.0f))
+      .Times(1);
+  bool updates_applied =
+      remote_compositor_bridge_->SendUpdates(scroll_updates, new_scale_factor);
+  EXPECT_TRUE(updates_applied);
+  // The host should have pre-emtively applied the changes.
+  EXPECT_EQ(new_scale_factor,
+            layer_tree_host_->GetLayerTree()->page_scale_factor());
+  EXPECT_EQ(child1_offset, child_layer1->scroll_offset());
+  EXPECT_EQ(child2_offset, child_layer2->scroll_offset());
+  EXPECT_EQ(inner_viewport_offset, inner_viewport_layer->scroll_offset());
+
+  // Destroy a layer and send a scroll update for it. We should be informed that
+  // the update could not be applied successfully.
+  child_layer1->RemoveAllChildren();
+  scroll_updates.clear();
+  scroll_updates[child_layer2->id()] = gfx::ScrollOffset(3, 2);
+  updates_applied =
+      remote_compositor_bridge_->SendUpdates(scroll_updates, new_scale_factor);
+  EXPECT_FALSE(updates_applied);
 }
 
 }  // namespace

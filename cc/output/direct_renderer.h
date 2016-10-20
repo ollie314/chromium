@@ -12,11 +12,11 @@
 #include "base/macros.h"
 #include "cc/base/cc_export.h"
 #include "cc/output/ca_layer_overlay.h"
-#include "cc/output/compositor_frame_metadata.h"
 #include "cc/output/overlay_processor.h"
 #include "cc/quads/tile_draw_quad.h"
 #include "cc/resources/resource_provider.h"
 #include "gpu/command_buffer/common/texture_in_use_response.h"
+#include "ui/events/latency_info.h"
 #include "ui/gfx/geometry/quad_f.h"
 #include "ui/gfx/geometry/rect.h"
 
@@ -55,11 +55,10 @@ class CC_EXPORT DirectRenderer {
   void DrawFrame(RenderPassList* render_passes_in_draw_order,
                  float device_scale_factor,
                  const gfx::ColorSpace& device_color_space,
-                 const gfx::Rect& device_viewport_rect,
-                 const gfx::Rect& device_clip_rect);
+                 const gfx::Size& device_viewport_size);
 
   // Public interface implemented by subclasses.
-  virtual void SwapBuffers(CompositorFrameMetadata metadata) = 0;
+  virtual void SwapBuffers(std::vector<ui::LatencyInfo> latency_info) = 0;
   virtual void SwapBuffersComplete() {}
   virtual void DidReceiveTextureInUseResponses(
       const gpu::TextureInUseResponses& responses) {}
@@ -81,8 +80,8 @@ class CC_EXPORT DirectRenderer {
     const ScopedResource* current_texture = nullptr;
 
     gfx::Rect root_damage_rect;
-    gfx::Rect device_viewport_rect;
-    gfx::Rect device_clip_rect;
+    gfx::Size device_viewport_size;
+    gfx::ColorSpace device_color_space;
 
     gfx::Transform projection_matrix;
     gfx::Transform window_matrix;
@@ -111,8 +110,6 @@ class CC_EXPORT DirectRenderer {
   gfx::Rect MoveFromDrawToWindowSpace(const DrawingFrame* frame,
                                       const gfx::Rect& draw_rect) const;
 
-  bool NeedDeviceClip(const DrawingFrame* frame) const;
-  gfx::Rect DeviceClipRectInDrawSpace(const DrawingFrame* frame) const;
   gfx::Rect DeviceViewportRectInDrawSpace(const DrawingFrame* frame) const;
   gfx::Rect OutputSurfaceRectInDrawSpace(const DrawingFrame* frame) const;
   static gfx::Rect ComputeScissorRectForRenderPass(const DrawingFrame* frame);
@@ -172,6 +169,10 @@ class CC_EXPORT DirectRenderer {
       DrawingFrame* frame,
       std::unique_ptr<CopyOutputRequest> request) = 0;
 
+  gfx::Size surface_size_for_swap_buffers() const {
+    return reshape_surface_size_;
+  }
+
   const RendererSettings* const settings_;
   OutputSurface* const output_surface_;
   ResourceProvider* const resource_provider_;
@@ -207,6 +208,12 @@ class CC_EXPORT DirectRenderer {
  private:
   bool initialized_ = false;
   gfx::Size enlarge_pass_texture_amount_;
+
+  // Cached values given to Reshape().
+  gfx::Size reshape_surface_size_;
+  float reshape_device_scale_factor_ = 0.f;
+  gfx::ColorSpace reshape_device_color_space_;
+  bool reshape_has_alpha_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(DirectRenderer);
 };

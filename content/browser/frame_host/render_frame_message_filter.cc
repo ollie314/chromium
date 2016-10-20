@@ -35,6 +35,7 @@
 #include "net/url_request/url_request_context_getter.h"
 #include "storage/browser/blob/blob_storage_context.h"
 #include "url/gurl.h"
+#include "url/origin.h"
 
 #if !defined(OS_MACOSX)
 #include "third_party/khronos/GLES2/gl2.h"
@@ -492,16 +493,14 @@ void RenderFrameMessageFilter::GetPluginsCallback(
 
   int child_process_id = -1;
   int routing_id = MSG_ROUTING_NONE;
-  GURL policy_url =
-      main_frame_origin.unique() ? GURL() : GURL(main_frame_origin.Serialize());
   // In this loop, copy the WebPluginInfo (and do not use a reference) because
   // the filter might mutate it.
   for (WebPluginInfo plugin : all_plugins) {
     // TODO(crbug.com/621724): Pass an url::Origin instead of a GURL.
     if (!filter ||
         filter->IsPluginAvailable(child_process_id, routing_id,
-                                  resource_context_, policy_url, policy_url,
-                                  &plugin)) {
+                                  resource_context_, main_frame_origin.GetURL(),
+                                  main_frame_origin, &plugin)) {
       plugins.push_back(plugin);
     }
   }
@@ -513,16 +512,16 @@ void RenderFrameMessageFilter::GetPluginsCallback(
 void RenderFrameMessageFilter::OnGetPluginInfo(
     int render_frame_id,
     const GURL& url,
-    const GURL& page_url,
+    const url::Origin& main_frame_origin,
     const std::string& mime_type,
     bool* found,
     WebPluginInfo* info,
     std::string* actual_mime_type) {
   bool allow_wildcard = true;
   *found = plugin_service_->GetPluginInfo(
-      render_process_id_, render_frame_id, resource_context_,
-      url, page_url, mime_type, allow_wildcard,
-      nullptr, info, actual_mime_type);
+      render_process_id_, render_frame_id, resource_context_, url,
+      main_frame_origin, mime_type, allow_wildcard, nullptr, info,
+      actual_mime_type);
 }
 
 void RenderFrameMessageFilter::OnOpenChannelToPepperPlugin(

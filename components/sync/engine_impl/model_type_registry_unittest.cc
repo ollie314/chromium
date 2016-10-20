@@ -9,8 +9,8 @@
 #include "base/deferred_sequenced_task_runner.h"
 #include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
-#include "components/sync/core/activation_context.h"
-#include "components/sync/core/test/fake_model_type_processor.h"
+#include "components/sync/engine/activation_context.h"
+#include "components/sync/engine/fake_model_type_processor.h"
 #include "components/sync/protocol/model_type_state.pb.h"
 #include "components/sync/syncable/directory.h"
 #include "components/sync/syncable/model_neutral_mutable_entry.h"
@@ -81,8 +81,8 @@ void ModelTypeRegistryTest::SetUp() {
   workers_.push_back(ui_worker);
   workers_.push_back(db_worker);
 
-  registry_.reset(
-      new ModelTypeRegistry(workers_, directory(), &mock_nudge_handler_));
+  registry_ = base::MakeUnique<ModelTypeRegistry>(workers_, directory(),
+                                                  &mock_nudge_handler_);
 }
 
 void ModelTypeRegistryTest::TearDown() {

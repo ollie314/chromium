@@ -52,17 +52,22 @@ CSSToLengthConversionData::FontSizes::FontSizes(const ComputedStyle* style,
 
 float CSSToLengthConversionData::FontSizes::ex() const {
   ASSERT(m_font);
-  // FIXME: We have a bug right now where the zoom will be applied twice to EX units.
-  // We really need to compute EX using fontMetrics for the original specifiedSize and not use
-  // our actual constructed layoutObject font.
-  if (!m_font->getFontMetrics().hasXHeight())
+  const SimpleFontData* fontData = m_font->primaryFont();
+  DCHECK(fontData);
+
+  // FIXME: We have a bug right now where the zoom will be applied twice to EX
+  // units. We really need to compute EX using fontMetrics for the original
+  // specifiedSize and not use our actual constructed layoutObject font.
+  if (!fontData || !fontData->getFontMetrics().hasXHeight())
     return m_em / 2.0f;
-  return m_font->getFontMetrics().xHeight();
+  return fontData->getFontMetrics().xHeight();
 }
 
 float CSSToLengthConversionData::FontSizes::ch() const {
-  ASSERT(m_font);
-  return m_font->getFontMetrics().zeroWidth();
+  DCHECK(m_font);
+  const SimpleFontData* fontData = m_font->primaryFont();
+  DCHECK(fontData);
+  return fontData ? fontData->getFontMetrics().zeroWidth() : 0;
 }
 
 CSSToLengthConversionData::ViewportSize::ViewportSize(
@@ -119,8 +124,9 @@ double CSSToLengthConversionData::zoomedComputedPixels(
     double value,
     CSSPrimitiveValue::UnitType type) const {
   // The logic in this function is duplicated in MediaValues::computeLength()
-  // because MediaValues::computeLength() needs nearly identical logic, but we haven't found a way to make
-  // zoomedComputedPixels() more generic (to solve both cases) without hurting performance.
+  // because MediaValues::computeLength() needs nearly identical logic, but we
+  // haven't found a way to make zoomedComputedPixels() more generic (to solve
+  // both cases) without hurting performance.
   switch (type) {
     case CSSPrimitiveValue::UnitType::Pixels:
     case CSSPrimitiveValue::UnitType::UserUnits:
@@ -153,8 +159,9 @@ double CSSToLengthConversionData::zoomedComputedPixels(
     case CSSPrimitiveValue::UnitType::ViewportMax:
       return value * viewportMaxPercent() * zoom();
 
-    // We do not apply the zoom factor when we are computing the value of the font-size property. The zooming
-    // for font sizes is much more complicated, since we have to worry about enforcing the minimum font size preference
+    // We do not apply the zoom factor when we are computing the value of the
+    // font-size property. The zooming for font sizes is much more complicated,
+    // since we have to worry about enforcing the minimum font size preference
     // as well as enforcing the implicit "smart minimum."
     case CSSPrimitiveValue::UnitType::Ems:
     case CSSPrimitiveValue::UnitType::QuirkyEms:

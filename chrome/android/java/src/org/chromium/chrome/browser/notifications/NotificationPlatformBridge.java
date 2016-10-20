@@ -7,6 +7,7 @@ package org.chromium.chrome.browser.notifications;
 import android.app.Notification;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
+import android.app.RemoteInput;
 import android.content.Context;
 import android.content.Intent;
 import android.content.res.Resources;
@@ -199,8 +200,8 @@ public class NotificationPlatformBridge {
             }
             int actionIndex = intent.getIntExtra(
                     NotificationConstants.EXTRA_NOTIFICATION_INFO_ACTION_INDEX, -1);
-            sInstance.onNotificationClicked(
-                    notificationId, origin, profileId, incognito, tag, webApkPackage, actionIndex);
+            sInstance.onNotificationClicked(notificationId, origin, profileId, incognito, tag,
+                    webApkPackage, actionIndex, getNotificationReply(intent));
             return true;
         } else if (NotificationConstants.ACTION_CLOSE_NOTIFICATION.equals(intent.getAction())) {
             // Notification deleteIntent is executed only "when the notification is explicitly
@@ -213,6 +214,22 @@ public class NotificationPlatformBridge {
 
         Log.e(TAG, "Unrecognized Notification action: " + intent.getAction());
         return false;
+    }
+
+    @Nullable
+    private static String getNotificationReply(Intent intent) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT_WATCH) {
+            // RemoteInput was added in KITKAT_WATCH.
+            Bundle remoteInputResults = RemoteInput.getResultsFromIntent(intent);
+            if (remoteInputResults != null) {
+                CharSequence reply =
+                        remoteInputResults.getCharSequence(NotificationConstants.KEY_TEXT_REPLY);
+                if (reply != null) {
+                    return reply.toString();
+                }
+            }
+        }
+        return null;
     }
 
     /**
@@ -506,8 +523,10 @@ public class NotificationPlatformBridge {
                 makePendingIntent(NotificationConstants.ACTION_CLOSE_NOTIFICATION, notificationId,
                         origin, profileId, incognito, tag, webApkPackage, -1 /* actionIndex */);
 
+        boolean hasImage = image != null;
+
         NotificationBuilderBase notificationBuilder =
-                createNotificationBuilder()
+                createNotificationBuilder(hasImage)
                         .setTitle(title)
                         .setBody(body)
                         .setImage(image)
@@ -526,13 +545,15 @@ public class NotificationPlatformBridge {
             PendingIntent intent = makePendingIntent(
                     NotificationConstants.ACTION_CLICK_NOTIFICATION, notificationId, origin,
                     profileId, incognito, tag, webApkPackage, actionIndex);
+            // Don't show action button icons when there's an image, as then action buttons go on
+            // the same row as the Site Settings button, so icons wouldn't leave room for text.
+            Bitmap actionIcon = hasImage ? null : actionIcons[actionIndex];
             // TODO(crbug.com/650302): Encode actionTypes with an enum, not a magic string!
             if (actionTypes[actionIndex].equals("text")) {
-                notificationBuilder.addTextAction(actionIcons[actionIndex],
-                        actionTitles[actionIndex], intent, actionPlaceholders[actionIndex]);
+                notificationBuilder.addTextAction(actionIcon, actionTitles[actionIndex], intent,
+                        actionPlaceholders[actionIndex]);
             } else {
-                notificationBuilder.addButtonAction(
-                        actionIcons[actionIndex], actionTitles[actionIndex], intent);
+                notificationBuilder.addButtonAction(actionIcon, actionTitles[actionIndex], intent);
             }
         }
 
@@ -540,7 +561,7 @@ public class NotificationPlatformBridge {
         // label and icon, so abbreviate it. This has the unfortunate side-effect of unnecessarily
         // abbreviating it on Android Wear also (crbug.com/576656). If custom layouts are enabled,
         // the label and icon provided here only affect Android Wear, so don't abbreviate them.
-        boolean abbreviateSiteSettings = actionTitles.length > 0 && !useCustomLayouts();
+        boolean abbreviateSiteSettings = actionTitles.length > 0 && !useCustomLayouts(hasImage);
         int settingsIconId = abbreviateSiteSettings ? 0 : R.drawable.settings_cog;
         CharSequence settingsTitle = abbreviateSiteSettings
                                      ? res.getString(R.string.notification_site_settings_button)
@@ -569,8 +590,8 @@ public class NotificationPlatformBridge {
         }
     }
 
-    private NotificationBuilderBase createNotificationBuilder() {
-        if (useCustomLayouts()) {
+    private NotificationBuilderBase createNotificationBuilder(boolean hasImage) {
+        if (useCustomLayouts(hasImage)) {
             return new CustomNotificationBuilder(mAppContext);
         }
         return new StandardNotificationBuilder(mAppContext);
@@ -604,10 +625,16 @@ public class NotificationPlatformBridge {
      *
      * The --{enable,disable}-web-notification-custom-layouts command line flags take precedence.
      *
+     * Normally a standard layout is used on Android N+, and a custom layout is used on older
+     * versions of Android. But if the notification has a content image, there isn't enough room for
+     * the Site Settings button to go on its own line when showing an image, nor is there enough
+     * room for action button icons, so a standard layout will be used here even on old versions.
+     *
+     * @param hasImage Whether the notification has a content image.
      * @return Whether custom layouts should be used.
      */
     @VisibleForTesting
-    static boolean useCustomLayouts() {
+    static boolean useCustomLayouts(boolean hasImage) {
         CommandLine commandLine = CommandLine.getInstance();
         if (commandLine.hasSwitch(ChromeSwitches.ENABLE_WEB_NOTIFICATION_CUSTOM_LAYOUTS)) {
             return true;
@@ -616,6 +643,9 @@ public class NotificationPlatformBridge {
             return false;
         }
         if (Build.VERSION.CODENAME.equals("N") || Build.VERSION.SDK_INT > Build.VERSION_CODES.M) {
+            return false;
+        }
+        if (hasImage) {
             return false;
         }
         return true;
@@ -666,12 +696,15 @@ public class NotificationPlatformBridge {
      * @param webApkPackage The package of the WebAPK associated with the notification.
      *        Empty if the notification is not associated with a WebAPK.
      * @param actionIndex
+     * @param reply User reply to a text action on the notification. Null if the user did not click
+     *              on a text action or if inline replies are not supported.
      */
     private void onNotificationClicked(String notificationId, String origin, String profileId,
-            boolean incognito, String tag, String webApkPackage, int actionIndex) {
+            boolean incognito, String tag, String webApkPackage, int actionIndex,
+            @Nullable String reply) {
         mLastNotificationClickMs = System.currentTimeMillis();
         nativeOnNotificationClicked(mNativeNotificationPlatformBridge, notificationId, origin,
-                profileId, incognito, tag, webApkPackage, actionIndex);
+                profileId, incognito, tag, webApkPackage, actionIndex, reply);
     }
 
     /**
@@ -695,7 +728,7 @@ public class NotificationPlatformBridge {
 
     private native void nativeOnNotificationClicked(long nativeNotificationPlatformBridgeAndroid,
             String notificationId, String origin, String profileId, boolean incognito, String tag,
-            String webApkPackage, int actionIndex);
+            String webApkPackage, int actionIndex, String reply);
     private native void nativeOnNotificationClosed(long nativeNotificationPlatformBridgeAndroid,
             String notificationId, String origin, String profileId, boolean incognito, String tag,
             boolean byUser);

@@ -14,7 +14,8 @@ namespace blink {
 
 ScriptPromise UnderlyingSourceBase::startWrapper(ScriptState* scriptState,
                                                  ScriptValue jsController) {
-  // Cannot call start twice (e.g., cannot use the same UnderlyingSourceBase to construct multiple streams)
+  // Cannot call start twice (e.g., cannot use the same UnderlyingSourceBase to
+  // construct multiple streams).
   ASSERT(!m_controller);
 
   m_controller = new ReadableStreamController(jsController);
@@ -57,7 +58,7 @@ bool UnderlyingSourceBase::hasPendingActivity() const {
   return m_controller && m_controller->isActive() && m_isStreamLocked;
 }
 
-void UnderlyingSourceBase::stop() {
+void UnderlyingSourceBase::contextDestroyed() {
   if (m_controller) {
     m_controller->noteHasBeenCanceled();
     m_controller.clear();

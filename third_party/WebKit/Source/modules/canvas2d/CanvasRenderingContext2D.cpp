@@ -158,11 +158,16 @@ void CanvasRenderingContext2D::dispose() {
 }
 
 void CanvasRenderingContext2D::validateStateStack() const {
-#if ENABLE(ASSERT)
-  SkCanvas* skCanvas = canvas()->existingDrawingCanvas();
-  if (skCanvas && m_contextLostMode == NotLostContext) {
-    ASSERT(static_cast<size_t>(skCanvas->getSaveCount()) ==
-           m_stateStack.size());
+#if DCHECK_IS_ON()
+  if (SkCanvas* skCanvas = canvas()->existingDrawingCanvas()) {
+    // The canvas should always have an initial save frame, to support
+    // resetting the top level matrix and clip.
+    DCHECK_GT(skCanvas->getSaveCount(), 1);
+
+    if (m_contextLostMode == NotLostContext) {
+      DCHECK_EQ(static_cast<size_t>(skCanvas->getSaveCount()),
+                m_stateStack.size() + 1);
+    }
   }
 #endif
   CHECK(m_stateStack.first()
@@ -279,11 +284,18 @@ void CanvasRenderingContext2D::reset() {
   m_stateStack.resize(1);
   m_stateStack.first() = CanvasRenderingContext2DState::create();
   m_path.clear();
-  SkCanvas* c = canvas()->existingDrawingCanvas();
-  if (c) {
-    c->resetMatrix();
-    c->clipRect(SkRect::MakeWH(canvas()->width(), canvas()->height()),
-                SkRegion::kReplace_Op);
+  if (SkCanvas* c = canvas()->existingDrawingCanvas()) {
+    // The canvas should always have an initial/unbalanced save frame, which
+    // we use to reset the top level matrix and clip here.
+    DCHECK_EQ(c->getSaveCount(), 2);
+    c->restore();
+    c->save();
+    DCHECK(c->getTotalMatrix().isIdentity());
+#if DCHECK_IS_ON()
+    SkIRect clipBounds;
+    DCHECK(c->getClipDeviceBounds(&clipBounds));
+    DCHECK(clipBounds == c->imageInfo().bounds());
+#endif
   }
   validateStateStack();
 }
@@ -741,6 +753,10 @@ TextMetrics* CanvasRenderingContext2D::measureText(const String& text) {
 
   canvas()->document().updateStyleAndLayoutTreeForNode(canvas());
   const Font& font = accessFont();
+  const SimpleFontData* fontData = font.primaryFont();
+  DCHECK(fontData);
+  if (!fontData)
+    return metrics;
 
   TextDirection direction;
   if (state().getDirection() == CanvasRenderingContext2DState::DirectionInherit)
@@ -761,7 +777,7 @@ TextMetrics* CanvasRenderingContext2D::measureText(const String& text) {
   metrics->setActualBoundingBoxRight(textBounds.maxX());
 
   // y direction
-  const FontMetrics& fontMetrics = font.getFontMetrics();
+  const FontMetrics& fontMetrics = fontData->getFontMetrics();
   const float ascent = fontMetrics.floatAscent();
   const float descent = fontMetrics.floatDescent();
   const float baselineY = getFontBaseline(fontMetrics);
@@ -817,10 +833,12 @@ void CanvasRenderingContext2D::drawTextInternal(
         DisableDeferralReasonSubPixelTextAntiAliasingSupport);
 
   const Font& font = accessFont();
-  if (!font.primaryFont())
+  font.getFontDescription().setSubpixelAscentDescent(true);
+  const SimpleFontData* fontData = font.primaryFont();
+  DCHECK(fontData);
+  if (!fontData)
     return;
-
-  const FontMetrics& fontMetrics = font.getFontMetrics();
+  const FontMetrics& fontMetrics = fontData->getFontMetrics();
 
   // FIXME: Need to turn off font smoothing.
 
@@ -898,22 +916,34 @@ const Font& CanvasRenderingContext2D::accessFont() {
   return state().font();
 }
 
-int CanvasRenderingContext2D::getFontBaseline(
+float CanvasRenderingContext2D::getFontBaseline(
     const FontMetrics& fontMetrics) const {
+  // If the font is so tiny that the lroundf operations result in two
+  // different types of text baselines to return the same baseline, use
+  // floating point metrics (crbug.com/338908).
+  // If you changed the heuristic here, for consistency please also change it
+  // in SimpleFontData::platformInit().
+  bool useFloatAscentDescent =
+      fontMetrics.ascent() < 3 || fontMetrics.height() < 2;
   switch (state().getTextBaseline()) {
     case TopTextBaseline:
-      return fontMetrics.ascent();
+      return useFloatAscentDescent ? fontMetrics.floatAscent()
+                                   : fontMetrics.ascent();
     case HangingTextBaseline:
       // According to
       // http://wiki.apache.org/xmlgraphics-fop/LineLayout/AlignmentHandling
       // "FOP (Formatting Objects Processor) puts the hanging baseline at 80% of
       // the ascender height"
-      return (fontMetrics.ascent() * 4) / 5;
+      return useFloatAscentDescent ? (fontMetrics.floatAscent() * 4.0) / 5.0
+                                   : (fontMetrics.ascent() * 4) / 5;
     case BottomTextBaseline:
     case IdeographicTextBaseline:
-      return -fontMetrics.descent();
+      return useFloatAscentDescent ? -fontMetrics.floatDescent()
+                                   : -fontMetrics.descent();
     case MiddleTextBaseline:
-      return -fontMetrics.descent() + fontMetrics.height() / 2;
+      return useFloatAscentDescent
+                 ? -fontMetrics.floatDescent() + fontMetrics.floatHeight() / 2.0
+                 : -fontMetrics.descent() + fontMetrics.height() / 2;
     case AlphabeticTextBaseline:
     default:
       // Do nothing.

@@ -62,7 +62,7 @@ void PopulateSpdyHeaderBlock(const BalsaHeaders& headers,
   for (const auto& header : header_values_map) {
     if (header.second.size() == 1) {
       // Avoid string allocation for the single value case.
-      block->ReplaceOrAppendHeader(header.first, header.second[0]);
+      (*block)[header.first] = header.second[0];
     } else {
       StringPiece separator("\0", 1);
       auto it = header.second.begin();
@@ -72,12 +72,12 @@ void PopulateSpdyHeaderBlock(const BalsaHeaders& headers,
         separator.AppendToString(&value);
         value.append(it->data(), it->size());
       }
-      block->ReplaceOrAppendHeader(header.first, value);
+      (*block)[header.first] = value;
     }
   }
 }
 
-void PopulateSpdy4RequestHeaderBlock(const BalsaHeaders& headers,
+void PopulateHttp2RequestHeaderBlock(const BalsaHeaders& headers,
                                      const string& scheme,
                                      const string& host_and_port,
                                      const string& path,
@@ -88,7 +88,7 @@ void PopulateSpdy4RequestHeaderBlock(const BalsaHeaders& headers,
     DCHECK(host_and_port.empty() || host_header == host_and_port);
     block->insert(make_pair(kV4Host, host_header));
     // PopulateSpdyHeaderBlock already added the "host" header,
-    // which is invalid for SPDY4.
+    // which is invalid for HTTP2.
     block->erase("host");
   } else {
     block->insert(make_pair(kV4Host, host_and_port));
@@ -267,13 +267,23 @@ SpdyHeaderBlock SpdyBalsaUtils::RequestHeadersToSpdyHeaders(
     }
   }
 
-  DCHECK(!scheme.empty());
-  DCHECK(!host_and_port.empty());
-  DCHECK(!path.empty());
+  if (scheme.empty()) {
+    if (request_headers.HasHeader("Scheme")) {
+      request_headers.GetAllOfHeaderAsString("Scheme", &scheme);
+    } else {
+      // Requests must contain a :scheme header, and unless another scheme is
+      // detected, https is assumed.
+      scheme = "https";
+    }
+  }
 
   SpdyHeaderBlock block;
-  PopulateSpdy4RequestHeaderBlock(request_headers, scheme, host_and_port, path,
+  PopulateHttp2RequestHeaderBlock(request_headers, scheme, host_and_port, path,
                                   &block);
+
+  // If a "Scheme" header existed in request_headers, it would have been
+  // propagated to |block|.
+  block.erase("scheme");
   return block;
 }
 

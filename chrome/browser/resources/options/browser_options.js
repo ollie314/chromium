@@ -6,6 +6,7 @@ cr.exportPath('options');
 
 /**
  * @typedef {{actionLinkText: (string|undefined),
+ *            accountInfo: (string|undefined),
  *            childUser: (boolean|undefined),
  *            hasError: (boolean|undefined),
  *            hasUnrecoverableError: (boolean|undefined),
@@ -361,14 +362,11 @@ cr.define('options', function() {
           chrome.send('coreOptionsUserMetricsAction',
                       ['Options_ShowTouchpadSettings']);
         };
-        if (loadTimeData.getBoolean('enableStorageManager')) {
-          $('storage-manager-button').hidden = false;
-          $('storage-manager-button').onclick = function(evt) {
-            PageManager.showPageByName('storage');
-            chrome.send('coreOptionsUserMetricsAction',
-                        ['Options_ShowStorageManager']);
-          };
-        }
+        $('storage-manager-button').onclick = function(evt) {
+          PageManager.showPageByName('storage');
+          chrome.send('coreOptionsUserMetricsAction',
+                      ['Options_ShowStorageManager']);
+        };
       }
 
       // Search section.
@@ -1187,6 +1185,9 @@ cr.define('options', function() {
                   loadTimeData.getString('syncButtonTextInProgress') :
                   loadTimeData.getString('syncButtonTextSignIn');
       $('start-stop-sync-indicator').hidden = signInButton.hidden;
+
+      $('account-info').textContent = syncData.accountInfo;
+      $('account-info').hidden = !this.signedIn_;
 
       // TODO(estade): can this just be textContent?
       $('sync-status-text').innerHTML = syncData.statusText;

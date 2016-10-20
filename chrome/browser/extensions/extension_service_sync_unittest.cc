@@ -34,10 +34,10 @@
 #include "chrome/test/base/testing_profile.h"
 #include "components/browser_sync/profile_sync_service.h"
 #include "components/crx_file/id_util.h"
-#include "components/sync/api/fake_sync_change_processor.h"
-#include "components/sync/api/sync_change_processor_wrapper_for_test.h"
-#include "components/sync/api/sync_data.h"
-#include "components/sync/api/sync_error_factory_mock.h"
+#include "components/sync/model/fake_sync_change_processor.h"
+#include "components/sync/model/sync_change_processor_wrapper_for_test.h"
+#include "components/sync/model/sync_data.h"
+#include "components/sync/model/sync_error_factory_mock.h"
 #include "components/variations/variations_associated_data.h"
 #include "extensions/browser/api_test_utils.h"
 #include "extensions/browser/app_sorting.h"
@@ -1581,17 +1581,6 @@ class ExtensionServiceTestSupervised : public ExtensionServiceSyncTest,
   }
 
  protected:
-  void InitNeedCustodianApprovalFieldTrial(bool enabled) {
-    // Group name doesn't matter.
-    base::FieldTrialList::CreateFieldTrial(
-        "SupervisedUserExtensionPermissionIncrease", "group");
-    std::map<std::string, std::string> params;
-    params["legacy_supervised_user"] = enabled ? "true" : "false";
-    params["child_account"] = enabled ? "true" : "false";
-    variations::AssociateVariationParams(
-        "SupervisedUserExtensionPermissionIncrease", "group", params);
-  }
-
   void InitSupervisedUserInitiatedExtensionInstallFeature(bool enabled) {
     base::FeatureList::ClearInstanceForTesting();
     std::unique_ptr<base::FeatureList> feature_list(new base::FeatureList);
@@ -2000,32 +1989,8 @@ TEST_F(ExtensionServiceTestSupervised, UpdateWithoutPermissionIncrease) {
   EXPECT_FALSE(IsPendingCustodianApproval(id));
 }
 
-TEST_F(ExtensionServiceTestSupervised, UpdateWithPermissionIncreaseNoApproval) {
-  InitNeedCustodianApprovalFieldTrial(false);
-
-  InitServices(true /* profile_is_supervised */);
-
-  MockPermissionRequestCreator* creator = new MockPermissionRequestCreator;
-  supervised_user_service()->AddPermissionRequestCreator(
-      base::WrapUnique(creator));
-
-  std::string id = InstallPermissionsTestExtension(true /* by_custodian */);
-
-  // Update to a new version with increased permissions.
-  // Since we don't require the custodian's approval, no permission request
-  // should be created.
-  const std::string version2("2");
-  EXPECT_CALL(*creator, CreateExtensionUpdateRequest(
-                            RequestId(id, version2), testing::_))
-      .Times(0);
-  UpdatePermissionsTestExtension(id, version2, DISABLED);
-  EXPECT_FALSE(IsPendingCustodianApproval(id));
-}
-
 TEST_F(ExtensionServiceTestSupervised,
        UpdateWithPermissionIncreaseApprovalOldVersion) {
-  InitNeedCustodianApprovalFieldTrial(true);
-
   InitServices(true /* profile_is_supervised */);
 
   MockPermissionRequestCreator* creator = new MockPermissionRequestCreator;
@@ -2076,8 +2041,6 @@ TEST_F(ExtensionServiceTestSupervised,
 
 TEST_F(ExtensionServiceTestSupervised,
        UpdateWithPermissionIncreaseApprovalMatchingVersion) {
-  InitNeedCustodianApprovalFieldTrial(true);
-
   InitServices(true /* profile_is_supervised */);
 
   MockPermissionRequestCreator* creator = new MockPermissionRequestCreator;
@@ -2115,8 +2078,6 @@ TEST_F(ExtensionServiceTestSupervised,
 
 TEST_F(ExtensionServiceTestSupervised,
        UpdateWithPermissionIncreaseApprovalNewVersion) {
-  InitNeedCustodianApprovalFieldTrial(true);
-
   InitServices(true /* profile_is_supervised */);
 
   MockPermissionRequestCreator* creator = new MockPermissionRequestCreator;
@@ -2163,7 +2124,6 @@ TEST_F(ExtensionServiceTestSupervised,
 }
 
 TEST_F(ExtensionServiceTestSupervised, SupervisedUserInitiatedInstalls) {
-  InitNeedCustodianApprovalFieldTrial(true);
   InitSupervisedUserInitiatedExtensionInstallFeature(true);
 
   InitServices(true /* profile_is_supervised */);
@@ -2204,7 +2164,6 @@ TEST_F(ExtensionServiceTestSupervised, SupervisedUserInitiatedInstalls) {
 
 TEST_F(ExtensionServiceTestSupervised,
        UpdateSUInitiatedInstallWithoutPermissionIncrease) {
-  InitNeedCustodianApprovalFieldTrial(true);
   InitSupervisedUserInitiatedExtensionInstallFeature(true);
 
   InitServices(true /* profile_is_supervised */);
@@ -2243,7 +2202,6 @@ TEST_F(ExtensionServiceTestSupervised,
 
 TEST_F(ExtensionServiceTestSupervised,
        UpdateSUInitiatedInstallWithPermissionIncrease) {
-  InitNeedCustodianApprovalFieldTrial(true);
   InitSupervisedUserInitiatedExtensionInstallFeature(true);
 
   InitServices(true /* profile_is_supervised */);
@@ -2289,7 +2247,6 @@ TEST_F(ExtensionServiceTestSupervised,
 
 TEST_F(ExtensionServiceTestSupervised,
        UpdateSUInitiatedInstallWithPermissionIncreaseApprovalArrivesFirst) {
-  InitNeedCustodianApprovalFieldTrial(true);
   InitSupervisedUserInitiatedExtensionInstallFeature(true);
 
   InitServices(true /* profile_is_supervised */);

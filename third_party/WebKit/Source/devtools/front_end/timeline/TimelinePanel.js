@@ -733,7 +733,7 @@ WebInspector.TimelinePanel.prototype = {
 
         var recordNode = encloseWithTag("b", WebInspector.shortcutRegistry.shortcutDescriptorsForAction("timeline.toggle-recording")[0].name);
         var reloadNode = encloseWithTag("b", WebInspector.shortcutRegistry.shortcutDescriptorsForAction("main.reload")[0].name);
-        var navigateNode = encloseWithTag("b", WebInspector.UIString("WASD"));
+        var navigateNode = encloseWithTag("b", WebInspector.UIString("WASD (ZQSD)"));
         var hintText = createElementWithClass("div");
         hintText.appendChild(WebInspector.formatLocalized("To capture a new timeline, click the record toolbar button or hit %s.", [recordNode]));
         hintText.createChild("br");
@@ -1043,7 +1043,7 @@ WebInspector.TimelinePanel.prototype = {
             this.showInDetails(WebInspector.TimelineUIUtils.generateDetailsContentForFrame(this._frameModel, frame, filmStripFrame));
             if (frame.layerTree) {
                 var layersView = this._layersView();
-                layersView.showLayerTree(frame.layerTree, frame.paints);
+                layersView.showLayerTree(frame.layerTree);
                 if (!this._detailsView.hasTab(WebInspector.TimelinePanel.DetailsTab.LayerViewer))
                     this._detailsView.appendTab(WebInspector.TimelinePanel.DetailsTab.LayerViewer, WebInspector.UIString("Layers"), layersView);
             }
@@ -1791,11 +1791,6 @@ WebInspector.TimelinePanel.StatusPane.prototype = {
     __proto__: WebInspector.VBox.prototype
 }
 
-WebInspector.TimelinePanel.show = function()
-{
-    WebInspector.inspectorView.setCurrentPanel(WebInspector.TimelinePanel.instance());
-}
-
 /**
  * @return {!WebInspector.TimelinePanel}
  */
@@ -1819,8 +1814,9 @@ WebInspector.LoadTimelineHandler.prototype = {
      */
     handleQueryParam: function(value)
     {
-        WebInspector.TimelinePanel.show();
-        WebInspector.TimelinePanel.instance()._loadFromURL(window.decodeURIComponent(value));
+        WebInspector.viewManager.showView("timeline").then(() => {
+            WebInspector.TimelinePanel.instance()._loadFromURL(window.decodeURIComponent(value));
+        });
     }
 }
 

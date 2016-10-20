@@ -13,13 +13,13 @@
 #include <mscat.h>  // NOLINT: This must be after wincrypt and wintrust.
 
 #include <algorithm>
+#include <set>
 
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/debug/leak_annotations.h"
 #include "base/environment.h"
 #include "base/file_version_info.h"
-#include "base/files/file_path.h"
 #include "base/i18n/case_conversion.h"
 #include "base/macros.h"
 #include "base/metrics/histogram_macros.h"
@@ -59,6 +59,12 @@ static bool ModuleSort(const ModuleEnumerator::Module& a,
 }
 
 namespace {
+
+// The default amount of time between module inspections. This prevents
+// certificate inspection and validation from using a large amount of CPU and
+// battery immediately after startup.
+constexpr base::TimeDelta kDefaultPerModuleDelay =
+  base::TimeDelta::FromSeconds(1);
 
 // A struct to help de-duping modules before adding them to the enumerated
 // modules vector.
@@ -243,16 +249,16 @@ struct CryptCATCatalogContextScopedTraits {
 using ScopedCryptCATCatalogContext = base::ScopedGeneric<
     CryptCATCatalogContext, CryptCATCatalogContextScopedTraits>;
 
-// Returns the "Subject" field associated with the certificate that signs
-// the catalog in which the given file is found, if any. Returns an empty string
-// on failure.
-base::string16 GetSubjectNameInCatalog(const base::FilePath& filename) {
+// Extracts the subject name and catalog path if the provided file is present in
+// a catalog file.
+void GetCatalogCertificateInfo(const base::FilePath& filename,
+                               ModuleEnumerator::CertificateInfo* cert_info) {
   // Get a crypt context for signature verification.
   ScopedCryptCATContext context;
   {
     PVOID raw_context = nullptr;
     if (!CryptCATAdminAcquireContext(&raw_context, nullptr, 0))
-      return base::string16();
+      return;
     context.reset(raw_context);
   }
 
@@ -262,20 +268,20 @@ base::string16 GetSubjectNameInCatalog(const base::FilePath& filename) {
     FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
     nullptr, OPEN_EXISTING, 0, nullptr));
   if (!file_handle.IsValid())
-    return base::string16();
+    return;
 
   // Get the size we need for our hash.
   DWORD hash_size = 0;
   CryptCATAdminCalcHashFromFileHandle(
       file_handle.Get(), &hash_size, nullptr, 0);
   if (hash_size == 0)
-    return base::string16();
+    return;
 
   // Calculate the hash. If this fails then bail.
   std::vector<BYTE> buffer(hash_size);
   if (!CryptCATAdminCalcHashFromFileHandle(file_handle.Get(), &hash_size,
           buffer.data(), 0)) {
-    return base::string16();
+    return;
   }
 
   // Get catalog for our context.
@@ -284,7 +290,7 @@ base::string16 GetSubjectNameInCatalog(const base::FilePath& filename) {
       CryptCATAdminEnumCatalogFromHash(context.get(), buffer.data(), hash_size,
                                        0, nullptr)));
   if (!catalog_context.is_valid())
-    return base::string16();
+    return;
 
   // Get the catalog info. This includes the path to the catalog itself, which
   // contains the signature of interest.
@@ -292,16 +298,46 @@ base::string16 GetSubjectNameInCatalog(const base::FilePath& filename) {
   catalog_info.cbStruct = sizeof(catalog_info);
   if (!CryptCATCatalogInfoFromContext(
       catalog_context.get().catalog_context(), &catalog_info, 0)) {
-    return base::string16();
+    return;
   }
 
   // Attempt to get the "Subject" field from the signature of the catalog file
   // itself.
   base::FilePath catalog_path(catalog_info.wszCatalogFile);
-  return GetSubjectNameInFile(catalog_path);
+  base::string16 subject = GetSubjectNameInFile(catalog_path);
+
+  if (subject.empty())
+    return;
+
+  cert_info->type = ModuleEnumerator::CERTIFICATE_IN_CATALOG;
+  cert_info->path = catalog_path;
+  cert_info->subject = subject;
+}
+
+// Extracts information about the certificate of the given file, if any is
+// found.
+void GetCertificateInfo(const base::FilePath& filename,
+                        ModuleEnumerator::CertificateInfo* cert_info) {
+  DCHECK_EQ(ModuleEnumerator::NO_CERTIFICATE, cert_info->type);
+  DCHECK(cert_info->path.empty());
+  DCHECK(cert_info->subject.empty());
+
+  GetCatalogCertificateInfo(filename, cert_info);
+  if (cert_info->type == ModuleEnumerator::CERTIFICATE_IN_CATALOG)
+    return;
+
+  base::string16 subject = GetSubjectNameInFile(filename);
+  if (subject.empty())
+    return;
+
+  cert_info->type = ModuleEnumerator::CERTIFICATE_IN_FILE;
+  cert_info->path = filename;
+  cert_info->subject = subject;
 }
 
 }  // namespace
+
+ModuleEnumerator::CertificateInfo::CertificateInfo() : type(NO_CERTIFICATE) {}
 
 ModuleEnumerator::Module::Module() {
 }
@@ -315,7 +351,6 @@ ModuleEnumerator::Module::Module(ModuleType type,
                                  const base::string16& product_name,
                                  const base::string16& description,
                                  const base::string16& version,
-                                 const base::string16& digital_signer,
                                  RecommendedAction recommended_action)
     : type(type),
       status(status),
@@ -324,7 +359,6 @@ ModuleEnumerator::Module::Module(ModuleType type,
       product_name(product_name),
       description(description),
       version(version),
-      digital_signer(digital_signer),
       recommended_action(recommended_action),
       duplicate_count(0),
       normalized(false) {
@@ -365,7 +399,8 @@ void ModuleEnumerator::NormalizeModule(Module* module) {
 
 ModuleEnumerator::ModuleEnumerator(EnumerateModulesModel* observer)
     : enumerated_modules_(nullptr),
-      observer_(observer) {
+      observer_(observer),
+      per_module_delay_(kDefaultPerModuleDelay) {
 }
 
 ModuleEnumerator::~ModuleEnumerator() {
@@ -380,12 +415,17 @@ void ModuleEnumerator::ScanNow(ModulesVector* list) {
   // scanning has not been finished before shutdown.
   BrowserThread::GetBlockingPool()->PostWorkerTaskWithShutdownBehavior(
       FROM_HERE,
-      base::Bind(&ModuleEnumerator::ScanImpl,
+      base::Bind(&ModuleEnumerator::ScanImplStart,
                  base::Unretained(this)),
       base::SequencedWorkerPool::CONTINUE_ON_SHUTDOWN);
 }
 
-void ModuleEnumerator::ScanImpl() {
+void ModuleEnumerator::SetPerModuleDelayToZero() {
+  // Set the delay to zero so the modules enumerate as quickly as possible.
+  per_module_delay_ = base::TimeDelta::FromSeconds(0);
+}
+
+void ModuleEnumerator::ScanImplStart() {
   base::TimeTicks start_time = base::TimeTicks::Now();
 
   // The provided destination for the enumerated modules should be empty, as it
@@ -416,6 +456,61 @@ void ModuleEnumerator::ScanImpl() {
   UMA_HISTOGRAM_TIMES("Conflicts.EnumerateWinsockModules",
                       checkpoint2 - checkpoint);
 
+  enumeration_total_time_ = base::TimeTicks::Now() - start_time;
+
+  // Post a delayed task to scan the first module. This forwards directly to
+  // ScanImplFinish if there are no modules to scan.
+  BrowserThread::GetBlockingPool()->PostDelayedWorkerTask(
+      FROM_HERE,
+      base::Bind(&ModuleEnumerator::ScanImplModule,
+                 base::Unretained(this),
+                 0),
+      per_module_delay_);
+}
+
+void ModuleEnumerator::ScanImplDelay(size_t index) {
+  // Bounce this over to a CONTINUE_ON_SHUTDOWN task in the same pool. This is
+  // necessary to prevent shutdown hangs while inspecting a module.
+  BrowserThread::GetBlockingPool()->PostWorkerTaskWithShutdownBehavior(
+      FROM_HERE,
+      base::Bind(&ModuleEnumerator::ScanImplModule,
+                 base::Unretained(this),
+                 index),
+      base::SequencedWorkerPool::CONTINUE_ON_SHUTDOWN);
+}
+
+void ModuleEnumerator::ScanImplModule(size_t index) {
+  while (index < enumerated_modules_->size()) {
+    base::TimeTicks start_time = base::TimeTicks::Now();
+    Module& entry = enumerated_modules_->at(index);
+    PopulateModuleInformation(&entry);
+    CollapsePath(&entry);
+    base::TimeDelta elapsed = base::TimeTicks::Now() - start_time;
+    enumeration_inspection_time_ += elapsed;
+    enumeration_total_time_ += elapsed;
+
+    // With a non-zero delay, bounce back over to ScanImplDelay, which will
+    // bounce back to this function and inspect the next module.
+    if (!per_module_delay_.is_zero()) {
+      BrowserThread::GetBlockingPool()->PostDelayedWorkerTask(
+          FROM_HERE,
+          base::Bind(&ModuleEnumerator::ScanImplDelay,
+                     base::Unretained(this),
+                     index + 1),
+          per_module_delay_);
+      return;
+    }
+
+    // If the delay has been set to zero then simply finish the rest of the
+    // enumeration in this already started task.
+    ++index;
+  }
+
+  // Getting here means that all of the modules have been inspected.
+  return ScanImplFinish();
+}
+
+void ModuleEnumerator::ScanImplFinish() {
   // TODO(chrisha): Annotate any modules that are suspicious/bad.
 
   ReportThirdPartyMetrics();
@@ -423,8 +518,10 @@ void ModuleEnumerator::ScanImpl() {
   std::sort(enumerated_modules_->begin(),
             enumerated_modules_->end(), ModuleSort);
 
+  UMA_HISTOGRAM_TIMES("Conflicts.EnumerationInspectionTime",
+                      enumeration_inspection_time_);
   UMA_HISTOGRAM_TIMES("Conflicts.EnumerationTotalTime",
-                      base::TimeTicks::Now() - start_time);
+                      enumeration_total_time_);
 
   // Send a reply back on the UI thread. The |observer_| outlives this
   // enumerator, so posting a raw pointer is safe. This is done last as
@@ -454,10 +551,7 @@ void ModuleEnumerator::EnumerateLoadedModules() {
     Module entry;
     entry.type = LOADED_MODULE;
     entry.location = module.szExePath;
-    PopulateModuleInformation(&entry);
-
     NormalizeModule(&entry);
-    CollapsePath(&entry);
     enumerated_modules_->push_back(entry);
   } while (::Module32Next(snap.Get(), &module));
 }
@@ -487,10 +581,7 @@ void ModuleEnumerator::ReadShellExtensions(HKEY parent) {
     Module entry;
     entry.type = SHELL_EXTENSION;
     entry.location = dll;
-    PopulateModuleInformation(&entry);
-
     NormalizeModule(&entry);
-    CollapsePath(&entry);
     AddToListWithoutDuplicating(entry);
 
     ++registration;
@@ -514,13 +605,9 @@ void ModuleEnumerator::EnumerateWinsockModules() {
     wchar_t expanded[MAX_PATH];
     DWORD size = ExpandEnvironmentStrings(
         entry.location.c_str(), expanded, MAX_PATH);
-    if (size != 0 && size <= MAX_PATH) {
-      entry.digital_signer =
-          GetSubjectNameFromDigitalSignature(base::FilePath(expanded));
-    }
+    if (size != 0 && size <= MAX_PATH)
+      entry.location = expanded;
     entry.version = base::IntToString16(layered_providers[i].version);
-
-    // Paths have already been collapsed.
     NormalizeModule(&entry);
     AddToListWithoutDuplicating(entry);
   }
@@ -530,8 +617,7 @@ void ModuleEnumerator::PopulateModuleInformation(Module* module) {
   module->status = NOT_MATCHED;
   module->duplicate_count = 0;
   module->normalized = false;
-  module->digital_signer =
-      GetSubjectNameFromDigitalSignature(base::FilePath(module->location));
+  GetCertificateInfo(base::FilePath(module->location), &module->cert_info);
   module->recommended_action = NONE;
   std::unique_ptr<FileVersionInfo> version_info(
       FileVersionInfo::CreateFileVersionInfo(base::FilePath(module->location)));
@@ -608,41 +694,52 @@ void ModuleEnumerator::CollapsePath(Module* entry) {
   }
 }
 
-base::string16 ModuleEnumerator::GetSubjectNameFromDigitalSignature(
-    const base::FilePath& filename) {
-  // Try using the signature directly present in the file first.
-  base::string16 subject_name = GetSubjectNameInFile(filename);
-  if (!subject_name.empty())
-    return subject_name;
-
-  // If that fails then look in the signed catalogs.
-  return GetSubjectNameInCatalog(filename);
-}
-
 void ModuleEnumerator::ReportThirdPartyMetrics() {
   static const wchar_t kMicrosoft[] = L"Microsoft ";
 
+  // Used for counting unique certificates that need to be validated. A
+  // catalog counts as a single certificate, as does a file with a baked in
+  // certificate.
+  std::set<base::FilePath> unique_certificates;
+  size_t microsoft_certificates = 0;
   size_t signed_modules = 0;
   size_t microsoft_modules = 0;
+  size_t catalog_modules = 0;
   for (const auto& module : *enumerated_modules_) {
-    if (!module.digital_signer.empty()) {
+    if (module.cert_info.type != ModuleEnumerator::NO_CERTIFICATE) {
       ++signed_modules;
+
+      if (module.cert_info.type == ModuleEnumerator::CERTIFICATE_IN_CATALOG)
+        ++catalog_modules;
+
+      // The first time this certificate is encountered it will be inserted
+      // into the set.
+      bool new_certificate =
+          unique_certificates.insert(module.cert_info.path).second;
 
       // Check if the signer name begins with "Microsoft ". Signatures are
       // typically "Microsoft Corporation" or "Microsoft Windows", but others
       // may exist.
-      if (module.digital_signer.compare(0, arraysize(kMicrosoft) - 1,
-                                        kMicrosoft) == 0) {
+      if (module.cert_info.subject.compare(0, arraysize(kMicrosoft) - 1,
+                                           kMicrosoft) == 0) {
         ++microsoft_modules;
+        if (new_certificate)
+          ++microsoft_certificates;
       }
     }
   }
 
-  // Report back some metrics regarding third party modules.
+  // Report back some metrics regarding third party modules and certificates.
+  UMA_HISTOGRAM_CUSTOM_COUNTS("ThirdPartyModules.Certificates.Total",
+                              unique_certificates.size(), 1, 500, 50);
+  UMA_HISTOGRAM_CUSTOM_COUNTS("ThirdPartyModules.Certificates.Microsoft",
+                              microsoft_certificates, 1, 500, 50);
   UMA_HISTOGRAM_CUSTOM_COUNTS("ThirdPartyModules.Modules.Signed",
                               signed_modules, 1, 500, 50);
   UMA_HISTOGRAM_CUSTOM_COUNTS("ThirdPartyModules.Modules.Signed.Microsoft",
                               microsoft_modules, 1, 500, 50);
+  UMA_HISTOGRAM_CUSTOM_COUNTS("ThirdPartyModules.Modules.Signed.Catalog",
+                              catalog_modules, 1, 500, 50);
   UMA_HISTOGRAM_CUSTOM_COUNTS("ThirdPartyModules.Modules.Total",
                               enumerated_modules_->size(), 1, 500, 50);
 }
@@ -719,20 +816,29 @@ void EnumerateModulesModel::MaybePostScanningTask() {
     BrowserThread::PostAfterStartupTask(
         FROM_HERE,
         BrowserThread::GetTaskRunnerForThread(BrowserThread::UI),
-        base::Bind(&EnumerateModulesModel::ScanNow, base::Unretained(this)));
+        base::Bind(&EnumerateModulesModel::ScanNow,
+                   base::Unretained(this),
+                   true));
     done = true;
   }
 }
 
-void EnumerateModulesModel::ScanNow() {
+void EnumerateModulesModel::ScanNow(bool background_mode) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   // |module_enumerator_| is used as a lock to know whether or not there are
   // active/pending blocking pool tasks. If a module enumerator exists then a
   // scan is already underway. Otherwise, either no scan has been completed or
   // a scan has terminated.
-  if (module_enumerator_)
+  if (module_enumerator_) {
+    // If a scan is in progress and this request is for immediate results, then
+    // inform the background scan. This is done without any locks because the
+    // other thread only reads from the value that is being modified, and on
+    // Windows its an atomic write.
+    if (!background_mode)
+      module_enumerator_->SetPerModuleDelayToZero();
     return;
+  }
 
   // Only allow a single scan per process lifetime. Immediately notify any
   // observers that the scan is complete. At this point |enumerated_modules_| is
@@ -744,6 +850,8 @@ void EnumerateModulesModel::ScanNow() {
 
   // ScanNow does not block, rather it simply schedules a task.
   module_enumerator_.reset(new ModuleEnumerator(this));
+  if (!background_mode)
+    module_enumerator_->SetPerModuleDelayToZero();
   module_enumerator_->ScanNow(&enumerated_modules_);
 }
 
@@ -787,7 +895,7 @@ base::ListValue* EnumerateModulesModel::GetModuleList() {
     data->SetString("product_name", module->product_name);
     data->SetString("description", module->description);
     data->SetString("version", module->version);
-    data->SetString("digital_signer", module->digital_signer);
+    data->SetString("digital_signer", module->cert_info.subject);
 
     // Figure out the possible resolution help string.
     base::string16 actions;

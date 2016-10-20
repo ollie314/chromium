@@ -70,7 +70,7 @@ class CORE_EXPORT FrameFetchContext final : public FetchContext {
                                    FetchResourceType) override;
   CachePolicy getCachePolicy() const override;
   WebCachePolicy resourceRequestCachePolicy(
-      const ResourceRequest&,
+      ResourceRequest&,
       Resource::Type,
       FetchRequest::DeferOption) const override;
   void dispatchDidChangeResourcePriority(unsigned long identifier,
@@ -136,7 +136,7 @@ class CORE_EXPORT FrameFetchContext final : public FetchContext {
   void addConsoleMessage(const String&,
                          LogMessageType = LogErrorMessage) const override;
   SecurityOrigin* getSecurityOrigin() const override;
-  void upgradeInsecureRequest(ResourceRequest&) override;
+  void modifyRequestForCSP(ResourceRequest&) override;
   void addClientHintsIfNecessary(FetchRequest&) override;
   void addCSPHeaderIfNecessary(Resource::Type, FetchRequest&) override;
   void populateRequestData(ResourceRequest&) override;

@@ -157,14 +157,22 @@ void RawResource::didAddClient(ResourceClient* c) {
   Resource::didAddClient(client);
 }
 
-void RawResource::willFollowRedirect(ResourceRequest& newRequest,
+bool RawResource::willFollowRedirect(const ResourceRequest& newRequest,
                                      const ResourceResponse& redirectResponse) {
-  Resource::willFollowRedirect(newRequest, redirectResponse);
+  bool follow = Resource::willFollowRedirect(newRequest, redirectResponse);
+  // The base class method takes a non const reference of a ResourceRequest
+  // and returns bool just for allowing RawResource to reject redirect. It
+  // must always return true.
+  DCHECK(follow);
 
   DCHECK(!redirectResponse.isNull());
   ResourceClientWalker<RawResourceClient> w(clients());
-  while (RawResourceClient* c = w.next())
-    c->redirectReceived(this, newRequest, redirectResponse);
+  while (RawResourceClient* c = w.next()) {
+    if (!c->redirectReceived(this, newRequest, redirectResponse))
+      follow = false;
+  }
+
+  return follow;
 }
 
 void RawResource::willNotFollowRedirect() {
@@ -319,15 +327,6 @@ NEVER_INLINE void RawResourceClientStateChecker::dataSent() {
 }
 
 NEVER_INLINE void RawResourceClientStateChecker::responseReceived() {
-  // TODO(hiroshige): Temporarily we insert the checks below to capture the
-  // wrong state. The checks should be reverted shortly. crbug.com/640960.
-  SECURITY_CHECK(m_state != NotAddedAsClient);
-  SECURITY_CHECK(m_state != RedirectBlocked);
-  SECURITY_CHECK(m_state != ResponseReceived);
-  SECURITY_CHECK(m_state != SetSerializedCachedMetadata);
-  SECURITY_CHECK(m_state != DataReceived);
-  SECURITY_CHECK(m_state != DataDownloaded);
-  SECURITY_CHECK(m_state != NotifyFinished);
   SECURITY_CHECK(m_state == Started);
   m_state = ResponseReceived;
 }

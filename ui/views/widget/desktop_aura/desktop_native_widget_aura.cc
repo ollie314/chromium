@@ -689,9 +689,6 @@ void DesktopNativeWidgetAura::StackAtTop() {
     desktop_window_tree_host_->StackAtTop();
 }
 
-void DesktopNativeWidgetAura::StackBelow(gfx::NativeView native_view) {
-}
-
 void DesktopNativeWidgetAura::SetShape(std::unique_ptr<SkRegion> shape) {
   if (content_window_)
     desktop_window_tree_host_->SetShape(std::move(shape));
@@ -1099,10 +1096,8 @@ void DesktopNativeWidgetAura::OnWindowActivated(
 void DesktopNativeWidgetAura::OnWindowFocused(aura::Window* gained_focus,
                                               aura::Window* lost_focus) {
   if (content_window_ == gained_focus) {
-    desktop_window_tree_host_->OnNativeWidgetFocus();
     native_widget_delegate_->OnNativeFocus();
   } else if (content_window_ == lost_focus) {
-    desktop_window_tree_host_->OnNativeWidgetBlur();
     native_widget_delegate_->OnNativeBlur();
   }
 }

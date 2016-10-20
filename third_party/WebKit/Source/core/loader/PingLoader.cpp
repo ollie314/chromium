@@ -204,7 +204,7 @@ class PingLoaderImpl : public GarbageCollectedFinalized<PingLoaderImpl>,
   void dispose();
 
   // WebURLLoaderClient
-  void willFollowRedirect(WebURLLoader*,
+  bool willFollowRedirect(WebURLLoader*,
                           WebURLRequest&,
                           const WebURLResponse&) override;
   void didReceiveResponse(WebURLLoader*, const WebURLResponse&) final;
@@ -288,18 +288,18 @@ void PingLoaderImpl::dispose() {
   m_keepAlive.clear();
 }
 
-void PingLoaderImpl::willFollowRedirect(
+bool PingLoaderImpl::willFollowRedirect(
     WebURLLoader*,
     WebURLRequest& passedNewRequest,
     const WebURLResponse& passedRedirectResponse) {
   if (!m_isBeacon)
-    return;
+    return true;
 
   // TODO(tyoshino): Check if setAllowStoredCredentials() should be called also
   // for non beacon cases.
   passedNewRequest.setAllowStoredCredentials(true);
   if (m_corsMode == NotCORSEnabled)
-    return;
+    return true;
 
   ResourceRequest& newRequest(passedNewRequest.toMutableResourceRequest());
   const ResourceResponse& redirectResponse(
@@ -316,18 +316,20 @@ void PingLoaderImpl::willFollowRedirect(
           m_origin, newRequest, redirectResponse, AllowStoredCredentials,
           options, errorDescription)) {
     if (LocalFrame* localFrame = frame()) {
-      if (localFrame->document())
+      if (localFrame->document()) {
         localFrame->document()->addConsoleMessage(ConsoleMessage::create(
             JSMessageSource, ErrorMessageLevel, errorDescription));
+      }
     }
     // Cancel the load and self destruct.
     dispose();
-    // Signal WebURLLoader that the redirect musn't be followed.
-    passedNewRequest = WebURLRequest();
-    return;
+
+    return false;
   }
   // FIXME: http://crbug.com/427429 is needed to correctly propagate updates of
   // Origin: following this successful redirect.
+
+  return true;
 }
 
 void PingLoaderImpl::didReceiveResponse(WebURLLoader*,
@@ -489,10 +491,11 @@ void PingLoader::sendLinkAuditPing(LocalFrame* frame,
 
   RefPtr<SecurityOrigin> pingOrigin = SecurityOrigin::create(pingURL);
   if (protocolIs(frame->document()->url().getString(), "http") ||
-      frame->document()->getSecurityOrigin()->canAccess(pingOrigin.get()))
+      frame->document()->getSecurityOrigin()->canAccess(pingOrigin.get())) {
     request.setHTTPHeaderField(
         HTTPNames::Ping_From,
         AtomicString(frame->document()->url().getString()));
+  }
 
   sendPingCommon(frame, request, FetchInitiatorTypeNames::ping,
                  AllowStoredCredentials, false);

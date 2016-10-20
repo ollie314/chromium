@@ -12,7 +12,7 @@
 #include "core/layout/compositing/PaintLayerCompositor.h"
 #include "core/page/scrolling/RootScrollerController.h"
 #include "core/paint/PaintLayer.h"
-#include "platform/TraceEvent.h"
+#include "platform/tracing/TraceEvent.h"
 
 namespace blink {
 
@@ -34,8 +34,8 @@ static const PaintLayer* findParentLayerOnClippingContainerChain(
       for (current = current->parent();
            current && !current->canContainFixedPositionObjects();
            current = current->parent()) {
-        // CSS clip applies to fixed position elements even for ancestors that are not what the
-        // fixed element is positioned with respect to.
+        // CSS clip applies to fixed position elements even for ancestors that
+        // are not what the fixed element is positioned with respect to.
         if (current->hasClip()) {
           DCHECK(current->hasLayer());
           return static_cast<const LayoutBoxModelObject*>(current)->layer();
@@ -47,7 +47,8 @@ static const PaintLayer* findParentLayerOnClippingContainerChain(
 
     if (current->hasLayer())
       return static_cast<const LayoutBoxModelObject*>(current)->layer();
-    // Having clip or overflow clip forces the LayoutObject to become a layer, except for contains: paint, which may apply to SVG.
+    // Having clip or overflow clip forces the LayoutObject to become a layer,
+    // except for contains: paint, which may apply to SVG.
     // SVG (other than LayoutSVGRoot) cannot have PaintLayers.
     DCHECK(!current->hasClipRelatedProperty() ||
            current->styleRef().containsPaint());
@@ -146,21 +147,23 @@ void CompositingInputsUpdater::updateRecursive(PaintLayer* layer,
     PaintLayer::RareAncestorDependentCompositingInputs rareProperties;
 
     if (!layer->isRootLayer()) {
-      properties.clippedAbsoluteBoundingBox =
-          enclosingIntRect(m_geometryMap.absoluteRect(
-              FloatRect(layer->boundingBoxForCompositingOverlapTest())));
-      // FIXME: Setting the absBounds to 1x1 instead of 0x0 makes very little sense,
-      // but removing this code will make JSGameBench sad.
-      // See https://codereview.chromium.org/13912020/
-      if (properties.clippedAbsoluteBoundingBox.isEmpty())
-        properties.clippedAbsoluteBoundingBox.setSize(IntSize(1, 1));
+      if (!RuntimeEnabledFeatures::slimmingPaintV2Enabled()) {
+        properties.clippedAbsoluteBoundingBox =
+            enclosingIntRect(m_geometryMap.absoluteRect(
+                FloatRect(layer->boundingBoxForCompositingOverlapTest())));
+        // FIXME: Setting the absBounds to 1x1 instead of 0x0 makes very little
+        // sense, but removing this code will make JSGameBench sad.
+        // See https://codereview.chromium.org/13912020/
+        if (properties.clippedAbsoluteBoundingBox.isEmpty())
+          properties.clippedAbsoluteBoundingBox.setSize(IntSize(1, 1));
 
-      IntRect clipRect =
-          pixelSnappedIntRect(layer->clipper()
-                                  .backgroundClipRect(ClipRectsContext(
-                                      m_rootLayer, AbsoluteClipRects))
-                                  .rect());
-      properties.clippedAbsoluteBoundingBox.intersect(clipRect);
+        IntRect clipRect =
+            pixelSnappedIntRect(layer->clipper()
+                                    .backgroundClipRect(ClipRectsContext(
+                                        m_rootLayer, AbsoluteClipRects))
+                                    .rect());
+        properties.clippedAbsoluteBoundingBox.intersect(clipRect);
+      }
 
       const PaintLayer* parent = layer->parent();
       rareProperties.opacityAncestor =

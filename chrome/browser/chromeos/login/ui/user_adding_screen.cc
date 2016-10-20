@@ -56,8 +56,9 @@ void UserAddingScreenImpl::Start() {
                  base::Unretained(this)));
 
   g_browser_process->platform_part()->SessionManager()->SetSessionState(
-      session_manager::SESSION_STATE_LOGIN_SECONDARY);
-  FOR_EACH_OBSERVER(Observer, observers_, OnUserAddingStarted());
+      session_manager::SessionState::LOGIN_SECONDARY);
+  for (auto& observer : observers_)
+    observer.OnUserAddingStarted();
 }
 
 void UserAddingScreenImpl::Cancel() {
@@ -91,8 +92,9 @@ void UserAddingScreenImpl::OnDisplayHostCompletion() {
   display_host_ = NULL;
 
   g_browser_process->platform_part()->SessionManager()->SetSessionState(
-      session_manager::SESSION_STATE_ACTIVE);
-  FOR_EACH_OBSERVER(Observer, observers_, OnUserAddingFinished());
+      session_manager::SessionState::ACTIVE);
+  for (auto& observer : observers_)
+    observer.OnUserAddingFinished();
 }
 
 // static
@@ -117,4 +119,3 @@ UserAddingScreen* UserAddingScreen::Get() {
 }
 
 }  // namespace chromeos
-

@@ -3,12 +3,11 @@
 // found in the LICENSE file.
 
 #include "ash/aura/wm_window_aura.h"
-#include "ash/common/shell_window_ids.h"
 #include "ash/common/system/tray/system_tray.h"
 #include "ash/common/wm/root_window_finder.h"
 #include "ash/display/display_manager.h"
+#include "ash/public/cpp/shell_window_ids.h"
 #include "ash/root_window_controller.h"
-#include "ash/screen_util.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/wm/window_properties.h"
@@ -49,7 +48,6 @@ class ModalWidgetDelegate : public views::WidgetDelegateView {
   ~ModalWidgetDelegate() override {}
 
   // Overridden from views::WidgetDelegate:
-  views::View* GetContentsView() override { return this; }
   ui::ModalType GetModalType() const override { return ui::MODAL_TYPE_SYSTEM; }
 
  private:
@@ -818,7 +816,7 @@ TEST_F(ExtendedDesktopTest, StayInSameRootWindow) {
   aura::Window* window =
       aura::test::CreateTestWindowWithId(100, settings_bubble_container);
   window->SetBoundsInScreen(gfx::Rect(150, 10, 50, 50),
-                            ScreenUtil::GetSecondaryDisplay());
+                            display_manager()->GetSecondaryDisplay());
   EXPECT_EQ(root_windows[0], window->GetRootWindow());
 
   aura::Window* status_container =
@@ -826,7 +824,7 @@ TEST_F(ExtendedDesktopTest, StayInSameRootWindow) {
           kShellWindowId_StatusContainer);
   window = aura::test::CreateTestWindowWithId(100, status_container);
   window->SetBoundsInScreen(gfx::Rect(150, 10, 50, 50),
-                            ScreenUtil::GetSecondaryDisplay());
+                            display_manager()->GetSecondaryDisplay());
   EXPECT_EQ(root_windows[0], window->GetRootWindow());
 }
 
@@ -843,7 +841,7 @@ TEST_F(ExtendedDesktopTest, KeyEventsOnLockScreen) {
   widget1->Show();
   EXPECT_EQ(root_windows[0], widget1->GetNativeView()->GetRootWindow());
   views::Widget* widget2 =
-      CreateTestWidget(ScreenUtil::GetSecondaryDisplay().bounds());
+      CreateTestWidget(display_manager()->GetSecondaryDisplay().bounds());
   widget2->Show();
   EXPECT_EQ(root_windows[1], widget2->GetNativeView()->GetRootWindow());
 

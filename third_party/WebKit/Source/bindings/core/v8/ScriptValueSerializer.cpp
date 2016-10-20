@@ -108,6 +108,22 @@ void SerializedScriptValueWriter::writeBooleanObject(bool value) {
   append(value ? TrueObjectTag : FalseObjectTag);
 }
 
+void SerializedScriptValueWriter::writeRawStringBytes(
+    v8::Local<v8::String>& string) {
+  int rawLength = string->Length();
+  string->WriteOneByte(byteAt(m_position), 0, rawLength,
+                       v8StringWriteOptions());
+  m_position += rawLength;
+}
+
+void SerializedScriptValueWriter::writeUtf8String(
+    v8::Local<v8::String>& string) {
+  int utf8Length = string->Utf8Length();
+  char* buffer = reinterpret_cast<char*>(byteAt(m_position));
+  string->WriteUtf8(buffer, utf8Length, 0, v8StringWriteOptions());
+  m_position += utf8Length;
+}
+
 void SerializedScriptValueWriter::writeOneByteString(
     v8::Local<v8::String>& string) {
   int stringLength = string->Length();
@@ -120,13 +136,10 @@ void SerializedScriptValueWriter::writeOneByteString(
 
   // ASCII fast path.
   if (stringLength == utf8Length) {
-    string->WriteOneByte(byteAt(m_position), 0, utf8Length,
-                         v8StringWriteOptions());
+    writeRawStringBytes(string);
   } else {
-    char* buffer = reinterpret_cast<char*>(byteAt(m_position));
-    string->WriteUtf8(buffer, utf8Length, 0, v8StringWriteOptions());
+    writeUtf8String(string);
   }
-  m_position += utf8Length;
 }
 
 void SerializedScriptValueWriter::writeUCharString(
@@ -355,6 +368,7 @@ void SerializedScriptValueWriter::writeTransferredOffscreenCanvas(
     uint32_t height,
     uint32_t canvasId,
     uint32_t clientId,
+    uint32_t sinkId,
     uint32_t localId,
     uint64_t nonce) {
   append(OffscreenCanvasTransferTag);
@@ -362,6 +376,7 @@ void SerializedScriptValueWriter::writeTransferredOffscreenCanvas(
   doWriteUint32(height);
   doWriteUint32(canvasId);
   doWriteUint32(clientId);
+  doWriteUint32(sinkId);
   doWriteUint32(localId);
   doWriteUint64(nonce);
 }
@@ -1254,8 +1269,20 @@ ScriptValueSerializer::writeWasmCompiledModule(v8::Local<v8::Object> object,
   // TODO (mtrofin): explore mechanism avoiding data copying / buffer resizing.
   v8::Local<v8::WasmCompiledModule> wasmModule =
       object.As<v8::WasmCompiledModule>();
+  v8::Local<v8::String> wireBytes = wasmModule->GetWasmWireBytes();
+  DCHECK(wireBytes->IsOneByte());
+
   v8::WasmCompiledModule::SerializedModule data = wasmModule->Serialize();
   m_writer.append(WasmModuleTag);
+  uint32_t wireBytesLength = static_cast<uint32_t>(wireBytes->Length());
+  // We place a tag so we may evolve the format in which we store the
+  // wire bytes. We plan to move them to a blob.
+  // We want to control how we write the string, though, so we explicitly
+  // call writeRawStringBytes.
+  m_writer.append(RawBytesTag);
+  m_writer.doWriteUint32(wireBytesLength);
+  m_writer.ensureSpace(wireBytesLength);
+  m_writer.writeRawStringBytes(wireBytes);
   m_writer.doWriteUint32(static_cast<uint32_t>(data.second));
   m_writer.append(data.first.get(), static_cast<int>(data.second));
   return nullptr;
@@ -1301,7 +1328,8 @@ ScriptValueSerializer::writeTransferredOffscreenCanvas(
   m_writer.writeTransferredOffscreenCanvas(
       offscreenCanvas->width(), offscreenCanvas->height(),
       offscreenCanvas->getAssociatedCanvasId(), offscreenCanvas->clientId(),
-      offscreenCanvas->localId(), offscreenCanvas->nonce());
+      offscreenCanvas->sinkId(), offscreenCanvas->localId(),
+      offscreenCanvas->nonce());
   return nullptr;
 }
 
@@ -1681,7 +1709,7 @@ bool SerializedScriptValueReader::readWithTag(
     case OffscreenCanvasTransferTag: {
       if (!m_version)
         return false;
-      uint32_t width, height, canvasId, clientId, localId;
+      uint32_t width, height, canvasId, clientId, sinkId, localId;
       uint64_t nonce;
       if (!doReadUint32(&width))
         return false;
@@ -1691,12 +1719,14 @@ bool SerializedScriptValueReader::readWithTag(
         return false;
       if (!doReadUint32(&clientId))
         return false;
+      if (!doReadUint32(&sinkId))
+        return false;
       if (!doReadUint32(&localId))
         return false;
       if (!doReadUint64(&nonce))
         return false;
       if (!deserializer.tryGetTransferredOffscreenCanvas(
-              width, height, canvasId, clientId, localId, nonce, value))
+              width, height, canvasId, clientId, sinkId, localId, nonce, value))
         return false;
       break;
     }
@@ -1948,24 +1978,40 @@ DOMArrayBuffer* SerializedScriptValueReader::doReadArrayBuffer() {
 bool SerializedScriptValueReader::readWasmCompiledModule(
     v8::Local<v8::Value>* value) {
   CHECK(RuntimeEnabledFeatures::webAssemblySerializationEnabled());
-  uint32_t size = 0;
-  if (!doReadUint32(&size))
+  // First, read the tag of the wire bytes.
+  SerializationTag wireBytesFormat = InvalidTag;
+  if (!readTag(&wireBytesFormat))
     return false;
-  if (m_position + size > m_length)
+  DCHECK(wireBytesFormat == RawBytesTag);
+  // Just like when writing, we don't rely on the default string serialization
+  // mechanics for the wire bytes. We don't even want a string, because
+  // that would lead to a memory copying API implementation on the V8 side.
+  uint32_t wireBytesSize = 0;
+  uint32_t compiledBytesSize = 0;
+  if (!doReadUint32(&wireBytesSize))
     return false;
-  const uint8_t* buf = m_buffer + m_position;
-  // TODO(mtrofin): simplify deserializer API. const uint8_t* + size_t should
-  // be sufficient.
-  v8::WasmCompiledModule::SerializedModule data = {
-      std::unique_ptr<const uint8_t[]>(buf), static_cast<size_t>(size)};
-  v8::MaybeLocal<v8::WasmCompiledModule> retval =
-      v8::WasmCompiledModule::Deserialize(isolate(), data);
-  data.first.release();
-  m_position += size;
+  if (m_position + wireBytesSize > m_length)
+    return false;
+  const uint8_t* wireBytesStart = m_buffer + m_position;
+  m_position += wireBytesSize;
 
-  // TODO(mtrofin): right now, we'll return undefined if the deserialization
-  // fails, which is what may happen when v8's version changes. Update when
-  // spec settles. crbug.com/639090
+  if (!doReadUint32(&compiledBytesSize))
+    return false;
+  if (m_position + compiledBytesSize > m_length)
+    return false;
+  const uint8_t* compiledBytesStart = m_buffer + m_position;
+  m_position += compiledBytesSize;
+
+  v8::WasmCompiledModule::CallerOwnedBuffer wireBytes = {
+      wireBytesStart, static_cast<size_t>(wireBytesSize)};
+
+  v8::WasmCompiledModule::CallerOwnedBuffer compiledBytes = {
+      compiledBytesStart, static_cast<size_t>(compiledBytesSize)};
+
+  v8::MaybeLocal<v8::WasmCompiledModule> retval =
+      v8::WasmCompiledModule::DeserializeOrCompile(isolate(), compiledBytes,
+                                                   wireBytes);
+
   return retval.ToLocal(value);
 }
 
@@ -2545,12 +2591,13 @@ bool ScriptValueDeserializer::tryGetTransferredOffscreenCanvas(
     uint32_t height,
     uint32_t canvasId,
     uint32_t clientId,
+    uint32_t sinkId,
     uint32_t localId,
     uint64_t nonce,
     v8::Local<v8::Value>* object) {
   OffscreenCanvas* offscreenCanvas = OffscreenCanvas::create(width, height);
   offscreenCanvas->setAssociatedCanvasId(canvasId);
-  offscreenCanvas->setSurfaceId(clientId, localId, nonce);
+  offscreenCanvas->setSurfaceId(clientId, sinkId, localId, nonce);
   *object = toV8(offscreenCanvas, m_reader.getScriptState());
   if ((*object).IsEmpty())
     return false;

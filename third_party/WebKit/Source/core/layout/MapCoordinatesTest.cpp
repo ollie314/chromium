@@ -32,13 +32,14 @@ class MapCoordinatesTest : public RenderingTest {
                                MapCoordinatesFlags = 0) const;
 };
 
-// One note about tests here that operate on LayoutInline and LayoutText objects:
-// mapLocalToAncestor() expects such objects to pass their static location and size (relatively to
-// the border edge of their container) to mapLocalToAncestor() via the TransformState
-// argument. mapLocalToAncestor() is then only expected to make adjustments for
-// relative-positioning, container-specific characteristics (such as writing mode roots, multicol),
-// and so on. This in contrast to LayoutBox objects, where the TransformState passed is relative to
-// the box itself, not the container.
+// One note about tests here that operate on LayoutInline and LayoutText
+// objects: mapLocalToAncestor() expects such objects to pass their static
+// location and size (relatively to the border edge of their container) to
+// mapLocalToAncestor() via the TransformState argument. mapLocalToAncestor() is
+// then only expected to make adjustments for relative-positioning,
+// container-specific characteristics (such as writing mode roots, multicol),
+// and so on. This in contrast to LayoutBox objects, where the TransformState
+// passed is relative to the box itself, not the container.
 
 FloatPoint MapCoordinatesTest::mapLocalToAncestor(
     const LayoutObject* object,
@@ -140,7 +141,7 @@ TEST_F(MapCoordinatesTest, OverflowClip) {
 
   LayoutObject* target = getLayoutObjectByElementId("target");
   LayoutObject* overflow = getLayoutObjectByElementId("overflow");
-  toLayoutBox(overflow)->scrollToOffset(DoubleSize(32, 54));
+  toLayoutBox(overflow)->scrollToPosition(FloatPoint(32, 54));
 
   FloatPoint mappedPoint = mapLocalToAncestor(
       target, toLayoutBoxModelObject(target->parent()), FloatPoint(100, 100));
@@ -513,10 +514,9 @@ TEST_F(MapCoordinatesTest, FixedPosInTransform) {
       "<div id='container'><div class='fixed' id='target'></div></div>"
       "<div class='spacer'></div>");
 
-  document().view()->setScrollPosition(DoublePoint(0.0, 50),
-                                       ProgrammaticScroll);
+  document().view()->setScrollOffset(ScrollOffset(0.0, 50), ProgrammaticScroll);
   document().view()->updateAllLifecyclePhases();
-  EXPECT_EQ(50, document().view()->scrollPosition().y());
+  EXPECT_EQ(50, document().view()->scrollOffsetInt().height());
 
   LayoutBox* target = toLayoutBox(getLayoutObjectByElementId("target"));
   LayoutBox* container = toLayoutBox(getLayoutObjectByElementId("container"));
@@ -550,10 +550,9 @@ TEST_F(MapCoordinatesTest, FixedPosInContainPaint) {
       "<div id='container'><div class='fixed' id='target'></div></div>"
       "<div class='spacer'></div>");
 
-  document().view()->setScrollPosition(DoublePoint(0.0, 50),
-                                       ProgrammaticScroll);
+  document().view()->setScrollOffset(ScrollOffset(0.0, 50), ProgrammaticScroll);
   document().view()->updateAllLifecyclePhases();
-  EXPECT_EQ(50, document().view()->scrollPosition().y());
+  EXPECT_EQ(50, document().view()->scrollOffsetInt().height());
 
   LayoutBox* target = toLayoutBox(getLayoutObjectByElementId("target"));
   LayoutBox* container = toLayoutBox(getLayoutObjectByElementId("container"));
@@ -593,8 +592,8 @@ TEST_F(MapCoordinatesTest, FixedPosInIFrameWhenMainFrameScrolled) {
       "<style>body { margin: 0; } #target { width: 200px; height: 200px; "
       "position:fixed}</style><div id=target></div>");
 
-  document().view()->setScrollPosition(DoublePoint(0.0, 1000),
-                                       ProgrammaticScroll);
+  document().view()->setScrollOffset(ScrollOffset(0.0, 1000),
+                                     ProgrammaticScroll);
   document().view()->updateAllLifecyclePhases();
 
   Element* target = frameDocument.getElementById("target");
@@ -604,8 +603,9 @@ TEST_F(MapCoordinatesTest, FixedPosInIFrameWhenMainFrameScrolled) {
                          TraverseDocumentBoundaries);
 
   // y = 70 - 8000, since the iframe is offset by 8000px from the main frame.
-  // The scroll is not taken into account because the element is not fixed to the root LayoutView,
-  // and the space of the root LayoutView does not include scroll.
+  // The scroll is not taken into account because the element is not fixed to
+  // the root LayoutView, and the space of the root LayoutView does not include
+  // scroll.
   EXPECT_EQ(FloatPoint(10, -7930), mappedPoint);
 }
 
@@ -624,8 +624,8 @@ TEST_F(MapCoordinatesTest, IFrameTransformed) {
 
   document().view()->updateAllLifecyclePhases();
 
-  frameDocument.view()->setScrollPosition(DoublePoint(0.0, 1000),
-                                          ProgrammaticScroll);
+  frameDocument.view()->setScrollOffset(ScrollOffset(0.0, 1000),
+                                        ProgrammaticScroll);
   frameDocument.view()->updateAllLifecyclePhases();
 
   Element* target = frameDocument.getElementById("target");
@@ -635,7 +635,8 @@ TEST_F(MapCoordinatesTest, IFrameTransformed) {
                          TraverseDocumentBoundaries | UseTransforms);
 
   // Derivation:
-  // (200, 200) -> (-50, -50)  (Adjust for transform origin of scale, which is at the center of the 500x500 iframe)
+  // (200, 200) -> (-50, -50)  (Adjust for transform origin of scale, which is
+  //                           at the center of the 500x500 iframe)
   // (-50, -50) -> (-25, -25)  (Divide by 2 to invert the scale)
   // (-25, -25) -> (225, 225)  (Add the origin back in)
   // (225, 225) -> (225, 1225) (Adjust by scroll offset of y=1000)
@@ -660,8 +661,8 @@ TEST_F(MapCoordinatesTest, FixedPosInScrolledIFrameWithTransform) {
       "<div style='width: 200; height: 8000px'></div>");
 
   document().view()->updateAllLifecyclePhases();
-  frameDocument.view()->setScrollPosition(DoublePoint(0.0, 1000),
-                                          ProgrammaticScroll);
+  frameDocument.view()->setScrollOffset(ScrollOffset(0.0, 1000),
+                                        ProgrammaticScroll);
 
   Element* target = frameDocument.getElementById("target");
   ASSERT_TRUE(target);
@@ -866,7 +867,8 @@ TEST_F(MapCoordinatesTest, MulticolWithAbsPosNotContained) {
   LayoutBox* target = toLayoutBox(getLayoutObjectByElementId("target"));
   LayoutBox* container = toLayoutBox(getLayoutObjectByElementId("container"));
 
-  // The multicol container isn't in the containing block chain of the abspos #target.
+  // The multicol container isn't in the containing block chain of the abspos
+  // #target.
   FloatPoint mappedPoint = mapLocalToAncestor(target, container, FloatPoint());
   EXPECT_EQ(FloatPoint(16, 16), mappedPoint);
   mappedPoint = mapAncestorToLocal(target, container, mappedPoint);
@@ -918,10 +920,10 @@ TEST_F(MapCoordinatesTest, FlippedBlocksWritingModeWithText) {
                                    ApplyContainerFlip);
   EXPECT_EQ(FloatPoint(75, 10), mappedPoint);
 
-  // Map to a container further up in the tree. Flipping should still occur on the nearest
-  // container. LayoutObject::mapLocalToAncestor() is called recursively until the ancestor is
-  // reached, and the ApplyContainerFlip flag is cleared after having processed the innermost
-  // object.
+  // Map to a container further up in the tree. Flipping should still occur on
+  // the nearest container. LayoutObject::mapLocalToAncestor() is called
+  // recursively until the ancestor is reached, and the ApplyContainerFlip flag
+  // is cleared after having processed the innermost object.
   mappedPoint =
       mapLocalToAncestor(text, text->containingBlock()->containingBlock(),
                          FloatPoint(75, 10), ApplyContainerFlip);
@@ -931,7 +933,8 @@ TEST_F(MapCoordinatesTest, FlippedBlocksWritingModeWithText) {
                          mappedPoint, ApplyContainerFlip);
   EXPECT_EQ(FloatPoint(75, 10), mappedPoint);
 
-  // If the ApplyContainerFlip flag isn't specified, no flipping should take place.
+  // If the ApplyContainerFlip flag isn't specified, no flipping should take
+  // place.
   mappedPoint = mapLocalToAncestor(
       text, text->containingBlock()->containingBlock(), FloatPoint(75, 10));
   EXPECT_EQ(FloatPoint(80, 10), mappedPoint);
@@ -955,7 +958,8 @@ TEST_F(MapCoordinatesTest, FlippedBlocksWritingModeWithInline) {
   LayoutObject* target = getLayoutObjectByElementId("target");
   ASSERT_TRUE(target);
 
-  // First map to the parent SPAN. Nothing special should happen, since flipping occurs at the nearest container.
+  // First map to the parent SPAN. Nothing special should happen, since flipping
+  // occurs at the nearest container.
   FloatPoint mappedPoint =
       mapLocalToAncestor(target, toLayoutBoxModelObject(target->parent()),
                          FloatPoint(75, 10), ApplyContainerFlip);
@@ -983,7 +987,8 @@ TEST_F(MapCoordinatesTest, FlippedBlocksWritingModeWithInline) {
                                    mappedPoint, ApplyContainerFlip);
   EXPECT_EQ(FloatPoint(75, 10), mappedPoint);
 
-  // Map to a container further up in the tree. Flipping should still only occur on the nearest container.
+  // Map to a container further up in the tree. Flipping should still only occur
+  // on the nearest container.
   mappedPoint =
       mapLocalToAncestor(target, target->containingBlock()->containingBlock(),
                          FloatPoint(75, 10), ApplyContainerFlip);
@@ -993,7 +998,8 @@ TEST_F(MapCoordinatesTest, FlippedBlocksWritingModeWithInline) {
                          mappedPoint, ApplyContainerFlip);
   EXPECT_EQ(FloatPoint(75, 10), mappedPoint);
 
-  // If the ApplyContainerFlip flag isn't specified, no flipping should take place.
+  // If the ApplyContainerFlip flag isn't specified, no flipping should take
+  // place.
   mappedPoint = mapLocalToAncestor(
       target, target->containingBlock()->containingBlock(), FloatPoint(75, 10));
   EXPECT_EQ(FloatPoint(82, 10), mappedPoint);
@@ -1429,7 +1435,8 @@ TEST_F(MapCoordinatesTest, LocalToAbsoluteTransformFlattens) {
 
   matrix = child1->localToAbsoluteTransform();
 
-  // With child1, the rotations cancel and points should map basically back to themselves.
+  // With child1, the rotations cancel and points should map basically back to
+  // themselves.
   EXPECT_NEAR(100.0, matrix.projectPoint(FloatPoint(100.0, 50.0)).x(),
               LayoutUnit::epsilon());
   EXPECT_NEAR(50.0, matrix.projectPoint(FloatPoint(100.0, 50.0)).y(),
@@ -1439,7 +1446,8 @@ TEST_F(MapCoordinatesTest, LocalToAbsoluteTransformFlattens) {
   EXPECT_NEAR(100.0, matrix.projectPoint(FloatPoint(50.0, 100.0)).y(),
               LayoutUnit::epsilon());
 
-  // With child2, each rotation gets flattened and the end result is approximately a 90-degree rotation.
+  // With child2, each rotation gets flattened and the end result is
+  // approximately a 90-degree rotation.
   matrix = child2->localToAbsoluteTransform();
   EXPECT_NEAR(50.0, matrix.projectPoint(FloatPoint(100.0, 50.0)).x(),
               LayoutUnit::epsilon());

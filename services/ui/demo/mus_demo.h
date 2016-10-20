@@ -14,7 +14,7 @@
 #include "base/callback.h"
 #include "base/macros.h"
 #include "base/timer/timer.h"
-#include "services/shell/public/cpp/service.h"
+#include "services/service_manager/public/cpp/service.h"
 #include "services/ui/public/cpp/window_manager_delegate.h"
 #include "services/ui/public/cpp/window_tree_client_delegate.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -25,10 +25,10 @@ class GpuService;
 
 namespace demo {
 
-// A simple MUS Demo mojo app. This app connects to the mojo:ui, creates a new
-// window and draws a spinning square in the center of the window. Provides a
-// simple way to demonstrate that the graphic stack works as intended.
-class MusDemo : public shell::Service,
+// A simple MUS Demo service. This service connects to the mojo:ui, creates a
+// new window and draws a spinning square in the center of the window. Provides
+// a simple way to demonstrate that the graphic stack works as intended.
+class MusDemo : public service_manager::Service,
                 public WindowTreeClientDelegate,
                 public WindowManagerDelegate {
  public:
@@ -36,10 +36,10 @@ class MusDemo : public shell::Service,
   ~MusDemo() override;
 
  private:
-  // shell::Service:
-  void OnStart(const shell::Identity& identity) override;
-  bool OnConnect(const shell::Identity& remote_identity,
-                 shell::InterfaceRegistry* registry) override;
+  // service_manager::Service:
+  void OnStart(const service_manager::Identity& identity) override;
+  bool OnConnect(const service_manager::Identity& remote_identity,
+                 service_manager::InterfaceRegistry* registry) override;
 
   // WindowTreeClientDelegate:
   void OnEmbed(Window* root) override;

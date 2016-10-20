@@ -228,9 +228,8 @@ bool ImageBuffer::copyToPlatformTexture(gpu::gles2::GLES2Interface* gl,
   if (!m_surface->isAccelerated())
     return false;
 
-  ASSERT(
-      textureImage
-          ->isTextureBacked());  // isAccelerated() check above should guarantee this
+  DCHECK(textureImage->isTextureBacked());  // The isAccelerated() check above
+                                            // should guarantee this.
   // Get the texture ID, flushing pending operations if needed.
   const GrGLTextureInfo* textureInfo = skia::GrBackendObjectToGrGLTextureInfo(
       textureImage->getTextureHandle(true));
@@ -244,9 +243,9 @@ bool ImageBuffer::copyToPlatformTexture(gpu::gles2::GLES2Interface* gl,
   gpu::gles2::GLES2Interface* sharedGL = provider->contextGL();
 
   gpu::Mailbox mailbox;
-  IntSize textureSize(textureImage->width(), textureImage->height());
 
-  // Contexts may be in a different share group. We must transfer the texture through a mailbox first
+  // Contexts may be in a different share group. We must transfer the texture
+  // through a mailbox first.
   sharedGL->GenMailboxCHROMIUM(mailbox.name);
   sharedGL->ProduceTextureDirectCHROMIUM(textureInfo->fID, textureInfo->fTarget,
                                          mailbox.name);
@@ -260,8 +259,9 @@ bool ImageBuffer::copyToPlatformTexture(gpu::gles2::GLES2Interface* gl,
   GLuint sourceTexture =
       gl->CreateAndConsumeTextureCHROMIUM(textureInfo->fTarget, mailbox.name);
 
-  // The canvas is stored in a premultiplied format, so unpremultiply if necessary.
-  // The canvas is stored in an inverted position, so the flip semantics are reversed.
+  // The canvas is stored in a premultiplied format, so unpremultiply if
+  // necessary. The canvas is also stored in an inverted position, so the flip
+  // semantics are reversed.
   gl->CopyTextureCHROMIUM(sourceTexture, texture, internalFormat, destType,
                           flipY ? GL_FALSE : GL_TRUE, GL_FALSE,
                           premultiplyAlpha ? GL_FALSE : GL_TRUE);

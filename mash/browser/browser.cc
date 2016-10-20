@@ -19,10 +19,10 @@
 #include "services/navigation/public/cpp/view_delegate.h"
 #include "services/navigation/public/cpp/view_observer.h"
 #include "services/navigation/public/interfaces/view.mojom.h"
-#include "services/shell/public/c/main.h"
-#include "services/shell/public/cpp/connector.h"
-#include "services/shell/public/cpp/service.h"
-#include "services/shell/public/cpp/service_runner.h"
+#include "services/service_manager/public/c/main.h"
+#include "services/service_manager/public/cpp/connector.h"
+#include "services/service_manager/public/cpp/service.h"
+#include "services/service_manager/public/cpp/service_runner.h"
 #include "services/tracing/public/cpp/provider.h"
 #include "services/ui/public/cpp/window.h"
 #include "services/ui/public/cpp/window_tree_client.h"
@@ -205,7 +205,8 @@ class TabStrip : public views::View,
     AddObserver(tab);
     tabs_.push_back(tab);
     tab_container_->AddChildView(tab);
-    FOR_EACH_OBSERVER(TabStripObserver, observers_, OnTabAdded(tab));
+    for (auto& observer : observers_)
+      observer.OnTabAdded(tab);
     SelectTab(tab);
   }
 
@@ -236,7 +237,8 @@ class TabStrip : public views::View,
         SelectTab(tabs_[next_selected_index]);
     }
     Layout();
-    FOR_EACH_OBSERVER(TabStripObserver, observers_, OnTabRemoved(tab));
+    for (auto& observer : observers_)
+      observer.OnTabRemoved(tab);
     delete tab;
   }
 
@@ -246,7 +248,8 @@ class TabStrip : public views::View,
     auto it = std::find(tabs_.begin(), tabs_.end(), tab);
     DCHECK(it != tabs_.end());
     selected_index_ = it - tabs_.begin();
-    FOR_EACH_OBSERVER(TabStripObserver, observers_, OnTabSelected(tab));
+    for (auto& observer : observers_)
+      observer.OnTabSelected(tab);
   }
   Tab* selected_tab() {
     return selected_index_ != -1 ? tabs_[selected_index_] : nullptr;
@@ -575,7 +578,6 @@ class UI : public views::WidgetDelegateView,
 
  private:
   // Overridden from views::WidgetDelegate:
-  views::View* GetContentsView() override { return this; }
   base::string16 GetWindowTitle() const override {
     // TODO(beng): use resources.
     if (selected_view()->title().empty())
@@ -865,7 +867,7 @@ std::unique_ptr<navigation::View> Browser::CreateView() {
   return base::MakeUnique<navigation::View>(std::move(factory));
 }
 
-void Browser::OnStart(const shell::Identity& identity) {
+void Browser::OnStart(const service_manager::Identity& identity) {
   tracing_.Initialize(connector(), identity.name());
 
   aura_init_.reset(
@@ -874,8 +876,8 @@ void Browser::OnStart(const shell::Identity& identity) {
       views::WindowManagerConnection::Create(connector(), identity);
 }
 
-bool Browser::OnConnect(const shell::Identity& remote_identity,
-                        shell::InterfaceRegistry* registry) {
+bool Browser::OnConnect(const service_manager::Identity& remote_identity,
+                        service_manager::InterfaceRegistry* registry) {
   registry->AddInterface<mojom::Launchable>(this);
   return true;
 }
@@ -896,7 +898,7 @@ void Browser::Launch(uint32_t what, mojom::LaunchMode how) {
   AddWindow(window);
 }
 
-void Browser::Create(const shell::Identity& remote_identity,
+void Browser::Create(const service_manager::Identity& remote_identity,
                      mojom::LaunchableRequest request) {
   bindings_.AddBinding(this, std::move(request));
 }

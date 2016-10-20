@@ -38,6 +38,7 @@ CrExtensionsBrowserTest.prototype = {
   extraLibraries: PolymerTest.getLibraries(ROOT_PATH).concat([
     'extension_test_util.js',
     'extension_detail_view_test.js',
+    'extension_error_page_test.js',
     'extension_item_test.js',
     'extension_item_list_test.js',
     'extension_keyboard_shortcuts_test.js',
@@ -71,6 +72,20 @@ CrExtensionsBrowserTestWithInstalledExtension.prototype = {
     GEN('  InstallGoodExtension();');
     GEN('  SetAutoConfirmUninstall();');
   },
+};
+
+/**
+ * Test fixture that navigates to chrome://extensions/?id=<id>.
+ * @constructor
+ * @extends {CrExtensionsBrowserTestWithInstalledExtension}
+ */
+function CrExtensionsBrowserTestWithIdQueryParam() {}
+
+CrExtensionsBrowserTestWithIdQueryParam.prototype = {
+  __proto__: CrExtensionsBrowserTestWithInstalledExtension.prototype,
+
+  /** @override */
+  browsePreload: 'chrome://extensions/?id=ldnnhddmnhbkjipkidpdiheffobcpfmf',
 };
 
 /**
@@ -216,6 +231,13 @@ TEST_F('CrExtensionsBrowserTestWithMultipleExtensionTypesInstalled',
   mocha.grep(assert(extension_manager_tests.TestNames.ChangePages)).run();
 });
 
+TEST_F('CrExtensionsBrowserTestWithIdQueryParam',
+       'ExtensionManagerNavigationToDetailsTest', function() {
+  extension_manager_tests.registerTests();
+  mocha.grep(
+      assert(extension_manager_tests.TestNames.UrlNavigationToDetails)).run();
+});
+
 ////////////////////////////////////////////////////////////////////////////////
 // Extension Keyboard Shortcuts Tests
 
@@ -253,4 +275,13 @@ TEST_F('CrExtensionsBrowserTest', 'ExtensionOptionsDialogInteractionTest',
        function() {
   extension_options_dialog_tests.registerTests();
   mocha.grep(assert(extension_options_dialog_tests.TestNames.Layout)).run();
+});
+
+////////////////////////////////////////////////////////////////////////////////
+// Extension Error Page Tests
+
+TEST_F('CrExtensionsBrowserTest', 'ExtensionErrorPageLayoutTest',
+       function() {
+  extension_error_page_tests.registerTests();
+  mocha.grep(assert(extension_error_page_tests.TestNames.Layout)).run();
 });

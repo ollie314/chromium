@@ -8,6 +8,7 @@
 #include "core/dom/Fullscreen.h"
 #include "core/frame/UseCounter.h"
 #include "core/inspector/ConsoleMessage.h"
+#include "gpu/command_buffer/client/gles2_interface.h"
 #include "modules/vr/NavigatorVR.h"
 #include "modules/vr/VRController.h"
 #include "modules/vr/VRDisplayCapabilities.h"
@@ -17,6 +18,7 @@
 #include "modules/vr/VRPose.h"
 #include "modules/vr/VRStageParameters.h"
 #include "modules/webgl/WebGLRenderingContextBase.h"
+#include "platform/Histogram.h"
 #include "platform/UserGestureIndicator.h"
 #include "public/platform/Platform.h"
 
@@ -96,10 +98,6 @@ bool VRDisplay::getFrameData(VRFrameData* frameData) {
 }
 
 VRPose* VRDisplay::getPose() {
-  Document* document = m_navigatorVR->document();
-  if (document)
-    UseCounter::count(*document, UseCounter::VRDeprecatedGetPose);
-
   updatePose();
 
   if (!m_framePose)
@@ -146,8 +144,29 @@ void VRDisplay::cancelAnimationFrame(int id) {
     document->cancelAnimationFrame(id);
 }
 
+void ReportPresentationResult(PresentationResult result) {
+  // Note that this is called twice for each call to requestPresent -
+  // one to declare that requestPresent was called, and one for the
+  // result.
+  DEFINE_STATIC_LOCAL(
+      EnumerationHistogram, vrPresentationResultHistogram,
+      ("VRDisplayPresentResult",
+       static_cast<int>(PresentationResult::PresentationResultMax)));
+  vrPresentationResultHistogram.count(static_cast<int>(result));
+}
+
 ScriptPromise VRDisplay::requestPresent(ScriptState* scriptState,
                                         const HeapVector<VRLayer>& layers) {
+  ExecutionContext* executionContext = scriptState->getExecutionContext();
+  UseCounter::count(executionContext, UseCounter::VRRequestPresent);
+  String errorMessage;
+  if (!executionContext->isSecureContext(errorMessage)) {
+    UseCounter::count(executionContext,
+                      UseCounter::VRRequestPresentInsecureOrigin);
+  }
+
+  ReportPresentationResult(PresentationResult::Requested);
+
   ScriptPromiseResolver* resolver = ScriptPromiseResolver::create(scriptState);
   ScriptPromise promise = resolver->promise();
 
@@ -157,6 +176,7 @@ ScriptPromise VRDisplay::requestPresent(ScriptState* scriptState,
     DOMException* exception =
         DOMException::create(InvalidStateError, "VRDisplay cannot present.");
     resolver->reject(exception);
+    ReportPresentationResult(PresentationResult::VRDisplayCannotPresent);
     return promise;
   }
 
@@ -170,6 +190,7 @@ ScriptPromise VRDisplay::requestPresent(ScriptState* scriptState,
     DOMException* exception = DOMException::create(
         InvalidStateError, "API can only be initiated by a user gesture.");
     resolver->reject(exception);
+    ReportPresentationResult(PresentationResult::NotInitiatedByUserGesture);
     return promise;
   }
 
@@ -181,6 +202,7 @@ ScriptPromise VRDisplay::requestPresent(ScriptState* scriptState,
     DOMException* exception =
         DOMException::create(InvalidStateError, "Invalid number of layers.");
     resolver->reject(exception);
+    ReportPresentationResult(PresentationResult::InvalidNumberOfLayers);
     return promise;
   }
 
@@ -191,6 +213,7 @@ ScriptPromise VRDisplay::requestPresent(ScriptState* scriptState,
     DOMException* exception =
         DOMException::create(InvalidStateError, "Invalid layer source.");
     resolver->reject(exception);
+    ReportPresentationResult(PresentationResult::InvalidLayerSource);
     return promise;
   }
 
@@ -202,8 +225,14 @@ ScriptPromise VRDisplay::requestPresent(ScriptState* scriptState,
     DOMException* exception = DOMException::create(
         InvalidStateError, "Layer source must have a WebGLRenderingContext");
     resolver->reject(exception);
+    ReportPresentationResult(
+        PresentationResult::LayerSourceMissingWebGLContext);
     return promise;
   }
+
+  // Save the WebGL script and underlying GL contexts for use by submitFrame().
+  m_renderingContext = toWebGLRenderingContextBase(renderingContext);
+  m_contextGL = m_renderingContext->contextGL();
 
   if ((m_layer.leftBounds().size() != 0 && m_layer.leftBounds().size() != 4) ||
       (m_layer.rightBounds().size() != 0 &&
@@ -213,6 +242,7 @@ ScriptPromise VRDisplay::requestPresent(ScriptState* scriptState,
         InvalidStateError,
         "Layer bounds must either be an empty array or have 4 values");
     resolver->reject(exception);
+    ReportPresentationResult(PresentationResult::InvalidLayerBounds);
     return promise;
   }
 
@@ -234,6 +264,7 @@ ScriptPromise VRDisplay::requestPresent(ScriptState* scriptState,
   } else {
     updateLayerBounds();
     resolver->resolve();
+    ReportPresentationResult(PresentationResult::SuccessAlreadyPresenting);
   }
 
   return promise;
@@ -267,16 +298,15 @@ void VRDisplay::beginPresent(ScriptPromiseResolver* resolver) {
         InvalidStateError,
         "VR Presentation not implemented for this VRDisplay.");
     resolver->reject(exception);
+    ReportPresentationResult(
+        PresentationResult::PresentationNotSupportedByDisplay);
     return;
   }
 
   m_isPresenting = true;
+  ReportPresentationResult(PresentationResult::Success);
 
   updateLayerBounds();
-
-  Document* document = m_navigatorVR->document();
-  if (document)
-    UseCounter::count(*document, UseCounter::VRPresent);
 
   resolver->resolve();
   m_navigatorVR->fireVRDisplayPresentChange(this);
@@ -294,6 +324,8 @@ void VRDisplay::forceExitPresent() {
   }
 
   m_isPresenting = false;
+  m_renderingContext = nullptr;
+  m_contextGL = nullptr;
 }
 
 void VRDisplay::updateLayerBounds() {
@@ -344,6 +376,39 @@ HeapVector<VRLayer> VRDisplay::getLayers() {
 }
 
 void VRDisplay::submitFrame() {
+  if (!m_isPresenting || !m_contextGL) {
+    // Something got confused, we can't submit frames if we're not presenting.
+    return;
+  }
+
+  // Write the frame number for the pose used into a bottom left pixel block.
+  // It is read by chrome/browser/android/vr_shell/vr_shell.cc to associate
+  // the correct corresponding pose for submission.
+  auto gl = m_contextGL;
+
+  // We must ensure that the WebGL app's GL state is preserved. We do this by
+  // calling low-level GL commands directly so that the rendering context's
+  // saved parameters don't get overwritten.
+
+  gl->Enable(GL_SCISSOR_TEST);
+  // Use a few pixels to ensure we get a clean color. The resolution for the
+  // WebGL buffer may not match the final rendered destination size, and
+  // texture filtering could interfere for single pixels. This isn't visible
+  // since the final rendering hides the edges via a vignette effect.
+  gl->Scissor(0, 0, 4, 4);
+  gl->ColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+  int idx = m_framePose->poseIndex;
+  // Careful with the arithmetic here. Float color 1.f is equivalent to int 255.
+  gl->ClearColor((idx & 255) / 255.0f, ((idx >> 8) & 255) / 255.0f,
+                 ((idx >> 16) & 255) / 255.0f, 1.0f);
+  gl->Clear(GL_COLOR_BUFFER_BIT);
+
+  // Set the GL state back to what was set by the WebVR application.
+  m_renderingContext->restoreScissorEnabled();
+  m_renderingContext->restoreScissorBox();
+  m_renderingContext->restoreColorMask();
+  m_renderingContext->restoreClearColor();
+
   controller()->submitFrame(m_displayId, m_framePose.Clone());
   m_canUpdateFramePose = true;
 }
@@ -369,6 +434,7 @@ DEFINE_TRACE(VRDisplay) {
   visitor->trace(m_eyeParametersLeft);
   visitor->trace(m_eyeParametersRight);
   visitor->trace(m_layer);
+  visitor->trace(m_renderingContext);
 }
 
 }  // namespace blink

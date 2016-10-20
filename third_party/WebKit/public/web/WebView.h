@@ -115,7 +115,6 @@ class WebView : protected WebWidget {
   using WebWidget::didAcquirePointerLock;
   using WebWidget::didNotAcquirePointerLock;
   using WebWidget::didLosePointerLock;
-  using WebWidget::didChangeWindowResizerRect;
   using WebWidget::backgroundColor;
   using WebWidget::pagePopup;
   using WebWidget::updateTopControlsState;
@@ -370,7 +369,7 @@ class WebView : protected WebWidget {
                                                const WebSize& tapArea) = 0;
 
   // Notifies the WebView that a drag has terminated.
-  virtual void dragSourceEndedAt(const WebPoint& clientPoint,
+  virtual void dragSourceEndedAt(const WebPoint& pointInViewport,
                                  const WebPoint& screenPoint,
                                  WebDragOperation operation) = 0;
 
@@ -381,18 +380,18 @@ class WebView : protected WebWidget {
   // something on the WebView.
   virtual WebDragOperation dragTargetDragEnter(
       const WebDragData&,
-      const WebPoint& clientPoint,
+      const WebPoint& pointInViewport,
       const WebPoint& screenPoint,
       WebDragOperationsMask operationsAllowed,
       int modifiers) = 0;
   virtual WebDragOperation dragTargetDragOver(
-      const WebPoint& clientPoint,
+      const WebPoint& pointInViewport,
       const WebPoint& screenPoint,
       WebDragOperationsMask operationsAllowed,
       int modifiers) = 0;
   virtual void dragTargetDragLeave() = 0;
   virtual void dragTargetDrop(const WebDragData&,
-                              const WebPoint& clientPoint,
+                              const WebPoint& pointInViewport,
                               const WebPoint& screenPoint,
                               int modifiers) = 0;
 

@@ -1,6 +1,7 @@
 /*
  * (C) 1999-2003 Lars Knoll (knoll@kde.org)
- * Copyright (C) 2004, 2006, 2007, 2008, 2009, 2010, 2012 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2006, 2007, 2008, 2009, 2010, 2012 Apple Inc. All rights
+ * reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -99,6 +100,9 @@ class CORE_EXPORT StyleSheetContents
   bool hasFontFaceRule() const { return m_hasFontFaceRule; }
   void findFontFaceRules(
       HeapVector<Member<const StyleRuleFontFace>>& fontFaceRules);
+
+  void setHasViewportRule() { m_hasViewportRule = true; }
+  bool hasViewportRule() const { return m_hasViewportRule; }
 
   void parserAddNamespace(const AtomicString& prefix, const AtomicString& uri);
   void parserAppendRule(StyleRuleBase*);
@@ -200,6 +204,7 @@ class CORE_EXPORT StyleSheetContents
   bool m_didLoadErrorOccur : 1;
   bool m_isMutable : 1;
   bool m_hasFontFaceRule : 1;
+  bool m_hasViewportRule : 1;
   bool m_hasMediaQueries : 1;
   bool m_hasSingleOwnerDocument : 1;
   bool m_isUsedFromTextCache : 1;

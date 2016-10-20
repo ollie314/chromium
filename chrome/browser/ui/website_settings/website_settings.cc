@@ -4,6 +4,7 @@
 
 #include "chrome/browser/ui/website_settings/website_settings.h"
 
+#include <openssl/ssl.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -13,6 +14,7 @@
 #include "base/command_line.h"
 #include "base/i18n/time_formatting.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_number_conversions.h"
@@ -396,6 +398,15 @@ void WebsiteSettings::OnRevokeSSLErrorBypassButtonPressed() {
 void WebsiteSettings::Init(
     const GURL& url,
     const SecurityStateModel::SecurityInfo& security_info) {
+#if !defined(OS_ANDROID) && !defined(OS_IOS)
+  // On desktop, internal URLs aren't handled by this class. Instead, a
+  // custom and simpler popup is shown.
+  DCHECK(!url.SchemeIs(content::kChromeUIScheme) &&
+         !url.SchemeIs(content::kChromeDevToolsScheme) &&
+         !url.SchemeIs(content::kViewSourceScheme) &&
+         !url.SchemeIs(content_settings::kExtensionScheme));
+#endif
+
   bool isChromeUINativeScheme = false;
 #if BUILDFLAG(ANDROID_JAVA_UI)
   isChromeUINativeScheme = url.SchemeIs(chrome::kChromeUINativeScheme);
@@ -638,12 +649,21 @@ void WebsiteSettings::Init(
         (security_info.connection_status &
          net::SSL_CONNECTION_NO_RENEGOTIATION_EXTENSION) != 0;
     const char *key_exchange, *cipher, *mac;
-    bool is_aead;
-    net::SSLCipherSuiteToStrings(
-        &key_exchange, &cipher, &mac, &is_aead, cipher_suite);
+    bool is_aead, is_tls13;
+    net::SSLCipherSuiteToStrings(&key_exchange, &cipher, &mac, &is_aead,
+                                 &is_tls13, cipher_suite);
 
     site_connection_details_ += ASCIIToUTF16("\n\n");
     if (is_aead) {
+      if (is_tls13) {
+        // For TLS 1.3 ciphers, report the group (historically, curve) as the
+        // key exchange.
+        key_exchange = SSL_get_curve_name(security_info.key_exchange_group);
+        if (!key_exchange) {
+          NOTREACHED();
+          key_exchange = "";
+        }
+      }
       site_connection_details_ += l10n_util::GetStringFUTF16(
           IDS_PAGE_INFO_SECURITY_TAB_ENCRYPTION_DETAILS_AEAD,
           ASCIIToUTF16(cipher), ASCIIToUTF16(key_exchange));
@@ -657,14 +677,6 @@ void WebsiteSettings::Init(
         site_connection_status_ <
             SITE_CONNECTION_STATUS_INSECURE_PASSIVE_SUBRESOURCE) {
       site_connection_status_ = SITE_CONNECTION_STATUS_ENCRYPTED_ERROR;
-    }
-
-    const bool did_fallback = (security_info.connection_status &
-                               net::SSL_CONNECTION_VERSION_FALLBACK) != 0;
-    if (did_fallback) {
-      site_connection_details_ += ASCIIToUTF16("\n\n");
-      site_connection_details_ += l10n_util::GetStringUTF16(
-          IDS_PAGE_INFO_SECURITY_TAB_FALLBACK_MESSAGE);
     }
 
     if (no_renegotiation) {
@@ -762,11 +774,13 @@ void WebsiteSettings::PresentSitePermissions() {
     auto chosen_objects = context->GetGrantedObjects(origin, origin);
     for (std::unique_ptr<base::DictionaryValue>& object : chosen_objects) {
       chosen_object_info_list.push_back(
-          new WebsiteSettingsUI::ChosenObjectInfo(ui_info, std::move(object)));
+          base::MakeUnique<WebsiteSettingsUI::ChosenObjectInfo>(
+              ui_info, std::move(object)));
     }
   }
 
-  ui_->SetPermissionInfo(permission_info_list, chosen_object_info_list);
+  ui_->SetPermissionInfo(permission_info_list,
+                         std::move(chosen_object_info_list));
 }
 
 void WebsiteSettings::PresentSiteData() {

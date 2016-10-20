@@ -9,8 +9,8 @@
 #include "base/bind.h"
 #include "base/message_loop/message_loop.h"
 #include "mash/public/interfaces/launchable.mojom.h"
-#include "services/shell/public/cpp/connection.h"
-#include "services/shell/public/cpp/connector.h"
+#include "services/service_manager/public/cpp/connection.h"
+#include "services/service_manager/public/cpp/connector.h"
 #include "services/ui/common/event_matcher_util.h"
 
 using mash::mojom::LaunchablePtr;
@@ -19,6 +19,8 @@ using mash::mojom::LaunchMode;
 namespace mash {
 namespace app_driver {
 namespace {
+
+const char kBrowserServiceName[] = "service:content_browser";
 
 enum class Accelerator : uint32_t {
   NewChromeWindow,
@@ -84,12 +86,12 @@ void AppDriver::OnAvailableCatalogEntries(
   }
 }
 
-void AppDriver::OnStart(const shell::Identity& identity) {
+void AppDriver::OnStart(const service_manager::Identity& identity) {
   AddAccelerators();
 }
 
-bool AppDriver::OnConnect(const shell::Identity& remote_identity,
-                          shell::InterfaceRegistry* registry) {
+bool AppDriver::OnConnect(const service_manager::Identity& remote_identity,
+                          service_manager::InterfaceRegistry* registry) {
   return true;
 }
 
@@ -109,13 +111,13 @@ void AppDriver::OnAccelerator(uint32_t id, std::unique_ptr<ui::Event> event) {
 
   std::map<Accelerator, LaunchOptions> options{
       {Accelerator::NewChromeWindow,
-       {mojom::kWindow, "exe:chrome", LaunchMode::MAKE_NEW}},
+       {mojom::kWindow, kBrowserServiceName, LaunchMode::MAKE_NEW}},
       {Accelerator::NewChromeTab,
-       {mojom::kDocument, "exe:chrome", LaunchMode::MAKE_NEW}},
+       {mojom::kDocument, kBrowserServiceName, LaunchMode::MAKE_NEW}},
       {Accelerator::NewChromeIncognitoWindow,
-       {mojom::kIncognitoWindow, "exe:chrome", LaunchMode::MAKE_NEW}},
+       {mojom::kIncognitoWindow, kBrowserServiceName, LaunchMode::MAKE_NEW}},
       {Accelerator::ShowTaskManager,
-       {mojom::kWindow, "mojo:task_viewer", LaunchMode::DEFAULT}},
+       {mojom::kWindow, "service:task_viewer", LaunchMode::DEFAULT}},
   };
 
   const auto iter = options.find(static_cast<Accelerator>(id));
@@ -127,7 +129,7 @@ void AppDriver::OnAccelerator(uint32_t id, std::unique_ptr<ui::Event> event) {
 }
 
 void AppDriver::AddAccelerators() {
-  connector()->ConnectToInterface("mojo:catalog", &catalog_);
+  connector()->ConnectToInterface("service:catalog", &catalog_);
   catalog_->GetEntriesProvidingClass(
       "mus:window_manager", base::Bind(&AppDriver::OnAvailableCatalogEntries,
                                        weak_factory_.GetWeakPtr()));

@@ -616,12 +616,6 @@
         <message desc="Title for Cast button in Android application menu." name="IDS_CAST_BUTTON_TITLE" formatter_data="android_java">
           Cast
         </message>
-        <message desc="Text for the Android action-bar button which opens the sliding navigation drawer when touched." name="IDS_OPEN_NAVIGATION_DRAWER" formatter_data="android_java">
-          Open navigation drawer
-        </message>
-        <message desc="Text for the Android action-bar button which closes the sliding navigation drawer when touched." name="IDS_CLOSE_NAVIGATION_DRAWER" formatter_data="android_java">
-          Close navigation drawer
-        </message>
 
 <!-- Play Store listings text. These Android-specific strings are not marked
      with formatter_data="android_java" since they are used only for the Play
@@ -652,10 +646,9 @@ Remote computers with non US-English keyboards may receive incorrect text input.
 For information about privacy, please see the Google Privacy Policy (http://goo.gl/SyrVzj) and the Chrome Privacy Policy (http://goo.gl/0uXE5d).
         </message>
         <message name="IDS_PLAY_STORE_CHANGES" desc="List of what's changed in this release of Chrome Remote Desktop for Android. [CHAR-LIMIT=500] [NAME=play_store_changes]">
-• Listen to audio from Windows or Linux computers.
-• Remove unwanted connections by long-pressing on the computer name.
-• Smoother pinch-to-zoom and two-finger scrolling.
-• New Help &amp; Feedback screen.
+• Improved desktop image quality, responsiveness, and battery consumption.
+• Improved responsiveness of click-drag operations.
+• Improved several UI animation effects.
         </message>
       </if>  <!-- is_android or is_ios -->
 
@@ -1154,8 +1147,14 @@ For information about privacy, please see the Google Privacy Policy (http://goo.
       <message desc="Menu option to open a new window." name="IDS_NEW_WINDOW">
         New window…
       </message>
+      <message desc="Message that is spoken (for accessibility) whenever the user selects an account from a list displayed in the application." name="IDS_LOG_IN_ACCOUNT_DESCRIPTION" formatter_data="android_java">
+        Signed in as <ph name="EMAIL_ADDRESS">%1$s<ex>test@gmail.com</ex></ph>.
+      </message>
       <message desc="Label for the Feedback button displayed in the Android Help screen. Pressing this button causes the Feedback screen to be shown." name="IDS_ACTIONBAR_FEEDBACK" formatter_data="android_java">
         Feedback
+      </message>
+      <message desc="Label for the menu button displayed on the Android toolbar. Pressing this button will open a drawer with a list of menu options." name="IDS_ACTIONBAR_MENU" formatter_data="android_java">
+        Menu
       </message>
       <message desc="Label for button to accept remote assistance.  This button appears in the Hangouts confirm dialog." name="IDS_HANGOUTS_CONFIRM_DIALOG_ACCEPT" >
         Accept

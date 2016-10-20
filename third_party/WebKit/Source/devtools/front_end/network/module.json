@@ -1,8 +1,9 @@
 {
     "extensions": [
         {
-            "type": "@WebInspector.Panel",
-            "name": "network",
+            "type": "view",
+            "location": "panel",
+            "id": "network",
             "title": "Network",
             "order": 40,
             "className": "WebInspector.NetworkPanel"
@@ -100,6 +101,7 @@
         "NetworkLogViewColumns.js",
         "NetworkManageCustomHeadersView.js",
         "NetworkOverview.js",
+        "NetworkTimelineColumn.js",
         "RequestCookiesView.js",
         "RequestHeadersView.js",
         "RequestHTMLView.js",
@@ -117,6 +119,7 @@
         "networkLogView.css",
         "networkManageCustomHeadersView.css",
         "networkPanel.css",
+        "networkTimelineColumn.css",
         "requestCookiesView.css",
         "requestHeadersTree.css",
         "requestHeadersView.css",

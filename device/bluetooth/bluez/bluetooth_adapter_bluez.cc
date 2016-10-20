@@ -539,8 +539,8 @@ void BluetoothAdapterBlueZ::DeviceAdded(const dbus::ObjectPath& object_path) {
   devices_.set(device_bluez->GetAddress(),
                std::unique_ptr<BluetoothDevice>(device_bluez));
 
-  FOR_EACH_OBSERVER(BluetoothAdapter::Observer, observers_,
-                    DeviceAdded(this, device_bluez));
+  for (auto& observer : observers_)
+    observer.DeviceAdded(this, device_bluez);
 }
 
 void BluetoothAdapterBlueZ::DeviceRemoved(const dbus::ObjectPath& object_path) {
@@ -552,8 +552,8 @@ void BluetoothAdapterBlueZ::DeviceRemoved(const dbus::ObjectPath& object_path) {
       std::unique_ptr<BluetoothDevice> scoped_device =
           devices_.take_and_erase(iter->first);
 
-      FOR_EACH_OBSERVER(BluetoothAdapter::Observer, observers_,
-                        DeviceRemoved(this, device_bluez));
+      for (auto& observer : observers_)
+        observer.DeviceRemoved(this, device_bluez);
       return;
     }
   }
@@ -590,6 +590,9 @@ void BluetoothAdapterBlueZ::DevicePropertyChanged(
     }
   }
 
+  if (property_name == properties->service_data.name())
+    device_bluez->UpdateServiceData();
+
   if (property_name == properties->bluetooth_class.name() ||
       property_name == properties->appearance.name() ||
       property_name == properties->address.name() ||
@@ -599,7 +602,8 @@ void BluetoothAdapterBlueZ::DevicePropertyChanged(
       property_name == properties->connected.name() ||
       property_name == properties->uuids.name() ||
       property_name == properties->rssi.name() ||
-      property_name == properties->tx_power.name()) {
+      property_name == properties->tx_power.name() ||
+      property_name == properties->service_data.name()) {
     NotifyDeviceChanged(device_bluez);
   }
 
@@ -1000,16 +1004,16 @@ void BluetoothAdapterBlueZ::RemoveAdapter() {
   devices_swapped.swap(devices_);
 
   for (auto& iter : devices_swapped) {
-    FOR_EACH_OBSERVER(BluetoothAdapter::Observer, observers_,
-                      DeviceRemoved(this, iter.second));
+    for (auto& observer : observers_)
+      observer.DeviceRemoved(this, iter.second);
   }
 
   PresentChanged(false);
 }
 
 void BluetoothAdapterBlueZ::DiscoverableChanged(bool discoverable) {
-  FOR_EACH_OBSERVER(BluetoothAdapter::Observer, observers_,
-                    AdapterDiscoverableChanged(this, discoverable));
+  for (auto& observer : observers_)
+    observer.AdapterDiscoverableChanged(this, discoverable);
 }
 
 void BluetoothAdapterBlueZ::DiscoveringChanged(bool discovering) {
@@ -1022,13 +1026,13 @@ void BluetoothAdapterBlueZ::DiscoveringChanged(bool discovering) {
     num_discovery_sessions_ = 0;
     MarkDiscoverySessionsAsInactive();
   }
-  FOR_EACH_OBSERVER(BluetoothAdapter::Observer, observers_,
-                    AdapterDiscoveringChanged(this, discovering));
+  for (auto& observer : observers_)
+    observer.AdapterDiscoveringChanged(this, discovering);
 }
 
 void BluetoothAdapterBlueZ::PresentChanged(bool present) {
-  FOR_EACH_OBSERVER(BluetoothAdapter::Observer, observers_,
-                    AdapterPresentChanged(this, present));
+  for (auto& observer : observers_)
+    observer.AdapterPresentChanged(this, present);
 }
 
 void BluetoothAdapterBlueZ::NotifyDeviceAddressChanged(
@@ -1036,8 +1040,8 @@ void BluetoothAdapterBlueZ::NotifyDeviceAddressChanged(
     const std::string& old_address) {
   DCHECK(device->adapter_ == this);
 
-  FOR_EACH_OBSERVER(BluetoothAdapter::Observer, observers_,
-                    DeviceAddressChanged(this, device, old_address));
+  for (auto& observer : observers_)
+    observer.DeviceAddressChanged(this, device, old_address);
 }
 
 void BluetoothAdapterBlueZ::UseProfile(

@@ -69,7 +69,7 @@ class ConnectCallback : public WebBluetoothRemoteGATTServerConnectCallbacks {
 
   void onError(
       int32_t
-          error /* Corresponds to WebBluetoothError in web_bluetooth.mojom */)
+          error /* Corresponds to WebBluetoothResult in web_bluetooth.mojom */)
       override {
     if (!m_resolver->getExecutionContext() ||
         m_resolver->getExecutionContext()->activeDOMObjectsAreStopped())
@@ -156,20 +156,25 @@ class GetPrimaryServicesCallback
 
   void onError(
       int32_t
-          error /* Corresponds to WebBluetoothError in web_bluetooth.mojom */)
+          error /* Corresponds to WebBluetoothResult in web_bluetooth.mojom */)
       override {
     if (!m_resolver->getExecutionContext() ||
         m_resolver->getExecutionContext()->activeDOMObjectsAreStopped())
       return;
 
-    m_device->gatt()->RemoveFromActiveAlgorithms(m_resolver.get());
+    if (!m_device->gatt()->RemoveFromActiveAlgorithms(m_resolver.get())) {
+      m_resolver->reject(
+          DOMException::create(NetworkError, kGATTServerDisconnected));
+      return;
+    }
+
     m_resolver->reject(BluetoothError::take(m_resolver, error));
   }
 
  private:
   Persistent<BluetoothDevice> m_device;
   mojom::blink::WebBluetoothGATTQueryQuantity m_quantity;
-  Persistent<ScriptPromiseResolver> m_resolver;
+  const Persistent<ScriptPromiseResolver> m_resolver;
 };
 
 ScriptPromise BluetoothRemoteGATTServer::getPrimaryService(

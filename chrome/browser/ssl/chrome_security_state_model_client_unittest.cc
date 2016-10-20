@@ -191,6 +191,55 @@ TEST(ChromeSecurityStateModelClientTest, ConnectionExplanation) {
         "strong cipher (CHACHA20_POLY1305).",
         explanation.description);
   }
+
+  // TLS 1.3 ciphers use the key exchange group exclusively.
+  net::SSLConnectionStatusSetCipherSuite(0x1301 /* TLS_AES_128_GCM_SHA256 */,
+                                         &security_info.connection_status);
+  net::SSLConnectionStatusSetVersion(net::SSL_CONNECTION_VERSION_TLS1_3,
+                                     &security_info.connection_status);
+  security_info.key_exchange_group = 29;  // X25519
+  {
+    content::SecurityStyleExplanations explanations;
+    ChromeSecurityStateModelClient::GetSecurityStyle(security_info,
+                                                     &explanations);
+    content::SecurityStyleExplanation explanation;
+    ASSERT_TRUE(FindSecurityStyleExplanation(
+        explanations.secure_explanations, "Secure Connection", &explanation));
+    EXPECT_EQ(
+        "The connection to this site is encrypted and authenticated using a "
+        "strong protocol (TLS 1.3), a strong key exchange (X25519), and a "
+        "strong cipher (AES_128_GCM).",
+        explanation.description);
+  }
+}
+
+// Tests that a security level of HTTP_SHOW_WARNING produces a
+// content::SecurityStyle of UNAUTHENTICATED, with an explanation.
+TEST(ChromeSecurityStateModelClientTest, HTTPWarning) {
+  security_state::SecurityStateModel::SecurityInfo security_info;
+  content::SecurityStyleExplanations explanations;
+  security_info.security_level =
+      security_state::SecurityStateModel::HTTP_SHOW_WARNING;
+  blink::WebSecurityStyle security_style =
+      ChromeSecurityStateModelClient::GetSecurityStyle(security_info,
+                                                       &explanations);
+  EXPECT_EQ(blink::WebSecurityStyleUnauthenticated, security_style);
+  EXPECT_EQ(1u, explanations.unauthenticated_explanations.size());
+}
+
+// Tests that a security level of NONE when there is a password or
+// credit card field on HTTP produces a content::SecurityStyle of
+// UNAUTHENTICATED, with an info explanation.
+TEST(ChromeSecurityStateModelClientTest, HTTPWarningInFuture) {
+  security_state::SecurityStateModel::SecurityInfo security_info;
+  content::SecurityStyleExplanations explanations;
+  security_info.security_level = security_state::SecurityStateModel::NONE;
+  security_info.displayed_private_user_data_input_on_http = true;
+  blink::WebSecurityStyle security_style =
+      ChromeSecurityStateModelClient::GetSecurityStyle(security_info,
+                                                       &explanations);
+  EXPECT_EQ(blink::WebSecurityStyleUnauthenticated, security_style);
+  EXPECT_EQ(1u, explanations.info_explanations.size());
 }
 
 }  // namespace

@@ -1,8 +1,6 @@
 // Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
-//
-// Mock ServerConnectionManager class for use in client unit tests.
 
 #ifndef COMPONENTS_SYNC_TEST_ENGINE_MOCK_CONNECTION_MANAGER_H_
 #define COMPONENTS_SYNC_TEST_ENGINE_MOCK_CONNECTION_MANAGER_H_
@@ -27,6 +25,7 @@
 
 namespace syncer {
 
+// Mock ServerConnectionManager class for use in client unit tests.
 class MockConnectionManager : public ServerConnectionManager {
  public:
   class MidCommitObserver {
@@ -355,7 +354,7 @@ class MockConnectionManager : public ServerConnectionManager {
   int countdown_to_postbuffer_fail_;
 
   // Our directory.  Used only to ensure that we are not holding the transaction
-  // lock when performing network I/O.  Can be NULL if the test author is
+  // lock when performing network I/O.  Can be null if the test author is
   // confident this can't happen.
   syncable::Directory* directory_;
 

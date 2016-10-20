@@ -27,6 +27,8 @@
 #include "core/fetch/CachedMetadata.h"
 #include "core/fetch/CrossOriginAccessControl.h"
 #include "core/fetch/FetchInitiatorTypeNames.h"
+#include "core/fetch/FetchRequest.h"
+#include "core/fetch/IntegrityMetadata.h"
 #include "core/fetch/MemoryCache.h"
 #include "core/fetch/ResourceClient.h"
 #include "core/fetch/ResourceClientWalker.h"
@@ -35,8 +37,8 @@
 #include "platform/Histogram.h"
 #include "platform/RuntimeEnabledFeatures.h"
 #include "platform/SharedBuffer.h"
-#include "platform/TraceEvent.h"
 #include "platform/network/HTTPParsers.h"
+#include "platform/tracing/TraceEvent.h"
 #include "platform/weborigin/KURL.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebCachePolicy.h"
@@ -265,12 +267,13 @@ Resource::ResourceCallback::ResourceCallback()
           CancellableTaskFactory::create(this, &ResourceCallback::runTask)) {}
 
 void Resource::ResourceCallback::schedule(Resource* resource) {
-  if (!m_callbackTaskFactory->isPending())
+  if (!m_callbackTaskFactory->isPending()) {
     Platform::current()
         ->currentThread()
         ->scheduler()
         ->loadingTaskRunner()
         ->postTask(BLINK_FROM_HERE, m_callbackTaskFactory->cancelAndCreate());
+  }
   m_resourcesWithPendingClients.add(resource);
 }
 
@@ -313,6 +316,8 @@ Resource::Resource(const ResourceRequest& request,
       m_linkPreload(false),
       m_isRevalidating(false),
       m_isAlive(false),
+      m_integrityDisposition(ResourceIntegrityDisposition::NotChecked),
+      m_isAddRemoveClientProhibited(false),
       m_options(options),
       m_responseTimestamp(currentTime()),
       m_cancelTimer(this, &Resource::cancelTimerFired),
@@ -448,6 +453,22 @@ bool Resource::isEligibleForIntegrityCheck(
          passesAccessControlCheck(securityOrigin, ignoredErrorDescription);
 }
 
+void Resource::setIntegrityDisposition(
+    ResourceIntegrityDisposition disposition) {
+  DCHECK_NE(disposition, ResourceIntegrityDisposition::NotChecked);
+  DCHECK(m_type == Resource::Script || m_type == Resource::CSSStyleSheet);
+  m_integrityDisposition = disposition;
+}
+
+bool Resource::mustRefetchDueToIntegrityMetadata(
+    const FetchRequest& request) const {
+  if (request.integrityMetadata().isEmpty())
+    return false;
+
+  return !IntegrityMetadata::setsEqual(m_integrityMetadata,
+                                       request.integrityMetadata());
+}
+
 static double currentAge(const ResourceResponse& response,
                          double responseTimestamp) {
   // RFC2616 13.2.3
@@ -549,18 +570,20 @@ void Resource::setRevalidatingRequest(const ResourceRequest& request) {
   m_status = NotStarted;
 }
 
-void Resource::willFollowRedirect(ResourceRequest& newRequest,
+bool Resource::willFollowRedirect(const ResourceRequest& newRequest,
                                   const ResourceResponse& redirectResponse) {
   if (m_isRevalidating)
     revalidationFailed();
   m_redirectChain.append(RedirectPair(newRequest, redirectResponse));
+  return true;
 }
 
 void Resource::setResponse(const ResourceResponse& response) {
   m_response = response;
-  if (m_response.wasFetchedViaServiceWorker())
+  if (m_response.wasFetchedViaServiceWorker()) {
     m_cacheHandler = ServiceWorkerResponseCachedMetadataHandler::create(
         this, m_fetcherSecurityOrigin.get());
+  }
 }
 
 void Resource::responseReceived(const ResourceResponse& response,
@@ -644,7 +667,7 @@ void Resource::didAddClient(ResourceClient* c) {
   }
 }
 
-static bool shouldSendCachedDataSynchronouslyForType(Resource::Type type) {
+static bool typeNeedsSynchronousCacheHit(Resource::Type type) {
   // Some resources types default to return data synchronously. For most of
   // these, it's because there are layout tests that expect data to return
   // synchronously in case of cache hit. In the case of fonts, there was a
@@ -687,6 +710,8 @@ void Resource::willAddClientOrObserver(PreloadReferencePolicy policy) {
 
 void Resource::addClient(ResourceClient* client,
                          PreloadReferencePolicy policy) {
+  CHECK(!m_isAddRemoveClientProhibited);
+
   willAddClientOrObserver(policy);
 
   if (m_isRevalidating) {
@@ -694,11 +719,10 @@ void Resource::addClient(ResourceClient* client,
     return;
   }
 
-  // If we have existing data to send to the new client and the resource type
-  // supprts it, send it asynchronously.
-  if (!m_response.isNull() &&
-      !shouldSendCachedDataSynchronouslyForType(getType()) &&
-      !m_needsSynchronousCacheHit) {
+  // If an error has occurred or we have existing data to send to the new client
+  // and the resource type supprts it, send it asynchronously.
+  if ((errorOccurred() || !m_response.isNull()) &&
+      !typeNeedsSynchronousCacheHit(getType()) && !m_needsSynchronousCacheHit) {
     m_clientsAwaitingCallback.add(client);
     ResourceCallback::callbackHandler().schedule(this);
     return;
@@ -710,6 +734,8 @@ void Resource::addClient(ResourceClient* client,
 }
 
 void Resource::removeClient(ResourceClient* client) {
+  CHECK(!m_isAddRemoveClientProhibited);
+
   // This code may be called in a pre-finalizer, where weak members in the
   // HashCountedSet are already swept out.
 
@@ -747,9 +773,7 @@ void Resource::didRemoveClientOrObserver() {
 void Resource::allClientsAndObserversRemoved() {
   if (!m_loader)
     return;
-  if (m_type == Raw)
-    cancelTimerFired(&m_cancelTimer);
-  else if (!m_cancelTimer.isActive())
+  if (!m_cancelTimer.isActive())
     m_cancelTimer.startOneShot(0, BLINK_FROM_HERE);
 }
 

@@ -13,6 +13,7 @@
 #include "base/run_loop.h"
 #include "content/child/child_process.h"
 #include "content/common/media/video_capture_messages.h"
+#include "content/common/video_capture.mojom.h"
 #include "content/renderer/media/video_capture_impl.h"
 #include "content/renderer/media/video_capture_impl_manager.h"
 #include "content/renderer/media/video_capture_message_filter.h"
@@ -33,9 +34,9 @@ ACTION_P(RunClosure, closure) {
 
 namespace {
 
-// Callback interface to be implemented by
-// VideoCaptureImplManagerTest. MockVideoCaptureImpl intercepts IPC messages and
-// calls these methods to simulate what the VideoCaptureHost would do.
+// Callback interface to be implemented by VideoCaptureImplManagerTest.
+// MockVideoCaptureImpl intercepts IPC messages and calls these methods to
+// simulate what the VideoCaptureHost would do.
 class PauseResumeCallback {
  public:
   PauseResumeCallback() {}
@@ -45,7 +46,8 @@ class PauseResumeCallback {
   virtual void OnResumed(media::VideoCaptureSessionId session_id) = 0;
 };
 
-class MockVideoCaptureImpl : public VideoCaptureImpl {
+class MockVideoCaptureImpl : public VideoCaptureImpl,
+                             public mojom::VideoCaptureHost {
  public:
   MockVideoCaptureImpl(media::VideoCaptureSessionId session_id,
                        VideoCaptureMessageFilter* filter,
@@ -59,27 +61,34 @@ class MockVideoCaptureImpl : public VideoCaptureImpl {
 
   ~MockVideoCaptureImpl() override { destruct_callback_.Run(); }
 
-  void Send(IPC::Message* message) override {
-    IPC_BEGIN_MESSAGE_MAP(MockVideoCaptureImpl, *message)
-      IPC_MESSAGE_HANDLER(VideoCaptureHostMsg_Pause, DevicePauseCapture)
-      IPC_MESSAGE_HANDLER(VideoCaptureHostMsg_Resume, DeviceResumeCapture)
-      default:
-        VideoCaptureImpl::Send(message);
-        return;
-    IPC_END_MESSAGE_MAP()
-    delete message;
-  }
-
  private:
-  void DevicePauseCapture(int device_id) {
-    pause_callback_->OnPaused(session_id());
+  void Start(int32_t device_id,
+             int32_t session_id,
+             const media::VideoCaptureParams& params,
+             mojom::VideoCaptureObserverPtr observer) override {
+    // For every Start(), expect a corresponding Stop() call.
+    EXPECT_CALL(*this, Stop(_));
   }
 
-  void DeviceResumeCapture(int device_id,
-                           media::VideoCaptureSessionId session_id,
-                           const media::VideoCaptureParams& params) {
+  MOCK_METHOD1(Stop, void(int32_t));
+
+  void Pause(int device_id) { pause_callback_->OnPaused(session_id()); }
+
+  void Resume(int32_t device_id,
+              int32_t session_id,
+              const media::VideoCaptureParams& params) override {
     pause_callback_->OnResumed(session_id);
   }
+
+  MOCK_METHOD1(RequestRefreshFrame, void(int32_t));
+  MOCK_METHOD4(ReleaseBuffer,
+               void(int32_t, int32_t, const gpu::SyncToken&, double));
+  MOCK_METHOD3(GetDeviceSupportedFormats,
+               void(int32_t,
+                    int32_t,
+                    const GetDeviceSupportedFormatsCallback&));
+  MOCK_METHOD3(GetDeviceFormatsInUse,
+               void(int32_t, int32_t, const GetDeviceFormatsInUseCallback&));
 
   PauseResumeCallback* const pause_callback_;
   const base::Closure destruct_callback_;
@@ -95,15 +104,17 @@ class MockVideoCaptureImplManager : public VideoCaptureImplManager {
         destruct_video_capture_callback_(destruct_video_capture_callback) {}
   ~MockVideoCaptureImplManager() override {}
 
- protected:
+ private:
   std::unique_ptr<VideoCaptureImpl> CreateVideoCaptureImplForTesting(
       media::VideoCaptureSessionId id,
       VideoCaptureMessageFilter* filter) const override {
-    return base::MakeUnique<MockVideoCaptureImpl>(
+    auto video_capture_impl = base::MakeUnique<MockVideoCaptureImpl>(
         id, filter, pause_callback_, destruct_video_capture_callback_);
+    video_capture_impl->SetVideoCaptureHostForTesting(
+        video_capture_impl.get());
+    return std::move(video_capture_impl);
   }
 
- private:
   PauseResumeCallback* const pause_callback_;
   const base::Closure destruct_video_capture_callback_;
 
@@ -116,8 +127,7 @@ class VideoCaptureImplManagerTest : public ::testing::Test,
                                     public PauseResumeCallback {
  public:
   VideoCaptureImplManagerTest()
-      : child_process_(new ChildProcess()),
-        manager_(new MockVideoCaptureImplManager(
+      : manager_(new MockVideoCaptureImplManager(
             this,
             BindToCurrentLoop(cleanup_run_loop_.QuitClosure()))) {}
 
@@ -141,7 +151,7 @@ class VideoCaptureImplManagerTest : public ::testing::Test,
           same_session_id ? 0 : static_cast<media::VideoCaptureSessionId>(i),
           params);
     }
-    child_process_->io_task_runner()->PostTask(
+    child_process_.io_task_runner()->PostTask(
         FROM_HERE,
         base::Bind(&VideoCaptureMessageFilter::OnFilterAdded,
                    base::Unretained(manager_->video_capture_message_filter()),
@@ -158,8 +168,8 @@ class VideoCaptureImplManagerTest : public ::testing::Test,
         .RetiresOnSaturation();
     EXPECT_CALL(*this, OnStopped(_)).WillOnce(RunClosure(quit_closure))
         .RetiresOnSaturation();
-    for (size_t i = 0; i < kNumClients; ++i)
-      (*stop_callbacks)[i].Run();
+    for (const auto& stop_callback : *stop_callbacks)
+      stop_callback.Run();
     run_loop.Run();
   }
 
@@ -190,7 +200,7 @@ class VideoCaptureImplManagerTest : public ::testing::Test,
   }
 
   const base::MessageLoop message_loop_;
-  const std::unique_ptr<ChildProcess> child_process_;
+  ChildProcess child_process_;
   base::RunLoop cleanup_run_loop_;
   std::unique_ptr<MockVideoCaptureImplManager> manager_;
 
@@ -207,8 +217,8 @@ TEST_F(VideoCaptureImplManagerTest, MultipleClients) {
   std::array<base::Closure, kNumClients> stop_callbacks =
       StartCaptureForAllClients(true);
   StopCaptureForAllClients(&stop_callbacks);
-  for (size_t i = 0; i < kNumClients; ++i)
-    release_callbacks[i].Run();
+  for (const auto& release_callback : release_callbacks)
+    release_callback.Run();
   cleanup_run_loop_.Run();
 }
 
@@ -295,8 +305,8 @@ TEST_F(VideoCaptureImplManagerTest, SuspendAndResumeSessions) {
   }
 
   StopCaptureForAllClients(&stop_callbacks);
-  for (size_t i = 0; i < kNumClients; ++i)
-    release_callbacks[i].Run();
+  for (const auto& release_callback : release_callbacks)
+    release_callback.Run();
   cleanup_run_loop_.Run();
 }
 

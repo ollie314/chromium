@@ -372,6 +372,15 @@ RenderFrameDevToolsAgentHost::CreateThrottleForNavigation(
   return nullptr;
 }
 
+// static
+void RenderFrameDevToolsAgentHost::WebContentsCreated(
+    WebContents* web_contents) {
+  if (ShouldForceCreation()) {
+    // Force agent host.
+    DevToolsAgentHost::GetOrCreateFor(web_contents);
+  }
+}
+
 RenderFrameDevToolsAgentHost::RenderFrameDevToolsAgentHost(
     RenderFrameHostImpl* host)
     : DevToolsAgentHostImpl(base::GenerateGUID()),
@@ -433,6 +442,7 @@ RenderFrameDevToolsAgentHost::RenderFrameDevToolsAgentHost(
 
   g_instances.Get().push_back(this);
   AddRef();  // Balanced in RenderFrameHostDestroyed.
+  NotifyCreated();
 }
 
 void RenderFrameDevToolsAgentHost::SetPending(RenderFrameHostImpl* host) {
@@ -533,10 +543,6 @@ void RenderFrameDevToolsAgentHost::OnClientAttached() {
 
   frame_trace_recorder_.reset(new DevToolsFrameTraceRecorder());
   CreatePowerSaveBlocker();
-
-  // TODO(kaznacheev): Move this call back to DevToolsManager when
-  // extensions::ProcessManager no longer relies on this notification.
-  DevToolsAgentHostImpl::NotifyCallbacks(this, true);
 }
 
 void RenderFrameDevToolsAgentHost::OnClientDetached() {
@@ -553,10 +559,6 @@ void RenderFrameDevToolsAgentHost::OnClientDetached() {
   tracing_handler_->Detached();
   frame_trace_recorder_.reset();
   in_navigation_protocol_message_buffer_.clear();
-
-  // TODO(kaznacheev): Move this call back to DevToolsManager when
-  // extensions::ProcessManager no longer relies on this notification.
-  DevToolsAgentHostImpl::NotifyCallbacks(this, false);
 }
 
 RenderFrameDevToolsAgentHost::~RenderFrameDevToolsAgentHost() {
@@ -569,6 +571,9 @@ RenderFrameDevToolsAgentHost::~RenderFrameDevToolsAgentHost() {
 
 void RenderFrameDevToolsAgentHost::ReadyToCommitNavigation(
     NavigationHandle* navigation_handle) {
+  // CommitPending may destruct |this|.
+  scoped_refptr<RenderFrameDevToolsAgentHost> protect(this);
+
   // TODO(clamy): Switch RenderFrameDevToolsAgentHost to always buffer messages
   // until ReadyToCommitNavigation is called, now that it is also called in
   // non-PlzNavigate mode.
@@ -597,6 +602,9 @@ void RenderFrameDevToolsAgentHost::ReadyToCommitNavigation(
 
 void RenderFrameDevToolsAgentHost::DidFinishNavigation(
     NavigationHandle* navigation_handle) {
+  // CommitPending may destruct |this|.
+  scoped_refptr<RenderFrameDevToolsAgentHost> protect(this);
+
   if (!IsBrowserSideNavigationEnabled())
     return;
 
@@ -629,6 +637,9 @@ void RenderFrameDevToolsAgentHost::DidFinishNavigation(
 void RenderFrameDevToolsAgentHost::AboutToNavigateRenderFrame(
     RenderFrameHost* old_host,
     RenderFrameHost* new_host) {
+  // CommitPending may destruct |this|.
+  scoped_refptr<RenderFrameDevToolsAgentHost> protect(this);
+
   if (IsBrowserSideNavigationEnabled())
     return;
 
@@ -662,6 +673,9 @@ void RenderFrameDevToolsAgentHost::AboutToNavigate(
 void RenderFrameDevToolsAgentHost::RenderFrameHostChanged(
     RenderFrameHost* old_host,
     RenderFrameHost* new_host) {
+  // CommitPending may destruct |this|.
+  scoped_refptr<RenderFrameDevToolsAgentHost> protect(this);
+
   target_handler_->UpdateFrames();
 
   if (IsBrowserSideNavigationEnabled())
@@ -819,6 +833,9 @@ void RenderFrameDevToolsAgentHost::DidCommitProvisionalLoadForFrame(
     RenderFrameHost* render_frame_host,
     const GURL& url,
     ui::PageTransition transition_type) {
+  // CommitPending may destruct |this|.
+  scoped_refptr<RenderFrameDevToolsAgentHost> protect(this);
+
   if (IsBrowserSideNavigationEnabled())
     return;
   if (pending_ && pending_->host() == render_frame_host)
@@ -898,6 +915,9 @@ void RenderFrameDevToolsAgentHost::DisconnectWebContents() {
 }
 
 void RenderFrameDevToolsAgentHost::ConnectWebContents(WebContents* wc) {
+  // CommitPending may destruct |this|.
+  scoped_refptr<RenderFrameDevToolsAgentHost> protect(this);
+
   DCHECK(!current_);
   DCHECK(!pending_);
   RenderFrameHostImpl* host =
@@ -930,8 +950,11 @@ std::string RenderFrameDevToolsAgentHost::GetParentId() {
 
 std::string RenderFrameDevToolsAgentHost::GetType() {
   DevToolsManager* manager = DevToolsManager::GetInstance();
-  if (manager->delegate())
-    return manager->delegate()->GetTargetType(current_->host());
+  if (manager->delegate() && current_) {
+    std::string result = manager->delegate()->GetTargetType(current_->host());
+    if (!result.empty())
+      return result;
+  }
   if (IsChildFrame())
     return kTypeFrame;
   return kTypePage;
@@ -939,20 +962,20 @@ std::string RenderFrameDevToolsAgentHost::GetType() {
 
 std::string RenderFrameDevToolsAgentHost::GetTitle() {
   DevToolsManager* manager = DevToolsManager::GetInstance();
-  std::string result;
-  if (manager->delegate())
-    result = manager->delegate()->GetTargetTitle(current_->host());
-  if (!result.empty())
-    return result;
+  if (manager->delegate() && current_) {
+    std::string result = manager->delegate()->GetTargetTitle(current_->host());
+    if (!result.empty())
+      return result;
+  }
   content::WebContents* web_contents = GetWebContents();
   if (web_contents)
-    result = base::UTF16ToUTF8(web_contents->GetTitle());
+    return base::UTF16ToUTF8(web_contents->GetTitle());
   return GetURL().spec();
 }
 
 std::string RenderFrameDevToolsAgentHost::GetDescription() {
   DevToolsManager* manager = DevToolsManager::GetInstance();
-  if (manager->delegate())
+  if (manager->delegate() && current_)
     return manager->delegate()->GetTargetDescription(current_->host());
   return "";
 }

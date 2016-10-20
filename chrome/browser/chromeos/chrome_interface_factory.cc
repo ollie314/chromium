@@ -7,25 +7,24 @@
 #include <memory>
 
 #include "ash/common/mojo_interface_factory.h"
-#include "ash/public/interfaces/wallpaper.mojom.h"
 #include "base/lazy_instance.h"
 #include "base/memory/weak_ptr.h"
 #include "base/threading/thread_checker.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "chrome/browser/chromeos/login/users/wallpaper/wallpaper_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/ash/app_list/app_list_presenter_service.h"
 #include "chrome/browser/ui/ash/ash_util.h"
-#include "chrome/browser/ui/ash/chrome_wallpaper_manager.h"
 #include "chrome/browser/ui/ash/keyboard_ui_service.h"
 #include "chrome/browser/ui/ash/system_tray_client.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_finder.h"
-#include "content/public/common/mojo_shell_connection.h"
+#include "content/public/common/service_manager_connection.h"
 #include "mash/public/interfaces/launchable.mojom.h"
 #include "mojo/public/cpp/bindings/binding_set.h"
-#include "services/shell/public/cpp/connection.h"
-#include "services/shell/public/cpp/interface_registry.h"
+#include "services/service_manager/public/cpp/connection.h"
+#include "services/service_manager/public/cpp/interface_registry.h"
 #include "ui/app_list/presenter/app_list_presenter.mojom.h"
 #include "ui/keyboard/keyboard.mojom.h"
 
@@ -84,7 +83,7 @@ class FactoryImpl {
 
   template <typename Interface>
   static void AddFactory(
-      shell::InterfaceRegistry* registry,
+      service_manager::InterfaceRegistry* registry,
       scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
     registry->AddInterface<Interface>(
         base::Bind(&FactoryImpl::CallMainThreadFactory<Interface>),
@@ -122,9 +121,7 @@ class FactoryImpl {
   }
 
   void BindRequest(ash::mojom::WallpaperManagerRequest request) {
-    if (!wallpaper_manager_)
-      wallpaper_manager_.reset(new ChromeWallpaperManager);
-    wallpaper_manager_->ProcessRequest(std::move(request));
+    WallpaperManager::Get()->BindRequest(std::move(request));
   }
 
   void BindRequest(app_list::mojom::AppListPresenterRequest request) {
@@ -140,7 +137,6 @@ class FactoryImpl {
   mojo::BindingSet<keyboard::mojom::Keyboard> keyboard_bindings_;
   std::unique_ptr<ChromeLaunchable> launchable_;
   mojo::BindingSet<ash::mojom::SystemTrayClient> system_tray_client_bindings_;
-  std::unique_ptr<ChromeWallpaperManager> wallpaper_manager_;
   std::unique_ptr<AppListPresenterService> app_list_presenter_service_;
   mojo::BindingSet<app_list::mojom::AppListPresenter>
       app_list_presenter_bindings_;
@@ -158,9 +154,10 @@ ChromeInterfaceFactory::ChromeInterfaceFactory()
 
 ChromeInterfaceFactory::~ChromeInterfaceFactory() {}
 
-bool ChromeInterfaceFactory::OnConnect(const shell::Identity& remote_identity,
-                                       shell::InterfaceRegistry* registry,
-                                       shell::Connector* connector) {
+bool ChromeInterfaceFactory::OnConnect(
+    const service_manager::Identity& remote_identity,
+    service_manager::InterfaceRegistry* registry,
+    service_manager::Connector* connector) {
   FactoryImpl::AddFactory<keyboard::mojom::Keyboard>(registry,
                                                      main_thread_task_runner_);
   FactoryImpl::AddFactory<mash::mojom::Launchable>(registry,

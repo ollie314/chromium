@@ -69,12 +69,23 @@ void WebSurroundingText::initialize(const WebNode& webNode,
 void WebSurroundingText::initializeFromCurrentSelection(WebLocalFrame* frame,
                                                         size_t maxLength) {
   LocalFrame* webFrame = toWebLocalFrameImpl(frame)->frame();
+
+  // TODO(xiaochengh): The use of updateStyleAndLayoutIgnorePendingStylesheets
+  // needs to be audited.  See http://crbug.com/590369 for more details.
+  webFrame->document()->updateStyleAndLayoutIgnorePendingStylesheets();
+
   if (Range* range = createRange(
           webFrame->selection().selection().toNormalizedEphemeralRange()))
     m_private.reset(new SurroundingText(*range, maxLength));
 }
 
 WebString WebSurroundingText::textContent() const {
+  DCHECK(m_private->document());
+
+  // TODO(editing-dev): The use of updateStyleAndLayoutIgnorePendingStylesheets
+  // needs to be audited.  See http://crbug.com/590369 for more details.
+  m_private->document()->updateStyleAndLayoutIgnorePendingStylesheets();
+
   return m_private->content();
 }
 

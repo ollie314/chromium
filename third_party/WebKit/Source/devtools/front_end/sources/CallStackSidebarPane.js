@@ -413,6 +413,13 @@ WebInspector.CallStackSidebarPane.prototype = {
                 this._revealHiddenCallFrames();
         }
 
+        var oldCallFrame = WebInspector.context.flavor(WebInspector.DebuggerModel.CallFrame);
+        if (oldCallFrame === callFrame) {
+            var uiLocation = WebInspector.debuggerWorkspaceBinding.rawLocationToUILocation(callFrame.location());
+            WebInspector.Revealer.reveal(uiLocation);
+            return;
+        }
+
         WebInspector.context.setFlavor(WebInspector.DebuggerModel.CallFrame, callFrame);
         callFrame.debuggerModel.setSelectedCallFrame(callFrame);
     },
@@ -469,15 +476,7 @@ WebInspector.CallStackSidebarPane.CallFrame = function(functionName, location, l
     this._location = location;
     this._debuggerCallFrame = debuggerCallFrame;
     this._asyncCallFrame = asyncCallFrame;
-
-    if (asyncCallFrame) {
-        var script = location.script();
-        var locationElement = linkifier.linkifyRawLocation(location, script ? script.sourceURL : "");
-        this.subtitleElement.appendChild(locationElement);
-    } else {
-        this._liveLocationPool = new WebInspector.LiveLocationPool();
-        WebInspector.debuggerWorkspaceBinding.createCallFrameLiveLocation(location, this._update.bind(this), locationPool);
-    }
+    WebInspector.debuggerWorkspaceBinding.createCallFrameLiveLocation(location, this._update.bind(this), locationPool);
 }
 
 WebInspector.CallStackSidebarPane.CallFrame.prototype = {

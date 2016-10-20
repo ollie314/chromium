@@ -15,7 +15,9 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/libyuv/include/libyuv/convert.h"
 #include "third_party/skia/include/core/SkCanvas.h"
+#include "third_party/skia/include/core/SkImage.h"
 #include "third_party/skia/include/core/SkRefCnt.h"
+#include "third_party/skia/include/core/SkSurface.h"
 #include "third_party/skia/include/gpu/GrContext.h"
 #include "third_party/skia/include/gpu/gl/GrGLInterface.h"
 #include "ui/gfx/geometry/rect_f.h"
@@ -71,7 +73,7 @@ class SkCanvasVideoRendererTest : public testing::Test {
                     SkCanvas* canvas,
                     const gfx::RectF& dest_rect,
                     Color color,
-                    SkXfermode::Mode mode,
+                    SkBlendMode mode,
                     VideoRotation video_rotation);
 
   void Copy(const scoped_refptr<VideoFrame>& video_frame, SkCanvas* canvas);
@@ -216,8 +218,8 @@ void SkCanvasVideoRendererTest::Paint(
     const scoped_refptr<VideoFrame>& video_frame,
     SkCanvas* canvas,
     Color color) {
-  PaintRotated(video_frame, canvas, kNaturalRect, color,
-               SkXfermode::kSrcOver_Mode, VIDEO_ROTATION_0);
+  PaintRotated(video_frame, canvas, kNaturalRect, color, SkBlendMode::kSrcOver,
+               VIDEO_ROTATION_0);
 }
 
 void SkCanvasVideoRendererTest::PaintRotated(
@@ -225,7 +227,7 @@ void SkCanvasVideoRendererTest::PaintRotated(
     SkCanvas* canvas,
     const gfx::RectF& dest_rect,
     Color color,
-    SkXfermode::Mode mode,
+    SkBlendMode mode,
     VideoRotation video_rotation) {
   switch (color) {
     case kNone:
@@ -241,7 +243,7 @@ void SkCanvasVideoRendererTest::PaintRotated(
       break;
   }
   SkPaint paint;
-  paint.setXfermodeMode(mode);
+  paint.setBlendMode(mode);
   paint.setFilterQuality(kLow_SkFilterQuality);
   renderer_.Paint(video_frame, canvas, dest_rect, paint, video_rotation,
                   Context3D());
@@ -264,7 +266,7 @@ TEST_F(SkCanvasVideoRendererTest, TransparentFrame) {
   FillCanvas(target_canvas(), SK_ColorRED);
   PaintRotated(
       VideoFrame::CreateTransparentFrame(gfx::Size(kWidth, kHeight)).get(),
-      target_canvas(), kNaturalRect, kNone, SkXfermode::kSrcOver_Mode,
+      target_canvas(), kNaturalRect, kNone, SkBlendMode::kSrcOver,
       VIDEO_ROTATION_0);
   EXPECT_EQ(static_cast<SkColor>(SK_ColorRED), GetColor(target_canvas()));
 }
@@ -274,7 +276,7 @@ TEST_F(SkCanvasVideoRendererTest, TransparentFrameSrcMode) {
   // SRC mode completely overwrites the buffer.
   PaintRotated(
       VideoFrame::CreateTransparentFrame(gfx::Size(kWidth, kHeight)).get(),
-      target_canvas(), kNaturalRect, kNone, SkXfermode::kSrc_Mode,
+      target_canvas(), kNaturalRect, kNone, SkBlendMode::kSrc,
       VIDEO_ROTATION_0);
   EXPECT_EQ(static_cast<SkColor>(SK_ColorTRANSPARENT),
             GetColor(target_canvas()));
@@ -366,7 +368,7 @@ TEST_F(SkCanvasVideoRendererTest, CroppedFrame_NoScaling) {
 TEST_F(SkCanvasVideoRendererTest, Video_Rotation_90) {
   SkCanvas canvas(AllocBitmap(kWidth, kHeight));
   PaintRotated(cropped_frame(), &canvas, kNaturalRect, kNone,
-               SkXfermode::kSrcOver_Mode, VIDEO_ROTATION_90);
+               SkBlendMode::kSrcOver, VIDEO_ROTATION_90);
   // Check the corners.
   EXPECT_EQ(SK_ColorGREEN, GetColorAt(&canvas, 0, 0));
   EXPECT_EQ(SK_ColorBLACK, GetColorAt(&canvas, kWidth - 1, 0));
@@ -377,7 +379,7 @@ TEST_F(SkCanvasVideoRendererTest, Video_Rotation_90) {
 TEST_F(SkCanvasVideoRendererTest, Video_Rotation_180) {
   SkCanvas canvas(AllocBitmap(kWidth, kHeight));
   PaintRotated(cropped_frame(), &canvas, kNaturalRect, kNone,
-               SkXfermode::kSrcOver_Mode, VIDEO_ROTATION_180);
+               SkBlendMode::kSrcOver, VIDEO_ROTATION_180);
   // Check the corners.
   EXPECT_EQ(SK_ColorBLUE, GetColorAt(&canvas, 0, 0));
   EXPECT_EQ(SK_ColorGREEN, GetColorAt(&canvas, kWidth - 1, 0));
@@ -388,7 +390,7 @@ TEST_F(SkCanvasVideoRendererTest, Video_Rotation_180) {
 TEST_F(SkCanvasVideoRendererTest, Video_Rotation_270) {
   SkCanvas canvas(AllocBitmap(kWidth, kHeight));
   PaintRotated(cropped_frame(), &canvas, kNaturalRect, kNone,
-               SkXfermode::kSrcOver_Mode, VIDEO_ROTATION_270);
+               SkBlendMode::kSrcOver, VIDEO_ROTATION_270);
   // Check the corners.
   EXPECT_EQ(SK_ColorRED, GetColorAt(&canvas, 0, 0));
   EXPECT_EQ(SK_ColorBLUE, GetColorAt(&canvas, kWidth - 1, 0));
@@ -402,7 +404,7 @@ TEST_F(SkCanvasVideoRendererTest, Video_Translate) {
 
   PaintRotated(cropped_frame(), &canvas,
                gfx::RectF(kWidth / 2, kHeight / 2, kWidth / 2, kHeight / 2),
-               kNone, SkXfermode::kSrcOver_Mode, VIDEO_ROTATION_0);
+               kNone, SkBlendMode::kSrcOver, VIDEO_ROTATION_0);
   // Check the corners of quadrant 2 and 4.
   EXPECT_EQ(SK_ColorMAGENTA, GetColorAt(&canvas, 0, 0));
   EXPECT_EQ(SK_ColorMAGENTA, GetColorAt(&canvas, (kWidth / 2) - 1, 0));
@@ -421,7 +423,7 @@ TEST_F(SkCanvasVideoRendererTest, Video_Translate_Rotation_90) {
 
   PaintRotated(cropped_frame(), &canvas,
                gfx::RectF(kWidth / 2, kHeight / 2, kWidth / 2, kHeight / 2),
-               kNone, SkXfermode::kSrcOver_Mode, VIDEO_ROTATION_90);
+               kNone, SkBlendMode::kSrcOver, VIDEO_ROTATION_90);
   // Check the corners of quadrant 2 and 4.
   EXPECT_EQ(SK_ColorMAGENTA, GetColorAt(&canvas, 0, 0));
   EXPECT_EQ(SK_ColorMAGENTA, GetColorAt(&canvas, (kWidth / 2) - 1, 0));
@@ -440,7 +442,7 @@ TEST_F(SkCanvasVideoRendererTest, Video_Translate_Rotation_180) {
 
   PaintRotated(cropped_frame(), &canvas,
                gfx::RectF(kWidth / 2, kHeight / 2, kWidth / 2, kHeight / 2),
-               kNone, SkXfermode::kSrcOver_Mode, VIDEO_ROTATION_180);
+               kNone, SkBlendMode::kSrcOver, VIDEO_ROTATION_180);
   // Check the corners of quadrant 2 and 4.
   EXPECT_EQ(SK_ColorMAGENTA, GetColorAt(&canvas, 0, 0));
   EXPECT_EQ(SK_ColorMAGENTA, GetColorAt(&canvas, (kWidth / 2) - 1, 0));
@@ -459,7 +461,7 @@ TEST_F(SkCanvasVideoRendererTest, Video_Translate_Rotation_270) {
 
   PaintRotated(cropped_frame(), &canvas,
                gfx::RectF(kWidth / 2, kHeight / 2, kWidth / 2, kHeight / 2),
-               kNone, SkXfermode::kSrcOver_Mode, VIDEO_ROTATION_270);
+               kNone, SkBlendMode::kSrcOver, VIDEO_ROTATION_270);
   // Check the corners of quadrant 2 and 4.
   EXPECT_EQ(SK_ColorMAGENTA, GetColorAt(&canvas, 0, 0));
   EXPECT_EQ(SK_ColorMAGENTA, GetColorAt(&canvas, (kWidth / 2) - 1, 0));
@@ -546,4 +548,46 @@ TEST_F(SkCanvasVideoRendererTest, ContextLost) {
   renderer_.Paint(video_frame, &canvas, kNaturalRect, paint, VIDEO_ROTATION_90,
                   context_3d);
 }
+
+void EmptyCallback(const gpu::SyncToken& sync_token) {}
+
+TEST_F(SkCanvasVideoRendererTest, CorrectFrameSizeToVisibleRect) {
+  int fWidth{16}, fHeight{16};
+  SkImageInfo imInfo =
+      SkImageInfo::MakeN32(fWidth, fHeight, kOpaque_SkAlphaType);
+
+  sk_sp<const GrGLInterface> glInterface(GrGLCreateNullInterface());
+  sk_sp<GrContext> grContext(
+      GrContext::Create(kOpenGL_GrBackend,
+                        reinterpret_cast<GrBackendContext>(glInterface.get())));
+
+  sk_sp<SkSurface> skSurface =
+      SkSurface::MakeRenderTarget(grContext.get(), SkBudgeted::kYes, imInfo);
+  SkCanvas* canvas = skSurface->getCanvas();
+
+  TestGLES2Interface gles2;
+  Context3D context_3d(&gles2, grContext.get());
+  gfx::Size coded_size(fWidth, fHeight);
+  gfx::Size visible_size(fWidth / 2, fHeight / 2);
+
+  gpu::MailboxHolder mailbox_holders[VideoFrame::kMaxPlanes];
+  for (size_t i = 0; i < VideoFrame::kMaxPlanes; i++) {
+    mailbox_holders[i] = gpu::MailboxHolder(
+        gpu::Mailbox::Generate(), gpu::SyncToken(), GL_TEXTURE_RECTANGLE_ARB);
+  }
+
+  auto video_frame = VideoFrame::WrapNativeTextures(
+      PIXEL_FORMAT_I420, mailbox_holders, base::Bind(EmptyCallback), coded_size,
+      gfx::Rect(visible_size), visible_size,
+      base::TimeDelta::FromMilliseconds(4));
+
+  gfx::RectF visible_rect(visible_size.width(), visible_size.height());
+  SkPaint paint;
+  renderer_.Paint(video_frame, canvas, visible_rect, paint, VIDEO_ROTATION_0,
+                  context_3d);
+
+  EXPECT_EQ(fWidth / 2, renderer_.LastImageDimensionsForTesting().width());
+  EXPECT_EQ(fWidth / 2, renderer_.LastImageDimensionsForTesting().height());
+}
+
 }  // namespace media

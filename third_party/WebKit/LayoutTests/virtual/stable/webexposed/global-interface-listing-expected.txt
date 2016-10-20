@@ -133,23 +133,18 @@ interface AudioDestinationNode : AudioNode
     method constructor
 interface AudioListener
     attribute @@toStringTag
-    getter dopplerFactor
     getter forwardX
     getter forwardY
     getter forwardZ
     getter positionX
     getter positionY
     getter positionZ
-    getter speedOfSound
     getter upX
     getter upY
     getter upZ
     method constructor
     method setOrientation
     method setPosition
-    method setVelocity
-    setter dopplerFactor
-    setter speedOfSound
 interface AudioNode : EventTarget
     attribute @@toStringTag
     getter channelCount
@@ -253,6 +248,10 @@ interface CSS
     static method supports
     attribute @@toStringTag
     method constructor
+interface CSSConditionRule : CSSGroupingRule
+    attribute @@toStringTag
+    getter conditionText
+    method constructor
 interface CSSFontFaceRule : CSSRule
     attribute @@toStringTag
     getter style
@@ -284,7 +283,7 @@ interface CSSKeyframesRule : CSSRule
     method deleteRule
     method findRule
     setter name
-interface CSSMediaRule : CSSGroupingRule
+interface CSSMediaRule : CSSConditionRule
     attribute @@toStringTag
     getter media
     method constructor
@@ -357,13 +356,9 @@ interface CSSStyleSheet : StyleSheet
     method deleteRule
     method insertRule
     method removeRule
-interface CSSSupportsRule : CSSRule
+interface CSSSupportsRule : CSSConditionRule
     attribute @@toStringTag
-    getter conditionText
-    getter cssRules
     method constructor
-    method deleteRule
-    method insertRule
 interface CSSViewportRule : CSSRule
     attribute @@toStringTag
     getter style
@@ -537,6 +532,14 @@ interface CompositionEvent : UIEvent
     getter data
     method constructor
     method initCompositionEvent
+interface ConstantSourceNode : AudioSourceNode
+    attribute @@toStringTag
+    getter offset
+    getter onended
+    method constructor
+    method start
+    method stop
+    setter onended
 interface ConvolverNode : AudioNode
     attribute @@toStringTag
     getter buffer
@@ -3463,6 +3466,7 @@ interface Navigator
     getter product
     getter productSub
     getter serviceWorker
+    getter storage
     getter userAgent
     getter vendor
     getter vendorSub
@@ -3652,7 +3656,6 @@ interface PannerNode : AudioNode
     method constructor
     method setOrientation
     method setPosition
-    method setVelocity
     setter coneInnerAngle
     setter coneOuterAngle
     setter coneOuterGain
@@ -3700,6 +3703,7 @@ interface Performance : EventTarget
     method measure
     method now
     method setResourceTimingBufferSize
+    method toJSON
     method webkitClearResourceTimings
     method webkitSetResourceTimingBufferSize
     setter onresourcetimingbufferfull
@@ -3727,6 +3731,7 @@ interface PerformanceNavigation
     getter redirectCount
     getter type
     method constructor
+    method toJSON
 interface PerformanceObserver
     attribute @@toStringTag
     method constructor
@@ -5153,6 +5158,7 @@ interface SecurityPolicyViolationEvent : Event
     attribute @@toStringTag
     getter blockedURI
     getter columnNumber
+    getter disposition
     getter documentURI
     getter effectiveDirective
     getter lineNumber
@@ -5357,6 +5363,11 @@ interface StorageEvent : Event
     getter url
     method constructor
     method initStorageEvent
+interface StorageManager
+    attribute @@toStringTag
+    method constructor
+    method persist
+    method persisted
 interface StyleSheet
     attribute @@toStringTag
     getter disabled

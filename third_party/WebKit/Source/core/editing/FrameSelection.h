@@ -1,5 +1,6 @@
 /*
- * Copyright (C) 2004, 2005, 2006, 2007, 2008, 2009, 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006, 2007, 2008, 2009, 2010 Apple Inc. All rights
+ * reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -86,8 +87,8 @@ class CORE_EXPORT FrameSelection final
     DoNotClearStrategy = 1 << 5,
     DoNotAdjustInFlatTree = 1 << 6,
   };
-  typedef unsigned
-      SetSelectionOptions;  // Union of values in SetSelectionOption and EUserTriggered
+  // Union of values in SetSelectionOption and EUserTriggered
+  typedef unsigned SetSelectionOptions;
   static inline EUserTriggered selectionOptionsToUserTriggered(
       SetSelectionOptions options) {
     return static_cast<EUserTriggered>(options & UserTriggered);
@@ -110,20 +111,36 @@ class CORE_EXPORT FrameSelection final
     return selection().isContentRichlyEditable();
   }
 
-  // TODO(xiaochengh): Remove the |moveTo(VisiblePosition)| overload.
+  // TODO(yosin): We should make and rename |moveTo()| as implementation of
+  // |WebLoalFrameImpl::moveCaretSeleciton()|, since there is only one call
+  // site.
   void moveTo(const VisiblePosition&,
               EUserTriggered = NotUserTriggered,
               CursorAlignOnScroll = CursorAlignOnScroll::IfNeeded);
-  void moveTo(const Position&, TextAffinity);
 
   template <typename Strategy>
   const VisibleSelectionTemplate<Strategy>& visibleSelection() const;
 
   const VisibleSelection& selection() const;
+
+  void setSelection(const SelectionInDOMTree&,
+                    SetSelectionOptions = CloseTyping | ClearTypingStyle,
+                    CursorAlignOnScroll = CursorAlignOnScroll::IfNeeded,
+                    TextGranularity = CharacterGranularity);
+
+  void setSelection(const SelectionInFlatTree&,
+                    SetSelectionOptions = CloseTyping | ClearTypingStyle,
+                    CursorAlignOnScroll = CursorAlignOnScroll::IfNeeded,
+                    TextGranularity = CharacterGranularity);
+
+  // TODO(yosin): We should use |SelectionInDOMTree| version instead of
+  // |VisibleSelection| version.
   void setSelection(const VisibleSelection&,
                     SetSelectionOptions = CloseTyping | ClearTypingStyle,
                     CursorAlignOnScroll = CursorAlignOnScroll::IfNeeded,
                     TextGranularity = CharacterGranularity);
+  // TODO(yosin): We should use |SelectionInFlatTree| version instead of
+  // |VisibleSelectionInFlatTree| version.
   void setSelection(const VisibleSelectionInFlatTree&,
                     SetSelectionOptions = CloseTyping | ClearTypingStyle,
                     CursorAlignOnScroll = CursorAlignOnScroll::IfNeeded,
@@ -135,13 +152,6 @@ class CORE_EXPORT FrameSelection final
     setSelection(selection, CloseTyping | ClearTypingStyle,
                  CursorAlignOnScroll::IfNeeded, granularity);
   }
-  // TODO(yosin) We should get rid of |Range| version of |setSelectedRagne()|
-  // for Oilpan.
-  bool setSelectedRange(
-      Range*,
-      TextAffinity,
-      SelectionDirectionalMode = SelectionDirectionalMode::NonDirectional,
-      SetSelectionOptions = CloseTyping | ClearTypingStyle);
   bool setSelectedRange(
       const EphemeralRange&,
       TextAffinity,
@@ -150,7 +160,8 @@ class CORE_EXPORT FrameSelection final
   void selectAll();
   void clear();
 
-  // Call this after doing user-triggered selections to make it easy to delete the frame you entirely selected.
+  // Call this after doing user-triggered selections to make it easy to delete
+  // the frame you entirely selected.
   void selectFrameElementInParentIfFullySelected();
 
   bool contains(const LayoutPoint&);
@@ -188,7 +199,8 @@ class CORE_EXPORT FrameSelection final
   Position start() const { return selection().start(); }
   Position end() const { return selection().end(); }
 
-  // Return the layoutObject that is responsible for painting the caret (in the selection start node)
+  // Return the layoutObject that is responsible for painting the caret (in the
+  // selection start node)
   LayoutBlock* caretLayoutObject() const;
 
   // Bounds of (possibly transformed) caret in absolute coords
@@ -202,8 +214,9 @@ class CORE_EXPORT FrameSelection final
   bool isInPasswordField() const;
   bool isDirectional() const { return selection().isDirectional(); }
 
-  // If this FrameSelection has a logical range which is still valid, this function return its clone. Otherwise,
-  // the return value from underlying VisibleSelection's firstRange() is returned.
+  // If this FrameSelection has a logical range which is still valid, this
+  // function return its clone. Otherwise, the return value from underlying
+  // VisibleSelection's firstRange() is returned.
   Range* firstRange() const;
 
   void documentAttached(Document*);
@@ -249,12 +262,12 @@ class CORE_EXPORT FrameSelection final
 
   enum EndPointsAdjustmentMode {
     AdjustEndpointsAtBidiBoundary,
-    DoNotAdjsutEndpoints
+    DoNotAdjustEndpoints
   };
   void setNonDirectionalSelectionIfNeeded(
       const VisibleSelectionInFlatTree&,
       TextGranularity,
-      EndPointsAdjustmentMode = DoNotAdjsutEndpoints);
+      EndPointsAdjustmentMode = DoNotAdjustEndpoints);
   void setFocusedNodeIfNeeded();
   void notifyLayoutObjectOfSelectionChange(EUserTriggered);
 
@@ -332,10 +345,6 @@ class CORE_EXPORT FrameSelection final
                                const Position& start,
                                const Position& end);
 
-  template <typename Strategy>
-  VisibleSelectionTemplate<Strategy> validateSelection(
-      const VisibleSelectionTemplate<Strategy>&);
-
   GranularityStrategy* granularityStrategy();
 
   // For unittests
@@ -356,7 +365,8 @@ class CORE_EXPORT FrameSelection final
 
   bool m_focused : 1;
 
-  // Controls text granularity used to adjust the selection's extent in moveRangeSelectionExtent.
+  // Controls text granularity used to adjust the selection's extent in
+  // moveRangeSelectionExtent.
   std::unique_ptr<GranularityStrategy> m_granularityStrategy;
 
   const Member<FrameCaret> m_frameCaret;

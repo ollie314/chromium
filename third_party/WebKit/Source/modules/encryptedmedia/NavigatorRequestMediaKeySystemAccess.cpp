@@ -4,8 +4,10 @@
 
 #include "modules/encryptedmedia/NavigatorRequestMediaKeySystemAccess.h"
 
+#include "bindings/core/v8/ScriptPromise.h"
 #include "bindings/core/v8/ScriptPromiseResolver.h"
 #include "bindings/core/v8/ScriptState.h"
+#include "bindings/core/v8/V8ThrowException.h"
 #include "core/dom/DOMException.h"
 #include "core/dom/Document.h"
 #include "core/dom/ExceptionCode.h"
@@ -102,9 +104,7 @@ class MediaKeySystemAccessInitializer final : public EncryptedMediaRequest {
       const override {
     return m_supportedConfigurations;
   }
-  SecurityOrigin* getSecurityOrigin() const override {
-    return m_resolver->getExecutionContext()->getSecurityOrigin();
-  }
+  SecurityOrigin* getSecurityOrigin() const override;
   void requestSucceeded(WebContentDecryptionModuleAccess*) override;
   void requestNotSupported(const WebString& errorMessage) override;
 
@@ -116,6 +116,9 @@ class MediaKeySystemAccessInitializer final : public EncryptedMediaRequest {
   }
 
  private:
+  // Returns true if the ExecutionContext is valid, false otherwise.
+  bool isExecutionContextValid() const;
+
   // For widevine key system, generate warning and report to UMA if
   // |m_supportedConfigurations| contains any video capability with empty
   // robustness string.
@@ -129,11 +132,11 @@ class MediaKeySystemAccessInitializer final : public EncryptedMediaRequest {
   // See http://crbug.com/605661.
   void checkEmptyCodecs(const WebMediaKeySystemConfiguration&);
 
-  // Log UseCounter if configuration does not have at least one of
+  // Log UseCounter if selected configuration does not have at least one of
   // 'audioCapabilities' and 'videoCapabilities' non-empty.
   // TODO(jrummell): Switch to deprecation message once we have data.
   // See http://crbug.com/616233.
-  void checkCapabilitiesProvided(const WebMediaKeySystemConfiguration&);
+  void checkCapabilities(const WebMediaKeySystemConfiguration&);
 
   Member<ScriptPromiseResolver> m_resolver;
   const String m_keySystem;
@@ -162,8 +165,6 @@ MediaKeySystemAccessInitializer::MediaKeySystemAccessInitializer(
     webConfig.videoCapabilities =
         convertCapabilities(config.videoCapabilities());
 
-    checkCapabilitiesProvided(webConfig);
-
     DCHECK(config.hasDistinctiveIdentifier());
     webConfig.distinctiveIdentifier =
         convertMediaKeysRequirement(config.distinctiveIdentifier());
@@ -175,7 +176,8 @@ MediaKeySystemAccessInitializer::MediaKeySystemAccessInitializer(
     if (config.hasSessionTypes()) {
       webConfig.sessionTypes = convertSessionTypes(config.sessionTypes());
     } else {
-      // From the spec (http://w3c.github.io/encrypted-media/#idl-def-mediakeysystemconfiguration):
+      // From the spec
+      // (http://w3c.github.io/encrypted-media/#idl-def-mediakeysystemconfiguration):
       // If this member is not present when the dictionary is passed to
       // requestMediaKeySystemAccess(), the dictionary will be treated
       // as if this member is set to [ "temporary" ].
@@ -193,9 +195,19 @@ MediaKeySystemAccessInitializer::MediaKeySystemAccessInitializer(
   checkVideoCapabilityRobustness();
 }
 
+SecurityOrigin* MediaKeySystemAccessInitializer::getSecurityOrigin() const {
+  return isExecutionContextValid()
+             ? m_resolver->getExecutionContext()->getSecurityOrigin()
+             : nullptr;
+}
+
 void MediaKeySystemAccessInitializer::requestSucceeded(
     WebContentDecryptionModuleAccess* access) {
   checkEmptyCodecs(access->getConfiguration());
+  checkCapabilities(access->getConfiguration());
+
+  if (!isExecutionContextValid())
+    return;
 
   m_resolver->resolve(
       new MediaKeySystemAccess(m_keySystem, wrapUnique(access)));
@@ -204,8 +216,19 @@ void MediaKeySystemAccessInitializer::requestSucceeded(
 
 void MediaKeySystemAccessInitializer::requestNotSupported(
     const WebString& errorMessage) {
+  if (!isExecutionContextValid())
+    return;
+
   m_resolver->reject(DOMException::create(NotSupportedError, errorMessage));
   m_resolver.clear();
+}
+
+bool MediaKeySystemAccessInitializer::isExecutionContextValid() const {
+  // activeDOMObjectsAreStopped() is called to see if the context is in the
+  // process of being destroyed. If it is true, assume the context is no
+  // longer valid as it is about to be destroyed anyway.
+  ExecutionContext* context = m_resolver->getExecutionContext();
+  return context && !context->activeDOMObjectsAreStopped();
 }
 
 void MediaKeySystemAccessInitializer::checkVideoCapabilityRobustness() const {
@@ -282,8 +305,11 @@ void MediaKeySystemAccessInitializer::checkEmptyCodecs(
   }
 }
 
-void MediaKeySystemAccessInitializer::checkCapabilitiesProvided(
+void MediaKeySystemAccessInitializer::checkCapabilities(
     const WebMediaKeySystemConfiguration& config) {
+  // This is only checking that at least one capability is provided in the
+  // selected configuration, as apps may pass empty capabilities for
+  // compatibility with other implementations.
   bool atLeastOneAudioCapability = config.audioCapabilities.size() > 0;
   bool atLeastOneVideoCapability = config.videoCapabilities.size() > 0;
 
@@ -309,21 +335,21 @@ ScriptPromise NavigatorRequestMediaKeySystemAccess::requestMediaKeySystemAccess(
 
   // From https://w3c.github.io/encrypted-media/#requestMediaKeySystemAccess
   // When this method is invoked, the user agent must run the following steps:
-  // 1. If keySystem is an empty string, return a promise rejected with a
-  //    new DOMException whose name is InvalidAccessError.
+  // 1. If keySystem is the empty string, return a promise rejected with a
+  //    newly created TypeError.
   if (keySystem.isEmpty()) {
-    return ScriptPromise::rejectWithDOMException(
-        scriptState, DOMException::create(InvalidAccessError,
+    return ScriptPromise::reject(
+        scriptState,
+        V8ThrowException::createTypeError(scriptState->isolate(),
                                           "The keySystem parameter is empty."));
   }
 
-  // 2. If supportedConfigurations was provided and is empty, return a
-  //    promise rejected with a new DOMException whose name is
-  //    InvalidAccessError.
+  // 2. If supportedConfigurations is empty, return a promise rejected with
+  //    a newly created TypeError.
   if (!supportedConfigurations.size()) {
-    return ScriptPromise::rejectWithDOMException(
-        scriptState, DOMException::create(
-                         InvalidAccessError,
+    return ScriptPromise::reject(
+        scriptState, V8ThrowException::createTypeError(
+                         scriptState->isolate(),
                          "The supportedConfigurations parameter is empty."));
   }
 

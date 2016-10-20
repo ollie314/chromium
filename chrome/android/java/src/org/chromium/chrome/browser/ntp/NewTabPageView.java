@@ -20,6 +20,7 @@ import android.support.v4.graphics.drawable.RoundedBitmapDrawable;
 import android.support.v4.graphics.drawable.RoundedBitmapDrawableFactory;
 import android.support.v7.widget.DefaultItemAnimator;
 import android.support.v7.widget.RecyclerView;
+import android.support.v7.widget.RecyclerView.AdapterDataObserver;
 import android.support.v7.widget.RecyclerView.ViewHolder;
 import android.support.v7.widget.helper.ItemTouchHelper;
 import android.text.Editable;
@@ -41,7 +42,6 @@ import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.Callback;
 import org.chromium.base.Log;
 import org.chromium.base.VisibleForTesting;
-import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.favicon.FaviconHelper.FaviconImageCallback;
 import org.chromium.chrome.browser.favicon.FaviconHelper.IconAvailabilityCallback;
@@ -126,6 +126,7 @@ public class NewTabPageView extends FrameLayout
     /** Flag used to request some layout changes after the next layout pass is completed. */
     private boolean mTileCountChanged;
     private boolean mSnapshotMostVisitedChanged;
+    private boolean mNewTabPageRecyclerViewChanged;
     private int mSnapshotWidth;
     private int mSnapshotHeight;
     private int mSnapshotScrollY;
@@ -279,7 +280,7 @@ public class NewTabPageView extends FrameLayout
         void removeContextMenuCloseCallback(Callback<Menu> callback);
 
         /**
-         * Makes the {@link Activity} close any open context menu.
+         * Makes the activity close any open context menu.
          */
         void closeContextMenu();
 
@@ -300,6 +301,12 @@ public class NewTabPageView extends FrameLayout
          * Page goes away.
          */
         void registerSignInStateObserver(SignInStateObserver signInStateObserver);
+
+        /**
+         * @return whether the {@link NewTabPage} associated with this manager is the current page
+         * displayed to the user.
+         */
+        boolean isCurrentPage();
     }
 
     /**
@@ -355,7 +362,7 @@ public class NewTabPageView extends FrameLayout
             stub.setLayoutResource(R.layout.new_tab_page_scroll_view);
             mScrollView = (NewTabPageScrollView) stub.inflate();
             mScrollView.setBackgroundColor(
-                    NtpStyleUtils.getBackgroundColorResource(getResources(), false));
+                    ApiCompatibilityUtils.getColor(getResources(), R.color.ntp_bg));
             mScrollView.enableBottomShadow(SHADOW_COLOR);
             mNewTabPageLayout = (NewTabPageLayout) findViewById(R.id.ntp_content);
         }
@@ -383,33 +390,54 @@ public class NewTabPageView extends FrameLayout
 
         // Set up snippets
         if (mUseCardsUi) {
-            mNewTabPageAdapter = NewTabPageAdapter.create(mManager, mNewTabPageLayout, mUiConfig);
+            mNewTabPageAdapter = new NewTabPageAdapter(mManager, mNewTabPageLayout, mUiConfig);
             mRecyclerView.setAdapter(mNewTabPageAdapter);
-            mRecyclerView.scrollToPosition(scrollPosition);
 
+            int scrollOffset;
             if (CardsVariationParameters.isScrollBelowTheFoldEnabled()) {
-                int searchBoxHeight = NtpStyleUtils.getSearchBoxHeight(getResources());
-                mRecyclerView.getLinearLayoutManager().scrollToPositionWithOffset(
-                        mNewTabPageAdapter.getFirstHeaderPosition(), searchBoxHeight);
+                scrollPosition = mNewTabPageAdapter.getFirstHeaderPosition();
+                scrollOffset = getResources().getDimensionPixelSize(R.dimen.ntp_search_box_height);
+            } else {
+                scrollOffset = 0;
             }
+            mRecyclerView.getLinearLayoutManager().scrollToPositionWithOffset(
+                    scrollPosition, scrollOffset);
 
             // Set up swipe-to-dismiss
             ItemTouchHelper helper =
                     new ItemTouchHelper(mNewTabPageAdapter.getItemTouchCallbacks());
             helper.attachToRecyclerView(mRecyclerView);
 
-            mRecyclerView.addOnScrollListener(new RecyclerView.OnScrollListener() {
-                private boolean mScrolledOnce = false;
+            initializeSearchBoxRecyclerViewScrollHandling();
+
+            // When the NewTabPageAdapter's data changes we need to invalidate any previous
+            // screen captures of the NewTabPageView.
+            mNewTabPageAdapter.registerAdapterDataObserver(new AdapterDataObserver() {
                 @Override
-                public void onScrollStateChanged(RecyclerView recyclerView, int newState) {
-                    if (newState != RecyclerView.SCROLL_STATE_DRAGGING) return;
-                    RecordUserAction.record("MobileNTP.Snippets.Scrolled");
-                    if (mScrolledOnce) return;
-                    mScrolledOnce = true;
-                    NewTabPageUma.recordSnippetAction(NewTabPageUma.SNIPPETS_ACTION_SCROLLED);
+                public void onChanged() {
+                    mNewTabPageRecyclerViewChanged = true;
+                }
+
+                @Override
+                public void onItemRangeChanged(int positionStart, int itemCount) {
+                    onChanged();
+                }
+
+                @Override
+                public void onItemRangeInserted(int positionStart, int itemCount) {
+                    onChanged();
+                }
+
+                @Override
+                public void onItemRangeRemoved(int positionStart, int itemCount) {
+                    onChanged();
+                }
+
+                @Override
+                public void onItemRangeMoved(int fromPosition, int toPosition, int itemCount) {
+                    onChanged();
                 }
             });
-            initializeSearchBoxRecyclerViewScrollHandling();
         } else {
             initializeSearchBoxScrollHandling();
         }
@@ -491,6 +519,15 @@ public class NewTabPageView extends FrameLayout
     private void updateSearchBoxOnScroll() {
         if (mDisableUrlFocusChangeAnimations) return;
 
+        // When the page changes (tab switching or new page loading), it is possible that events
+        // (e.g. delayed RecyclerView change notifications) trigger calls to these methods after
+        // the current page changes. We check it again to make sure we don't attempt to update the
+        // wrong page.
+        if (!mManager.isCurrentPage()) return;
+
+        // Disable the search box contents if it is the process of being animated away.
+        ViewUtils.setEnabledRecursive(mSearchBoxView, mSearchBoxView.getAlpha() == 1.0f);
+
         if (mSearchBoxScrollListener != null) {
             mSearchBoxScrollListener.onNtpScrollChanged(getToolbarTransitionPercentage());
         }
@@ -509,6 +546,14 @@ public class NewTabPageView extends FrameLayout
         // search box) are sane.
         if (getWrapperView().getHeight() == 0) return 0f;
 
+        if (mUseCardsUi && !mRecyclerView.isFirstItemVisible()) {
+            // getVerticalScroll is valid only for the RecyclerView if the first item is visible.
+            // If the first item is not visible, we must have scrolled quite far and we know the
+            // toolbar transition should be 100%. This might be the initial scroll position due to
+            // the scroll restore feature, so the search box will not have been laid out yet.
+            return 1f;
+        }
+
         int searchBoxTop = mSearchBoxView.getTop();
         if (searchBoxTop == 0) return 0f;
 
@@ -518,13 +563,6 @@ public class NewTabPageView extends FrameLayout
 
         if (!mUseCardsUi) {
             return MathUtils.clamp(getVerticalScroll() / (float) searchBoxTop, 0f, 1f);
-        }
-
-        if (!mRecyclerView.isFirstItemVisible()) {
-            // getVerticalScroll is valid only for the RecyclerView if the first item is
-            // visible. If the first item is not visible, we know the toolbar transition
-            // should be 100%.
-            return 1f;
         }
 
         final int scrollY = getVerticalScroll();
@@ -539,7 +577,7 @@ public class NewTabPageView extends FrameLayout
                 / transitionLength, 0f, 1f);
     }
 
-    private ViewGroup getWrapperView() {
+    ViewGroup getWrapperView() {
         return mUseCardsUi ? mRecyclerView : mScrollView;
     }
 
@@ -872,8 +910,9 @@ public class NewTabPageView extends FrameLayout
     boolean shouldCaptureThumbnail() {
         if (getWidth() == 0 || getHeight() == 0) return false;
 
-        return mSnapshotMostVisitedChanged || getWidth() != mSnapshotWidth
-                || getHeight() != mSnapshotHeight || getVerticalScroll() != mSnapshotScrollY;
+        return mNewTabPageRecyclerViewChanged || mSnapshotMostVisitedChanged
+                || getWidth() != mSnapshotWidth || getHeight() != mSnapshotHeight
+                || getVerticalScroll() != mSnapshotScrollY;
     }
 
     /**
@@ -887,6 +926,7 @@ public class NewTabPageView extends FrameLayout
         mSnapshotHeight = getHeight();
         mSnapshotScrollY = getVerticalScroll();
         mSnapshotMostVisitedChanged = false;
+        mNewTabPageRecyclerViewChanged = false;
     }
 
     // OnLayoutChangeListener overrides
@@ -896,9 +936,6 @@ public class NewTabPageView extends FrameLayout
             int oldLeft, int oldTop, int oldRight, int oldBottom) {
         int oldHeight = oldBottom - oldTop;
         int newHeight = bottom - top;
-
-        // Close the Context Menu as it may have moved (https://crbug.com/642688).
-        mManager.closeContextMenu();
 
         if (oldHeight == newHeight && !mTileCountChanged) return;
         mTileCountChanged = false;
@@ -1207,6 +1244,9 @@ public class NewTabPageView extends FrameLayout
         // layout pass, which means that the new style will only be visible after layout happens
         // again. We prefer updating here to avoid having to require that additional layout pass.
         mUiConfig.updateDisplayStyle();
+
+        // Close the Context Menu as it may have moved (https://crbug.com/642688).
+        mManager.closeContextMenu();
     }
 
     private int getVerticalScroll() {

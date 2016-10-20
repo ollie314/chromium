@@ -1,6 +1,7 @@
 /*
  * (C) 1999-2003 Lars Knoll (knoll@kde.org)
- * Copyright (C) 2004, 2005, 2006, 2007, 2008, 2009, 2010, 2012 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006, 2007, 2008, 2009, 2010, 2012 Apple Inc. All
+ * rights reserved.
  * Copyright (C) 2011 Research In Motion Limited. All rights reserved.
  * Copyright (C) 2013 Intel Corporation. All rights reserved.
  *
@@ -57,7 +58,7 @@ StylePropertySerializer::StylePropertySetForSerializer::
         continue;
       m_needToExpandAll = true;
     }
-    if (property.id() < firstCSSProperty || property.id() > lastCSSProperty)
+    if (!isCSSPropertyIDWithName(property.id()))
       continue;
     m_longhandPropertyUsed.set(property.id() - firstCSSProperty);
   }
@@ -83,10 +84,10 @@ StylePropertySerializer::StylePropertySetForSerializer::propertyAt(
 
   CSSPropertyID propertyID =
       static_cast<CSSPropertyID>(index + firstCSSProperty);
-  ASSERT(firstCSSProperty <= propertyID && propertyID <= lastCSSProperty);
+  DCHECK(isCSSPropertyIDWithName(propertyID));
   if (m_longhandPropertyUsed.test(index)) {
     int index = m_propertySet->findPropertyIndex(propertyID);
-    ASSERT(index != -1);
+    DCHECK_NE(index, -1);
     return StylePropertySerializer::PropertyValueForSerializer(
         m_propertySet->propertyAt(index));
   }
@@ -111,14 +112,14 @@ bool StylePropertySerializer::StylePropertySetForSerializer::
     if (property.id() == CSSPropertyAll ||
         !CSSProperty::isAffectedByAllProperty(property.id()))
       return true;
-    if (property.id() < firstCSSProperty || property.id() > lastCSSProperty)
+    if (!isCSSPropertyIDWithName(property.id()))
       return false;
     return m_longhandPropertyUsed.test(property.id() - firstCSSProperty);
   }
 
   CSSPropertyID propertyID =
       static_cast<CSSPropertyID>(index + firstCSSProperty);
-  ASSERT(firstCSSProperty <= propertyID && propertyID <= lastCSSProperty);
+  DCHECK(isCSSPropertyIDWithName(propertyID));
 
   // Since "all" is expanded, we don't need to process "all".
   // We should not process expanded shorthands (e.g. font, background,
@@ -168,7 +169,7 @@ StylePropertySerializer::StylePropertySerializer(
 String StylePropertySerializer::getCustomPropertyText(
     const PropertyValueForSerializer& property,
     bool isNotFirstDecl) const {
-  ASSERT(property.id() == CSSPropertyVariable);
+  DCHECK_EQ(property.id(), CSSPropertyVariable);
   StringBuilder result;
   if (isNotFirstDecl)
     result.append(' ');
@@ -227,10 +228,10 @@ String StylePropertySerializer::asText() const {
         m_propertySet.propertyAt(n);
     CSSPropertyID propertyID = property.id();
     // Only enabled properties should be part of the style.
-    ASSERT(CSSPropertyMetadata::isEnabledProperty(propertyID));
+    DCHECK(CSSPropertyMetadata::isEnabledProperty(propertyID));
     // Shorthands with variable references are not expanded at parse time
     // and hence may still be observed during serialization.
-    ASSERT(!isShorthandProperty(propertyID) ||
+    DCHECK(!isShorthandProperty(propertyID) ||
            property.value()->isVariableReferenceValue());
 
     switch (propertyID) {
@@ -302,7 +303,7 @@ String StylePropertySerializer::asText() const {
                                   property.isImportant(), numDecls++));
   }
 
-  ASSERT(!numDecls ^ !result.isEmpty());
+  DCHECK(!numDecls ^ !result.isEmpty());
   return result.toString();
 }
 
@@ -418,7 +419,8 @@ String StylePropertySerializer::commonShorthandChecks(
 String StylePropertySerializer::getPropertyValue(
     CSSPropertyID propertyID) const {
   const StylePropertyShorthand& shorthand = shorthandForProperty(propertyID);
-  // TODO(timloh): This is weird, why do we call this with non-shorthands at all?
+  // TODO(timloh): This is weird, why do we call this with non-shorthands at
+  // all?
   if (!shorthand.length())
     return String();
 
@@ -532,7 +534,7 @@ void StylePropertySerializer::appendFontLonghandValueIfNotNormal(
     CSSPropertyID propertyID,
     StringBuilder& result) const {
   int foundPropertyIndex = m_propertySet.findPropertyIndex(propertyID);
-  ASSERT(foundPropertyIndex != -1);
+  DCHECK_NE(foundPropertyIndex, -1);
 
   const CSSValue* val = m_propertySet.propertyAt(foundPropertyIndex).value();
   if (val->isIdentifierValue() &&
@@ -555,14 +557,15 @@ void StylePropertySerializer::appendFontLonghandValueIfNotNormal(
       prefix = '/';
       break;
     default:
-      ASSERT_NOT_REACHED();
+      NOTREACHED();
   }
 
   if (prefix && !result.isEmpty())
     result.append(prefix);
 
   String value;
-  // In the font-variant shorthand a "none" ligatures value needs to be expanded.
+  // In the font-variant shorthand a "none" ligatures value needs to be
+  // expanded.
   if (propertyID == CSSPropertyFontVariantLigatures &&
       val->isIdentifierValue() &&
       toCSSIdentifierValue(val)->getValueID() == CSSValueNone) {
@@ -604,7 +607,8 @@ String StylePropertySerializer::fontValue() const {
   PropertyValueForSerializer fontVariantNumericProperty =
       m_propertySet.propertyAt(fontVariantNumericPropertyIndex);
 
-  // Check that non-initial font-variant subproperties are not conflicting with this serialization.
+  // Check that non-initial font-variant subproperties are not conflicting with
+  // this serialization.
   const CSSValue* ligaturesValue = fontVariantLigaturesProperty.value();
   const CSSValue* numericValue = fontVariantNumericProperty.value();
   if ((ligaturesValue->isIdentifierValue() &&
@@ -640,8 +644,8 @@ String StylePropertySerializer::fontValue() const {
 String StylePropertySerializer::fontVariantValue() const {
   StringBuilder result;
 
-  // TODO(drott): Decide how we want to return ligature values in shorthands, reduced to "none" or
-  // spelled out, filed as W3C bug:
+  // TODO(drott): Decide how we want to return ligature values in shorthands,
+  // reduced to "none" or spelled out, filed as W3C bug:
   // https://www.w3.org/Bugs/Public/show_bug.cgi?id=29594
   appendFontLonghandValueIfNotNormal(CSSPropertyFontVariantLigatures, result);
   appendFontLonghandValueIfNotNormal(CSSPropertyFontVariantCaps, result);
@@ -716,7 +720,8 @@ String StylePropertySerializer::getLayeredShorthandValue(
 
   StringBuilder result;
 
-  // Now stitch the properties together. Implicit initial values are flagged as such and
+  // Now stitch the properties together. Implicit initial values are flagged as
+  // such and
   // can safely be omitted.
   for (size_t layer = 0; layer < numLayers; layer++) {
     StringBuilder layerResult;
@@ -752,7 +757,7 @@ String StylePropertySerializer::getLayeredShorthandValue(
            m_propertySet.isPropertyImplicit(property)) &&
           (property == CSSPropertyBackgroundRepeatX ||
            property == CSSPropertyWebkitMaskRepeatX)) {
-        ASSERT(shorthand.properties()[propertyIndex + 1] ==
+        DCHECK(shorthand.properties()[propertyIndex + 1] ==
                    CSSPropertyBackgroundRepeatY ||
                shorthand.properties()[propertyIndex + 1] ==
                    CSSPropertyWebkitMaskRepeatY);
@@ -761,14 +766,16 @@ String StylePropertySerializer::getLayeredShorthandValue(
                 ? toCSSValueList(values[propertyIndex + 1])->item(layer)
                 : *values[propertyIndex + 1];
 
-        // FIXME: At some point we need to fix this code to avoid returning an invalid shorthand,
-        // since some longhand combinations are not serializable into a single shorthand.
+        // FIXME: At some point we need to fix this code to avoid returning an
+        // invalid shorthand, since some longhand combinations are not
+        // serializable into a single shorthand.
         if (!value->isIdentifierValue() || !yValue.isIdentifierValue())
           continue;
 
         CSSValueID xId = toCSSIdentifierValue(value)->getValueID();
         CSSValueID yId = toCSSIdentifierValue(yValue).getValueID();
-        // Maybe advance propertyIndex to look at the next CSSValue in the list for the checks below.
+        // Maybe advance propertyIndex to look at the next CSSValue in the list
+        // for the checks below.
         if (xId == yId) {
           useSingleWordShorthand = true;
           property = shorthand.properties()[++propertyIndex];
@@ -790,7 +797,8 @@ String StylePropertySerializer::getLayeredShorthandValue(
           else
             layerResult.append(" 0% 0% / ");
         } else if (!layerResult.isEmpty()) {
-          // Do this second to avoid ending up with an extra space in the output if we hit the continue above.
+          // Do this second to avoid ending up with an extra space in the output
+          // if we hit the continue above.
           layerResult.append(' ');
         }
 
@@ -811,8 +819,8 @@ String StylePropertySerializer::getLayeredShorthandValue(
         if (property == CSSPropertyBackgroundPositionY ||
             property == CSSPropertyWebkitMaskPositionY) {
           foundPositionYCSSProperty = true;
-          // background-position is a special case. If only the first offset is specified,
-          // the second one defaults to "center", not the same value.
+          // background-position is a special case. If only the first offset is
+          // specified, the second one defaults to "center", not the same value.
         }
       }
     }

@@ -243,7 +243,7 @@ void MainThreadDebugger::runMessageLoopOnPause(int contextGroupId) {
   m_paused = true;
 
   if (UserGestureToken* token = UserGestureIndicator::currentToken())
-    token->setPauseInDebugger();
+    token->setTimeoutPolicy(UserGestureToken::HasPaused);
   // Wait for continue or step command.
   if (m_clientMessageLoop)
     m_clientMessageLoop->run(pausedFrame);
@@ -312,7 +312,8 @@ void MainThreadDebugger::consoleAPIMessage(
     return;
   if (type == v8_inspector::V8ConsoleAPIType::kClear && frame->host())
     frame->host()->consoleMessageStorage().clear();
-  // TODO(dgozman): we can save a copy of message and url here by making FrameConsole work with StringView.
+  // TODO(dgozman): we can save a copy of message and url here by making
+  // FrameConsole work with StringView.
   std::unique_ptr<SourceLocation> location =
       SourceLocation::create(toCoreString(url), lineNumber, columnNumber,
                              stackTrace ? stackTrace->clone() : nullptr, 0);
@@ -325,7 +326,7 @@ v8::MaybeLocal<v8::Value> MainThreadDebugger::memoryInfo(
     v8::Isolate* isolate,
     v8::Local<v8::Context> context) {
   ExecutionContext* executionContext = toExecutionContext(context);
-  ASSERT_UNUSED(executionContext, executionContext);
+  DCHECK(executionContext);
   ASSERT(executionContext->isDocument());
   return toV8(MemoryInfo::create(), context->Global(), isolate);
 }
@@ -394,7 +395,8 @@ void MainThreadDebugger::querySelectorAllCallback(
   ExceptionState exceptionState(ExceptionState::ExecutionContext, "$$",
                                 "CommandLineAPI", info.Holder(),
                                 info.GetIsolate());
-  // toV8(elementList) doesn't work here, since we need a proper Array instance, not NodeList.
+  // toV8(elementList) doesn't work here, since we need a proper Array instance,
+  // not NodeList.
   StaticElementList* elementList = toContainerNode(node)->querySelectorAll(
       AtomicString(selector), exceptionState);
   if (exceptionState.hadException() || !elementList)

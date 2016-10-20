@@ -41,6 +41,7 @@
 #include "content/common/renderer.mojom.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/interstitial_page_delegate.h"
+#include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
@@ -590,6 +591,23 @@ class SitePerProcessIgnoreCertErrorsBrowserTest
   void SetUpCommandLine(base::CommandLine* command_line) override {
     SitePerProcessBrowserTest::SetUpCommandLine(command_line);
     command_line->AppendSwitch(switches::kIgnoreCertificateErrors);
+  }
+};
+
+// SitePerProcessEmbedderCSPEnforcementBrowserTest
+
+class SitePerProcessEmbedderCSPEnforcementBrowserTest
+    : public SitePerProcessBrowserTest {
+ public:
+  SitePerProcessEmbedderCSPEnforcementBrowserTest() {}
+
+ protected:
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    SitePerProcessBrowserTest::SetUpCommandLine(command_line);
+    // TODO(amalika): Remove this switch when the EmbedderCSPEnforcement becomes
+    // stable
+    command_line->AppendSwitchASCII(switches::kEnableBlinkFeatures,
+                                    "EmbedderCSPEnforcement");
   }
 };
 
@@ -1548,14 +1566,8 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest,
 
 // Tests OOPIF rendering by checking that the RWH of the iframe generates
 // OnSwapCompositorFrame message.
-#if defined(OS_ANDROID)
-// http://crbug.com/471850
-#define MAYBE_CompositorFrameSwapped DISABLED_CompositorFrameSwapped
-#else
-#define MAYBE_CompositorFrameSwapped CompositorFrameSwapped
-#endif
 IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest,
-                       MAYBE_CompositorFrameSwapped) {
+                       CompositorFrameSwapped) {
   GURL main_url(embedded_test_server()->GetURL(
       "a.com", "/cross_site_iframe_factory.html?a(baz)"));
   NavigateToURL(shell(), main_url);
@@ -3114,6 +3126,63 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest,
 
     current_margin_width += 5;
     current_margin_height += 10;
+  }
+}
+
+// Verify that "csp" property on frame elements propagates to child frames
+// correctly. See  https://crbug.com/647588
+IN_PROC_BROWSER_TEST_F(SitePerProcessEmbedderCSPEnforcementBrowserTest,
+                       FrameOwnerPropertiesPropagationCSP) {
+  GURL main_url(embedded_test_server()->GetURL(
+      "a.com", "/frame_owner_properties_csp.html"));
+  EXPECT_TRUE(NavigateToURL(shell(), main_url));
+
+  // It is safe to obtain the root frame tree node here, as it doesn't change.
+  FrameTreeNode* root = web_contents()->GetFrameTree()->root();
+  ASSERT_EQ(1u, root->child_count());
+
+  EXPECT_EQ(
+      " Site A ------------ proxies for B\n"
+      "   +--Site B ------- proxies for A\n"
+      "Where A = http://a.com/\n"
+      "      B = http://b.com/",
+      DepictFrameTree(root));
+
+  FrameTreeNode* child = root->child_at(0);
+
+  std::string csp;
+  EXPECT_TRUE(ExecuteScriptAndExtractString(
+      root,
+      "window.domAutomationController.send("
+      "document.getElementById('child-1').getAttribute('csp'));",
+      &csp));
+  EXPECT_EQ("object-src \'none\'", csp);
+
+  // Run the test over variety of parent/child cases.
+  GURL urls[] = {// Remote to remote.
+                 embedded_test_server()->GetURL("c.com", "/title2.html"),
+                 // Remote to local.
+                 embedded_test_server()->GetURL("a.com", "/title1.html"),
+                 // Local to remote.
+                 embedded_test_server()->GetURL("b.com", "/title2.html")};
+
+  std::vector<std::string> csp_values = {"default-src a.com",
+                                         "default-src b.com", "img-src c.com"};
+
+  // Before each navigation, we change the csp property of the frame.
+  // We then check whether that property is applied
+  // correctly after the navigation has completed.
+  for (size_t i = 0; i < arraysize(urls); ++i) {
+    // Change csp before navigating.
+    EXPECT_TRUE(ExecuteScript(
+        root,
+        base::StringPrintf("document.getElementById('child-1').setAttribute("
+                           "    'csp', '%s');",
+                           csp_values[i].c_str())));
+
+    NavigateFrameToURL(child, urls[i]);
+    EXPECT_EQ(csp_values[i], child->frame_owner_properties().required_csp);
+    // TODO(amalika): add checks that the CSP replication takes effect
   }
 }
 
@@ -6075,7 +6144,7 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest,
   // Send the message to create a proxy for B's new child frame in A.  This
   // used to crash, as parent_routing_id refers to a proxy that doesn't exist
   // anymore.
-  RenderProcessHostImpl::GetRendererInterface(process_a)->CreateFrameProxy(
+  process_a->GetRendererInterface()->CreateFrameProxy(
       new_routing_id, view_routing_id, MSG_ROUTING_NONE, parent_routing_id,
       FrameReplicationState());
 
@@ -6151,8 +6220,7 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest,
     params->widget_params->hidden = true;
     params->replication_state.name = "name";
     params->replication_state.unique_name = "name";
-    RenderProcessHostImpl::GetRendererInterface(process)->CreateFrame(
-        std::move(params));
+    process->GetRendererInterface()->CreateFrame(std::move(params));
   }
 
   // The test must wait for the process to exit, but if there is no leak, the
@@ -6217,8 +6285,7 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest, ParentDetachRemoteChild) {
     params->widget_params->hidden = true;
     params->replication_state.name = "name";
     params->replication_state.unique_name = "name";
-    RenderProcessHostImpl::GetRendererInterface(process)->CreateFrame(
-        std::move(params));
+    process->GetRendererInterface()->CreateFrame(std::move(params));
   }
 
   // The test must wait for the process to exit, but if there is no leak, the
@@ -6518,20 +6585,26 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessIgnoreCertErrorsBrowserTest,
   GURL iframe_url(
       https_server.GetURL("/mixed-content/basic-passive-in-iframe.html"));
   EXPECT_TRUE(NavigateToURL(shell(), iframe_url));
-  EXPECT_TRUE(web_contents->DisplayedInsecureContent());
+  NavigationEntry* entry = web_contents->GetController().GetVisibleEntry();
+  EXPECT_TRUE(!!(entry->GetSSL().content_status &
+                 SSLStatus::DISPLAYED_INSECURE_CONTENT));
 
   // When the subframe navigates, the WebContents should still be marked
   // as having displayed insecure content.
   GURL navigate_url(https_server.GetURL("/title1.html"));
   FrameTreeNode* root = web_contents->GetFrameTree()->root();
   NavigateFrameToURL(root->child_at(0), navigate_url);
-  EXPECT_TRUE(web_contents->DisplayedInsecureContent());
+  entry = web_contents->GetController().GetVisibleEntry();
+  EXPECT_TRUE(!!(entry->GetSSL().content_status &
+                 SSLStatus::DISPLAYED_INSECURE_CONTENT));
 
   // When the main frame navigates, it should no longer be marked as
   // displaying insecure content.
   EXPECT_TRUE(
       NavigateToURL(shell(), https_server.GetURL("b.com", "/title1.html")));
-  EXPECT_FALSE(web_contents->DisplayedInsecureContent());
+  entry = web_contents->GetController().GetVisibleEntry();
+  EXPECT_FALSE(!!(entry->GetSSL().content_status &
+                  SSLStatus::DISPLAYED_INSECURE_CONTENT));
 }
 
 // Tests that, when a parent frame is set to strictly block mixed
@@ -6550,7 +6623,9 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessIgnoreCertErrorsBrowserTest,
   GURL iframe_url_with_strict_blocking(https_server.GetURL(
       "/mixed-content/basic-passive-in-iframe-with-strict-blocking.html"));
   EXPECT_TRUE(NavigateToURL(shell(), iframe_url_with_strict_blocking));
-  EXPECT_FALSE(web_contents->DisplayedInsecureContent());
+  NavigationEntry* entry = web_contents->GetController().GetVisibleEntry();
+  EXPECT_FALSE(!!(entry->GetSSL().content_status &
+                  SSLStatus::DISPLAYED_INSECURE_CONTENT));
 
   FrameTreeNode* root = web_contents->GetFrameTree()->root();
   EXPECT_EQ(blink::kBlockAllMixedContent,
@@ -6592,7 +6667,9 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessIgnoreCertErrorsBrowserTest,
   GURL iframe_url_with_upgrade(https_server.GetURL(
       "/mixed-content/basic-passive-in-iframe-with-upgrade.html"));
   EXPECT_TRUE(NavigateToURL(shell(), iframe_url_with_upgrade));
-  EXPECT_FALSE(web_contents->DisplayedInsecureContent());
+  NavigationEntry* entry = web_contents->GetController().GetVisibleEntry();
+  EXPECT_FALSE(!!(entry->GetSSL().content_status &
+                  SSLStatus::DISPLAYED_INSECURE_CONTENT));
 
   FrameTreeNode* root = web_contents->GetFrameTree()->root();
   EXPECT_EQ(blink::kUpgradeInsecureRequests,
@@ -6665,14 +6742,13 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessIgnoreCertErrorsBrowserTest,
   ASSERT_TRUE(entry);
 
   // The main page was loaded with certificate errors.
-  EXPECT_EQ(SECURITY_STYLE_AUTHENTICATION_BROKEN,
-            entry->GetSSL().security_style);
+  EXPECT_TRUE(net::IsCertStatusError(entry->GetSSL().cert_status));
 
   // The image that the iframe loaded had certificate errors also, so
   // the page should be marked as having displayed subresources with
   // cert errors.
-  EXPECT_TRUE(entry->GetSSL().content_status &
-              SSLStatus::DISPLAYED_CONTENT_WITH_CERT_ERRORS);
+  EXPECT_TRUE(!!(entry->GetSSL().content_status &
+                 SSLStatus::DISPLAYED_CONTENT_WITH_CERT_ERRORS));
 }
 
 // Test setting a cross-origin iframe to display: none.
@@ -7882,7 +7958,7 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest,
   GURL stall_url(embedded_test_server()->GetURL("b.com", "/title2.html"));
   TestNavigationManager delayer(shell()->web_contents(), stall_url);
   shell()->LoadURL(stall_url);
-  EXPECT_TRUE(delayer.WaitForWillStartRequest());
+  EXPECT_TRUE(delayer.WaitForRequestStart());
 
   // The pending RFH should be in the same process as the popup.
   RenderFrameHostImpl* pending_rfh =
@@ -7944,7 +8020,7 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest,
   GURL stall_url(embedded_test_server()->GetURL("b.com", "/title2.html"));
   TestNavigationManager delayer(shell()->web_contents(), stall_url);
   shell()->LoadURL(stall_url);
-  EXPECT_TRUE(delayer.WaitForWillStartRequest());
+  EXPECT_TRUE(delayer.WaitForRequestStart());
 
   // Kill the b.com process, currently in use by the pending RenderFrameHost
   // and the popup.
@@ -8251,7 +8327,7 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest,
                                            cross_site_url_1);
   shell()->web_contents()->GetController().LoadURL(
       cross_site_url_1, Referrer(), ui::PAGE_TRANSITION_LINK, std::string());
-  EXPECT_TRUE(cross_site_manager.WaitForWillProcessResponse());
+  EXPECT_TRUE(cross_site_manager.WaitForResponse());
 
   // Start a renderer-initiated navigation to a cross-process url and make sure
   // the navigation will be blocked before being transferred.
@@ -8261,7 +8337,7 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest,
                                          cross_site_url_2);
   EXPECT_TRUE(ExecuteScript(
       root, "location.href = '" + cross_site_url_2.spec() + "';"));
-  EXPECT_TRUE(transfer_manager.WaitForWillProcessResponse());
+  EXPECT_TRUE(transfer_manager.WaitForResponse());
 
   // Now have the cross-process navigation commit and mark the current RFH as
   // pending deletion.
@@ -8270,6 +8346,180 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest,
   // Resume the navigation in the previous RFH that has just been marked as
   // pending deletion. We should not crash.
   transfer_manager.WaitForNavigationFinished();
+}
+
+class NavigationHandleWatcher : public WebContentsObserver {
+ public:
+  NavigationHandleWatcher(WebContents* web_contents)
+      : WebContentsObserver(web_contents) {}
+  void DidStartNavigation(NavigationHandle* navigation_handle) override {
+    DCHECK_EQ(GURL("http://b.com/"),
+              navigation_handle->GetStartingSiteInstance()->GetSiteURL());
+  }
+};
+
+// Verifies that the SiteInstance of a NavigationHandle correctly identifies the
+// RenderFrameHost that started the navigation (and not the destination RFH).
+IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest,
+                       NavigationHandleSiteInstance) {
+  // Navigate to a page with a cross-site iframe.
+  GURL main_url(embedded_test_server()->GetURL(
+      "a.com", "/cross_site_iframe_factory.html?a(b)"));
+  EXPECT_TRUE(NavigateToURL(shell(), main_url));
+
+  // Navigate the iframe cross-site.
+  NavigationHandleWatcher watcher(shell()->web_contents());
+  TestNavigationObserver load_observer(shell()->web_contents());
+  GURL frame_url = embedded_test_server()->GetURL("c.com", "/title1.html");
+  EXPECT_TRUE(ExecuteScript(
+      shell()->web_contents(),
+      "window.frames[0].location = \"" + frame_url.spec() + "\";"));
+  load_observer.Wait();
+}
+
+// Test that when canceling a pending RenderFrameHost in the middle of a
+// redirect, and then killing the corresponding RenderView's renderer process,
+// the RenderViewHost isn't reused in an improper state later.  Previously this
+// led to a crash in CreateRenderView when recreating the RenderView due to a
+// stale main frame routing ID.  See https://crbug.com/627400.
+IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest,
+                       ReuseNonLiveRenderViewHostAfterCancelPending) {
+  GURL a_url(embedded_test_server()->GetURL("a.com", "/title1.html"));
+  GURL b_url(embedded_test_server()->GetURL("b.com", "/title2.html"));
+  GURL c_url(embedded_test_server()->GetURL("c.com", "/title3.html"));
+
+  EXPECT_TRUE(NavigateToURL(shell(), a_url));
+
+  // Open a popup and navigate it to b.com.
+  Shell* popup = OpenPopup(shell(), a_url, "popup");
+  EXPECT_TRUE(NavigateToURL(popup, b_url));
+
+  // Open a second popup and navigate it to b.com, which redirects to c.com.
+  // The navigation to b.com will create a pending RenderFrameHost, which will
+  // be canceled during the redirect to c.com.  Note that NavigateToURL will
+  // return false because the committed URL won't match the requested URL due
+  // to the redirect.
+  Shell* popup2 = OpenPopup(shell(), a_url, "popup2");
+  TestNavigationObserver observer(popup2->web_contents());
+  GURL redirect_url(embedded_test_server()->GetURL(
+      "b.com", "/server-redirect?" + c_url.spec()));
+  EXPECT_FALSE(NavigateToURL(popup2, redirect_url));
+  EXPECT_EQ(c_url, observer.last_navigation_url());
+  EXPECT_TRUE(observer.last_navigation_succeeded());
+
+  // Kill the b.com process (which currently hosts a RenderFrameProxy that
+  // replaced the pending RenderFrame in |popup2|, as well as the RenderFrame
+  // for |popup|).
+  RenderProcessHost* b_process =
+      popup->web_contents()->GetMainFrame()->GetProcess();
+  RenderProcessHostWatcher crash_observer(
+      b_process, RenderProcessHostWatcher::WATCH_FOR_PROCESS_EXIT);
+  b_process->Shutdown(0, false);
+  crash_observer.Wait();
+
+  // Navigate the second popup to b.com.  This used to crash when creating the
+  // RenderView, because it reused the RenderViewHost created by the canceled
+  // navigation to b.com, and that RenderViewHost had a stale main frame
+  // routing ID and active state.
+  EXPECT_TRUE(NavigateToURL(popup2, b_url));
+}
+
+// Check that after a pending RFH is canceled and replaced with a proxy (which
+// reuses the canceled RFH's RenderViewHost), navigating to a main frame in the
+// same site as the canceled RFH doesn't lead to a renderer crash.  The steps
+// here are similar to ReuseNonLiveRenderViewHostAfterCancelPending, but don't
+// involve crashing the renderer. See https://crbug.com/651980.
+IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest,
+                       RecreateMainFrameAfterCancelPending) {
+  GURL a_url(embedded_test_server()->GetURL("a.com", "/title1.html"));
+  GURL b_url(embedded_test_server()->GetURL("b.com", "/title2.html"));
+  GURL c_url(embedded_test_server()->GetURL("c.com", "/title3.html"));
+
+  EXPECT_TRUE(NavigateToURL(shell(), a_url));
+
+  // Open a popup and navigate it to b.com.
+  Shell* popup = OpenPopup(shell(), a_url, "popup");
+  EXPECT_TRUE(NavigateToURL(popup, b_url));
+
+  // Open a second popup and navigate it to b.com, which redirects to c.com.
+  // The navigation to b.com will create a pending RenderFrameHost, which will
+  // be canceled during the redirect to c.com.  Note that NavigateToURL will
+  // return false because the committed URL won't match the requested URL due
+  // to the redirect.
+  Shell* popup2 = OpenPopup(shell(), a_url, "popup2");
+  TestNavigationObserver observer(popup2->web_contents());
+  GURL redirect_url(embedded_test_server()->GetURL(
+      "b.com", "/server-redirect?" + c_url.spec()));
+  EXPECT_FALSE(NavigateToURL(popup2, redirect_url));
+  EXPECT_EQ(c_url, observer.last_navigation_url());
+  EXPECT_TRUE(observer.last_navigation_succeeded());
+
+  // Navigate the second popup to b.com.  This used to crash the b.com renderer
+  // because it failed to delete the canceled RFH's RenderFrame, so this caused
+  // it to try to create a frame widget which already existed.
+  EXPECT_TRUE(NavigateToURL(popup2, b_url));
+}
+
+// Check that when a pending RFH is canceled and a proxy needs to be created in
+// its place, the proxy is properly initialized on the renderer side.  See
+// https://crbug.com/653746.
+IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest,
+                       CommunicateWithProxyAfterCancelPending) {
+  GURL a_url(embedded_test_server()->GetURL("a.com", "/title1.html"));
+  GURL b_url(embedded_test_server()->GetURL("b.com", "/title2.html"));
+  GURL c_url(embedded_test_server()->GetURL("c.com", "/title3.html"));
+
+  EXPECT_TRUE(NavigateToURL(shell(), a_url));
+
+  // Open a popup and navigate it to b.com.
+  Shell* popup = OpenPopup(shell(), a_url, "popup");
+  EXPECT_TRUE(NavigateToURL(popup, b_url));
+
+  // Open a second popup and navigate it to b.com, which redirects to c.com.
+  // The navigation to b.com will create a pending RenderFrameHost, which will
+  // be canceled during the redirect to c.com.  Note that NavigateToURL will
+  // return false because the committed URL won't match the requested URL due
+  // to the redirect.
+  Shell* popup2 = OpenPopup(shell(), a_url, "popup2");
+  TestNavigationObserver observer(popup2->web_contents());
+  GURL redirect_url(embedded_test_server()->GetURL(
+      "b.com", "/server-redirect?" + c_url.spec()));
+  EXPECT_FALSE(NavigateToURL(popup2, redirect_url));
+  EXPECT_EQ(c_url, observer.last_navigation_url());
+  EXPECT_TRUE(observer.last_navigation_succeeded());
+
+  // Because b.com has other active frames (namely, the frame in |popup|),
+  // there should be a proxy created for the canceled RFH, and it should be
+  // live.
+  SiteInstance* b_instance = popup->web_contents()->GetSiteInstance();
+  FrameTreeNode* popup2_root =
+      static_cast<WebContentsImpl*>(popup2->web_contents())
+          ->GetFrameTree()
+          ->root();
+  RenderFrameProxyHost* proxy =
+      popup2_root->render_manager()->GetRenderFrameProxyHost(b_instance);
+  EXPECT_TRUE(proxy);
+  EXPECT_TRUE(proxy->is_render_frame_proxy_live());
+
+  // Add a postMessage listener in |popup2| (currently at a c.com URL).
+  EXPECT_TRUE(
+      ExecuteScript(popup2,
+                    "window.addEventListener('message', function(event) {\n"
+                    "  document.title=event.data;\n"
+                    "});"));
+
+  // Check that a postMessage can be sent via |proxy| above.  This needs to be
+  // done from the b.com process.  |popup| is currently in b.com, but it can't
+  // reach the window reference for |popup2| due to a security restriction in
+  // Blink. So, navigate the main tab to b.com and then send a postMessage to
+  // |popup2|. This is allowed since the main tab is |popup2|'s opener.
+  EXPECT_TRUE(NavigateToURL(shell(), b_url));
+
+  base::string16 expected_title(base::UTF8ToUTF16("foo"));
+  TitleWatcher title_watcher(popup2->web_contents(), expected_title);
+  EXPECT_TRUE(ExecuteScript(
+      shell(), "window.open('','popup2').postMessage('foo', '*');"));
+  EXPECT_EQ(expected_title, title_watcher.WaitAndGetTitle());
 }
 
 }  // namespace content

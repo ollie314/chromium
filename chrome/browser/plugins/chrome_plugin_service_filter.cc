@@ -7,10 +7,12 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/engagement/site_engagement_service.h"
+#include "chrome/browser/plugins/flash_temporary_permission_tracker.h"
 #include "chrome/browser/plugins/plugin_finder.h"
 #include "chrome/browser/plugins/plugin_metadata.h"
 #include "chrome/browser/plugins/plugin_utils.h"
@@ -18,7 +20,6 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/render_messages.h"
-#include "components/content_settings/content/common/content_settings_messages.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
@@ -28,7 +29,6 @@
 #include "content/public/browser/resource_context.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_constants.h"
-#include "url/gurl.h"
 
 using content::BrowserThread;
 using content::PluginService;
@@ -44,9 +44,11 @@ class ProfileContentSettingObserver : public content_settings::Observer {
                                const ContentSettingsPattern& secondary_pattern,
                                ContentSettingsType content_type,
                                std::string resource_identifier) override {
-    DCHECK(base::FeatureList::IsEnabled(features::kPreferHtmlOverPlugins));
-    if (content_type == CONTENT_SETTINGS_TYPE_PLUGINS)
+    if (content_type == CONTENT_SETTINGS_TYPE_PLUGINS &&
+        PluginUtils::ShouldPreferHtmlOverPlugins(
+            HostContentSettingsMapFactory::GetForProfile(profile_))) {
       PluginService::GetInstance()->PurgePluginListCache(profile_, false);
+    }
   }
 
  private:
@@ -63,14 +65,15 @@ void AuthorizeRenderer(content::RenderFrameHost* render_frame_host) {
 // ChromePluginServiceFilter inner struct definitions.
 
 struct ChromePluginServiceFilter::ContextInfo {
-  ContextInfo(
-      const scoped_refptr<PluginPrefs>& plugin_prefs,
-      const scoped_refptr<HostContentSettingsMap>& host_content_settings_map,
-      Profile* profile);
+  ContextInfo(scoped_refptr<PluginPrefs> pp,
+              scoped_refptr<HostContentSettingsMap> hcsm,
+              scoped_refptr<FlashTemporaryPermissionTracker> ftpm,
+              Profile* profile);
   ~ContextInfo();
 
   scoped_refptr<PluginPrefs> plugin_prefs;
   scoped_refptr<HostContentSettingsMap> host_content_settings_map;
+  scoped_refptr<FlashTemporaryPermissionTracker> permission_tracker;
   ProfileContentSettingObserver observer;
 
  private:
@@ -78,19 +81,19 @@ struct ChromePluginServiceFilter::ContextInfo {
 };
 
 ChromePluginServiceFilter::ContextInfo::ContextInfo(
-    const scoped_refptr<PluginPrefs>& plugin_prefs,
-    const scoped_refptr<HostContentSettingsMap>& host_content_settings_map,
+    scoped_refptr<PluginPrefs> pp,
+    scoped_refptr<HostContentSettingsMap> hcsm,
+    scoped_refptr<FlashTemporaryPermissionTracker> ftpm,
     Profile* profile)
-    : plugin_prefs(plugin_prefs),
-      host_content_settings_map(host_content_settings_map),
-      observer(ProfileContentSettingObserver(profile)) {
-  if (base::FeatureList::IsEnabled(features::kPreferHtmlOverPlugins))
-    host_content_settings_map->AddObserver(&observer);
+    : plugin_prefs(std::move(pp)),
+      host_content_settings_map(std::move(hcsm)),
+      permission_tracker(std::move(ftpm)),
+      observer(profile) {
+  host_content_settings_map->AddObserver(&observer);
 }
 
 ChromePluginServiceFilter::ContextInfo::~ContextInfo() {
-  if (base::FeatureList::IsEnabled(features::kPreferHtmlOverPlugins))
-    host_content_settings_map->RemoveObserver(&observer);
+  host_content_settings_map->RemoveObserver(&observer);
 }
 
 ChromePluginServiceFilter::OverriddenPlugin::OverriddenPlugin()
@@ -108,6 +111,14 @@ ChromePluginServiceFilter::ProcessDetails::~ProcessDetails() {}
 // ChromePluginServiceFilter definitions.
 
 // static
+const char ChromePluginServiceFilter::kEngagementSettingAllowedHistogram[] =
+    "Plugin.Flash.Engagement.ContentSettingAllowed";
+const char ChromePluginServiceFilter::kEngagementSettingBlockedHistogram[] =
+    "Plugin.Flash.Engagement.ContentSettingBlocked";
+const char ChromePluginServiceFilter::kEngagementNoSettingHistogram[] =
+    "Plugin.Flash.Engagement.NoSetting";
+
+// static
 ChromePluginServiceFilter* ChromePluginServiceFilter::GetInstance() {
   return base::Singleton<ChromePluginServiceFilter>::get();
 }
@@ -119,7 +130,7 @@ void ChromePluginServiceFilter::RegisterResourceContext(Profile* profile,
   resource_context_map_[context] = base::MakeUnique<ContextInfo>(
       PluginPrefs::GetForProfile(profile),
       HostContentSettingsMapFactory::GetForProfile(profile),
-      profile);
+      FlashTemporaryPermissionTracker::Get(profile), profile);
 }
 
 void ChromePluginServiceFilter::UnregisterResourceContext(
@@ -167,7 +178,7 @@ bool ChromePluginServiceFilter::IsPluginAvailable(
     int render_frame_id,
     const void* context,
     const GURL& plugin_content_url,
-    const GURL& main_url,
+    const url::Origin& main_frame_origin,
     content::WebPluginInfo* plugin) {
   base::AutoLock auto_lock(lock_);
   const ProcessDetails* details = GetProcess(render_process_id);
@@ -201,34 +212,48 @@ bool ChromePluginServiceFilter::IsPluginAvailable(
   // If PreferHtmlOverPlugins is enabled and the plugin is Flash, we do
   // additional checks.
   if (plugin->name == base::ASCIIToUTF16(content::kFlashPluginName) &&
-      base::FeatureList::IsEnabled(features::kPreferHtmlOverPlugins)) {
+      PluginUtils::ShouldPreferHtmlOverPlugins(
+          context_info->host_content_settings_map.get())) {
     // Check the content setting first, and always respect the ALLOW or BLOCK
     // state. When IsPluginAvailable() is called to check whether a plugin
-    // should be advertised, |url| has the same value of |policy_url| (i.e. the
-    //  main frame origin). The intended behavior is that Flash is advertised
-    // only if a Flash embed hosted on the same origin as the main frame origin
-    // is allowed to run.
+    // should be advertised, |url| has the same origin as |main_frame_origin|.
+    // The intended behavior is that Flash is advertised only if a Flash embed
+    // hosted on the same origin as the main frame origin is allowed to run.
     bool is_managed = false;
     HostContentSettingsMap* settings_map =
         context_info_it->second->host_content_settings_map.get();
     ContentSetting flash_setting = PluginUtils::GetFlashPluginContentSetting(
-        settings_map, main_url, plugin_content_url, &is_managed);
+        settings_map, main_frame_origin, plugin_content_url, &is_managed);
     flash_setting = PluginsFieldTrial::EffectiveContentSetting(
-        CONTENT_SETTINGS_TYPE_PLUGINS, flash_setting);
-    if (flash_setting == CONTENT_SETTING_ALLOW)
-      return true;
-    else if (flash_setting == CONTENT_SETTING_BLOCK)
-      return false;
+        settings_map, CONTENT_SETTINGS_TYPE_PLUGINS, flash_setting);
+    double engagement = SiteEngagementService::GetScoreFromSettings(
+        settings_map, main_frame_origin.GetURL());
 
-    // The content setting is neither ALLOW or BLOCK. Check whether the site
-    // meets the engagement cutoff for making Flash available without a prompt.
-    // This should only happen if the setting isn't being enforced by an
-    // enterprise policy.
-    if (is_managed ||
-        SiteEngagementService::GetScoreFromSettings(settings_map, main_url) <
-            PluginsFieldTrial::GetSiteEngagementThresholdForFlash()) {
+    if (flash_setting == CONTENT_SETTING_ALLOW) {
+      UMA_HISTOGRAM_COUNTS_100(kEngagementSettingAllowedHistogram, engagement);
+      return true;
+    }
+
+    if (flash_setting == CONTENT_SETTING_BLOCK) {
+      UMA_HISTOGRAM_COUNTS_100(kEngagementSettingBlockedHistogram, engagement);
       return false;
     }
+
+    UMA_HISTOGRAM_COUNTS_100(kEngagementNoSettingHistogram, engagement);
+
+    // If the content setting is being managed by enterprise policy and is an
+    // ASK setting, we check to see if it has been temporarily granted.
+    if (is_managed) {
+      return context_info_it->second->permission_tracker->IsFlashEnabled(
+          main_frame_origin.GetURL());
+    }
+
+    // If the content setting isn't managed by enterprise policy, but is ASK,
+    // check whether the site meets the engagement cutoff for making Flash
+    // available without a prompt.This should only happen if the setting isn't
+    // being enforced by an enterprise policy.
+    if (engagement < PluginsFieldTrial::GetSiteEngagementThresholdForFlash())
+      return false;
   }
 
   return true;

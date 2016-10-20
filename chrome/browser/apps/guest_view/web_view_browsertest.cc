@@ -24,6 +24,7 @@
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/apps/app_browsertest_util.h"
 #include "chrome/browser/chrome_content_browser_client.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/download/download_history.h"
 #include "chrome/browser/download/download_prefs.h"
@@ -97,6 +98,10 @@
 #include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
 #include "chrome/browser/chromeos/accessibility/speech_monitor.h"
 #endif
+
+// Turn these tests off on Mac while we collect data on windows server crashes
+// on mac chromium builders. https://crbug.com/653353
+#if !defined(OS_MACOSX)
 
 using extensions::ContextMenuMatcher;
 using extensions::ExtensionsAPIClient;
@@ -3847,3 +3852,5 @@ IN_PROC_BROWSER_TEST_P(WebViewFocusTest, TouchFocusesEmbedder) {
   EXPECT_TRUE(aura_webview->HasFocus());
 }
 #endif
+
+#endif  // !defined(OS_MACOSX)

@@ -11,7 +11,7 @@
 #include "base/path_service.h"
 #include "build/build_config.h"
 #include "services/catalog/public/cpp/resource_loader.h"
-#include "services/shell/public/cpp/connector.h"
+#include "services/service_manager/public/cpp/connector.h"
 #include "ui/aura/env.h"
 #include "ui/base/ime/input_method_initializer.h"
 #include "ui/base/material_design/material_design_controller.h"
@@ -45,7 +45,7 @@ class MusViewsDelegate : public ViewsDelegate {
 
 }  // namespace
 
-AuraInit::AuraInit(shell::Connector* connector,
+AuraInit::AuraInit(service_manager::Connector* connector,
                    const std::string& resource_file,
                    const std::string& resource_file_200)
     : resource_file_(resource_file),
@@ -80,7 +80,7 @@ AuraInit::~AuraInit() {
 #endif
 }
 
-void AuraInit::InitializeResources(shell::Connector* connector) {
+void AuraInit::InitializeResources(service_manager::Connector* connector) {
   // Resources may have already been initialized (e.g. when 'chrome --mash' is
   // used to launch the current app).
   if (ui::ResourceBundle::HasSharedInstance())
@@ -92,7 +92,7 @@ void AuraInit::InitializeResources(shell::Connector* connector) {
 
   catalog::ResourceLoader loader;
   filesystem::mojom::DirectoryPtr directory;
-  connector->ConnectToInterface("mojo:catalog", &directory);
+  connector->ConnectToInterface("service:catalog", &directory);
   CHECK(loader.OpenFiles(std::move(directory), resource_paths));
   ui::RegisterPathProvider();
   base::File pak_file = loader.TakeFile(resource_file_);

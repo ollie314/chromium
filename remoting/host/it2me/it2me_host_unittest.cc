@@ -22,6 +22,7 @@
 #include "remoting/host/chromoting_host_context.h"
 #include "remoting/host/it2me/it2me_confirmation_dialog.h"
 #include "remoting/host/policy_watcher.h"
+#include "remoting/signaling/fake_signal_strategy.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace remoting {
@@ -96,6 +97,7 @@ class It2MeHostTest : public testing::Test {
   void RunValidationCallback(const std::string& remote_jid);
 
   ValidationResult validation_result_ = ValidationResult::SUCCESS;
+  std::string remote_user_email_;
 
   // Used to set ConfirmationDialog behavior.
   FakeIt2MeConfirmationDialog* dialog_ = nullptr;
@@ -104,10 +106,10 @@ class It2MeHostTest : public testing::Test {
   std::unique_ptr<base::MessageLoop> message_loop_;
   std::unique_ptr<base::RunLoop> run_loop_;
 
-  scoped_refptr<It2MeHost> it2me_host_;
+  scoped_refptr<AutoThreadTaskRunner> network_task_runner_;
+  scoped_refptr<AutoThreadTaskRunner> ui_task_runner_;
 
-  std::string directory_bot_jid_;
-  XmppSignalStrategy::XmppServerConfig xmpp_server_config_;
+  scoped_refptr<It2MeHost> it2me_host_;
 
   DISALLOW_COPY_AND_ASSIGN(It2MeHostTest);
 };
@@ -116,17 +118,24 @@ void It2MeHostTest::SetUp() {
   message_loop_.reset(new base::MessageLoop());
   run_loop_.reset(new base::RunLoop());
 
-  scoped_refptr<AutoThreadTaskRunner> auto_thread_task_runner =
-      new AutoThreadTaskRunner(base::ThreadTaskRunnerHandle::Get(),
-                               run_loop_->QuitClosure());
+  std::unique_ptr<ChromotingHostContext> host_context(
+      ChromotingHostContext::Create(new AutoThreadTaskRunner(
+          base::ThreadTaskRunnerHandle::Get(), run_loop_->QuitClosure())));
+  network_task_runner_ = host_context->network_task_runner();
+  ui_task_runner_ = host_context->ui_task_runner();
+
   dialog_ = new FakeIt2MeConfirmationDialog();
-  it2me_host_ = new It2MeHost(
-      ChromotingHostContext::Create(auto_thread_task_runner),
-      /*policy_watcher=*/nullptr, base::WrapUnique(dialog_),
-      /*observer=*/nullptr, xmpp_server_config_, directory_bot_jid_);
+  it2me_host_ =
+      new It2MeHost(std::move(host_context),
+                    /*policy_watcher=*/nullptr, base::WrapUnique(dialog_),
+                    /*observer=*/nullptr,
+                    base::WrapUnique(new FakeSignalStrategy("fake_local_jid")),
+                    "fake_user_name", "fake_bot_jid");
 }
 
 void It2MeHostTest::TearDown() {
+  network_task_runner_ = nullptr;
+  ui_task_runner_ = nullptr;
   it2me_host_ = nullptr;
   run_loop_->Run();
 }
@@ -134,7 +143,9 @@ void It2MeHostTest::TearDown() {
 void It2MeHostTest::OnValidationComplete(const base::Closure& resume_callback,
                                          ValidationResult validation_result) {
   validation_result_ = validation_result;
-  resume_callback.Run();
+  remote_user_email_ = dialog_->get_remote_user_email();
+
+  ui_task_runner_->PostTask(FROM_HERE, resume_callback);
 }
 
 void It2MeHostTest::SetClientDomainPolicy(const std::string& policy_value) {
@@ -149,11 +160,19 @@ void It2MeHostTest::SetClientDomainPolicy(const std::string& policy_value) {
 void It2MeHostTest::RunValidationCallback(const std::string& remote_jid) {
   base::RunLoop run_loop;
 
-  it2me_host_->GetValidationCallbackForTesting().Run(
-      remote_jid, base::Bind(&It2MeHostTest::OnValidationComplete,
-                             base::Unretained(this), run_loop.QuitClosure()));
+  network_task_runner_->PostTask(
+      FROM_HERE, base::Bind(&It2MeHost::SetStateForTesting, it2me_host_.get(),
+                            It2MeHostState::kStarting, std::string()));
+
+  network_task_runner_->PostTask(
+      FROM_HERE,
+      base::Bind(it2me_host_->GetValidationCallbackForTesting(), remote_jid,
+                 base::Bind(&It2MeHostTest::OnValidationComplete,
+                            base::Unretained(this), run_loop.QuitClosure())));
 
   run_loop.Run();
+
+  it2me_host_->Disconnect();
 }
 
 TEST_F(It2MeHostTest, ConnectionValidation_NoClientDomainPolicy_ValidJid) {
@@ -216,14 +235,14 @@ TEST_F(It2MeHostTest, ConnectionValidation_WrongClientDomain_MatchEnd) {
 TEST_F(It2MeHostTest, ConnectionValidation_ConfirmationDialog_Accept) {
   RunValidationCallback(kTestClientJid);
   ASSERT_EQ(ValidationResult::SUCCESS, validation_result_);
-  ASSERT_STREQ(kTestClientUserName, dialog_->get_remote_user_email().c_str());
+  ASSERT_STREQ(kTestClientUserName, remote_user_email_.c_str());
 }
 
 TEST_F(It2MeHostTest, ConnectionValidation_ConfirmationDialog_Reject) {
   dialog_->set_dialog_result(DialogResult::CANCEL);
   RunValidationCallback(kTestClientJid);
   ASSERT_EQ(ValidationResult::ERROR_REJECTED_BY_USER, validation_result_);
-  ASSERT_STREQ(kTestClientUserName, dialog_->get_remote_user_email().c_str());
+  ASSERT_STREQ(kTestClientUserName, remote_user_email_.c_str());
 }
 
 }  // namespace remoting

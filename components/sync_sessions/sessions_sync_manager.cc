@@ -11,11 +11,11 @@
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram_macros.h"
 #include "build/build_config.h"
-#include "components/sync/api/sync_error.h"
-#include "components/sync/api/sync_error_factory.h"
-#include "components/sync/api/sync_merge_result.h"
-#include "components/sync/api/time.h"
 #include "components/sync/device_info/local_device_info_provider.h"
+#include "components/sync/model/sync_error.h"
+#include "components/sync/model/sync_error_factory.h"
+#include "components/sync/model/sync_merge_result.h"
+#include "components/sync/model/time.h"
 #include "components/sync/syncable/syncable_util.h"
 #include "components/sync_sessions/sync_sessions_client.h"
 #include "components/sync_sessions/synced_tab_delegate.h"
@@ -1053,8 +1053,8 @@ void SessionsSyncManager::SetSessionTabFromDelegate(
 
   if (is_supervised) {
     int offset = session_tab->navigations.size();
-    const std::vector<const SerializedNavigationEntry*>& blocked_navigations =
-        *tab_delegate.GetBlockedNavigations();
+    const std::vector<std::unique_ptr<const SerializedNavigationEntry>>&
+        blocked_navigations = *tab_delegate.GetBlockedNavigations();
     for (size_t i = 0; i < blocked_navigations.size(); ++i) {
       session_tab->navigations.push_back(*blocked_navigations[i]);
       session_tab->navigations.back().set_index(offset + i);

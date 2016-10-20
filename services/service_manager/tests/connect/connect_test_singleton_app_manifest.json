@@ -1,0 +1,10 @@
+{
+  "manifest_version": 1,
+  "name": "service:connect_test_singleton_app",
+  "display_name": "Connect Test Singleton App",
+  "capabilities": {
+    "required": {
+      "service:service_manager": [ "service_manager:all_users" ]
+    }
+  }
+}

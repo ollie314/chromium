@@ -1,5 +1,6 @@
 /*
- * Copyright (C) 2004, 2005, 2006, 2007, 2008, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006, 2007, 2008, 2009 Apple Inc. All rights
+ * reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -181,7 +182,7 @@ static PositionWithAffinityTemplate<Strategy> honorEditingBoundaryAtOrBefore(
 
   // Return empty position if |pos| is not somewhere inside the editable
   // region containing this position
-  if (highestRoot && !pos.position().anchorNode()->isDescendantOf(highestRoot))
+  if (highestRoot && !pos.anchorNode()->isDescendantOf(highestRoot))
     return PositionWithAffinityTemplate<Strategy>();
 
   // Return |pos| itself if the two are from the very same editable region, or
@@ -416,7 +417,8 @@ const InlineTextBox* CachedLogicallyOrderedLeafBoxes::previousTextBox(
 
   collectBoxes(root);
 
-  // If box is null, root is box's previous RootInlineBox, and previousBox is the last logical box in root.
+  // If box is null, root is box's previous RootInlineBox, and previousBox is
+  // the last logical box in root.
   int boxIndex = m_leafBoxes.size() - 1;
   if (box)
     boxIndex = boxIndexInLeaves(box) - 1;
@@ -437,8 +439,9 @@ const InlineTextBox* CachedLogicallyOrderedLeafBoxes::nextTextBox(
 
   collectBoxes(root);
 
-  // If box is null, root is box's next RootInlineBox, and nextBox is the first logical box in root.
-  // Otherwise, root is box's RootInlineBox, and nextBox is the next logical box in the same line.
+  // If box is null, root is box's next RootInlineBox, and nextBox is the first
+  // logical box in root. Otherwise, root is box's RootInlineBox, and nextBox is
+  // the next logical box in the same line.
   size_t nextBoxIndex = 0;
   if (box)
     nextBoxIndex = boxIndexInLeaves(box) + 1;
@@ -624,7 +627,8 @@ static bool isLogicalStartOfWord(TextBreakIterator* iter,
     return false;
 
   iter->following(position);
-  // isWordTextBreak returns true after moving across a word and false after moving across a punctuation/space.
+  // isWordTextBreak returns true after moving across a word and false after
+  // moving across a punctuation/space.
   return isWordTextBreak(iter);
 }
 
@@ -1184,8 +1188,9 @@ static PositionWithAffinityTemplate<Strategy> startPositionForLine(
     if (!startNode)
       return PositionWithAffinityTemplate<Strategy>();
   } else {
-    // Generated content (e.g. list markers and CSS :before and :after pseudoelements) have no corresponding DOM element,
-    // and so cannot be represented by a VisiblePosition. Use whatever follows instead.
+    // Generated content (e.g. list markers and CSS :before and :after
+    // pseudoelements) have no corresponding DOM element, and so cannot be
+    // represented by a VisiblePosition. Use whatever follows instead.
     startBox = rootBox->firstLeafChild();
     while (true) {
       if (!startBox)
@@ -1425,8 +1430,8 @@ bool inSameLineAlgorithm(
     const PositionWithAffinityTemplate<Strategy>& position2) {
   if (position1.isNull() || position2.isNull())
     return false;
-  DCHECK_EQ(position1.position().document(), position2.position().document());
-  DCHECK(!position1.position().document()->needsLayoutTreeUpdate());
+  DCHECK_EQ(position1.document(), position2.document());
+  DCHECK(!position1.document()->needsLayoutTreeUpdate());
 
   PositionWithAffinityTemplate<Strategy> startOfLine1 = startOfLine(position1);
   PositionWithAffinityTemplate<Strategy> startOfLine2 = startOfLine(position2);
@@ -1574,9 +1579,9 @@ VisiblePosition previousLinePosition(const VisiblePosition& visiblePosition,
     return createVisiblePosition(lineLayoutItem.positionForPoint(pointInLine));
   }
 
-  // Could not find a previous line. This means we must already be on the first line.
-  // Move to the start of the content in this block, which effectively moves us
-  // to the start of the line we're on.
+  // Could not find a previous line. This means we must already be on the first
+  // line. Move to the start of the content in this block, which effectively
+  // moves us to the start of the line we're on.
   Element* rootElement = hasEditableStyle(*node, editableType)
                              ? rootEditableElement(*node, editableType)
                              : node->document().documentElement();
@@ -1707,7 +1712,8 @@ static unsigned previousSentencePositionBoundary(
     unsigned,
     BoundarySearchContextAvailability,
     bool&) {
-  // FIXME: This is identical to startSentenceBoundary. I'm pretty sure that's not right.
+  // FIXME: This is identical to startSentenceBoundary. I'm pretty sure that's
+  // not right.
   TextBreakIterator* iterator = sentenceBreakIterator(characters, length);
   // FIXME: The following function can return -1; we don't handle that.
   return iterator->preceding(length);
@@ -1724,8 +1730,8 @@ static unsigned nextSentencePositionBoundary(const UChar* characters,
                                              unsigned,
                                              BoundarySearchContextAvailability,
                                              bool&) {
-  // FIXME: This is identical to endSentenceBoundary. This isn't right, it needs to
-  // move to the equivlant position in the following sentence.
+  // FIXME: This is identical to endSentenceBoundary. This isn't right, it needs
+  // to move to the equivlant position in the following sentence.
   TextBreakIterator* iterator = sentenceBreakIterator(characters, length);
   return iterator->following(0);
 }
@@ -1854,28 +1860,6 @@ VisiblePositionInFlatTree startOfParagraph(
 }
 
 template <typename Strategy>
-VisiblePositionTemplate<Strategy> startOfParagraphAlgorithmDeprecated(
-    const VisiblePositionTemplate<Strategy>& visiblePosition,
-    EditingBoundaryCrossingRule boundaryCrossingRule) {
-  return createVisiblePositionDeprecated(startOfParagraphAlgorithm(
-      visiblePosition.deepEquivalent(), boundaryCrossingRule));
-}
-
-VisiblePosition startOfParagraphDeprecated(
-    const VisiblePosition& c,
-    EditingBoundaryCrossingRule boundaryCrossingRule) {
-  return startOfParagraphAlgorithmDeprecated<EditingStrategy>(
-      c, boundaryCrossingRule);
-}
-
-VisiblePositionInFlatTree startOfParagraphDeprecated(
-    const VisiblePositionInFlatTree& c,
-    EditingBoundaryCrossingRule boundaryCrossingRule) {
-  return startOfParagraphAlgorithmDeprecated<EditingInFlatTreeStrategy>(
-      c, boundaryCrossingRule);
-}
-
-template <typename Strategy>
 static PositionTemplate<Strategy> endOfParagraphAlgorithm(
     const PositionTemplate<Strategy>& position,
     EditingBoundaryCrossingRule boundaryCrossingRule) {
@@ -1925,7 +1909,8 @@ static PositionTemplate<Strategy> endOfParagraphAlgorithm(
     if (layoutObject->isBR() || isEnclosingBlock(nextNodeItreator))
       break;
 
-    // FIXME: We avoid returning a position where the layoutObject can't accept the caret.
+    // FIXME: We avoid returning a position where the layoutObject can't accept
+    // the caret.
     if (layoutObject->isText() &&
         toLayoutText(layoutObject)->resolvedTextLength()) {
       SECURITY_DCHECK(nextNodeItreator->isTextNode());
@@ -1984,28 +1969,6 @@ VisiblePositionInFlatTree endOfParagraph(
       c, boundaryCrossingRule);
 }
 
-template <typename Strategy>
-static VisiblePositionTemplate<Strategy> endOfParagraphAlgorithmDeprecated(
-    const VisiblePositionTemplate<Strategy>& visiblePosition,
-    EditingBoundaryCrossingRule boundaryCrossingRule) {
-  return createVisiblePositionDeprecated(endOfParagraphAlgorithm(
-      visiblePosition.deepEquivalent(), boundaryCrossingRule));
-}
-
-VisiblePosition endOfParagraphDeprecated(
-    const VisiblePosition& c,
-    EditingBoundaryCrossingRule boundaryCrossingRule) {
-  return endOfParagraphAlgorithmDeprecated<EditingStrategy>(
-      c, boundaryCrossingRule);
-}
-
-VisiblePositionInFlatTree endOfParagraphDeprecated(
-    const VisiblePositionInFlatTree& c,
-    EditingBoundaryCrossingRule boundaryCrossingRule) {
-  return endOfParagraphAlgorithmDeprecated<EditingInFlatTreeStrategy>(
-      c, boundaryCrossingRule);
-}
-
 // FIXME: isStartOfParagraph(startOfNextParagraph(pos)) is not always true
 VisiblePosition startOfNextParagraph(const VisiblePosition& visiblePosition) {
   DCHECK(visiblePosition.isValid()) << visiblePosition;
@@ -2021,19 +1984,6 @@ VisiblePosition startOfNextParagraph(const VisiblePosition& visiblePosition) {
 }
 
 // FIXME: isStartOfParagraph(startOfNextParagraph(pos)) is not always true
-VisiblePosition startOfNextParagraphDeprecated(
-    const VisiblePosition& visiblePosition) {
-  VisiblePosition paragraphEnd(
-      endOfParagraphDeprecated(visiblePosition, CanSkipOverEditingBoundary));
-  VisiblePosition afterParagraphEnd(
-      nextPositionOf(paragraphEnd, CannotCrossEditingBoundary));
-  // The position after the last position in the last cell of a table
-  // is not the start of the next paragraph.
-  if (tableElementJustBefore(afterParagraphEnd))
-    return nextPositionOf(afterParagraphEnd, CannotCrossEditingBoundary);
-  return afterParagraphEnd;
-}
-
 bool inSameParagraph(const VisiblePosition& a,
                      const VisiblePosition& b,
                      EditingBoundaryCrossingRule boundaryCrossingRule) {
@@ -2042,16 +1992,6 @@ bool inSameParagraph(const VisiblePosition& a,
   return a.isNotNull() &&
          startOfParagraph(a, boundaryCrossingRule).deepEquivalent() ==
              startOfParagraph(b, boundaryCrossingRule).deepEquivalent();
-}
-
-bool inSameParagraphDeprecated(
-    const VisiblePosition& a,
-    const VisiblePosition& b,
-    EditingBoundaryCrossingRule boundaryCrossingRule) {
-  return a.isNotNull() &&
-         startOfParagraphDeprecated(a, boundaryCrossingRule).deepEquivalent() ==
-             startOfParagraphDeprecated(b, boundaryCrossingRule)
-                 .deepEquivalent();
 }
 
 template <typename Strategy>
@@ -2077,30 +2017,6 @@ bool isStartOfParagraph(const VisiblePositionInFlatTree& pos,
 }
 
 template <typename Strategy>
-static bool isStartOfParagraphAlgorithmDeprecated(
-    const VisiblePositionTemplate<Strategy>& pos,
-    EditingBoundaryCrossingRule boundaryCrossingRule) {
-  return pos.isNotNull() &&
-         pos.deepEquivalent() ==
-             startOfParagraphDeprecated(pos, boundaryCrossingRule)
-                 .deepEquivalent();
-}
-
-bool isStartOfParagraphDeprecated(
-    const VisiblePosition& pos,
-    EditingBoundaryCrossingRule boundaryCrossingRule) {
-  return isStartOfParagraphAlgorithmDeprecated<EditingStrategy>(
-      pos, boundaryCrossingRule);
-}
-
-bool isStartOfParagraphDeprecated(
-    const VisiblePositionInFlatTree& pos,
-    EditingBoundaryCrossingRule boundaryCrossingRule) {
-  return isStartOfParagraphAlgorithmDeprecated<EditingInFlatTreeStrategy>(
-      pos, boundaryCrossingRule);
-}
-
-template <typename Strategy>
 static bool isEndOfParagraphAlgorithm(
     const VisiblePositionTemplate<Strategy>& pos,
     EditingBoundaryCrossingRule boundaryCrossingRule) {
@@ -2118,30 +2034,6 @@ bool isEndOfParagraph(const VisiblePosition& pos,
 bool isEndOfParagraph(const VisiblePositionInFlatTree& pos,
                       EditingBoundaryCrossingRule boundaryCrossingRule) {
   return isEndOfParagraphAlgorithm<EditingInFlatTreeStrategy>(
-      pos, boundaryCrossingRule);
-}
-
-template <typename Strategy>
-static bool isEndOfParagraphAlgorithmDeprecated(
-    const VisiblePositionTemplate<Strategy>& pos,
-    EditingBoundaryCrossingRule boundaryCrossingRule) {
-  return pos.isNotNull() &&
-         pos.deepEquivalent() ==
-             endOfParagraphDeprecated(pos, boundaryCrossingRule)
-                 .deepEquivalent();
-}
-
-bool isEndOfParagraphDeprecated(
-    const VisiblePosition& pos,
-    EditingBoundaryCrossingRule boundaryCrossingRule) {
-  return isEndOfParagraphAlgorithmDeprecated<EditingStrategy>(
-      pos, boundaryCrossingRule);
-}
-
-bool isEndOfParagraphDeprecated(
-    const VisiblePositionInFlatTree& pos,
-    EditingBoundaryCrossingRule boundaryCrossingRule) {
-  return isEndOfParagraphAlgorithmDeprecated<EditingInFlatTreeStrategy>(
       pos, boundaryCrossingRule);
 }
 
@@ -2637,11 +2529,11 @@ template <typename Strategy>
 LayoutRect localCaretRectOfPositionTemplate(
     const PositionWithAffinityTemplate<Strategy>& position,
     LayoutObject*& layoutObject) {
-  if (position.position().isNull()) {
+  if (position.isNull()) {
     layoutObject = nullptr;
     return LayoutRect();
   }
-  Node* node = position.position().anchorNode();
+  Node* node = position.anchorNode();
 
   layoutObject = node->layoutObject();
   if (!layoutObject)
@@ -2910,8 +2802,8 @@ static PositionTemplate<Strategy> mostBackwardCaretPosition(
   bool boundaryCrossed = false;
   for (; !currentPos.atStart(); currentPos.decrement()) {
     Node* currentNode = currentPos.node();
-    // Don't check for an editability change if we haven't moved to a different node,
-    // to avoid the expense of computing hasEditableStyle().
+    // Don't check for an editability change if we haven't moved to a different
+    // node, to avoid the expense of computing hasEditableStyle().
     if (currentNode != lastNode) {
       // Don't change editability.
       bool currentEditable = hasEditableStyle(*currentNode);
@@ -2923,8 +2815,9 @@ static PositionTemplate<Strategy> mostBackwardCaretPosition(
       lastNode = currentNode;
     }
 
-    // If we've moved to a position that is visually distinct, return the last saved position. There
-    // is code below that terminates early if we're *about* to move to a visually distinct position.
+    // If we've moved to a position that is visually distinct, return the last
+    // saved position. There is code below that terminates early if we're
+    // *about* to move to a visually distinct position.
     if (endsOfNodeAreVisuallyDistinctPositions(currentNode) &&
         currentNode != boundary)
       return lastVisible.deprecatedComputePosition();
@@ -2945,13 +2838,15 @@ static PositionTemplate<Strategy> mostBackwardCaretPosition(
     if (isStreamer<Strategy>(currentPos))
       lastVisible = currentPos;
 
-    // Don't move past a position that is visually distinct.  We could rely on code above to terminate and
-    // return lastVisible on the next iteration, but we terminate early to avoid doing a nodeIndex() call.
+    // Don't move past a position that is visually distinct.  We could rely on
+    // code above to terminate and return lastVisible on the next iteration, but
+    // we terminate early to avoid doing a nodeIndex() call.
     if (endsOfNodeAreVisuallyDistinctPositions(currentNode) &&
         currentPos.atStartOfNode())
       return lastVisible.deprecatedComputePosition();
 
-    // Return position after tables and nodes which have content that can be ignored.
+    // Return position after tables and nodes which have content that can be
+    // ignored.
     if (Strategy::editingIgnoresContent(currentNode) ||
         isDisplayInsideTable(currentNode)) {
       if (currentPos.atEndOfNode())
@@ -2964,9 +2859,10 @@ static PositionTemplate<Strategy> mostBackwardCaretPosition(
       LayoutText* const textLayoutObject = toLayoutText(layoutObject);
       const unsigned textStartOffset = textLayoutObject->textStartOffset();
       if (currentNode != startNode) {
-        // This assertion fires in layout tests in the case-transform.html test because
-        // of a mix-up between offsets in the text in the DOM tree with text in the
-        // layout tree which can have a different length due to case transformation.
+        // This assertion fires in layout tests in the case-transform.html test
+        // because of a mix-up between offsets in the text in the DOM tree with
+        // text in the layout tree which can have a different length due to case
+        // transformation.
         // Until we resolve that, disable this so we can run the layout tests!
         // DCHECK_GE(currentOffset, layoutObject->caretMaxOffset());
         return PositionTemplate<Strategy>(
@@ -3008,8 +2904,9 @@ static PositionTemplate<Strategy> mostBackwardCaretPosition(
         if (box == lastTextBox || textOffset != box->start() + box->len() + 1)
           continue;
 
-        // The text continues on the next line only if the last text box is not on this line and
-        // none of the boxes on this line have a larger start offset.
+        // The text continues on the next line only if the last text box is not
+        // on this line and none of the boxes on this line have a larger start
+        // offset.
 
         bool continuesOnNextLine = true;
         InlineBox* otherBox = box;
@@ -3079,8 +2976,8 @@ PositionTemplate<Strategy> mostForwardCaretPosition(
   bool boundaryCrossed = false;
   for (; !currentPos.atEnd(); currentPos.increment()) {
     Node* currentNode = currentPos.node();
-    // Don't check for an editability change if we haven't moved to a different node,
-    // to avoid the expense of computing hasEditableStyle().
+    // Don't check for an editability change if we haven't moved to a different
+    // node, to avoid the expense of computing hasEditableStyle().
     if (currentNode != lastNode) {
       // Don't change editability.
       bool currentEditable = hasEditableStyle(*currentNode);
@@ -3103,8 +3000,9 @@ PositionTemplate<Strategy> mostForwardCaretPosition(
         currentNode != boundary)
       return lastVisible.deprecatedComputePosition();
     // Do not move past a visually disinct position.
-    // Note: The first position after the last in a node whose ends are visually distinct
-    // positions will be [boundary->parentNode(), originalBlock->nodeIndex() + 1].
+    // Note: The first position after the last in a node whose ends are visually
+    // distinct positions will be [boundary->parentNode(),
+    // originalBlock->nodeIndex() + 1].
     if (boundary && Strategy::parent(*boundary) == currentNode)
       return lastVisible.deprecatedComputePosition();
 
@@ -3124,7 +3022,8 @@ PositionTemplate<Strategy> mostForwardCaretPosition(
     if (isStreamer<Strategy>(currentPos))
       lastVisible = currentPos;
 
-    // Return position before tables and nodes which have content that can be ignored.
+    // Return position before tables and nodes which have content that can be
+    // ignored.
     if (Strategy::editingIgnoresContent(currentNode) ||
         isDisplayInsideTable(currentNode)) {
       if (currentPos.offsetInLeafNode() <= layoutObject->caretMinOffset())
@@ -3160,8 +3059,9 @@ PositionTemplate<Strategy> mostForwardCaretPosition(
         if (box == lastTextBox || textOffset != box->start() + box->len())
           continue;
 
-        // The text continues on the next line only if the last text box is not on this line and
-        // none of the boxes on this line have a larger start offset.
+        // The text continues on the next line only if the last text box is not
+        // on this line and none of the boxes on this line have a larger start
+        // offset.
 
         bool continuesOnNextLine = true;
         InlineBox* otherBox = box;
@@ -3297,11 +3197,7 @@ static bool isVisuallyEquivalentCandidateAlgorithm(
       return hasEditableStyle(*anchorNode) && atEditingBoundary(position);
     }
   } else {
-    LocalFrame* frame = anchorNode->document().frame();
-    bool caretBrowsing =
-        frame->settings() && frame->settings()->caretBrowsingEnabled();
-    return (caretBrowsing || hasEditableStyle(*anchorNode)) &&
-           atEditingBoundary(position);
+    return hasEditableStyle(*anchorNode) && atEditingBoundary(position);
   }
 
   return false;
@@ -3773,7 +3669,8 @@ static PositionTemplate<Strategy> rightVisuallyDistinctCandidate(
             continue;
         }
       } else {
-        // Trailing edge of a secondary run. Set to the leading edge of the entire run.
+        // Trailing edge of a secondary run. Set to the leading edge of the
+        // entire run.
         while (true) {
           while (InlineBox* prevBox = box->prevLeafChild()) {
             if (prevBox->bidiLevel() < level)
@@ -3875,29 +3772,6 @@ VisiblePositionInFlatTree nextPositionOf(
       visiblePosition.toPositionWithAffinity(), rule);
 }
 
-VisiblePosition nextPositionOfDeprecated(const VisiblePosition& visiblePosition,
-                                         EditingBoundaryCrossingRule rule) {
-  if (visiblePosition.isNull())
-    return VisiblePosition();
-  visiblePosition.deepEquivalent()
-      .document()
-      ->updateStyleAndLayoutIgnorePendingStylesheets();
-  return nextPositionOfAlgorithm<EditingStrategy>(
-      visiblePosition.toPositionWithAffinity(), rule);
-}
-
-VisiblePositionInFlatTree nextPositionOfDeprecated(
-    const VisiblePositionInFlatTree& visiblePosition,
-    EditingBoundaryCrossingRule rule) {
-  if (visiblePosition.isNull())
-    return VisiblePositionInFlatTree();
-  visiblePosition.deepEquivalent()
-      .document()
-      ->updateStyleAndLayoutIgnorePendingStylesheets();
-  return nextPositionOfAlgorithm<EditingInFlatTreeStrategy>(
-      visiblePosition.toPositionWithAffinity(), rule);
-}
-
 template <typename Strategy>
 static VisiblePositionTemplate<Strategy> skipToStartOfEditingBoundary(
     const VisiblePositionTemplate<Strategy>& pos,
@@ -3972,30 +3846,6 @@ VisiblePositionInFlatTree previousPositionOf(
     const VisiblePositionInFlatTree& visiblePosition,
     EditingBoundaryCrossingRule rule) {
   DCHECK(visiblePosition.isValid()) << visiblePosition;
-  return previousPositionOfAlgorithm<EditingInFlatTreeStrategy>(
-      visiblePosition.deepEquivalent(), rule);
-}
-
-VisiblePosition previousPositionOfDeprecated(
-    const VisiblePosition& visiblePosition,
-    EditingBoundaryCrossingRule rule) {
-  if (visiblePosition.isNull())
-    return VisiblePosition();
-  visiblePosition.deepEquivalent()
-      .document()
-      ->updateStyleAndLayoutIgnorePendingStylesheets();
-  return previousPositionOfAlgorithm<EditingStrategy>(
-      visiblePosition.deepEquivalent(), rule);
-}
-
-VisiblePositionInFlatTree previousPositionOfDeprecated(
-    const VisiblePositionInFlatTree& visiblePosition,
-    EditingBoundaryCrossingRule rule) {
-  if (visiblePosition.isNull())
-    return VisiblePositionInFlatTree();
-  visiblePosition.deepEquivalent()
-      .document()
-      ->updateStyleAndLayoutIgnorePendingStylesheets();
   return previousPositionOfAlgorithm<EditingInFlatTreeStrategy>(
       visiblePosition.deepEquivalent(), rule);
 }

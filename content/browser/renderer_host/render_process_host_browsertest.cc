@@ -16,11 +16,11 @@
 #include "content/public/common/url_constants.h"
 #include "content/public/test/content_browser_test.h"
 #include "content/public/test/content_browser_test_utils.h"
-#include "content/public/test/test_mojo_service.mojom.h"
+#include "content/public/test/test_service.mojom.h"
 #include "content/shell/browser/shell.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
-#include "services/shell/public/cpp/interface_provider.h"
-#include "services/shell/public/cpp/interface_registry.h"
+#include "services/service_manager/public/cpp/interface_provider.h"
+#include "services/service_manager/public/cpp/interface_registry.h"
 
 #if defined(OS_WIN)
 #include "base/win/windows_version.h"
@@ -222,7 +222,7 @@ IN_PROC_BROWSER_TEST_F(RenderProcessHostTest, KillProcessOnBadMojoMessage) {
   process_exits_ = 0;
   rph->AddObserver(this);
 
-  mojom::TestMojoServicePtr service;
+  mojom::TestServicePtr service;
   rph->GetRemoteInterfaces()->GetInterface(&service);
 
   base::RunLoop run_loop;

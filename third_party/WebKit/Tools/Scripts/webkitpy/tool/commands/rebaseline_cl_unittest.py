@@ -62,11 +62,11 @@ class RebaselineCLTest(BaseTestCase, LoggingTestCase):
         tests = [
             'fast/dom/prototype-taco.html',
             'fast/dom/prototype-inheritance.html',
+            'fast/dom/prototype-newtest.html',
             'svg/dynamic-updates/SVGFEDropShadowElement-dom-stdDeviation-attr.html',
         ]
         for test in tests:
-            # pylint: disable=protected-access
-            self._write(port._filesystem.join(port.layout_tests_dir(), test), 'contents')
+            self._write(port.host.filesystem.join(port.layout_tests_dir(), test), 'contents')
 
     def tearDown(self):
         BaseTestCase.tearDown(self)
@@ -88,13 +88,14 @@ class RebaselineCLTest(BaseTestCase, LoggingTestCase):
 
     def test_execute_with_issue_number_given(self):
         self.command.execute(self.command_options(issue=11112222), [], self.tool)
-        print self._log.messages()
         self.assertLog([
             'INFO: Tests to rebaseline:\n',
+            'INFO:   fast/dom/prototype-newtest.html: MOCK Try Win (5000)\n',
             'INFO:   svg/dynamic-updates/SVGFEDropShadowElement-dom-stdDeviation-attr.html: MOCK Try Win (5000)\n',
             'INFO:   fast/dom/prototype-inheritance.html: MOCK Try Win (5000)\n',
             'INFO:   fast/dom/prototype-taco.html: MOCK Try Win (5000)\n',
             'INFO: Rebaselining fast/dom/prototype-inheritance.html\n',
+            'INFO: Rebaselining fast/dom/prototype-newtest.html\n',
             'INFO: Rebaselining fast/dom/prototype-taco.html\n',
             'INFO: Rebaselining svg/dynamic-updates/SVGFEDropShadowElement-dom-stdDeviation-attr.html\n',
         ])
@@ -112,10 +113,12 @@ class RebaselineCLTest(BaseTestCase, LoggingTestCase):
         self.command.execute(self.command_options(), [], self.tool)
         self.assertLog([
             'INFO: Tests to rebaseline:\n',
+            'INFO:   fast/dom/prototype-newtest.html: MOCK Try Win (5000)\n',
             'INFO:   svg/dynamic-updates/SVGFEDropShadowElement-dom-stdDeviation-attr.html: MOCK Try Win (5000)\n',
             'INFO:   fast/dom/prototype-inheritance.html: MOCK Try Win (5000)\n',
             'INFO:   fast/dom/prototype-taco.html: MOCK Try Win (5000)\n',
             'INFO: Rebaselining fast/dom/prototype-inheritance.html\n',
+            'INFO: Rebaselining fast/dom/prototype-newtest.html\n',
             'INFO: Rebaselining fast/dom/prototype-taco.html\n',
             'INFO: Rebaselining svg/dynamic-updates/SVGFEDropShadowElement-dom-stdDeviation-attr.html\n',
         ])
@@ -142,33 +145,25 @@ class RebaselineCLTest(BaseTestCase, LoggingTestCase):
 
     def test_execute_with_trigger_jobs_option(self):
         self.command.execute(self.command_options(issue=11112222, trigger_jobs=True), [], self.tool)
-        # A message is printed showing that some try jobs are triggered.
         self.assertLog([
             'INFO: Triggering try jobs for:\n',
             'INFO:   MOCK Try Linux\n',
-            'INFO: Tests to rebaseline:\n',
-            'INFO:   svg/dynamic-updates/SVGFEDropShadowElement-dom-stdDeviation-attr.html: MOCK Try Win (5000)\n',
-            'INFO:   fast/dom/prototype-inheritance.html: MOCK Try Win (5000)\n',
-            'INFO:   fast/dom/prototype-taco.html: MOCK Try Win (5000)\n',
-            'INFO: Rebaselining fast/dom/prototype-inheritance.html\n',
-            'INFO: Rebaselining fast/dom/prototype-taco.html\n',
-            'INFO: Rebaselining svg/dynamic-updates/SVGFEDropShadowElement-dom-stdDeviation-attr.html\n',
+            'INFO: Please re-run webkit-patch rebaseline-cl once all pending try jobs have finished.\n',
         ])
-        # The first executive call, before the rebaseline calls, is triggering try jobs.
-        self.assertEqual(self.tool.executive.calls[0], ['git', 'cl', 'try', '-b', 'MOCK Try Linux'])
+        self.assertEqual(
+            self.tool.executive.calls,
+            [['git', 'cl', 'try', '-b', 'MOCK Try Linux']])
 
     def test_rebaseline_calls(self):
         """Tests the list of commands that are invoked when rebaseline is called."""
         # First write test contents to the mock filesystem so that
         # fast/dom/prototype-taco.html is considered a real test to rebaseline.
-        # TODO(qyearsley): Change this to avoid accessing protected methods.
-        # pylint: disable=protected-access
         port = self.tool.port_factory.get('test-win-win7')
         self._write(
-            port._filesystem.join(port.layout_tests_dir(), 'fast/dom/prototype-taco.html'),
+            port.host.filesystem.join(port.layout_tests_dir(), 'fast/dom/prototype-taco.html'),
             'test contents')
 
-        self.command._rebaseline(
+        self.command.rebaseline(
             self.command_options(issue=11112222),
             {"fast/dom/prototype-taco.html": {Build("MOCK Try Win", 5000): ["txt", "png"]}})
 
@@ -176,8 +171,8 @@ class RebaselineCLTest(BaseTestCase, LoggingTestCase):
             self.tool.executive.calls,
             [
                 [['python', 'echo', 'copy-existing-baselines-internal', '--suffixes', 'txt',
-                  '--builder', 'MOCK Try Win', '--test', 'fast/dom/prototype-taco.html', '--build-number', '5000']],
+                  '--builder', 'MOCK Try Win', '--test', 'fast/dom/prototype-taco.html']],
                 [['python', 'echo', 'rebaseline-test-internal', '--suffixes', 'txt',
                   '--builder', 'MOCK Try Win', '--test', 'fast/dom/prototype-taco.html', '--build-number', '5000']],
-                [['python', 'echo', 'optimize-baselines', '--no-modify-scm', '--suffixes', 'txt', 'fast/dom/prototype-taco.html']]
+                [['python', 'echo', 'optimize-baselines', '--suffixes', 'txt', 'fast/dom/prototype-taco.html']]
             ])

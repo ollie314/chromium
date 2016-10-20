@@ -1,19 +1,4 @@
 {
-    "AllBookmarks": [
-        {
-            "platforms": [
-                "android"
-            ],
-            "experiments": [
-                {
-                    "name": "Disabled",
-                    "disable_features": [
-                        "AllBookmarks"
-                    ]
-                }
-            ]
-        }
-    ],
     "AndroidSessionNotifications": [
         {
             "platforms": [
@@ -193,6 +178,33 @@
             "experiments": [
                 {
                     "name": "Enabled"
+                }
+            ]
+        }
+    ],
+    "BrowserScheduler": [
+        {
+            "platforms": [
+                "android",
+                "chromeos",
+                "ios",
+                "linux",
+                "mac",
+                "win"
+            ],
+            "experiments": [
+                {
+                    "name": "Default"
+                },
+                {
+                    "name": "EnableViaFlag",
+                    "forcing_flag": "enable-browser-task-scheduler",
+                    "params": {
+                        "Background": "3;8;0.1;0;30000",
+                        "BackgroundFileIO": "3;8;0.1;0;30000",
+                        "Foreground": "8;32;0.3;0;30000",
+                        "ForegroundFileIO": "8;32;0.3;0;30000"
+                    }
                 }
             ]
         }
@@ -570,21 +582,6 @@
             ]
         }
     ],
-    "EnableWin32kLockDownMimeTypes": [
-        {
-            "platforms": [
-                "win"
-            ],
-            "experiments": [
-                {
-                    "name": "PPAPILockdown_Enabled",
-                    "params": {
-                        "*": "Enabled"
-                    }
-                }
-            ]
-        }
-    ],
     "ExpectCTReporting": [
         {
             "platforms": [
@@ -920,6 +917,10 @@
             "experiments": [
                 {
                     "name": "Enabled",
+                    "params": {
+                        "content_suggestions_backend": "https://chromecontentsuggestions-pa.googleapis.com/v1/suggestions/fetch",
+                        "quota_SuggestionFetcher": "2"
+                    },
                     "enable_features": [
                         "NTPArticleSuggestions",
                         "NTPBookmarkSuggestions",
@@ -1435,21 +1436,6 @@
             ]
         }
     ],
-    "ReadItLater": [
-        {
-            "platforms": [
-                "android"
-            ],
-            "experiments": [
-                {
-                    "name": "Enabled",
-                    "enable_features": [
-                        "ReadItLaterInMenu"
-                    ]
-                }
-            ]
-        }
-    ],
     "ReaderModeUI": [
         {
             "platforms": [
@@ -1711,6 +1697,21 @@
             "experiments": [
                 {
                     "name": "Enabled"
+                }
+            ]
+        }
+    ],
+    "SaveAsMenuText": [
+        {
+            "platforms": [
+                "chromeos",
+                "linux",
+                "mac",
+                "win"
+            ],
+            "experiments": [
+                {
+                    "name": "download"
                 }
             ]
         }
@@ -2205,22 +2206,6 @@
         }
     ],
     "WebRTC-LocalIPPermissionCheck": [
-        {
-            "platforms": [
-                "android",
-                "chromeos",
-                "linux",
-                "mac",
-                "win"
-            ],
-            "experiments": [
-                {
-                    "name": "Enabled"
-                }
-            ]
-        }
-    ],
-    "WebRTC-PeerConnectionDTLS1.2": [
         {
             "platforms": [
                 "android",

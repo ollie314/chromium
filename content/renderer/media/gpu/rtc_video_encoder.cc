@@ -565,7 +565,8 @@ void RTCVideoEncoder::Impl::EncodeOneFrame() {
   if (next_frame->video_frame_buffer()->native_handle()) {
     frame = static_cast<media::VideoFrame*>(
         next_frame->video_frame_buffer()->native_handle());
-    requires_copy = RequiresSizeChange(frame);
+    requires_copy = RequiresSizeChange(frame) ||
+                    frame->storage_type() != media::VideoFrame::STORAGE_SHMEM;
   } else {
     requires_copy = true;
   }
@@ -751,7 +752,10 @@ int32_t RTCVideoEncoder::InitEncode(const webrtc::VideoCodec* codec_settings,
            << ", width=" << codec_settings->width
            << ", height=" << codec_settings->height
            << ", startBitrate=" << codec_settings->startBitrate;
-  DCHECK(!impl_.get());
+  if (impl_) {
+    DVLOG(1) << "Release because of reinitialization";
+    Release();
+  }
 
   impl_ = new Impl(gpu_factories_, video_codec_type_);
   const media::VideoCodecProfile profile = WebRTCVideoCodecToVideoCodecProfile(

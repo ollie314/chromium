@@ -302,7 +302,6 @@ void RenderViewTest::SetUp() {
   view_params.proxy_routing_id = MSG_ROUTING_NONE;
   view_params.hidden = false;
   view_params.never_visible = false;
-  view_params.next_page_id = 1;
   view_params.initial_size = *InitialSizeParams();
   view_params.enable_auto_resize = false;
   view_params.min_size = gfx::Size();
@@ -527,7 +526,6 @@ uint32_t RenderViewTest::GetNavigationIPCType() {
 }
 
 void RenderViewTest::Resize(gfx::Size new_size,
-                            gfx::Rect resizer_rect,
                             bool is_fullscreen_granted) {
   ResizeParams params;
   params.screen_info = ScreenInfo();
@@ -535,7 +533,6 @@ void RenderViewTest::Resize(gfx::Size new_size,
   params.physical_backing_size = new_size;
   params.top_controls_height = 0.f;
   params.top_controls_shrink_blink_size = false;
-  params.resizer_rect = resizer_rect;
   params.is_fullscreen_granted = is_fullscreen_granted;
   params.display_mode = blink::WebDisplayModeBrowser;
   std::unique_ptr<IPC::Message> resize_message(new ViewMsg_Resize(0, params));
@@ -652,7 +649,6 @@ void RenderViewTest::GoToOffset(int offset,
       LOFI_UNSPECIFIED, base::TimeTicks::Now(), "GET", nullptr);
   RequestNavigationParams request_params;
   request_params.page_state = state;
-  request_params.page_id = impl->page_id_ + offset;
   request_params.nav_entry_id = pending_offset + 1;
   request_params.pending_history_list_offset = pending_offset;
   request_params.current_history_list_offset = impl->history_list_offset_;

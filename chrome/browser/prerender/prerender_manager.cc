@@ -21,6 +21,7 @@
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/single_thread_task_runner.h"
+#include "base/strings/string_util.h"
 #include "base/sys_info.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
@@ -60,6 +61,7 @@
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/common/url_constants.h"
 #include "extensions/common/constants.h"
+#include "net/http/http_request_headers.h"
 #include "ui/gfx/geometry/rect.h"
 
 using content::BrowserThread;
@@ -77,6 +79,22 @@ const int kPeriodicCleanupIntervalMs = 1000;
 
 // Length of prerender history, for display in chrome://net-internals
 const int kHistoryLength = 100;
+
+// Check if |extra_headers| requested via chrome::NavigateParams::extra_headers
+// are the same as what the HTTP server saw when serving prerendered contents.
+// PrerenderContents::StartPrerendering doesn't specify any extra headers when
+// calling content::NavigationController::LoadURLWithParams, but in reality
+// Blink will always add an Upgrade-Insecure-Requests http request header, so
+// that HTTP request for prerendered contents always includes this header.
+// Because of this, it is okay to show prerendered contents even if
+// |extra_headers| contains "Upgrade-Insecure-Requests" header.
+bool AreExtraHeadersCompatibleWithPrerenderContents(
+    const std::string& extra_headers) {
+  net::HttpRequestHeaders parsed_headers;
+  parsed_headers.AddHeadersFromString(extra_headers);
+  parsed_headers.RemoveHeader("upgrade-insecure-requests");
+  return parsed_headers.IsEmpty();
+}
 
 }  // namespace
 
@@ -147,15 +165,16 @@ struct PrerenderManager::NavigationRecord {
 PrerenderManager::PrerenderManager(Profile* profile)
     : profile_(profile),
       prerender_contents_factory_(PrerenderContents::CreateFactory()),
-      last_prerender_start_time_(
-          GetCurrentTimeTicks() -
-          base::TimeDelta::FromMilliseconds(kMinTimeBetweenPrerendersMs)),
       prerender_history_(new PrerenderHistory(kHistoryLength)),
       histograms_(new PrerenderHistograms()),
       profile_network_bytes_(0),
       last_recorded_profile_network_bytes_(0),
       weak_factory_(this) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
+
+  last_prerender_start_time_ =
+      GetCurrentTimeTicks() -
+      base::TimeDelta::FromMilliseconds(kMinTimeBetweenPrerendersMs);
 
   // Certain experiments override our default config_ values.
   switch (PrerenderManager::GetMode()) {
@@ -298,9 +317,14 @@ bool PrerenderManager::MaybeUsePrerenderedPage(const GURL& url,
   WebContents* web_contents = params->target_contents;
   DCHECK(!IsWebContentsPrerendering(web_contents, nullptr));
 
-  // Don't prerender if the navigation involves some special parameters.
-  if (params->uses_post || !params->extra_headers.empty())
+  // Don't prerender if the navigation involves some special parameters that
+  // are different from what was used by PrerenderContents::StartPrerendering
+  // (which always uses GET method and doesn't specify any extra headers when
+  // calling content::NavigationController::LoadURLWithParams).
+  if (params->uses_post ||
+      !AreExtraHeadersCompatibleWithPrerenderContents(params->extra_headers)) {
     return false;
+  }
 
   DeleteOldEntries();
   to_delete_prerenders_.clear();
@@ -733,7 +757,7 @@ bool PrerenderManager::DoesURLHaveValidScheme(const GURL& url) {
 
 // static
 bool PrerenderManager::DoesSubresourceURLHaveValidScheme(const GURL& url) {
-  return DoesURLHaveValidScheme(url) || url == GURL(url::kAboutBlankURL);
+  return DoesURLHaveValidScheme(url) || url == url::kAboutBlankURL;
 }
 
 std::unique_ptr<base::DictionaryValue> PrerenderManager::GetAsValue() const {
@@ -1071,11 +1095,21 @@ void PrerenderManager::DeleteOldEntries() {
 }
 
 base::Time PrerenderManager::GetCurrentTime() const {
+  if (time_override_) {
+    return time_override_->GetCurrentTime();
+  }
   return base::Time::Now();
 }
 
 base::TimeTicks PrerenderManager::GetCurrentTimeTicks() const {
+  if (time_override_) {
+    return time_override_->GetCurrentTimeTicks();
+  }
   return base::TimeTicks::Now();
+}
+
+void PrerenderManager::SetTimeOverride(std::unique_ptr<TimeOverride> override) {
+  time_override_ = std::move(override);
 }
 
 std::unique_ptr<PrerenderContents> PrerenderManager::CreatePrerenderContents(

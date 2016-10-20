@@ -26,6 +26,7 @@ namespace protocol {
 
 class TransportContext;
 class MessagePipe;
+class WebrtcAudioModule;
 
 class WebrtcTransport : public Transport {
  public:
@@ -70,6 +71,7 @@ class WebrtcTransport : public Transport {
   WebrtcDummyVideoEncoderFactory* video_encoder_factory() {
     return video_encoder_factory_;
   }
+  WebrtcAudioModule* audio_module();
 
   // Creates outgoing data channel. The channel is created in CONNECTING state.
   // The caller must wait for OnMessagePipeOpen() notification before sending
@@ -122,7 +124,6 @@ class WebrtcTransport : public Transport {
 
   base::ThreadChecker thread_checker_;
 
-  rtc::Thread* worker_thread_;
   scoped_refptr<TransportContext> transport_context_;
   EventHandler* event_handler_ = nullptr;
   SendTransportInfoCallback send_transport_info_callback_;

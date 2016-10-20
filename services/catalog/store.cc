@@ -15,15 +15,11 @@ const char Store::kQualifierKey[] = "process-group";
 // static
 const char Store::kDisplayNameKey[] = "display_name";
 // static
-const char Store::kCapabilitiesKey[] = "capabilities";
+const char Store::kInterfaceProviderSpecsKey[] = "capabilities";
 // static
-const char Store::kCapabilities_ProvidedKey[] = "provided";
+const char Store::kInterfaceProviderSpecs_ProvidesKey[] = "provided";
 // static
-const char Store::kCapabilities_RequiredKey[] = "required";
-// static
-const char Store::kCapabilities_ClassesKey[] = "classes";
-// static
-const char Store::kCapabilities_InterfacesKey[] = "interfaces";
+const char Store::kInterfaceProviderSpecs_RequiresKey[] = "required";
 // static
 const char Store::kServicesKey[] = "services";
 

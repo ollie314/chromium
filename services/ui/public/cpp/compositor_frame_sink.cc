@@ -26,6 +26,9 @@ CompositorFrameSink::CompositorFrameSink(
 CompositorFrameSink::~CompositorFrameSink() {}
 
 bool CompositorFrameSink::BindToClient(cc::CompositorFrameSinkClient* client) {
+  if (!cc::CompositorFrameSink::BindToClient(client))
+    return false;
+
   surface_->BindToThread();
   surface_->set_client(this);
 
@@ -35,7 +38,7 @@ bool CompositorFrameSink::BindToClient(cc::CompositorFrameSinkClient* client) {
           base::ThreadTaskRunnerHandle::Get().get())));
 
   client->SetBeginFrameSource(begin_frame_source_.get());
-  return cc::CompositorFrameSink::BindToClient(client);
+  return true;
 }
 
 void CompositorFrameSink::DetachFromClient() {
@@ -45,23 +48,21 @@ void CompositorFrameSink::DetachFromClient() {
   cc::CompositorFrameSink::DetachFromClient();
 }
 
-void CompositorFrameSink::SwapBuffers(cc::CompositorFrame frame) {
+void CompositorFrameSink::SubmitCompositorFrame(cc::CompositorFrame frame) {
   // CompositorFrameSink owns WindowSurface, and so if CompositorFrameSink is
   // destroyed then SubmitCompositorFrame's callback will never get called.
-  // Thus, base::Unretained is safe here.
+  // Thus, base::Unretained is safe here as |client_| is valid as long as |this|
+  // is.
   surface_->SubmitCompositorFrame(
-      std::move(frame), base::Bind(&CompositorFrameSink::SwapBuffersComplete,
-                                   base::Unretained(this)));
+      std::move(frame),
+      base::Bind(&cc::CompositorFrameSinkClient::DidReceiveCompositorFrameAck,
+                 base::Unretained(client_)));
 }
 
 void CompositorFrameSink::OnResourcesReturned(
     ui::WindowSurface* surface,
-    mojo::Array<cc::ReturnedResource> resources) {
-  client_->ReclaimResources(resources.To<cc::ReturnedResourceArray>());
-}
-
-void CompositorFrameSink::SwapBuffersComplete() {
-  client_->DidSwapBuffersComplete();
+    const cc::ReturnedResourceArray& resources) {
+  client_->ReclaimResources(resources);
 }
 
 }  // namespace ui

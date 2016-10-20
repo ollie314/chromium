@@ -20,7 +20,6 @@
 #include "ash/common/shelf/shelf_layout_manager.h"
 #include "ash/common/shelf/shelf_widget.h"
 #include "ash/common/shell_delegate.h"
-#include "ash/common/shell_window_ids.h"
 #include "ash/common/system/status_area_layout_manager.h"
 #include "ash/common/system/status_area_widget.h"
 #include "ash/common/system/tray/system_tray_delegate.h"
@@ -43,6 +42,7 @@
 #include "ash/high_contrast/high_contrast_controller.h"
 #include "ash/host/ash_window_tree_host.h"
 #include "ash/public/cpp/shelf_types.h"
+#include "ash/public/cpp/shell_window_ids.h"
 #include "ash/root_window_settings.h"
 #include "ash/shelf/shelf_window_targeter.h"
 #include "ash/shell.h"
@@ -63,11 +63,9 @@
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/client/screen_position_client.h"
 #include "ui/aura/window.h"
-#include "ui/aura/window_delegate.h"
 #include "ui/aura/window_event_dispatcher.h"
 #include "ui/aura/window_observer.h"
 #include "ui/aura/window_tracker.h"
-#include "ui/base/hit_test.h"
 #include "ui/display/display.h"
 #include "ui/display/screen.h"
 #include "ui/keyboard/keyboard_controller.h"
@@ -144,43 +142,6 @@ bool IsWindowAboveContainer(aura::Window* window,
 
   return true;
 }
-
-// A window delegate which does nothing. Used to create a window that
-// is a event target, but do nothing.
-class EmptyWindowDelegate : public aura::WindowDelegate {
- public:
-  EmptyWindowDelegate() {}
-  ~EmptyWindowDelegate() override {}
-
-  // aura::WindowDelegate overrides:
-  gfx::Size GetMinimumSize() const override { return gfx::Size(); }
-  gfx::Size GetMaximumSize() const override { return gfx::Size(); }
-  void OnBoundsChanged(const gfx::Rect& old_bounds,
-                       const gfx::Rect& new_bounds) override {}
-  gfx::NativeCursor GetCursor(const gfx::Point& point) override {
-    return gfx::kNullCursor;
-  }
-  int GetNonClientComponent(const gfx::Point& point) const override {
-    return HTNOWHERE;
-  }
-  bool ShouldDescendIntoChildForEventHandling(
-      aura::Window* child,
-      const gfx::Point& location) override {
-    return false;
-  }
-  bool CanFocus() override { return false; }
-  void OnCaptureLost() override {}
-  void OnPaint(const ui::PaintContext& context) override {}
-  void OnDeviceScaleFactorChanged(float device_scale_factor) override {}
-  void OnWindowDestroying(aura::Window* window) override {}
-  void OnWindowDestroyed(aura::Window* window) override { delete this; }
-  void OnWindowTargetVisibilityChanged(bool visible) override {}
-  bool HasHitTestMask() const override { return false; }
-  void GetHitTestMask(gfx::Path* mask) const override {}
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(EmptyWindowDelegate);
-};
 
 }  // namespace
 
@@ -311,47 +272,6 @@ const aura::Window* RootWindowController::GetContainer(int container_id) const {
   return ash_host_->AsWindowTreeHost()->window()->GetChildById(container_id);
 }
 
-void RootWindowController::ShowShelf() {
-  if (!wm_shelf_aura_->IsShelfInitialized())
-    return;
-  // TODO(jamescook): Move this into WmShelf.
-  wm_shelf_aura_->shelf_widget()->SetShelfVisibility(true);
-  wm_shelf_aura_->shelf_widget()->status_area_widget()->Show();
-}
-
-void RootWindowController::CreateShelf() {
-  if (wm_shelf_aura_->IsShelfInitialized())
-    return;
-  wm_shelf_aura_->InitializeShelf();
-
-  if (panel_layout_manager())
-    panel_layout_manager()->SetShelf(wm_shelf_aura_.get());
-  if (docked_window_layout_manager()) {
-    docked_window_layout_manager()->SetShelf(wm_shelf_aura_.get());
-    if (wm_shelf_aura_->shelf_layout_manager()) {
-      docked_window_layout_manager()->AddObserver(
-          wm_shelf_aura_->shelf_layout_manager());
-    }
-  }
-
-  // Notify shell observers that the shelf has been created.
-  // TODO(jamescook): Move this into WmShelf::InitializeShelf(). This will
-  // require changing AttachedPanelWidgetTargeter's access to WmShelf.
-  WmShell::Get()->NotifyShelfCreatedForRootWindow(
-      WmWindowAura::Get(GetRootWindow()));
-
-  wm_shelf_aura_->shelf_widget()->PostCreateShelf();
-}
-
-void RootWindowController::UpdateAfterLoginStatusChange(LoginStatus status) {
-  if (status != LoginStatus::NOT_LOGGED_IN)
-    mouse_event_target_.reset();
-  StatusAreaWidget* status_area_widget =
-      wm_shelf_aura_->shelf_widget()->status_area_widget();
-  if (status_area_widget)
-    status_area_widget->UpdateAfterLoginStatusChange(status);
-}
-
 void RootWindowController::OnInitialWallpaperAnimationStarted() {
 #if defined(OS_CHROMEOS)
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
@@ -374,8 +294,6 @@ void RootWindowController::OnWallpaperAnimationFinished(views::Widget* widget) {
 }
 
 void RootWindowController::CloseChildWindows() {
-  mouse_event_target_.reset();
-
   // Remove observer as deactivating keyboard causes
   // docked_window_layout_manager() to fire notifications.
   if (docked_window_layout_manager() &&
@@ -535,7 +453,7 @@ void RootWindowController::Init(RootWindowType root_window_type,
 
     // Create a shelf if a user is already logged in.
     if (WmShell::Get()->GetSessionStateDelegate()->NumberOfLoggedInUsers())
-      CreateShelf();
+      wm_root_window_controller_->CreateShelf();
 
     // Notify shell observers about new root window.
     shell->OnRootWindowAdded(WmWindowAura::Get(root_window));
@@ -556,7 +474,6 @@ void RootWindowController::InitLayoutManagers() {
   aura::Window* status_container = GetContainer(kShellWindowId_StatusContainer);
   WmWindow* wm_shelf_container = WmWindowAura::Get(shelf_container);
   WmWindow* wm_status_container = WmWindowAura::Get(status_container);
-  wm_shelf_aura_->CreateShelfWidget(WmWindowAura::Get(GetRootWindow()));
 
   wm_root_window_controller_->CreateLayoutManagers();
 
@@ -566,20 +483,6 @@ void RootWindowController::InitLayoutManagers() {
       wm_shelf_container, wm_shelf_aura_.get()));
   status_container->SetEventTargeter(base::MakeUnique<ShelfWindowTargeter>(
       wm_status_container, wm_shelf_aura_.get()));
-
-  if (!WmShell::Get()
-           ->GetSessionStateDelegate()
-           ->IsActiveUserSessionStarted()) {
-    // This window exists only to be a event target on login screen.
-    // It does not have to handle events, nor be visible.
-    mouse_event_target_.reset(new aura::Window(new EmptyWindowDelegate));
-    mouse_event_target_->Init(ui::LAYER_NOT_DRAWN);
-
-    aura::Window* lock_wallpaper_container =
-        GetContainer(kShellWindowId_LockScreenWallpaperContainer);
-    lock_wallpaper_container->AddChild(mouse_event_target_.get());
-    mouse_event_target_->Show();
-  }
 
   panel_container_handler_ = base::MakeUnique<PanelWindowEventHandler>();
   GetContainer(kShellWindowId_PanelContainer)

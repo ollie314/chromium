@@ -49,9 +49,9 @@ class StyleInheritedVariables;
 typedef RefVector<AppliedTextDecoration> AppliedTextDecorationList;
 typedef HeapVector<CursorData> CursorList;
 
-// This struct is for rarely used inherited CSS3, CSS2, and WebKit-specific properties.
-// By grouping them together, we save space, and only allocate this object when someone
-// actually uses one of these properties.
+// This struct is for rarely used inherited CSS3, CSS2, and WebKit-specific
+// properties.  By grouping them together, we save space, and only allocate this
+// object when someone actually uses one of these properties.
 // TODO(sashab): Move this into a private class on ComputedStyle, and remove
 // all methods on it, merging them into copy/creation methods on ComputedStyle
 // instead. Keep the allocation logic, only allocating a new object if needed.
@@ -178,6 +178,7 @@ class CORE_EXPORT StyleRareInheritedData
   // CSS Image Values Level 3
   unsigned m_imageRendering : 3;         // EImageRendering
   unsigned m_textUnderlinePosition : 1;  // TextUnderlinePosition
+  unsigned m_textDecorationSkip : 3;     // TextDecorationSkip
   unsigned m_rubyPosition : 1;           // RubyPosition
 
   // Though will-change is not itself an inherited property, the intent

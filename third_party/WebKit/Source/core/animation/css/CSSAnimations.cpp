@@ -113,7 +113,7 @@ static StringKeyframeEffectModel* createKeyframeEffectModel(
           timingFunction = CSSTimingData::initialTimingFunction();
         }
         keyframe->setEasing(timingFunction.release());
-      } else if (CSSAnimations::isAnimatableProperty(property)) {
+      } else if (!CSSAnimations::isAnimationAffectingProperty(property)) {
         keyframe->setCSSPropertyValue(property,
                                       properties.propertyAt(j).value());
       }
@@ -129,7 +129,7 @@ static StringKeyframeEffectModel* createKeyframeEffectModel(
   DEFINE_STATIC_LOCAL(SparseHistogram, propertyHistogram,
                       ("WebCore.Animation.CSSProperties"));
   for (CSSPropertyID property : specifiedPropertiesForUseCounter) {
-    DCHECK_NE(property, CSSPropertyInvalid);
+    DCHECK(isValidCSSPropertyID(property));
     propertyHistogram.sample(
         UseCounter::mapCSSPropertyIdToCSSSampleIdForHistogram(property));
   }
@@ -512,7 +512,7 @@ void CSSAnimations::maybeApplyPendingUpdate(Element* element) {
         new AnimationEventDelegate(element, entry.name);
     KeyframeEffect* effect = KeyframeEffect::create(
         element, inertAnimation->model(), inertAnimation->specifiedTiming(),
-        KeyframeEffect::DefaultPriority, eventDelegate);
+        KeyframeEffectReadOnly::DefaultPriority, eventDelegate);
     Animation* animation = element->document().timeline().play(effect);
     animation->setId(entry.name);
     if (inertAnimation->paused())
@@ -616,7 +616,7 @@ void CSSAnimations::maybeApplyPendingUpdate(Element* element) {
 
     KeyframeEffect* transition = KeyframeEffect::create(
         element, model, inertAnimation->specifiedTiming(),
-        KeyframeEffect::TransitionPriority, eventDelegate);
+        KeyframeEffectReadOnly::TransitionPriority, eventDelegate);
     Animation* animation = element->document().timeline().play(transition);
     animation->setId(getPropertyName(newTransition.id));
     // Set the current time as the start time for retargeted transitions
@@ -625,7 +625,7 @@ void CSSAnimations::maybeApplyPendingUpdate(Element* element) {
     animation->update(TimingUpdateOnDemand);
     runningTransition.animation = animation;
     m_transitions.set(id, runningTransition);
-    DCHECK_NE(id, CSSPropertyInvalid);
+    DCHECK(isValidCSSPropertyID(id));
 
     DEFINE_STATIC_LOCAL(SparseHistogram, propertyHistogram,
                         ("WebCore.Animation.CSSProperties"));
@@ -746,8 +746,7 @@ void CSSAnimations::calculateTransitionUpdate(CSSAnimationUpdate& update,
   if (!animatingElement)
     return;
 
-  if (animatingElement->document().printing() ||
-      animatingElement->document().wasPrinting())
+  if (animatingElement->document().finishingOrIsPrinting())
     return;
 
   ElementAnimations* elementAnimations = animatingElement->elementAnimations();
@@ -857,9 +856,9 @@ void CSSAnimations::calculateAnimationActiveInterpolations(
   if (update.newAnimations().isEmpty() &&
       update.suppressedAnimations().isEmpty()) {
     ActiveInterpolationsMap activeInterpolationsForAnimations(
-        AnimationStack::activeInterpolations(animationStack, nullptr, nullptr,
-                                             KeyframeEffect::DefaultPriority,
-                                             isStylePropertyHandle));
+        AnimationStack::activeInterpolations(
+            animationStack, nullptr, nullptr,
+            KeyframeEffectReadOnly::DefaultPriority, isStylePropertyHandle));
     update.adoptActiveInterpolationsForAnimations(
         activeInterpolationsForAnimations);
     return;
@@ -876,7 +875,7 @@ void CSSAnimations::calculateAnimationActiveInterpolations(
   ActiveInterpolationsMap activeInterpolationsForAnimations(
       AnimationStack::activeInterpolations(
           animationStack, &newEffects, &update.suppressedAnimations(),
-          KeyframeEffect::DefaultPriority, isStylePropertyHandle));
+          KeyframeEffectReadOnly::DefaultPriority, isStylePropertyHandle));
   update.adoptActiveInterpolationsForAnimations(
       activeInterpolationsForAnimations);
 }
@@ -893,8 +892,8 @@ void CSSAnimations::calculateTransitionActiveInterpolations(
   if (update.newTransitions().isEmpty() &&
       update.cancelledTransitions().isEmpty()) {
     activeInterpolationsForTransitions = AnimationStack::activeInterpolations(
-        animationStack, nullptr, nullptr, KeyframeEffect::TransitionPriority,
-        isStylePropertyHandle);
+        animationStack, nullptr, nullptr,
+        KeyframeEffectReadOnly::TransitionPriority, isStylePropertyHandle);
   } else {
     HeapVector<Member<const InertEffect>> newTransitions;
     for (const auto& entry : update.newTransitions())
@@ -913,7 +912,7 @@ void CSSAnimations::calculateTransitionActiveInterpolations(
 
     activeInterpolationsForTransitions = AnimationStack::activeInterpolations(
         animationStack, &newTransitions, &cancelledAnimations,
-        KeyframeEffect::TransitionPriority, isStylePropertyHandle);
+        KeyframeEffectReadOnly::TransitionPriority, isStylePropertyHandle);
   }
 
   // Properties being animated by animations don't get values from transitions
@@ -1048,7 +1047,7 @@ const StylePropertyShorthand& CSSAnimations::propertiesForTransitionAll() {
 
 // Properties that affect animations are not allowed to be affected by
 // animations. http://w3c.github.io/web-animations/#not-animatable-section
-bool CSSAnimations::isAnimatableProperty(CSSPropertyID property) {
+bool CSSAnimations::isAnimationAffectingProperty(CSSPropertyID property) {
   switch (property) {
     case CSSPropertyAnimation:
     case CSSPropertyAnimationDelay:
@@ -1065,9 +1064,9 @@ bool CSSAnimations::isAnimatableProperty(CSSPropertyID property) {
     case CSSPropertyTransitionDuration:
     case CSSPropertyTransitionProperty:
     case CSSPropertyTransitionTimingFunction:
-      return false;
-    default:
       return true;
+    default:
+      return false;
   }
 }
 

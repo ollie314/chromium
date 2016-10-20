@@ -309,8 +309,6 @@ component("views") {
     "round_rect_painter.h",
     "shadow_border.cc",
     "shadow_border.h",
-    "style/mac/combobox_background_mac.cc",
-    "style/mac/combobox_background_mac.h",
     "style/platform_style.cc",
     "style/platform_style.h",
     "style/platform_style_mac.mm",
@@ -379,6 +377,7 @@ component("views") {
     "window/window_resources.h",
     "window/window_shape.cc",
     "window/window_shape.h",
+    "word_lookup_client.h",
   ]
 
   configs += [
@@ -577,6 +576,8 @@ component("views") {
           "widget/desktop_aura/x11_desktop_handler_observer.h",
           "widget/desktop_aura/x11_desktop_window_move_client.cc",
           "widget/desktop_aura/x11_desktop_window_move_client.h",
+          "widget/desktop_aura/x11_desktop_window_move_client_managed.cc",
+          "widget/desktop_aura/x11_desktop_window_move_client_managed.h",
           "widget/desktop_aura/x11_move_loop.h",
           "widget/desktop_aura/x11_move_loop_delegate.h",
           "widget/desktop_aura/x11_pointer_grab.cc",
@@ -819,6 +820,7 @@ source_set("views_unittests_sources") {
     "controls/button/image_button_unittest.cc",
     "controls/button/label_button_unittest.cc",
     "controls/button/menu_button_unittest.cc",
+    "controls/button/toggle_button_unittest.cc",
     "controls/combobox/combobox_unittest.cc",
     "controls/label_unittest.cc",
     "controls/menu/menu_controller_unittest.cc",
@@ -929,6 +931,7 @@ source_set("views_unittests_sources") {
     sources += [
       "accessibility/ax_aura_obj_cache_unittest.cc",
       "controls/native/native_view_host_aura_unittest.cc",
+      "corewm/tooltip_controller_unittest.cc",
       "touchui/touch_selection_menu_runner_views_unittest.cc",
       "view_unittest_aura.cc",
       "widget/native_widget_aura_unittest.cc",
@@ -964,9 +967,6 @@ test("views_unittests") {
 
   if (use_aura) {
     sources += [
-      # Tooltips. Can not be shared with mus: crbug.com/599558
-      "corewm/tooltip_controller_unittest.cc",
-
       # Some of the tests need drag-drop support. crbug.com/614037
       "touchui/touch_selection_controller_impl_unittest.cc",
     ]

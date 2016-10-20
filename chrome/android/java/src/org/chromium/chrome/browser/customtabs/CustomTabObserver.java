@@ -35,6 +35,8 @@ class CustomTabObserver extends EmptyTabObserver {
     private long mIntentReceivedTimestamp;
     private long mPageLoadStartedTimestamp;
 
+    private boolean mScreenshotTakenForCurrentNavigation;
+
     private static final int STATE_RESET = 0;
     private static final int STATE_WAITING_LOAD_START = 1;
     private static final int STATE_WAITING_LOAD_FINISH = 2;
@@ -85,12 +87,15 @@ class CustomTabObserver extends EmptyTabObserver {
             if (mCustomTabsConnection != null) {
                 mCustomTabsConnection.notifyNavigationEvent(
                         mSession, CustomTabsCallback.NAVIGATION_ABORTED);
+                mCustomTabsConnection.sendNavigationInfo(
+                        mSession, tab.getUrl(), tab.getTitle(), null);
             }
             mPageLoadStartedTimestamp = SystemClock.elapsedRealtime();
         }
         if (mCustomTabsConnection != null) {
             mCustomTabsConnection.notifyNavigationEvent(
                     mSession, CustomTabsCallback.NAVIGATION_STARTED);
+            mScreenshotTakenForCurrentNavigation = false;
         }
     }
 
@@ -100,6 +105,11 @@ class CustomTabObserver extends EmptyTabObserver {
             mCustomTabsConnection.notifyNavigationEvent(
                     mSession, CustomTabsCallback.TAB_SHOWN);
         }
+    }
+
+    @Override
+    public void onHidden(Tab tab) {
+        if (!mScreenshotTakenForCurrentNavigation) captureNavigationInfo(tab);
     }
 
     @Override
@@ -118,10 +128,13 @@ class CustomTabObserver extends EmptyTabObserver {
                     pageLoadFinishedTimestamp - mIntentReceivedTimestamp;
 
             String histogramPrefix = mOpenedByChrome ? "ChromeGeneratedCustomTab" : "CustomTabs";
-            // Same bounds and bucket count as "Startup.FirstCommitNavigationTime"
             RecordHistogram.recordCustomTimesHistogram(
-                    histogramPrefix + ".IntentToFirstCommitNavigationTime", timeToPageLoadStartedMs,
-                    1, TimeUnit.MINUTES.toMillis(1), TimeUnit.MILLISECONDS, 225);
+                    histogramPrefix + ".IntentToFirstCommitNavigationTime2.ZoomedOut",
+                    timeToPageLoadStartedMs,
+                    50, TimeUnit.MINUTES.toMillis(10), TimeUnit.MILLISECONDS, 50);
+            RecordHistogram.recordCustomTimesHistogram(
+                    histogramPrefix + ".IntentToFirstCommitNavigationTime2.ZoomedIn",
+                    timeToPageLoadStartedMs, 200, 1000, TimeUnit.MILLISECONDS, 100);
             // Same bounds and bucket count as PLT histograms.
             RecordHistogram.recordCustomTimesHistogram(histogramPrefix + ".IntentToPageLoadedTime",
                     timeToPageLoadFinishedMs, 10, TimeUnit.MINUTES.toMillis(10),
@@ -168,5 +181,6 @@ class CustomTabObserver extends EmptyTabObserver {
         };
         tab.getWebContents().getContentBitmapAsync(
                 Bitmap.Config.ARGB_8888, mScaleForNavigationInfo, new Rect(), callback);
+        mScreenshotTakenForCurrentNavigation = true;
     }
 }

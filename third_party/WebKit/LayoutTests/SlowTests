@@ -218,7 +218,7 @@ crbug.com/231721 svg/custom/invisible-text-after-scrolling.xhtml [ Slow ]
 crbug.com/237270 [ Win7 ] fast/css/custom-font-xheight.html [ Slow ]
 crbug.com/241576 [ Win ] http/tests/appcache/404-manifest.html [ Slow ]
 crbug.com/241869 [ Debug ] css3/flexbox/multiline-justify-content.html [ Slow ]
-crbug.com/243249 http/tests/misc/submit-post-keygen.html [ Slow ]
+crbug.com/520189 http/tests/misc/submit-post-keygen.html [ Slow ]
 crbug.com/245154 editing/selection/modify_move/move-by-character-brute-force.html [ Slow ]
 crbug.com/246749 inspector/extensions/extensions-panel.html [ Slow ]
 
@@ -319,9 +319,9 @@ crbug.com/606649 fast/dom/gc-dom-tree-lifetime.html [ Slow ]
 
 crbug.com/647192 fast/css3-text/css3-word-break/word-break-all-ascii.html [ Slow ]
 crbug.com/647192 virtual/mojo-loading/webexposed/global-interface-listing.html [ Slow ]
+crbug.com/520619 [ Win Debug ] webexposed/global-interface-listing.html [ Slow ]
 
 # These tests are slow with our MESA backend. They may be less slow when we have
 # bots running tests on real hardware or maybe when using SwiftShader.
 crbug.com/646528 compositing/lots-of-img-layers.html [ Slow ]
 crbug.com/646528 compositing/lots-of-img-layers-with-opacity.html [ Slow ]
-

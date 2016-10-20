@@ -15,7 +15,6 @@
 #include "base/strings/string_util.h"
 #include "base/threading/platform_thread.h"
 #include "components/policy/policy_constants.h"
-#include "net/socket/client_socket_factory.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "remoting/base/auto_thread.h"
 #include "remoting/base/chromium_url_request.h"
@@ -61,11 +60,13 @@ It2MeHost::It2MeHost(
     std::unique_ptr<PolicyWatcher> policy_watcher,
     std::unique_ptr<It2MeConfirmationDialog> confirmation_dialog,
     base::WeakPtr<It2MeHost::Observer> observer,
-    const XmppSignalStrategy::XmppServerConfig& xmpp_server_config,
+    std::unique_ptr<SignalStrategy> signal_strategy,
+    const std::string& username,
     const std::string& directory_bot_jid)
     : host_context_(std::move(host_context)),
       observer_(observer),
-      xmpp_server_config_(xmpp_server_config),
+      signal_strategy_(std::move(signal_strategy)),
+      username_(username),
       directory_bot_jid_(directory_bot_jid),
       policy_watcher_(std::move(policy_watcher)),
       confirmation_dialog_(std::move(confirmation_dialog)) {
@@ -173,8 +174,7 @@ void It2MeHost::FinishConnect() {
 
   // Check the host domain policy.
   if (!required_host_domain_.empty() &&
-      !base::EndsWith(xmpp_server_config_.username,
-                      std::string("@") + required_host_domain_,
+      !base::EndsWith(username_, std::string("@") + required_host_domain_,
                       base::CompareCase::INSENSITIVE_ASCII)) {
     SetState(kInvalidDomainError, "");
     return;
@@ -184,19 +184,13 @@ void It2MeHost::FinishConnect() {
   // TODO(wez): Move this to the worker thread.
   host_key_pair_ = RsaKeyPair::Generate();
 
-  // Create XMPP connection.
-  std::unique_ptr<SignalStrategy> signal_strategy(new XmppSignalStrategy(
-      net::ClientSocketFactory::GetDefaultFactory(),
-      host_context_->url_request_context_getter(), xmpp_server_config_));
-
   // Request registration of the host for support.
   std::unique_ptr<RegisterSupportHostRequest> register_request(
       new RegisterSupportHostRequest(
-          signal_strategy.get(), host_key_pair_, directory_bot_jid_,
+          signal_strategy_.get(), host_key_pair_, directory_bot_jid_,
           base::Bind(&It2MeHost::OnReceivedSupportID, base::Unretained(this))));
 
   // Beyond this point nothing can fail, so save the config and request.
-  signal_strategy_ = std::move(signal_strategy);
   register_request_ = std::move(register_request);
 
   // If NAT traversal is off then limit port range to allow firewall pin-holing.
@@ -249,7 +243,7 @@ void It2MeHost::FinishConnect() {
 
   // Connect signaling and start the host.
   signal_strategy_->Connect();
-  host_->Start(xmpp_server_config_.username);
+  host_->Start(username_);
 
   SetState(kRequestedAccessCode, "");
   return;
@@ -483,6 +477,8 @@ void It2MeHost::OnReceivedSupportID(
 void It2MeHost::ValidateConnectionDetails(
     const std::string& remote_jid,
     const protocol::ValidatingAuthenticator::ResultCallback& result_callback) {
+  DCHECK(host_context_->network_task_runner()->BelongsToCurrentThread());
+
   // First ensure the JID we received is valid.
   std::string client_username;
   if (!SplitJidResource(remote_jid, &client_username, /*resource=*/nullptr)) {
@@ -490,6 +486,7 @@ void It2MeHost::ValidateConnectionDetails(
                << ": Invalid JID.";
     result_callback.Run(
         protocol::ValidatingAuthenticator::Result::ERROR_INVALID_ACCOUNT);
+    DisconnectOnNetworkThread();
     return;
   }
 
@@ -497,6 +494,7 @@ void It2MeHost::ValidateConnectionDetails(
     LOG(ERROR) << "Invalid user name passed in: " << remote_jid;
     result_callback.Run(
         protocol::ValidatingAuthenticator::Result::ERROR_INVALID_ACCOUNT);
+    DisconnectOnNetworkThread();
     return;
   }
 
@@ -508,6 +506,7 @@ void It2MeHost::ValidateConnectionDetails(
       LOG(ERROR) << "Rejecting incoming connection from " << remote_jid
                  << ": Domain mismatch.";
       result_callback.Run(ValidationResult::ERROR_INVALID_ACCOUNT);
+      DisconnectOnNetworkThread();
       return;
     }
   }
@@ -524,6 +523,8 @@ void It2MeHost::ValidateConnectionDetails(
 void It2MeHost::OnConfirmationResult(
     const protocol::ValidatingAuthenticator::ResultCallback& result_callback,
     It2MeConfirmationDialog::Result result) {
+  DCHECK(host_context_->network_task_runner()->BelongsToCurrentThread());
+
   switch (result) {
     case It2MeConfirmationDialog::Result::OK:
       result_callback.Run(ValidationResult::SUCCESS);
@@ -531,6 +532,7 @@ void It2MeHost::OnConfirmationResult(
 
     case It2MeConfirmationDialog::Result::CANCEL:
       result_callback.Run(ValidationResult::ERROR_REJECTED_BY_USER);
+      DisconnectOnNetworkThread();
       break;
   }
 }
@@ -543,7 +545,8 @@ scoped_refptr<It2MeHost> It2MeHostFactory::CreateIt2MeHost(
     std::unique_ptr<ChromotingHostContext> context,
     policy::PolicyService* policy_service,
     base::WeakPtr<It2MeHost::Observer> observer,
-    const XmppSignalStrategy::XmppServerConfig& xmpp_server_config,
+    std::unique_ptr<SignalStrategy> signal_strategy,
+    const std::string& username,
     const std::string& directory_bot_jid) {
   DCHECK(context->ui_task_runner()->BelongsToCurrentThread());
 
@@ -551,7 +554,7 @@ scoped_refptr<It2MeHost> It2MeHostFactory::CreateIt2MeHost(
       PolicyWatcher::Create(policy_service, context->file_task_runner());
   return new It2MeHost(std::move(context), std::move(policy_watcher),
                        It2MeConfirmationDialog::Create(), observer,
-                       xmpp_server_config, directory_bot_jid);
+                       std::move(signal_strategy), username, directory_bot_jid);
 }
 
 }  // namespace remoting

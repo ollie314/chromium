@@ -6,13 +6,14 @@
 
 #include <utility>
 
+#include "base/bind.h"
 #include "base/location.h"
 #include "base/memory/ref_counted.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
-#include "cc/output/compositor_frame.h"
 #include "cc/output/output_surface_client.h"
+#include "cc/output/output_surface_frame.h"
 #include "cc/output/software_output_device.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "ui/events/latency_info.h"
@@ -23,10 +24,12 @@ namespace content {
 SoftwareBrowserCompositorOutputSurface::SoftwareBrowserCompositorOutputSurface(
     std::unique_ptr<cc::SoftwareOutputDevice> software_device,
     const scoped_refptr<ui::CompositorVSyncManager>& vsync_manager,
-    cc::SyntheticBeginFrameSource* begin_frame_source)
+    cc::SyntheticBeginFrameSource* begin_frame_source,
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner)
     : BrowserCompositorOutputSurface(std::move(software_device),
                                      vsync_manager,
                                      begin_frame_source),
+      task_runner_(std::move(task_runner)),
       weak_factory_(this) {}
 
 SoftwareBrowserCompositorOutputSurface::
@@ -46,19 +49,27 @@ void SoftwareBrowserCompositorOutputSurface::BindFramebuffer() {
   NOTREACHED();
 }
 
+void SoftwareBrowserCompositorOutputSurface::Reshape(
+    const gfx::Size& size,
+    float device_scale_factor,
+    const gfx::ColorSpace& color_space,
+    bool has_alpha) {
+  software_device()->Resize(size, device_scale_factor);
+}
+
 void SoftwareBrowserCompositorOutputSurface::SwapBuffers(
-    cc::CompositorFrame frame) {
+    cc::OutputSurfaceFrame frame) {
   base::TimeTicks swap_time = base::TimeTicks::Now();
-  for (auto& latency : frame.metadata.latency_info) {
+  for (auto& latency : frame.latency_info) {
     latency.AddLatencyNumberWithTimestamp(
         ui::INPUT_EVENT_GPU_SWAP_BUFFER_COMPONENT, 0, 0, swap_time, 1);
     latency.AddLatencyNumberWithTimestamp(
         ui::INPUT_EVENT_LATENCY_TERMINATED_FRAME_SWAP_COMPONENT, 0, 0,
         swap_time, 1);
   }
-  base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::Bind(&RenderWidgetHostImpl::CompositorFrameDrawn,
-                            frame.metadata.latency_info));
+  task_runner_->PostTask(FROM_HERE,
+                         base::Bind(&RenderWidgetHostImpl::CompositorFrameDrawn,
+                                    frame.latency_info));
 
   gfx::VSyncProvider* vsync_provider = software_device()->GetVSyncProvider();
   if (vsync_provider) {
@@ -66,7 +77,15 @@ void SoftwareBrowserCompositorOutputSurface::SwapBuffers(
         &BrowserCompositorOutputSurface::OnUpdateVSyncParametersFromGpu,
         weak_factory_.GetWeakPtr()));
   }
-  PostSwapBuffersComplete();
+
+  task_runner_->PostTask(
+      FROM_HERE,
+      base::Bind(&SoftwareBrowserCompositorOutputSurface::SwapBuffersCallback,
+                 weak_factory_.GetWeakPtr()));
+}
+
+void SoftwareBrowserCompositorOutputSurface::SwapBuffersCallback() {
+  client_->DidReceiveSwapBuffersAck();
 }
 
 bool SoftwareBrowserCompositorOutputSurface::IsDisplayedAsOverlayPlane() const {
@@ -87,13 +106,6 @@ SoftwareBrowserCompositorOutputSurface::GetFramebufferCopyTextureFormat() {
   // Not used for software surfaces.
   NOTREACHED();
   return 0;
-}
-
-void SoftwareBrowserCompositorOutputSurface::OnGpuSwapBuffersCompleted(
-    const std::vector<ui::LatencyInfo>& latency_info,
-    gfx::SwapResult result,
-    const gpu::GpuProcessHostedCALayerTreeParamsMac* params_mac) {
-  NOTREACHED();
 }
 
 #if defined(OS_MACOSX)

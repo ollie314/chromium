@@ -406,37 +406,37 @@ void OmniboxEditModel::Revert() {
   client_->OnRevert();
 }
 
-void OmniboxEditModel::StartAutocomplete(
-    bool has_selected_text,
-    bool prevent_inline_autocomplete,
-    bool entering_keyword_mode) {
-  size_t cursor_position;
+void OmniboxEditModel::StartAutocomplete(bool has_selected_text,
+                                         bool prevent_inline_autocomplete) {
   const base::string16 input_text = MaybePrependKeyword(user_text_);
-  if (inline_autocomplete_text_.empty()) {
-    // Cursor position is equivalent to the current selection's end.
+
+  // Compute the cursor position.  There are three cases:
+  //   1. The user is in the midst of typing; there is no inline autocompletion.
+  //   2. The user is in the midst of typing; there is inline autocompletion.
+  //   3. The user is not in the midst of typing, but is triggering this some
+  //      other way, e.g. hitting ctrl-K while the view is showing the permanent
+  //      or temporary text.
+  size_t cursor_position;
+  if (!has_temporary_text_ && (user_text_ == view_->GetText())) {
+    // Case 1 above.  In this case there's a meaningful current cursor position,
+    // so we read it from the view.  (Note that if there is a selected range,
+    // the "cursor position" is considered to be the selection's end.)
     size_t start;
     view_->GetSelectionBounds(&start, &cursor_position);
+
     // For keyword searches, the text that AutocompleteInput expects is of the
-    // form "<keyword> <query>", where our query is |user_text_|.  So if we're
-    // in keyword mode, we need to adjust the cursor position forward by the
-    // length of "<keyword> ".  If we're just entering keyword mode, though, we
-    // have to avoid making this adjustment, because we haven't actually updated
-    // |user_text_| yet, but the caller has already cleared |is_keyword_hint_|,
-    // so MaybePrependKeyword() will believe we are already in keyword mode, and
-    // will thus mis-adjust the cursor position.
-    if (!entering_keyword_mode)
-      cursor_position += input_text.length() - user_text_.length();
+    // form "<keyword> <query>", where our query is |user_text_|.  So we need to
+    // adjust the cursor position forward by the length of any keyword added by
+    // MaybePrependKeyword() above.
+    cursor_position += input_text.length() - user_text_.length();
   } else {
-    // There are some cases where StartAutocomplete() may be called
-    // with non-empty |inline_autocomplete_text_|.  In such cases, we cannot
-    // use the current selection, because it could result with the cursor
-    // position past the last character from the user text.  Instead,
-    // we assume that the cursor is simply at the end of input.
-    // One example is when user presses Ctrl key while having a highlighted
-    // inline autocomplete text.
-    // TODO: Rethink how we are going to handle this case to avoid
-    // inconsistent behavior when user presses Ctrl key.
-    // See http://crbug.com/165961 and http://crbug.com/165968 for more details.
+    // Case 2 or 3 above.  In case 2, the existing inline autocompletion will be
+    // ignored for this next autocomplete run.  The current cursor position is
+    // always effectively "the end of the input text".  (If the user changes
+    // this cursor position by arrowing, it will accept the inline
+    // autocompletion, which would put us in case 1.)  In case 3, there is no
+    // meaningful current cursor position; the correct default behavior is to
+    // simply claim the cursor is at the end of the input.
     cursor_position = input_text.length();
   }
 
@@ -566,7 +566,7 @@ void OmniboxEditModel::EnterKeywordModeForDefaultSearchProvider(
   is_keyword_hint_ = false;
   keyword_mode_entry_method_ = entry_method;
 
-  StartAutocomplete(false, false, true);
+  StartAutocomplete(false, false);
 
   UMA_HISTOGRAM_ENUMERATION(
       kEnteredKeywordModeHistogram, static_cast<int>(entry_method),
@@ -742,12 +742,10 @@ bool OmniboxEditModel::AcceptKeyword(
   keyword_mode_entry_method_ = entry_method;
   user_text_ = MaybeStripKeyword(user_text_);
 
-  user_text_ = MaybeStripKeyword(user_text_);
-
   if (PopupIsOpen())
     popup_model()->SetSelectedLineState(OmniboxPopupModel::KEYWORD);
   else
-    StartAutocomplete(false, true, true);
+    StartAutocomplete(false, true);
 
   // When entering keyword mode via tab, the new text to show is whatever the
   // newly-selected match in the dropdown is.  When entering via space, however,
@@ -1149,18 +1147,18 @@ bool OmniboxEditModel::OnAfterPossibleChange(
     SetFocusState(OMNIBOX_FOCUS_VISIBLE, OMNIBOX_FOCUS_CHANGE_TYPING);
   }
 
-  // Modifying the selection counts as accepting the autocompleted text.
-  const bool user_state_changesd =
-      state_changes.text_differs ||
-      (state_changes.selection_differs && !inline_autocomplete_text_.empty());
-
   // If something has changed while the control key is down, prevent
   // "ctrl-enter" until the control key is released.
   if ((state_changes.text_differs || state_changes.selection_differs) &&
       (control_key_state_ == DOWN_WITHOUT_CHANGE))
     control_key_state_ = DOWN_WITH_CHANGE;
 
-  if (!user_state_changesd) {
+  // If the user text does not need to be changed, return now, so we don't
+  // change any other state, lest arrowing around the omnibox do something like
+  // reset |just_deleted_text_|.  Note that modifying the selection accepts any
+  // inline autocompletion, which results in a user text change.
+  if (!state_changes.text_differs &&
+      (!state_changes.selection_differs || inline_autocomplete_text_.empty())) {
     if (state_changes.keyword_differs) {
       // We won't need the below logic for creating a keyword by a space at the
       // end or in the middle, or by typing a '?', but we do need to update the
@@ -1173,14 +1171,8 @@ bool OmniboxEditModel::OnAfterPossibleChange(
     return state_changes.keyword_differs;
   }
 
-  // If the user text has not changed, we do not want to change the model's
-  // state associated with the text.  Otherwise, we can get surprising behavior
-  // where the autocompleted text unexpectedly reappears, e.g. crbug.com/55983
   InternalSetUserText(*state_changes.new_text);
   has_temporary_text_ = false;
-
-  // Track when the user has deleted text so we won't allow inline
-  // autocomplete.
   just_deleted_text_ = state_changes.just_deleted_text;
 
   if (user_input_in_progress_ && user_text_.empty()) {

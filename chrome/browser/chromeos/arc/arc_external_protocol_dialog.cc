@@ -11,8 +11,8 @@
 
 #include "base/bind.h"
 #include "base/memory/ref_counted.h"
+#include "base/metrics/histogram_macros.h"
 #include "chrome/browser/chromeos/arc/arc_navigation_throttle.h"
-#include "chrome/browser/chromeos/arc/page_transition_util.h"
 #include "chrome/browser/chromeos/external_protocol_dialog.h"
 #include "chrome/browser/tab_contents/tab_util.h"
 #include "chrome/browser/ui/browser_dialogs.h"
@@ -20,6 +20,7 @@
 #include "components/arc/arc_service_manager.h"
 #include "components/arc/intent_helper/activity_icon_loader.h"
 #include "components/arc/intent_helper/arc_intent_helper_bridge.h"
+#include "components/arc/intent_helper/page_transition_util.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_contents.h"
@@ -34,6 +35,13 @@ namespace {
 
 constexpr uint32_t kMinVersionForHandleUrl = 2;
 constexpr uint32_t kMinVersionForRequestUrlHandlerList = 2;
+constexpr uint32_t kMinVersionForAddPreferredPackage = 7;
+
+void RecordUma(ArcNavigationThrottle::CloseReason close_reason) {
+  UMA_HISTOGRAM_ENUMERATION(
+      "Arc.IntentHandlerAction", static_cast<int>(close_reason),
+      static_cast<int>(ArcNavigationThrottle::CloseReason::SIZE));
+}
 
 // Shows the Chrome OS' original external protocol dialog as a fallback.
 void ShowFallbackExternalProtocolDialog(int render_process_host_id,
@@ -74,8 +82,12 @@ void OnIntentPickerClosed(int render_process_host_id,
 
   switch (close_reason) {
     case ArcNavigationThrottle::CloseReason::ALWAYS_PRESSED: {
-      // TODO(yusukes): Add NOTREACHED(); break; here once b/31665510 is fixed.
-      // fall through, for now.
+      if (ArcIntentHelperBridge::GetIntentHelperInstance(
+              "AddPreferredPackage", kMinVersionForAddPreferredPackage)) {
+        instance->AddPreferredPackage(
+            handlers[selected_app_index]->package_name);
+      }
+      // fall through.
     }
     case ArcNavigationThrottle::CloseReason::JUST_ONCE_PRESSED: {
       // Launch the selected app.
@@ -84,15 +96,16 @@ void OnIntentPickerClosed(int render_process_host_id,
       CloseTabIfNeeded(render_process_host_id, routing_id);
       break;
     }
-    case ArcNavigationThrottle::CloseReason::PREFERRED_ACTIVITY_FOUND: {
-      // Our OnUrlHandlerList callback does not search for a preferred activity.
-      NOTREACHED();
-      break;
-    }
-    case ArcNavigationThrottle::CloseReason::ERROR:
+    case ArcNavigationThrottle::CloseReason::PREFERRED_ACTIVITY_FOUND:
     case ArcNavigationThrottle::CloseReason::INVALID: {
-      LOG(ERROR) << "IntentPickerBubbleView returned unexpected close_reason: "
-                 << static_cast<int>(close_reason);
+      NOTREACHED();
+      return;  // no UMA recording.
+    }
+    case ArcNavigationThrottle::CloseReason::ERROR: {
+      LOG(ERROR) << "IntentPickerBubbleView returned CloseReason::ERROR: "
+                 << "instance=" << instance
+                 << ", selected_app_index=" << selected_app_index
+                 << ", handlers.size=" << handlers.size();
       // fall through.
     }
     case ArcNavigationThrottle::CloseReason::DIALOG_DEACTIVATED: {
@@ -102,6 +115,7 @@ void OnIntentPickerClosed(int render_process_host_id,
       break;
     }
   }
+  RecordUma(close_reason);
 }
 
 // Called when ARC returned activity icons for the |handlers|.
@@ -146,6 +160,18 @@ void OnUrlHandlerList(int render_process_host_id,
   if (!instance || !icon_loader || !handlers.size()) {
     // No handler is available on ARC side. Show the Chrome OS dialog.
     ShowFallbackExternalProtocolDialog(render_process_host_id, routing_id, url);
+    return;
+  }
+
+  // If one of the apps is marked as preferred, use it right away without
+  // showing the UI. |is_preferred| will never be true unless the user
+  // explicitly makes it the default with the "always" button.
+  for (size_t i = 0; i < handlers.size(); ++i) {
+    if (!handlers[i]->is_preferred)
+      continue;
+    instance->HandleUrl(url.spec(), handlers[i]->package_name);
+    CloseTabIfNeeded(render_process_host_id, routing_id);
+    RecordUma(ArcNavigationThrottle::CloseReason::PREFERRED_ACTIVITY_FOUND);
     return;
   }
 

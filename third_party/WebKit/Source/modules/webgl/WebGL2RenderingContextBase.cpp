@@ -5,11 +5,13 @@
 #include "modules/webgl/WebGL2RenderingContextBase.h"
 
 #include "bindings/modules/v8/WebGLAny.h"
+#include "core/dom/DOMException.h"
 #include "core/frame/ImageBitmap.h"
 #include "core/html/HTMLCanvasElement.h"
 #include "core/html/HTMLImageElement.h"
 #include "core/html/HTMLVideoElement.h"
 #include "core/html/ImageData.h"
+#include "gpu/GLES2/gl2extchromium.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
 #include "modules/webgl/WebGLActiveInfo.h"
 #include "modules/webgl/WebGLBuffer.h"
@@ -40,6 +42,8 @@ GLsync syncObjectOrZero(const WebGLSync* object) {
   return object ? object->object() : nullptr;
 }
 
+// TODO(kainino): Change outByteLength to GLuint and change the associated
+// range checking (and all uses) - overflow becomes possible in cases below
 bool validateSubSourceAndGetData(DOMArrayBufferView* view,
                                  GLuint subOffset,
                                  GLuint subLength,
@@ -135,18 +139,86 @@ const GLenum kSupportedInternalFormatsStorage[] = {
     GL_DEPTH32F_STENCIL8,
 };
 
-const GLenum kCompressedTextureFormatsETC2EAC[] = {
-    GL_COMPRESSED_R11_EAC,
-    GL_COMPRESSED_SIGNED_R11_EAC,
-    GL_COMPRESSED_RG11_EAC,
-    GL_COMPRESSED_SIGNED_RG11_EAC,
-    GL_COMPRESSED_RGB8_ETC2,
-    GL_COMPRESSED_SRGB8_ETC2,
-    GL_COMPRESSED_RGB8_PUNCHTHROUGH_ALPHA1_ETC2,
-    GL_COMPRESSED_SRGB8_PUNCHTHROUGH_ALPHA1_ETC2,
-    GL_COMPRESSED_RGBA8_ETC2_EAC,
-    GL_COMPRESSED_SRGB8_ALPHA8_ETC2_EAC,
+class WebGLGetBufferSubDataAsyncCallback
+    : public GarbageCollected<WebGLGetBufferSubDataAsyncCallback> {
+ public:
+  WebGLGetBufferSubDataAsyncCallback(
+      WebGL2RenderingContextBase* context,
+      ScriptPromiseResolver* promiseResolver,
+      void* shmReadbackResultData,
+      GLuint commandsIssuedQueryID,
+      DOMArrayBufferView* destinationArrayBufferView,
+      void* destinationDataPtr,
+      long long destinationByteLength)
+      : m_context(context),
+        m_promiseResolver(promiseResolver),
+        m_shmReadbackResultData(shmReadbackResultData),
+        m_commandsIssuedQueryID(commandsIssuedQueryID),
+        m_destinationArrayBufferView(destinationArrayBufferView),
+        m_destinationDataPtr(destinationDataPtr),
+        m_destinationByteLength(destinationByteLength) {
+    DCHECK(shmReadbackResultData);
+    DCHECK(destinationDataPtr);
+  }
+
+  void destroy() {
+    DCHECK(m_shmReadbackResultData);
+    m_context->contextGL()->FreeSharedMemory(m_shmReadbackResultData);
+    m_shmReadbackResultData = nullptr;
+    DOMException* exception =
+        DOMException::create(InvalidStateError, "Context lost or destroyed");
+    m_promiseResolver->reject(exception);
+  }
+
+  void resolve() {
+    if (!m_context || !m_shmReadbackResultData) {
+      DOMException* exception =
+          DOMException::create(InvalidStateError, "Context lost or destroyed");
+      m_promiseResolver->reject(exception);
+      return;
+    }
+    if (m_destinationArrayBufferView->buffer()->isNeutered()) {
+      DOMException* exception = DOMException::create(
+          InvalidStateError, "ArrayBufferView became invalid asynchronously");
+      m_promiseResolver->reject(exception);
+      return;
+    }
+    memcpy(m_destinationDataPtr, m_shmReadbackResultData,
+           m_destinationByteLength);
+    // TODO(kainino): What would happen if the DOM was suspended when the
+    // promise became resolved? Could another JS task happen between the memcpy
+    // and the promise resolution task, which would see the wrong data?
+    m_promiseResolver->resolve(m_destinationArrayBufferView);
+
+    m_context->contextGL()->DeleteQueriesEXT(1, &m_commandsIssuedQueryID);
+    this->destroy();
+    m_context->unregisterGetBufferSubDataAsyncCallback(this);
+  }
+
+  DECLARE_TRACE();
+
+ private:
+  WeakMember<WebGL2RenderingContextBase> m_context;
+  Member<ScriptPromiseResolver> m_promiseResolver;
+
+  // Pointer to shared memory where the gpu readback result is stored.
+  void* m_shmReadbackResultData;
+  // ID of the GL query used to call this callback.
+  GLuint m_commandsIssuedQueryID;
+
+  // ArrayBufferView returned from the promise.
+  Member<DOMArrayBufferView> m_destinationArrayBufferView;
+  // Pointer into the offset into destinationArrayBufferView.
+  void* m_destinationDataPtr;
+  // Size in bytes of the copy operation being performed.
+  long long m_destinationByteLength;
 };
+
+DEFINE_TRACE(WebGLGetBufferSubDataAsyncCallback) {
+  visitor->trace(m_context);
+  visitor->trace(m_promiseResolver);
+  visitor->trace(m_destinationArrayBufferView);
+}
 
 WebGL2RenderingContextBase::WebGL2RenderingContextBase(
     HTMLCanvasElement* passedCanvas,
@@ -160,17 +232,6 @@ WebGL2RenderingContextBase::WebGL2RenderingContextBase(
       kSupportedInternalFormatsStorage,
       kSupportedInternalFormatsStorage +
           WTF_ARRAY_LENGTH(kSupportedInternalFormatsStorage));
-  m_supportedInternalFormatsStorage.insert(
-      kCompressedTextureFormatsETC2EAC,
-      kCompressedTextureFormatsETC2EAC +
-          WTF_ARRAY_LENGTH(kCompressedTextureFormatsETC2EAC));
-  m_compressedTextureFormatsETC2EAC.insert(
-      kCompressedTextureFormatsETC2EAC,
-      kCompressedTextureFormatsETC2EAC +
-          WTF_ARRAY_LENGTH(kCompressedTextureFormatsETC2EAC));
-  m_compressedTextureFormats.append(
-      kCompressedTextureFormatsETC2EAC,
-      WTF_ARRAY_LENGTH(kCompressedTextureFormatsETC2EAC));
 }
 
 WebGL2RenderingContextBase::~WebGL2RenderingContextBase() {
@@ -185,6 +246,15 @@ WebGL2RenderingContextBase::~WebGL2RenderingContextBase() {
 
   m_currentBooleanOcclusionQuery = nullptr;
   m_currentTransformFeedbackPrimitivesWrittenQuery = nullptr;
+}
+
+void WebGL2RenderingContextBase::destroyContext() {
+  for (auto& callback : m_getBufferSubDataAsyncCallbacks) {
+    callback->destroy();
+  }
+  m_getBufferSubDataAsyncCallbacks.clear();
+
+  WebGLRenderingContextBase::destroyContext();
 }
 
 void WebGL2RenderingContextBase::initializeNewContext() {
@@ -357,33 +427,108 @@ void WebGL2RenderingContextBase::getBufferSubData(GLenum target,
                                                   DOMArrayBufferView* dstData,
                                                   GLuint dstOffset,
                                                   GLuint length) {
-  const char* funcName = "getBufferSubData";
-  if (isContextLost())
-    return;
-  if (!validateValueFitNonNegInt32(funcName, "srcByteOffset", srcByteOffset)) {
+  WebGLBuffer* sourceBuffer = nullptr;
+  void* destinationDataPtr = nullptr;
+  long long destinationByteLength = 0;
+  const char* message = validateGetBufferSubData(
+      __FUNCTION__, target, srcByteOffset, dstData, dstOffset, length,
+      &sourceBuffer, &destinationDataPtr, &destinationByteLength);
+  if (message) {
+    // If there was a GL error, it was already synthesized in
+    // validateGetBufferSubData, so it's not done here.
     return;
   }
-  WebGLBuffer* buffer = validateBufferDataTarget(funcName, target);
-  if (!buffer)
-    return;
-  void* subBaseAddress = nullptr;
-  long long subByteLength = 0;
-  if (!validateSubSourceAndGetData(dstData, dstOffset, length, &subBaseAddress,
-                                   &subByteLength)) {
-    synthesizeGLError(GL_INVALID_VALUE, funcName, "buffer overflow");
+
+  // If the length of the copy is zero, this is a no-op.
+  if (!destinationByteLength) {
     return;
   }
 
   void* mappedData =
       contextGL()->MapBufferRange(target, static_cast<GLintptr>(srcByteOffset),
-                                  subByteLength, GL_MAP_READ_BIT);
+                                  destinationByteLength, GL_MAP_READ_BIT);
 
   if (!mappedData)
     return;
 
-  memcpy(subBaseAddress, mappedData, subByteLength);
+  memcpy(destinationDataPtr, mappedData, destinationByteLength);
 
   contextGL()->UnmapBuffer(target);
+}
+
+ScriptPromise WebGL2RenderingContextBase::getBufferSubDataAsync(
+    ScriptState* scriptState,
+    GLenum target,
+    GLintptr srcByteOffset,
+    DOMArrayBufferView* dstData,
+    GLuint dstOffset,
+    GLuint length) {
+  ScriptPromiseResolver* resolver = ScriptPromiseResolver::create(scriptState);
+  ScriptPromise promise = resolver->promise();
+
+  WebGLBuffer* sourceBuffer = nullptr;
+  void* destinationDataPtr = nullptr;
+  long long destinationByteLength = 0;
+  const char* message = validateGetBufferSubData(
+      __FUNCTION__, target, srcByteOffset, dstData, dstOffset, length,
+      &sourceBuffer, &destinationDataPtr, &destinationByteLength);
+  if (message) {
+    // If there was a GL error, it was already synthesized in
+    // validateGetBufferSubData, so it's not done here.
+    DOMException* exception = DOMException::create(InvalidStateError, message);
+    resolver->reject(exception);
+    return promise;
+  }
+
+  message = validateGetBufferSubDataBounds(
+      __FUNCTION__, sourceBuffer, srcByteOffset, destinationByteLength);
+  if (message) {
+    // If there was a GL error, it was already synthesized in
+    // validateGetBufferSubDataBounds, so it's not done here.
+    DOMException* exception = DOMException::create(InvalidStateError, message);
+    resolver->reject(exception);
+    return promise;
+  }
+
+  // If the length of the copy is zero, this is a no-op.
+  if (!destinationByteLength) {
+    resolver->resolve(dstData);
+    return promise;
+  }
+
+  GLuint queryID;
+  contextGL()->GenQueriesEXT(1, &queryID);
+  contextGL()->BeginQueryEXT(GL_COMMANDS_ISSUED_CHROMIUM, queryID);
+  void* mappedData = contextGL()->GetBufferSubDataAsyncCHROMIUM(
+      target, srcByteOffset, destinationByteLength);
+  contextGL()->EndQueryEXT(GL_COMMANDS_ISSUED_CHROMIUM);
+  if (!mappedData) {
+    DOMException* exception =
+        DOMException::create(InvalidStateError, "Out of memory");
+    resolver->reject(exception);
+    return promise;
+  }
+
+  auto callbackObject = new WebGLGetBufferSubDataAsyncCallback(
+      this, resolver, mappedData, queryID, dstData, destinationDataPtr,
+      destinationByteLength);
+  registerGetBufferSubDataAsyncCallback(callbackObject);
+  auto callback = WTF::bind(&WebGLGetBufferSubDataAsyncCallback::resolve,
+                            wrapPersistent(callbackObject));
+  drawingBuffer()->contextProvider()->signalQuery(
+      queryID, convertToBaseCallback(std::move(callback)));
+
+  return promise;
+}
+
+void WebGL2RenderingContextBase::registerGetBufferSubDataAsyncCallback(
+    WebGLGetBufferSubDataAsyncCallback* callback) {
+  m_getBufferSubDataAsyncCallbacks.add(callback);
+}
+
+void WebGL2RenderingContextBase::unregisterGetBufferSubDataAsyncCallback(
+    WebGLGetBufferSubDataAsyncCallback* callback) {
+  m_getBufferSubDataAsyncCallbacks.remove(callback);
 }
 
 void WebGL2RenderingContextBase::blitFramebuffer(GLint srcX0,
@@ -463,27 +608,8 @@ void WebGL2RenderingContextBase::framebufferTextureLayer(GLenum target,
                       "no framebuffer bound");
     return;
   }
-  if (attachment == GL_DEPTH_STENCIL_ATTACHMENT) {
-    contextGL()->FramebufferTextureLayer(target, GL_DEPTH_ATTACHMENT,
-                                         objectOrZero(texture), level, layer);
-    contextGL()->FramebufferTextureLayer(target, GL_STENCIL_ATTACHMENT,
-                                         objectOrZero(texture), level, layer);
-  } else {
-    contextGL()->FramebufferTextureLayer(target, attachment,
-                                         objectOrZero(texture), level, layer);
-  }
-  if (attachment == GL_DEPTH_STENCIL_ATTACHMENT) {
-    // On ES3, DEPTH_STENCIL_ATTACHMENT is like an alias for DEPTH_ATTACHMENT +
-    // STENCIL_ATTACHMENT.  We divide it here so in WebGLFramebuffer, we don't
-    // have to handle DEPTH_STENCIL_ATTACHMENT in WebGL 2.
-    framebufferBinding->setAttachmentForBoundFramebuffer(
-        target, GL_DEPTH_ATTACHMENT, textarget, texture, level, layer);
-    framebufferBinding->setAttachmentForBoundFramebuffer(
-        target, GL_STENCIL_ATTACHMENT, textarget, texture, level, layer);
-  } else {
-    framebufferBinding->setAttachmentForBoundFramebuffer(
-        target, attachment, textarget, texture, level, layer);
-  }
+  framebufferBinding->setAttachmentForBoundFramebuffer(
+      target, attachment, textarget, texture, level, layer);
   applyStencilTest();
 }
 
@@ -4277,7 +4403,35 @@ DEFINE_TRACE(WebGL2RenderingContextBase) {
   visitor->trace(m_currentBooleanOcclusionQuery);
   visitor->trace(m_currentTransformFeedbackPrimitivesWrittenQuery);
   visitor->trace(m_samplerUnits);
+  visitor->trace(m_getBufferSubDataAsyncCallbacks);
   WebGLRenderingContextBase::trace(visitor);
+}
+
+DEFINE_TRACE_WRAPPERS(WebGL2RenderingContextBase) {
+  if (isContextLost()) {
+    return;
+  }
+
+  visitor->traceWrappers(m_transformFeedbackBinding);
+  visitor->traceWrappers(m_readFramebufferBinding);
+  visitor->traceWrappers(m_boundCopyReadBuffer);
+  visitor->traceWrappers(m_boundCopyWriteBuffer);
+  visitor->traceWrappers(m_boundPixelPackBuffer);
+  visitor->traceWrappers(m_boundPixelUnpackBuffer);
+  visitor->traceWrappers(m_boundTransformFeedbackBuffer);
+  visitor->traceWrappers(m_boundUniformBuffer);
+  for (auto& buf : m_boundIndexedTransformFeedbackBuffers) {
+    visitor->traceWrappers(buf);
+  }
+  for (auto& buf : m_boundIndexedUniformBuffers) {
+    visitor->traceWrappers(buf);
+  }
+  visitor->traceWrappers(m_currentBooleanOcclusionQuery);
+  visitor->traceWrappers(m_currentTransformFeedbackPrimitivesWrittenQuery);
+  for (auto& unit : m_samplerUnits) {
+    visitor->traceWrappers(unit);
+  }
+  WebGLRenderingContextBase::traceWrappers(visitor);
 }
 
 WebGLTexture* WebGL2RenderingContextBase::validateTexture3DBinding(
@@ -4406,6 +4560,63 @@ bool WebGL2RenderingContextBase::validateBufferDataUsage(
       return WebGLRenderingContextBase::validateBufferDataUsage(functionName,
                                                                 usage);
   }
+}
+
+const char* WebGL2RenderingContextBase::validateGetBufferSubData(
+    const char* functionName,
+    GLenum target,
+    GLintptr sourceByteOffset,
+    DOMArrayBufferView* destinationArrayBufferView,
+    GLuint destinationOffset,
+    GLuint length,
+    WebGLBuffer** outSourceBuffer,
+    void** outDestinationDataPtr,
+    long long* outDestinationByteLength) {
+  if (isContextLost()) {
+    return "Context lost";
+  }
+
+  if (!validateValueFitNonNegInt32(functionName, "srcByteOffset",
+                                   sourceByteOffset)) {
+    return "Invalid value: srcByteOffset";
+  }
+  if (target == GL_TRANSFORM_FEEDBACK_BUFFER && m_currentProgram &&
+      m_currentProgram->activeTransformFeedbackCount()) {
+    synthesizeGLError(GL_INVALID_OPERATION, functionName,
+                      "targeted transform feedback buffer is active");
+    return "Invalid operation: targeted transform feedback buffer is active";
+  }
+
+  WebGLBuffer* sourceBuffer = validateBufferDataTarget(functionName, target);
+  if (!sourceBuffer) {
+    return "Invalid operation: no buffer bound to target";
+  }
+  *outSourceBuffer = sourceBuffer;
+
+  if (!validateSubSourceAndGetData(
+          destinationArrayBufferView, destinationOffset, length,
+          outDestinationDataPtr, outDestinationByteLength)) {
+    synthesizeGLError(GL_INVALID_VALUE, functionName, "overflow of dstData");
+    return "Invalid value: overflow of dstData";
+  }
+
+  return nullptr;
+}
+
+const char* WebGL2RenderingContextBase::validateGetBufferSubDataBounds(
+    const char* functionName,
+    WebGLBuffer* sourceBuffer,
+    GLintptr sourceByteOffset,
+    long long destinationByteLength) {
+  CheckedNumeric<long long> srcEnd = sourceByteOffset;
+  srcEnd += destinationByteLength;
+  if (!srcEnd.IsValid() || srcEnd.ValueOrDie() > sourceBuffer->getSize()) {
+    synthesizeGLError(GL_INVALID_VALUE, functionName,
+                      "overflow of bound buffer");
+    return "Invalid value: overflow of bound buffer";
+  }
+
+  return nullptr;
 }
 
 void WebGL2RenderingContextBase::removeBoundBuffer(WebGLBuffer* buffer) {

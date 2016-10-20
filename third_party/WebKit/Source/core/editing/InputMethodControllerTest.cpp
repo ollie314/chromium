@@ -85,8 +85,8 @@ TEST_F(InputMethodControllerTest, BackspaceFromEndOfInput) {
   controller().extendSelectionAndDelete(1, 0);
   EXPECT_STREQ("foo", input->value().utf8().data());
 
-  input->setValue(String::fromUTF8(
-      "foo\xE0\xB8\x81\xE0\xB9\x89"));  // composed U+0E01 "ka kai" + U+0E49 "mai tho"
+  // composed U+0E01 "ka kai" + U+0E49 "mai tho"
+  input->setValue(String::fromUTF8("foo\xE0\xB8\x81\xE0\xB9\x89"));
   document().updateStyleAndLayout();
   controller().setEditableSelectionOffsets(PlainTextRange(4, 4));
   EXPECT_STREQ("foo\xE0\xB8\x81\xE0\xB9\x89", input->value().utf8().data());
@@ -116,6 +116,75 @@ TEST_F(InputMethodControllerTest, SetCompositionFromExistingText) {
   PlainTextRange plainTextRange(PlainTextRange::create(*div, *range));
   EXPECT_EQ(0u, plainTextRange.start());
   EXPECT_EQ(5u, plainTextRange.end());
+}
+
+TEST_F(InputMethodControllerTest, SetCompositionKeepingStyle) {
+  Element* div = insertHTMLElement(
+      "<div id='sample' "
+      "contenteditable='true'>abc1<b>2</b>34567<b>8</b>9</div>",
+      "sample");
+
+  Vector<CompositionUnderline> underlines;
+  underlines.append(CompositionUnderline(3, 12, Color(255, 0, 0), false, 0));
+  controller().setCompositionFromExistingText(underlines, 3, 12);
+
+  // Subtract a character.
+  controller().setComposition(String("12345789"), underlines, 8, 8);
+  EXPECT_STREQ("abc1<b>2</b>3457<b>8</b>9", div->innerHTML().utf8().data());
+
+  // Append a character.
+  controller().setComposition(String("123456789"), underlines, 9, 9);
+  EXPECT_STREQ("abc1<b>2</b>34567<b>8</b>9", div->innerHTML().utf8().data());
+
+  // Subtract and append characters.
+  controller().setComposition(String("123hello789"), underlines, 11, 11);
+  EXPECT_STREQ("abc1<b>2</b>3hello7<b>8</b>9", div->innerHTML().utf8().data());
+}
+
+TEST_F(InputMethodControllerTest, SetCompositionWithEmojiKeepingStyle) {
+  // U+1F3E0 = 0xF0 0x9F 0x8F 0xA0 (UTF8). It's an emoji character.
+  Element* div = insertHTMLElement(
+      "<div id='sample' contenteditable='true'><b>&#x1f3e0</b></div>",
+      "sample");
+
+  Vector<CompositionUnderline> underlines;
+  underlines.append(CompositionUnderline(0, 2, Color(255, 0, 0), false, 0));
+
+  controller().setCompositionFromExistingText(underlines, 0, 2);
+
+  // 0xF0 0x9F 0x8F 0xAB is also an emoji character, with the same leading
+  // surrogate pair to the previous one.
+  controller().setComposition(String::fromUTF8("\xF0\x9F\x8F\xAB"), underlines,
+                              2, 2);
+  EXPECT_STREQ("<b>\xF0\x9F\x8F\xAB</b>", div->innerHTML().utf8().data());
+
+  controller().setComposition(String::fromUTF8("\xF0\x9F\x8F\xA0"), underlines,
+                              2, 2);
+  EXPECT_STREQ("<b>\xF0\x9F\x8F\xA0</b>", div->innerHTML().utf8().data());
+}
+
+TEST_F(InputMethodControllerTest,
+       SetCompositionWithTeluguSignVisargaKeepingStyle) {
+  // U+0C03 = 0xE0 0xB0 0x83 (UTF8), a telugu sign visarga with one code point.
+  // It's one grapheme cluster if separated. It can also form one grapheme
+  // cluster with another code point(e.g, itself).
+  Element* div = insertHTMLElement(
+      "<div id='sample' contenteditable='true'><b>&#xc03</b></div>", "sample");
+
+  Vector<CompositionUnderline> underlines;
+  underlines.append(CompositionUnderline(0, 2, Color(255, 0, 0), false, 0));
+  controller().setCompositionFromExistingText(underlines, 0, 1);
+
+  // 0xE0 0xB0 0x83 0xE0 0xB0 0x83, a telugu character with 2 code points in
+  // 1 grapheme cluster.
+  controller().setComposition(String::fromUTF8("\xE0\xB0\x83\xE0\xB0\x83"),
+                              underlines, 2, 2);
+  EXPECT_STREQ("<b>\xE0\xB0\x83\xE0\xB0\x83</b>",
+               div->innerHTML().utf8().data());
+
+  controller().setComposition(String::fromUTF8("\xE0\xB0\x83"), underlines, 1,
+                              1);
+  EXPECT_STREQ("<b>\xE0\xB0\x83</b>", div->innerHTML().utf8().data());
 }
 
 TEST_F(InputMethodControllerTest, SelectionOnConfirmExistingText) {
@@ -202,6 +271,321 @@ TEST_F(InputMethodControllerTest, ConfirmPasswordComposition) {
   EXPECT_STREQ("foo", input->value().utf8().data());
 }
 
+TEST_F(InputMethodControllerTest, DeleteSurroundingTextWithEmptyText) {
+  HTMLInputElement* input =
+      toHTMLInputElement(insertHTMLElement("<input id='sample'>", "sample"));
+
+  input->setValue("");
+  document().updateStyleAndLayout();
+  EXPECT_STREQ("", input->value().utf8().data());
+  controller().deleteSurroundingText(0, 0);
+  EXPECT_STREQ("", input->value().utf8().data());
+
+  input->setValue("");
+  document().updateStyleAndLayout();
+  EXPECT_STREQ("", input->value().utf8().data());
+  controller().deleteSurroundingText(1, 0);
+  EXPECT_STREQ("", input->value().utf8().data());
+
+  input->setValue("");
+  document().updateStyleAndLayout();
+  EXPECT_STREQ("", input->value().utf8().data());
+  controller().deleteSurroundingText(0, 1);
+  EXPECT_STREQ("", input->value().utf8().data());
+
+  input->setValue("");
+  document().updateStyleAndLayout();
+  EXPECT_STREQ("", input->value().utf8().data());
+  controller().deleteSurroundingText(1, 1);
+  EXPECT_STREQ("", input->value().utf8().data());
+}
+
+TEST_F(InputMethodControllerTest, DeleteSurroundingTextWithRangeSelection) {
+  HTMLInputElement* input =
+      toHTMLInputElement(insertHTMLElement("<input id='sample'>", "sample"));
+
+  input->setValue("hello");
+  document().updateStyleAndLayout();
+  EXPECT_STREQ("hello", input->value().utf8().data());
+  controller().setEditableSelectionOffsets(PlainTextRange(1, 4));
+  controller().deleteSurroundingText(0, 0);
+  EXPECT_STREQ("hello", input->value().utf8().data());
+
+  input->setValue("hello");
+  document().updateStyleAndLayout();
+  EXPECT_STREQ("hello", input->value().utf8().data());
+  controller().setEditableSelectionOffsets(PlainTextRange(1, 4));
+  controller().deleteSurroundingText(1, 1);
+  EXPECT_STREQ("ell", input->value().utf8().data());
+
+  input->setValue("hello");
+  document().updateStyleAndLayout();
+  EXPECT_STREQ("hello", input->value().utf8().data());
+  controller().setEditableSelectionOffsets(PlainTextRange(1, 4));
+  controller().deleteSurroundingText(100, 0);
+  EXPECT_STREQ("ello", input->value().utf8().data());
+
+  input->setValue("hello");
+  document().updateStyleAndLayout();
+  EXPECT_STREQ("hello", input->value().utf8().data());
+  controller().setEditableSelectionOffsets(PlainTextRange(1, 4));
+  controller().deleteSurroundingText(0, 100);
+  EXPECT_STREQ("hell", input->value().utf8().data());
+
+  input->setValue("hello");
+  document().updateStyleAndLayout();
+  EXPECT_STREQ("hello", input->value().utf8().data());
+  controller().setEditableSelectionOffsets(PlainTextRange(1, 4));
+  controller().deleteSurroundingText(100, 100);
+  EXPECT_STREQ("ell", input->value().utf8().data());
+}
+
+TEST_F(InputMethodControllerTest, DeleteSurroundingTextWithCursorSelection) {
+  HTMLInputElement* input =
+      toHTMLInputElement(insertHTMLElement("<input id='sample'>", "sample"));
+
+  input->setValue("hello");
+  document().updateStyleAndLayout();
+  EXPECT_STREQ("hello", input->value().utf8().data());
+  controller().setEditableSelectionOffsets(PlainTextRange(2, 2));
+  controller().deleteSurroundingText(1, 0);
+  EXPECT_STREQ("hllo", input->value().utf8().data());
+
+  input->setValue("hello");
+  document().updateStyleAndLayout();
+  EXPECT_STREQ("hello", input->value().utf8().data());
+  controller().setEditableSelectionOffsets(PlainTextRange(2, 2));
+  controller().deleteSurroundingText(0, 1);
+  EXPECT_STREQ("helo", input->value().utf8().data());
+
+  input->setValue("hello");
+  document().updateStyleAndLayout();
+  EXPECT_STREQ("hello", input->value().utf8().data());
+  controller().setEditableSelectionOffsets(PlainTextRange(2, 2));
+  controller().deleteSurroundingText(0, 0);
+  EXPECT_STREQ("hello", input->value().utf8().data());
+
+  input->setValue("hello");
+  document().updateStyleAndLayout();
+  EXPECT_STREQ("hello", input->value().utf8().data());
+  controller().setEditableSelectionOffsets(PlainTextRange(2, 2));
+  controller().deleteSurroundingText(1, 1);
+  EXPECT_STREQ("hlo", input->value().utf8().data());
+
+  input->setValue("hello");
+  document().updateStyleAndLayout();
+  EXPECT_STREQ("hello", input->value().utf8().data());
+  controller().setEditableSelectionOffsets(PlainTextRange(2, 2));
+  controller().deleteSurroundingText(100, 0);
+  EXPECT_STREQ("llo", input->value().utf8().data());
+
+  input->setValue("hello");
+  document().updateStyleAndLayout();
+  EXPECT_STREQ("hello", input->value().utf8().data());
+  controller().setEditableSelectionOffsets(PlainTextRange(2, 2));
+  controller().deleteSurroundingText(0, 100);
+  EXPECT_STREQ("he", input->value().utf8().data());
+
+  input->setValue("hello");
+  document().updateStyleAndLayout();
+  EXPECT_STREQ("hello", input->value().utf8().data());
+  controller().setEditableSelectionOffsets(PlainTextRange(2, 2));
+  controller().deleteSurroundingText(100, 100);
+  EXPECT_STREQ("", input->value().utf8().data());
+
+  input->setValue("h");
+  document().updateStyleAndLayout();
+  EXPECT_STREQ("h", input->value().utf8().data());
+  controller().setEditableSelectionOffsets(PlainTextRange(1, 1));
+  controller().deleteSurroundingText(1, 0);
+  EXPECT_STREQ("", input->value().utf8().data());
+
+  input->setValue("h");
+  document().updateStyleAndLayout();
+  EXPECT_STREQ("h", input->value().utf8().data());
+  controller().setEditableSelectionOffsets(PlainTextRange(0, 0));
+  controller().deleteSurroundingText(0, 1);
+  EXPECT_STREQ("", input->value().utf8().data());
+}
+
+TEST_F(InputMethodControllerTest,
+       DeleteSurroundingTextWithMultiCodeTextOnTheLeft) {
+  HTMLInputElement* input =
+      toHTMLInputElement(insertHTMLElement("<input id='sample'>", "sample"));
+
+  // U+2605 == "black star". It takes up 1 space.
+  input->setValue(String::fromUTF8("foo\xE2\x98\x85"));
+  document().updateStyleAndLayout();
+  controller().setEditableSelectionOffsets(PlainTextRange(4, 4));
+  EXPECT_STREQ("foo\xE2\x98\x85", input->value().utf8().data());
+  controller().deleteSurroundingText(1, 0);
+  EXPECT_STREQ("foo", input->value().utf8().data());
+
+  // U+1F3C6 == "trophy". It takes up 2 space.
+  input->setValue(String::fromUTF8("foo\xF0\x9F\x8F\x86"));
+  document().updateStyleAndLayout();
+  controller().setEditableSelectionOffsets(PlainTextRange(5, 5));
+  EXPECT_STREQ("foo\xF0\x9F\x8F\x86", input->value().utf8().data());
+  controller().deleteSurroundingText(1, 0);
+  EXPECT_STREQ("foo", input->value().utf8().data());
+
+  // composed U+0E01 "ka kai" + U+0E49 "mai tho". It takes up 2 space.
+  input->setValue(String::fromUTF8("foo\xE0\xB8\x81\xE0\xB9\x89"));
+  document().updateStyleAndLayout();
+  controller().setEditableSelectionOffsets(PlainTextRange(5, 5));
+  EXPECT_STREQ("foo\xE0\xB8\x81\xE0\xB9\x89", input->value().utf8().data());
+  controller().deleteSurroundingText(1, 0);
+  EXPECT_STREQ("foo", input->value().utf8().data());
+
+  // "trophy" + "trophy".
+  input->setValue(String::fromUTF8("foo\xF0\x9F\x8F\x86\xF0\x9F\x8F\x86"));
+  document().updateStyleAndLayout();
+  controller().setEditableSelectionOffsets(PlainTextRange(7, 7));
+  EXPECT_STREQ("foo\xF0\x9F\x8F\x86\xF0\x9F\x8F\x86",
+               input->value().utf8().data());
+  controller().deleteSurroundingText(2, 0);
+  EXPECT_STREQ("foo\xF0\x9F\x8F\x86", input->value().utf8().data());
+
+  // "trophy" + "trophy".
+  input->setValue(String::fromUTF8("foo\xF0\x9F\x8F\x86\xF0\x9F\x8F\x86"));
+  document().updateStyleAndLayout();
+  controller().setEditableSelectionOffsets(PlainTextRange(7, 7));
+  EXPECT_STREQ("foo\xF0\x9F\x8F\x86\xF0\x9F\x8F\x86",
+               input->value().utf8().data());
+  controller().deleteSurroundingText(3, 0);
+  EXPECT_STREQ("foo", input->value().utf8().data());
+
+  // "trophy" + "trophy".
+  input->setValue(String::fromUTF8("foo\xF0\x9F\x8F\x86\xF0\x9F\x8F\x86"));
+  document().updateStyleAndLayout();
+  controller().setEditableSelectionOffsets(PlainTextRange(7, 7));
+  EXPECT_STREQ("foo\xF0\x9F\x8F\x86\xF0\x9F\x8F\x86",
+               input->value().utf8().data());
+  controller().deleteSurroundingText(4, 0);
+  EXPECT_STREQ("foo", input->value().utf8().data());
+
+  // "trophy" + "trophy".
+  input->setValue(String::fromUTF8("foo\xF0\x9F\x8F\x86\xF0\x9F\x8F\x86"));
+  document().updateStyleAndLayout();
+  controller().setEditableSelectionOffsets(PlainTextRange(7, 7));
+  EXPECT_STREQ("foo\xF0\x9F\x8F\x86\xF0\x9F\x8F\x86",
+               input->value().utf8().data());
+  controller().deleteSurroundingText(5, 0);
+  EXPECT_STREQ("fo", input->value().utf8().data());
+}
+
+TEST_F(InputMethodControllerTest,
+       DeleteSurroundingTextWithMultiCodeTextOnTheRight) {
+  HTMLInputElement* input =
+      toHTMLInputElement(insertHTMLElement("<input id='sample'>", "sample"));
+
+  // U+2605 == "black star". It takes up 1 space.
+  input->setValue(String::fromUTF8("\xE2\x98\x85 foo"));
+  document().updateStyleAndLayout();
+  controller().setEditableSelectionOffsets(PlainTextRange(0, 0));
+  EXPECT_STREQ("\xE2\x98\x85 foo", input->value().utf8().data());
+  controller().deleteSurroundingText(0, 1);
+  EXPECT_STREQ(" foo", input->value().utf8().data());
+
+  // U+1F3C6 == "trophy". It takes up 2 space.
+  input->setValue(String::fromUTF8("\xF0\x9F\x8F\x86 foo"));
+  document().updateStyleAndLayout();
+  controller().setEditableSelectionOffsets(PlainTextRange(0, 0));
+  EXPECT_STREQ("\xF0\x9F\x8F\x86 foo", input->value().utf8().data());
+  controller().deleteSurroundingText(0, 1);
+  EXPECT_STREQ(" foo", input->value().utf8().data());
+
+  // composed U+0E01 "ka kai" + U+0E49 "mai tho". It takes up 2 space.
+  input->setValue(String::fromUTF8("\xE0\xB8\x81\xE0\xB9\x89 foo"));
+  document().updateStyleAndLayout();
+  controller().setEditableSelectionOffsets(PlainTextRange(0, 0));
+  EXPECT_STREQ("\xE0\xB8\x81\xE0\xB9\x89 foo", input->value().utf8().data());
+  controller().deleteSurroundingText(0, 1);
+  EXPECT_STREQ(" foo", input->value().utf8().data());
+
+  // "trophy" + "trophy".
+  input->setValue(String::fromUTF8("\xF0\x9F\x8F\x86\xF0\x9F\x8F\x86 foo"));
+  document().updateStyleAndLayout();
+  controller().setEditableSelectionOffsets(PlainTextRange(0, 0));
+  EXPECT_STREQ("\xF0\x9F\x8F\x86\xF0\x9F\x8F\x86 foo",
+               input->value().utf8().data());
+  controller().deleteSurroundingText(0, 2);
+  EXPECT_STREQ("\xF0\x9F\x8F\x86 foo", input->value().utf8().data());
+
+  // "trophy" + "trophy".
+  input->setValue(String::fromUTF8("\xF0\x9F\x8F\x86\xF0\x9F\x8F\x86 foo"));
+  document().updateStyleAndLayout();
+  controller().setEditableSelectionOffsets(PlainTextRange(0, 0));
+  EXPECT_STREQ("\xF0\x9F\x8F\x86\xF0\x9F\x8F\x86 foo",
+               input->value().utf8().data());
+  controller().deleteSurroundingText(0, 3);
+  EXPECT_STREQ(" foo", input->value().utf8().data());
+
+  // "trophy" + "trophy".
+  input->setValue(String::fromUTF8("\xF0\x9F\x8F\x86\xF0\x9F\x8F\x86 foo"));
+  document().updateStyleAndLayout();
+  controller().setEditableSelectionOffsets(PlainTextRange(0, 0));
+  EXPECT_STREQ("\xF0\x9F\x8F\x86\xF0\x9F\x8F\x86 foo",
+               input->value().utf8().data());
+  controller().deleteSurroundingText(0, 4);
+  EXPECT_STREQ(" foo", input->value().utf8().data());
+
+  // "trophy" + "trophy".
+  input->setValue(String::fromUTF8("\xF0\x9F\x8F\x86\xF0\x9F\x8F\x86 foo"));
+  document().updateStyleAndLayout();
+  controller().setEditableSelectionOffsets(PlainTextRange(0, 0));
+  EXPECT_STREQ("\xF0\x9F\x8F\x86\xF0\x9F\x8F\x86 foo",
+               input->value().utf8().data());
+  controller().deleteSurroundingText(0, 5);
+  EXPECT_STREQ("foo", input->value().utf8().data());
+}
+
+TEST_F(InputMethodControllerTest,
+       DeleteSurroundingTextWithMultiCodeTextOnBothSides) {
+  HTMLInputElement* input =
+      toHTMLInputElement(insertHTMLElement("<input id='sample'>", "sample"));
+
+  // "trophy" + "trophy".
+  input->setValue(String::fromUTF8("\xF0\x9F\x8F\x86\xF0\x9F\x8F\x86"));
+  document().updateStyleAndLayout();
+  controller().setEditableSelectionOffsets(PlainTextRange(2, 2));
+  EXPECT_STREQ("\xF0\x9F\x8F\x86\xF0\x9F\x8F\x86",
+               input->value().utf8().data());
+  controller().deleteSurroundingText(1, 1);
+  EXPECT_STREQ("", input->value().utf8().data());
+}
+
+TEST_F(InputMethodControllerTest, DeleteSurroundingTextForMultipleNodes) {
+  Element* div = insertHTMLElement(
+      "<div id='sample' contenteditable='true'>aaa"
+      "<div id='sample2' contenteditable='true'>bbb"
+      "<div id='sample3' contenteditable='true'>ccc"
+      "<div id='sample4' contenteditable='true'>ddd"
+      "<div id='sample5' contenteditable='true'>eee"
+      "</div></div></div></div></div>",
+      "sample");
+
+  controller().setEditableSelectionOffsets(PlainTextRange(8, 8));
+  EXPECT_STREQ("aaa\nbbb\nccc\nddd\neee", div->innerText().utf8().data());
+  EXPECT_EQ(8u, controller().getSelectionOffsets().start());
+  EXPECT_EQ(8u, controller().getSelectionOffsets().end());
+
+  controller().deleteSurroundingText(1, 0);
+  EXPECT_STREQ("aaa\nbbbccc\nddd\neee", div->innerText().utf8().data());
+  EXPECT_EQ(7u, controller().getSelectionOffsets().start());
+  EXPECT_EQ(7u, controller().getSelectionOffsets().end());
+
+  controller().deleteSurroundingText(0, 4);
+  EXPECT_STREQ("aaa\nbbbddd\neee", div->innerText().utf8().data());
+  EXPECT_EQ(7u, controller().getSelectionOffsets().start());
+  EXPECT_EQ(7u, controller().getSelectionOffsets().end());
+
+  controller().deleteSurroundingText(5, 5);
+  EXPECT_STREQ("aaee", div->innerText().utf8().data());
+  EXPECT_EQ(2u, controller().getSelectionOffsets().start());
+  EXPECT_EQ(2u, controller().getSelectionOffsets().end());
+}
+
 TEST_F(InputMethodControllerTest, SetCompositionForInputWithNewCaretPositions) {
   HTMLInputElement* input =
       toHTMLInputElement(insertHTMLElement("<input id='sample'>", "sample"));
@@ -261,7 +645,8 @@ TEST_F(InputMethodControllerTest, SetCompositionForInputWithNewCaretPositions) {
 
 TEST_F(InputMethodControllerTest,
        SetCompositionForContentEditableWithNewCaretPositions) {
-  // There are 7 nodes and 5+1+5+1+3+4+3 characters: "hello", '\n', "world", "\n", "012", "3456", "789".
+  // There are 7 nodes and 5+1+5+1+3+4+3 characters: "hello", '\n', "world",
+  // "\n", "012", "3456", "789".
   Element* div = insertHTMLElement(
       "<div id='sample' contenteditable='true'>"
       "hello"
@@ -484,7 +869,7 @@ TEST_F(InputMethodControllerTest, CompositionInputEventData) {
 
   document().setTitle(emptyString());
   controller().setComposition("ni", underlines, 0, 1);
-  EXPECT_STREQ("beforeinput.data:ni;input.data:ni;",
+  EXPECT_STREQ("beforeinput.data:i;input.data:i;",
                document().title().utf8().data());
 
   document().setTitle(emptyString());

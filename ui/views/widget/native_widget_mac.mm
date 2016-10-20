@@ -96,8 +96,9 @@ BridgedNativeWidget* NativeWidgetMac::GetBridgeForNativeWindow(
 }
 
 bool NativeWidgetMac::IsWindowModalSheet() const {
-  return GetWidget()->widget_delegate()->GetModalType() ==
-         ui::MODAL_TYPE_WINDOW;
+  return bridge_ && bridge_->parent() &&
+         GetWidget()->widget_delegate()->GetModalType() ==
+             ui::MODAL_TYPE_WINDOW;
 }
 
 void NativeWidgetMac::OnWindowWillClose() {
@@ -106,6 +107,7 @@ void NativeWidgetMac::OnWindowWillClose() {
   // is still a valid pointer, then reset it.
   if (bridge_) {
     delegate_->OnNativeWidgetDestroying();
+    [GetNativeWindow() setDelegate:nil];
     bridge_.reset();
   }
   delegate_->OnNativeWidgetDestroyed();
@@ -291,8 +293,13 @@ void NativeWidgetMac::InitModalType(ui::ModalType modal_type) {
 
   // System modal windows not implemented (or used) on Mac.
   DCHECK_NE(ui::MODAL_TYPE_SYSTEM, modal_type);
-  DCHECK(bridge_->parent());
-  // Everyhing happens upon show.
+
+  // A peculiarity of the constrained window framework is that it permits a
+  // dialog of MODAL_TYPE_WINDOW to have a null parent window; falling back to
+  // a non-modal window in this case.
+  DCHECK(bridge_->parent() || modal_type == ui::MODAL_TYPE_WINDOW);
+
+  // Everything happens upon show.
 }
 
 gfx::Rect NativeWidgetMac::GetWindowBoundsInScreen() const {
@@ -329,10 +336,6 @@ void NativeWidgetMac::StackAbove(gfx::NativeView native_view) {
 }
 
 void NativeWidgetMac::StackAtTop() {
-  NOTIMPLEMENTED();
-}
-
-void NativeWidgetMac::StackBelow(gfx::NativeView native_view) {
   NOTIMPLEMENTED();
 }
 

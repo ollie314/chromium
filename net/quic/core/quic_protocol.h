@@ -56,9 +56,6 @@ typedef uint16_t QuicPacketLength;
 const QuicByteCount kDefaultMaxPacketSize = 1350;
 // Default initial maximum size in bytes of a QUIC packet for servers.
 const QuicByteCount kDefaultServerMaxPacketSize = 1000;
-// Minimum size of a QUIC packet, used if a server receives packets from a
-// client with unusual network headers. 1280 - sizeof(eth) - sizeof(ipv6).
-const QuicByteCount kMinimumSupportedPacketSize = 1214;
 // The maximum packet size of any QUIC packet, based on ethernet's max size,
 // minus the IP and UDP headers. IPv6 has a 40 byte header, UDP adds an
 // additional 8 bytes.  This is a total overhead of 48 bytes.  Ethernet's
@@ -345,17 +342,8 @@ enum QuicPacketPrivateFlags {
   // Bit 0: Does this packet contain an entropy bit?
   PACKET_PRIVATE_FLAGS_ENTROPY = 1 << 0,
 
-  // Bit 1: Payload is part of an FEC group?
-  PACKET_PRIVATE_FLAGS_FEC_GROUP = 1 << 1,
-
-  // Bit 2: Payload is FEC as opposed to frames?
-  PACKET_PRIVATE_FLAGS_FEC = 1 << 2,
-
-  // All bits set (bits 3-7 are not currently used): 00000111
-  PACKET_PRIVATE_FLAGS_MAX = (1 << 3) - 1,
-
-  // For version 32 (bits 1-7 are not used): 00000001
-  PACKET_PRIVATE_FLAGS_MAX_VERSION_32 = (1 << 1) - 1
+  // (bits 1-7 are not used): 00000001
+  PACKET_PRIVATE_FLAGS_MAX = (1 << 1) - 1
 };
 
 // The available versions of QUIC. Guaranteed that the integer value of the enum
@@ -368,8 +356,6 @@ enum QuicVersion {
   // Special case to indicate unknown/unsupported QUIC version.
   QUIC_VERSION_UNSUPPORTED = 0,
 
-  QUIC_VERSION_30 = 30,  // Add server side support of cert transparency.
-  QUIC_VERSION_31 = 31,  // Adds a hash of the client hello to crypto proof.
   QUIC_VERSION_32 = 32,  // FEC related fields are removed from wire format.
   QUIC_VERSION_33 = 33,  // Adds diversification nonces.
   QUIC_VERSION_34 = 34,  // Deprecates entropy, removes private flag from packet
@@ -390,7 +376,7 @@ enum QuicVersion {
 // http://sites/quic/adding-and-removing-versions
 static const QuicVersion kSupportedQuicVersions[] = {
     QUIC_VERSION_36, QUIC_VERSION_35, QUIC_VERSION_34, QUIC_VERSION_33,
-    QUIC_VERSION_32, QUIC_VERSION_31, QUIC_VERSION_30};
+    QUIC_VERSION_32};
 
 typedef std::vector<QuicVersion> QuicVersionVector;
 
@@ -504,6 +490,8 @@ enum QuicRstStreamErrorCode {
   QUIC_PROMISE_VARY_MISMATCH,
   // Only GET and HEAD methods allowed.
   QUIC_INVALID_PROMISE_METHOD,
+  // The push stream is unclaimed and timed out.
+  QUIC_PUSH_STREAM_TIMED_OUT,
   // No error. Used as bound while iterating.
   QUIC_STREAM_LAST_ERROR,
 };
@@ -728,8 +716,12 @@ enum QuicErrorCode {
   // to crash.
   QUIC_STREAM_SEQUENCER_INVALID_STATE = 95,
 
+  // Connection closed because of server hits max number of sessions allowed.
+  // TODO(fayang): Add monitoring for QUIC_TOO_MANY_SESSIONS_ON_SERVER.
+  QUIC_TOO_MANY_SESSIONS_ON_SERVER = 96,
+
   // No error. Used as bound while iterating.
-  QUIC_LAST_ERROR = 96,
+  QUIC_LAST_ERROR = 97,
 };
 
 typedef std::array<char, 32> DiversificationNonce;
@@ -770,7 +762,6 @@ struct NET_EXPORT_PRIVATE QuicPacketHeader {
   QuicPathId path_id;
   bool entropy_flag;
   QuicPacketEntropyHash entropy_hash;
-  bool fec_flag;
 };
 
 struct NET_EXPORT_PRIVATE QuicPublicResetPacket {
@@ -779,6 +770,8 @@ struct NET_EXPORT_PRIVATE QuicPublicResetPacket {
 
   QuicPacketPublicHeader public_header;
   QuicPublicResetNonceProof nonce_proof;
+  // TODO(fayang): remove rejected_packet_number when deprecating
+  // FLAGS_quic_remove_packet_number_from_public_reset.
   QuicPacketNumber rejected_packet_number;
   IPEndPoint client_address;
 };
@@ -1068,6 +1061,7 @@ enum LossDetectionType {
   kNack,          // Used to mimic TCP's loss detection.
   kTime,          // Time based loss detection.
   kAdaptiveTime,  // Adaptive time based loss detection.
+  kLazyFack,      // Nack based but with FACK disabled for the first ack.
 };
 
 struct NET_EXPORT_PRIVATE QuicRstStreamFrame {
@@ -1301,7 +1295,7 @@ class NET_EXPORT_PRIVATE QuicEncryptedPacket : public QuicData {
   QuicEncryptedPacket(const char* buffer, size_t length, bool owns_buffer);
 
   // Clones the packet into a new packet which owns the buffer.
-  QuicEncryptedPacket* Clone() const;
+  std::unique_ptr<QuicEncryptedPacket> Clone() const;
 
   // By default, gtest prints the raw bytes of an object. The bool data
   // member (in the base class QuicData) causes this object to have padding
@@ -1327,20 +1321,17 @@ class NET_EXPORT_PRIVATE QuicReceivedPacket : public QuicEncryptedPacket {
                      size_t length,
                      QuicTime receipt_time,
                      bool owns_buffer,
-                     bool potentially_small_mtu,
                      int ttl,
                      bool ttl_valid);
 
   // Clones the packet into a new packet which owns the buffer.
-  QuicReceivedPacket* Clone() const;
+  std::unique_ptr<QuicReceivedPacket> Clone() const;
 
   // Returns the time at which the packet was received.
   QuicTime receipt_time() const { return receipt_time_; }
 
   // This is the TTL of the packet, assuming ttl_vaild_ is true.
   int ttl() const { return ttl_; }
-
-  bool potentially_small_mtu() const { return potentially_small_mtu_; }
 
   // By default, gtest prints the raw bytes of an object. The bool data
   // member (in the base class QuicData) causes this object to have padding
@@ -1353,7 +1344,6 @@ class NET_EXPORT_PRIVATE QuicReceivedPacket : public QuicEncryptedPacket {
  private:
   const QuicTime receipt_time_;
   int ttl_;
-  bool potentially_small_mtu_;
 
   DISALLOW_COPY_AND_ASSIGN(QuicReceivedPacket);
 };
@@ -1401,8 +1391,6 @@ class NET_EXPORT_PRIVATE QuicVersionManager {
   const QuicVersionVector& GetSupportedVersions();
 
  private:
-  // FLAGS_quic_disable_pre_32
-  bool disable_pre_32_;
   // FLAGS_quic_disable_pre_34
   bool disable_pre_34_;
   // FLAGS_quic_enable_version_35

@@ -385,9 +385,9 @@ void TabAndroid::InitWebContents(
       SetViewAndroid(web_contents()->GetNativeView());
   CoreTabHelper::FromWebContents(web_contents())->set_delegate(this);
   SearchTabHelper::FromWebContents(web_contents())->set_delegate(this);
-  web_contents_delegate_.reset(
-      new chrome::android::TabWebContentsDelegateAndroid(
-          env, jweb_contents_delegate));
+  web_contents_delegate_ =
+      base::MakeUnique<android::TabWebContentsDelegateAndroid>(
+          env, jweb_contents_delegate);
   web_contents_delegate_->LoadProgressChanged(web_contents(), 0);
   web_contents()->SetDelegate(web_contents_delegate_.get());
 
@@ -462,9 +462,9 @@ void TabAndroid::UpdateDelegates(
     const JavaParamRef<jobject>& jcontext_menu_populator) {
   ContextMenuHelper::FromWebContents(web_contents())->SetPopulator(
       jcontext_menu_populator);
-  web_contents_delegate_.reset(
-      new chrome::android::TabWebContentsDelegateAndroid(
-          env, jweb_contents_delegate));
+  web_contents_delegate_ =
+      base::MakeUnique<android::TabWebContentsDelegateAndroid>(
+          env, jweb_contents_delegate);
   web_contents()->SetDelegate(web_contents_delegate_.get());
 }
 
@@ -783,12 +783,6 @@ jlong TabAndroid::GetBookmarkId(JNIEnv* env,
       web_contents()->GetURL());
   Profile* profile = GetProfile();
 
-  // If the url points to an offline page, then we need to get its original URL.
-  if (offline_pages::OfflinePageUtils::IsOfflinePage(profile, url)) {
-    url = offline_pages::OfflinePageUtils::MaybeGetOnlineURLForOfflineURL(
-        profile, url);
-  }
-
   // Get all the nodes for |url| and sort them by date added.
   std::vector<const bookmarks::BookmarkNode*> nodes;
   bookmarks::ManagedBookmarkService* managed =
@@ -873,8 +867,8 @@ void TabAndroid::AttachToTabContentManager(
     JNIEnv* env,
     const JavaParamRef<jobject>& obj,
     const JavaParamRef<jobject>& jtab_content_manager) {
-  chrome::android::TabContentManager* tab_content_manager =
-      chrome::android::TabContentManager::FromJavaObject(jtab_content_manager);
+  android::TabContentManager* tab_content_manager =
+      android::TabContentManager::FromJavaObject(jtab_content_manager);
   if (tab_content_manager == tab_content_manager_)
     return;
 

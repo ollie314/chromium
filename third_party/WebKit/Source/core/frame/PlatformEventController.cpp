@@ -17,7 +17,7 @@ PlatformEventController::PlatformEventController(Page* page)
 PlatformEventController::~PlatformEventController() {}
 
 void PlatformEventController::oneShotCallback(TimerBase* timer) {
-  ASSERT_UNUSED(timer, timer == &m_timer);
+  DCHECK_EQ(timer, &m_timer);
   ASSERT(hasLastData());
   ASSERT(!m_timer.isActive());
 
@@ -41,9 +41,7 @@ void PlatformEventController::stopUpdating() {
   if (!m_isActive)
     return;
 
-  if (m_timer.isActive())
-    m_timer.stop();
-
+  m_timer.stop();
   unregisterWithDispatcher();
   m_isActive = false;
 }

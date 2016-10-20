@@ -697,10 +697,6 @@ class NET_EXPORT_PRIVATE QuicConnection
     return last_packet_source_address_;
   }
 
-  void set_largest_packet_size_supported(QuicByteCount size) {
-    largest_packet_size_supported_ = size;
-  }
-
  protected:
   // Calls cancel() on all the alarms owned by this connection.
   void CancelAllAlarms();
@@ -910,8 +906,12 @@ class NET_EXPORT_PRIVATE QuicConnection
                                      // parsed or nullptr.
   EncryptionLevel last_decrypted_packet_level_;
   QuicPacketHeader last_header_;
+  // TODO(ianswett): Remove last_stop_waiting_frame_ once
+  // FLAGS_quic_receive_packet_once_decrypted is deprecated.
   QuicStopWaitingFrame last_stop_waiting_frame_;
   bool should_last_packet_instigate_acks_;
+  // Whether the most recent packet was missing before it was received.
+  bool was_last_packet_missing_;
 
   // Track some peer state so we can do less bookkeeping
   // Largest sequence sent by the peer which had an ack frame (latest ack info).
@@ -924,7 +924,7 @@ class NET_EXPORT_PRIVATE QuicConnection
   // established, but which could not be decrypted.  We buffer these on
   // the assumption that they could not be processed because they were
   // sent with the INITIAL encryption and the CHLO message was lost.
-  std::deque<QuicEncryptedPacket*> undecryptable_packets_;
+  std::deque<std::unique_ptr<QuicEncryptedPacket>> undecryptable_packets_;
 
   // Maximum number of undecryptable packets the connection will store.
   size_t max_undecryptable_packets_;
@@ -1092,9 +1092,6 @@ class NET_EXPORT_PRIVATE QuicConnection
 
   // The size of the largest packet received from peer.
   QuicByteCount largest_received_packet_size_;
-
-  // The maximum allowed packet size.
-  QuicByteCount largest_packet_size_supported_;
 
   // Whether a GoAway has been sent.
   bool goaway_sent_;

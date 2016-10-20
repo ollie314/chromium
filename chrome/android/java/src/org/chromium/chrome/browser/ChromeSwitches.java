@@ -196,11 +196,6 @@ public abstract class ChromeSwitches {
     public static final String PARTNER_HOMEPAGE_FOR_TESTING = "partner-homepage-for-testing";
 
     /**
-     * Enables the all bookmarks section in bookmark manager.
-     */
-    public static final String ENABLE_ALL_BOOKMARKS_VIEW = "enable-all-bookmarks-view";
-
-    /**
      * Enables "Add to Home screen" to mint a WebApk.
      */
     public static final String ENABLE_WEBAPK = "enable-webapk";
@@ -210,6 +205,16 @@ public abstract class ChromeSwitches {
      */
     public static final String ALWAYS_EXTRACT_WEBAPK_RUNTIME_DEX_ON_STARTUP =
             "always-extract-webapk-dex-on-startup";
+
+    /**
+     * Forces a check for whether the WebAPK's Web Manifest has changed each time that a WebAPK is
+     * launched.
+     */
+    public static final String CHECK_FOR_WEB_MANIFEST_UPDATE_ON_STARTUP =
+            "check-for-web-manifest-update-on-startup";
+
+    /** Enable Vr Shell development environment. */
+    public static final String ENABLE_VR_SHELL_DEV = "enable-vr-shell-dev";
 
     // Prevent instantiation.
     private ChromeSwitches() {}

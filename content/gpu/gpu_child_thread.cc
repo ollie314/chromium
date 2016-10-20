@@ -21,7 +21,7 @@
 #include "content/gpu/gpu_service_factory.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_switches.h"
-#include "content/public/common/mojo_shell_connection.h"
+#include "content/public/common/service_manager_connection.h"
 #include "content/public/common/service_names.h"
 #include "content/public/gpu/content_gpu_client.h"
 #include "gpu/command_buffer/service/gpu_switches.h"
@@ -37,8 +37,8 @@
 #include "media/gpu/ipc/service/gpu_jpeg_decode_accelerator.h"
 #include "media/gpu/ipc/service/gpu_video_decode_accelerator.h"
 #include "media/gpu/ipc/service/gpu_video_encode_accelerator.h"
-#include "media/gpu/ipc/service/media_service.h"
-#include "services/shell/public/cpp/interface_registry.h"
+#include "media/gpu/ipc/service/media_gpu_channel_manager.h"
+#include "services/service_manager/public/cpp/interface_registry.h"
 #include "ui/gl/gl_implementation.h"
 #include "ui/gl/gl_switches.h"
 #include "ui/gl/gpu_switching_manager.h"
@@ -143,18 +143,18 @@ ChildThreadImpl::Options GetOptions(
 }  // namespace
 
 GpuChildThread::GpuChildThread(
-    gpu::GpuWatchdogThread* watchdog_thread,
+    std::unique_ptr<gpu::GpuWatchdogThread> watchdog_thread,
     bool dead_on_arrival,
     const gpu::GPUInfo& gpu_info,
     const DeferredMessages& deferred_messages,
     gpu::GpuMemoryBufferFactory* gpu_memory_buffer_factory)
     : ChildThreadImpl(GetOptions(gpu_memory_buffer_factory)),
       dead_on_arrival_(dead_on_arrival),
+      watchdog_thread_(std::move(watchdog_thread)),
       gpu_info_(gpu_info),
       deferred_messages_(deferred_messages),
       in_browser_process_(false),
       gpu_memory_buffer_factory_(gpu_memory_buffer_factory) {
-  watchdog_thread_ = watchdog_thread;
 #if defined(OS_WIN)
   target_services_ = NULL;
 #endif
@@ -167,7 +167,6 @@ GpuChildThread::GpuChildThread(
     gpu::GpuMemoryBufferFactory* gpu_memory_buffer_factory)
     : ChildThreadImpl(ChildThreadImpl::Options::Builder()
                           .InBrowserProcess(params)
-                          .UseMojoChannel(true)
                           .AddStartupFilter(new GpuMemoryBufferMessageFilter(
                               gpu_memory_buffer_factory))
                           .ConnectToBrowser(true)
@@ -240,7 +239,6 @@ bool GpuChildThread::OnControlMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER(GpuMsg_Clean, OnClean)
     IPC_MESSAGE_HANDLER(GpuMsg_Crash, OnCrash)
     IPC_MESSAGE_HANDLER(GpuMsg_Hang, OnHang)
-    IPC_MESSAGE_HANDLER(GpuMsg_DisableWatchdog, OnDisableWatchdog)
     IPC_MESSAGE_HANDLER(GpuMsg_GpuSwitched, OnGpuSwitched)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
@@ -280,7 +278,7 @@ void GpuChildThread::DidCreateOffscreenContext(const GURL& active_url) {
 }
 
 void GpuChildThread::DidDestroyChannel(int client_id) {
-  media_service_->RemoveChannel(client_id);
+  media_gpu_channel_manager_->RemoveChannel(client_id);
   Send(new GpuHostMsg_DestroyChannel(client_id));
 }
 
@@ -358,7 +356,8 @@ void GpuChildThread::OnInitialize(const gpu::GpuPreferences& gpu_preferences) {
       ChildProcess::current()->GetShutDownEvent(), sync_point_manager,
       gpu_memory_buffer_factory_));
 
-  media_service_.reset(new media::MediaService(gpu_channel_manager_.get()));
+  media_gpu_channel_manager_.reset(
+      new media::MediaGpuChannelManager(gpu_channel_manager_.get()));
 
   // Only set once per process instance.
   service_factory_.reset(new GpuServiceFactory);
@@ -379,12 +378,6 @@ void GpuChildThread::OnInitialize(const gpu::GpuPreferences& gpu_preferences) {
 void GpuChildThread::OnFinalize() {
   // Quit the GPU process
   base::MessageLoop::current()->QuitWhenIdle();
-}
-
-void GpuChildThread::StopWatchdog() {
-  if (watchdog_thread_.get()) {
-    watchdog_thread_->Stop();
-  }
 }
 
 void GpuChildThread::OnCollectGraphicsInfo() {
@@ -474,18 +467,6 @@ void GpuChildThread::OnHang() {
   }
 }
 
-void GpuChildThread::OnDisableWatchdog() {
-  DVLOG(1) << "GPU: Disabling watchdog thread";
-  if (watchdog_thread_.get()) {
-    // Disarm the watchdog before shutting down the message loop. This prevents
-    // the future posting of tasks to the message loop.
-    if (watchdog_thread_->message_loop())
-      watchdog_thread_->PostAcknowledge();
-    // Prevent rearming.
-    watchdog_thread_->Stop();
-  }
-}
-
 void GpuChildThread::OnGpuSwitched() {
   DVLOG(1) << "GPU: GPU has switched";
   // Notify observers in the GPU process.
@@ -500,7 +481,7 @@ void GpuChildThread::OnEstablishChannel(const EstablishChannelParams& params) {
   IPC::ChannelHandle channel_handle = gpu_channel_manager_->EstablishChannel(
       params.client_id, params.client_tracing_id, params.preempts,
       params.allow_view_command_buffers, params.allow_real_time_streams);
-  media_service_->AddChannel(params.client_id);
+  media_gpu_channel_manager_->AddChannel(params.client_id);
   Send(new GpuHostMsg_ChannelEstablished(channel_handle));
 }
 
@@ -537,13 +518,13 @@ void GpuChildThread::OnDestroyingVideoSurface(int surface_id) {
 void GpuChildThread::OnLoseAllContexts() {
   if (gpu_channel_manager_) {
     gpu_channel_manager_->DestroyAllChannels();
-    media_service_->DestroyAllChannels();
+    media_gpu_channel_manager_->DestroyAllChannels();
   }
 }
 
 void GpuChildThread::BindServiceFactoryRequest(
-    shell::mojom::ServiceFactoryRequest request) {
-  DVLOG(1) << "GPU: Binding shell::mojom::ServiceFactoryRequest";
+    service_manager::mojom::ServiceFactoryRequest request) {
+  DVLOG(1) << "GPU: Binding service_manager::mojom::ServiceFactoryRequest";
   DCHECK(service_factory_);
   service_factory_bindings_.AddBinding(service_factory_.get(),
                                        std::move(request));

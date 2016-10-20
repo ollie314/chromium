@@ -1262,6 +1262,49 @@ TEST_F(WebViewTest, ExtendSelectionAndDelete) {
   EXPECT_EQ("ijklmnopqrstuvwxyz", std::string(info.value.utf8().data()));
 }
 
+TEST_F(WebViewTest, DeleteSurroundingText) {
+  URLTestHelpers::registerMockedURLFromBaseURL(
+      WebString::fromUTF8(m_baseURL.c_str()),
+      WebString::fromUTF8("input_field_populated.html"));
+  WebView* webView = m_webViewHelper.initializeAndLoad(
+      m_baseURL + "input_field_populated.html");
+  WebLocalFrameImpl* frame = toWebLocalFrameImpl(webView->mainFrame());
+  webView->setInitialFocus(false);
+
+  frame->setEditableSelectionOffsets(10, 10);
+  frame->deleteSurroundingText(5, 8);
+  WebTextInputInfo info = webView->textInputInfo();
+  EXPECT_EQ("01234ijklmnopqrstuvwxyz", std::string(info.value.utf8().data()));
+  EXPECT_EQ(5, info.selectionStart);
+  EXPECT_EQ(5, info.selectionEnd);
+
+  frame->setEditableSelectionOffsets(5, 10);
+  frame->deleteSurroundingText(3, 5);
+  info = webView->textInputInfo();
+  EXPECT_EQ("01ijklmstuvwxyz", std::string(info.value.utf8().data()));
+  EXPECT_EQ(2, info.selectionStart);
+  EXPECT_EQ(7, info.selectionEnd);
+
+  frame->setEditableSelectionOffsets(5, 5);
+  frame->deleteSurroundingText(10, 0);
+  info = webView->textInputInfo();
+  EXPECT_EQ("lmstuvwxyz", std::string(info.value.utf8().data()));
+  EXPECT_EQ(0, info.selectionStart);
+  EXPECT_EQ(0, info.selectionEnd);
+
+  frame->deleteSurroundingText(0, 20);
+  info = webView->textInputInfo();
+  EXPECT_EQ("", std::string(info.value.utf8().data()));
+  EXPECT_EQ(0, info.selectionStart);
+  EXPECT_EQ(0, info.selectionEnd);
+
+  frame->deleteSurroundingText(10, 10);
+  info = webView->textInputInfo();
+  EXPECT_EQ("", std::string(info.value.utf8().data()));
+  EXPECT_EQ(0, info.selectionStart);
+  EXPECT_EQ(0, info.selectionEnd);
+}
+
 TEST_F(WebViewTest, SetCompositionFromExistingText) {
   URLTestHelpers::registerMockedURLFromBaseURL(
       WebString::fromUTF8(m_baseURL.c_str()),
@@ -1472,8 +1515,9 @@ TEST_F(WebViewTest, HistoryResetScrollAndScaleState) {
   LocalFrame* mainFrameLocal = toLocalFrame(webViewImpl->page()->mainFrame());
   mainFrameLocal->loader().saveScrollState();
   EXPECT_EQ(2.0f, mainFrameLocal->loader().currentItem()->pageScaleFactor());
-  EXPECT_EQ(94, mainFrameLocal->loader().currentItem()->scrollPoint().x());
-  EXPECT_EQ(111, mainFrameLocal->loader().currentItem()->scrollPoint().y());
+  EXPECT_EQ(94, mainFrameLocal->loader().currentItem()->scrollOffset().width());
+  EXPECT_EQ(111,
+            mainFrameLocal->loader().currentItem()->scrollOffset().height());
 
   // Confirm that resetting the page state resets the saved scroll position.
   webViewImpl->resetScrollAndScaleState();
@@ -1481,8 +1525,8 @@ TEST_F(WebViewTest, HistoryResetScrollAndScaleState) {
   EXPECT_EQ(0, webViewImpl->mainFrame()->scrollOffset().width);
   EXPECT_EQ(0, webViewImpl->mainFrame()->scrollOffset().height);
   EXPECT_EQ(1.0f, mainFrameLocal->loader().currentItem()->pageScaleFactor());
-  EXPECT_EQ(0, mainFrameLocal->loader().currentItem()->scrollPoint().x());
-  EXPECT_EQ(0, mainFrameLocal->loader().currentItem()->scrollPoint().y());
+  EXPECT_EQ(0, mainFrameLocal->loader().currentItem()->scrollOffset().width());
+  EXPECT_EQ(0, mainFrameLocal->loader().currentItem()->scrollOffset().height());
 }
 
 TEST_F(WebViewTest, BackForwardRestoreScroll) {
@@ -1568,9 +1612,10 @@ TEST_F(WebViewTest, FullscreenResetScrollAndScaleFullscreenStyles) {
 
   // Sanity-check. There should be no scrolling possible.
   ASSERT_EQ(0, webViewImpl->mainFrame()->scrollOffset().height);
-  ASSERT_EQ(
-      0,
-      webViewImpl->mainFrameImpl()->frameView()->maximumScrollPosition().y());
+  ASSERT_EQ(0, webViewImpl->mainFrameImpl()
+                   ->frameView()
+                   ->maximumScrollOffset()
+                   .height());
 
   // Confirm that after exiting and doing a layout, the scroll and scale
   // parameters are reset. The page sets display: none on overflowing elements
@@ -1607,9 +1652,10 @@ TEST_F(WebViewTest, FullscreenResetScrollAndScaleExitAndReenter) {
 
   // Sanity-check. There should be no scrolling possible.
   ASSERT_EQ(0, webViewImpl->mainFrame()->scrollOffset().height);
-  ASSERT_EQ(
-      0,
-      webViewImpl->mainFrameImpl()->frameView()->maximumScrollPosition().y());
+  ASSERT_EQ(0, webViewImpl->mainFrameImpl()
+                   ->frameView()
+                   ->maximumScrollOffset()
+                   .height());
 
   // Exit and, without performing a layout, reenter fullscreen again. We
   // shouldn't try to restore the scroll and scale values when we layout to
@@ -1622,9 +1668,10 @@ TEST_F(WebViewTest, FullscreenResetScrollAndScaleExitAndReenter) {
 
   // Sanity-check. There should be no scrolling possible.
   ASSERT_EQ(0, webViewImpl->mainFrame()->scrollOffset().height);
-  ASSERT_EQ(
-      0,
-      webViewImpl->mainFrameImpl()->frameView()->maximumScrollPosition().y());
+  ASSERT_EQ(0, webViewImpl->mainFrameImpl()
+                   ->frameView()
+                   ->maximumScrollOffset()
+                   .height());
 
   // When we exit now, we should restore the original scroll value.
   webViewImpl->exitFullscreenForElement(element);
@@ -4047,8 +4094,8 @@ TEST_F(WebViewTest, ViewportOverrideAdaptsToScaleAndScroll) {
   // Initial transform takes current page scale and scroll position into
   // account.
   webViewImpl->setPageScaleFactor(1.5f);
-  frameView->setScrollPosition(DoublePoint(100, 150), ProgrammaticScroll,
-                               ScrollBehaviorInstant);
+  frameView->setScrollOffset(ScrollOffset(100, 150), ProgrammaticScroll,
+                             ScrollBehaviorInstant);
   devToolsEmulator->forceViewport(WebFloatPoint(50, 55), 2.f);
   expectedMatrix.makeIdentity()
       .scale(2.f)
@@ -4062,8 +4109,8 @@ TEST_F(WebViewTest, ViewportOverrideAdaptsToScaleAndScroll) {
             *devToolsEmulator->visibleContentRectForPainting());
 
   // Transform adapts to scroll changes.
-  frameView->setScrollPosition(DoublePoint(50, 55), ProgrammaticScroll,
-                               ScrollBehaviorInstant);
+  frameView->setScrollOffset(ScrollOffset(50, 55), ProgrammaticScroll,
+                             ScrollBehaviorInstant);
   expectedMatrix.makeIdentity()
       .scale(2.f)
       .translate(-50, -55)

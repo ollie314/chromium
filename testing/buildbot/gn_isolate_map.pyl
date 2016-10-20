@@ -174,7 +174,7 @@
     "type": "console_test_launcher",
   },
   "blimp_test_apk": {
-    "label": "//blimp/client:blimp_test_apk",
+    "label": "//blimp/client/app:blimp_test_apk",
     "type": "console_test_launcher",
   },
   "blimp_unittests": {
@@ -368,13 +368,6 @@
     "label": "//content/public/android:content_junit_tests",
     "type": "junit_test",
   },
-  "content_site_isolation_browsertests": {
-    "label": "//content/test:content_site_isolation_browsertests",
-    "label_type": "group",
-    "type": "windowed_test_launcher",
-    "executable": "content_browsertests",
-    "args": ["--site-per-process", "--test-launcher-filter-file=../../testing/buildbot/filters/site-per-process.content_browsertests.filter"],
-  },
   "content_shell_test_apk": {
     "label": "//content/shell/android:content_shell_test_apk",
     "type": "console_test_launcher",
@@ -390,6 +383,10 @@
   "cronet_package": {
     "label": "//components/cronet/android:cronet_package",
     "type": "additional_compile_target",
+  },
+  "cronet_test": {
+    "label": "//components/cronet/ios:cronet_test",
+    "type": "raw",
   },
   "cronet_test_instrumentation_apk": {
     "label": "//components/cronet/android:cronet_test_instrumentation_apk",
@@ -597,6 +594,10 @@
     "label": "//media/blink:media_blink_unittests",
     "type": "windowed_test_launcher",
   },
+  "media_remoting_unittests": {
+    "label": "//media/remoting:media_remoting_unittests",
+    "type": "console_test_launcher",
+  },
   "midi_unittests": {
     "label": "//media/midi:midi_unittests",
     "type": "windowed_test_launcher",
@@ -626,7 +627,7 @@
     "type": "console_test_launcher",
   },
   "mojo_public_application_unittests": {
-    "label": "//services/shell/public/cpp/tests:mojo_public_application_unittests",
+    "label": "//services/service_manager/public/cpp/tests:mojo_public_application_unittests",
     "type": "windowed_test_launcher",
   },
   "mojo_public_bindings_unittests": {
@@ -638,11 +639,7 @@
     "type": "console_test_launcher",
   },
   "mojo_runner_host_unittests": {
-    "label": "//services/shell/runner/host:mojo_runner_host_unittests",
-    "type": "console_test_launcher",
-  },
-  "mojo_shell_unittests": {
-    "label": "//services/shell/tests:mojo_shell_unittests",
+    "label": "//services/service_manager/runner/host:mojo_runner_host_unittests",
     "type": "console_test_launcher",
   },
   "mojo_system_unittests": {
@@ -776,6 +773,10 @@
     "label": "//sandbox/win:sbox_validation_tests",
     "type": "console_test_launcher",
   },
+  "service_manager_unittests": {
+    "label": "//services/service_manager/tests:service_manager_unittests",
+    "type": "console_test_launcher",
+  },
   "setup_unittests": {
     "label": "//chrome/installer/setup:setup_unittests",
     "type": "console_test_launcher",
@@ -786,6 +787,10 @@
   },
   "sql_unittests": {
     "label": "//sql:sql_unittests",
+    "type": "console_test_launcher",
+  },
+  "storage_unittests": {
+    "label": "//storage/browser:storage_unittests",
     "type": "console_test_launcher",
   },
   "sync_integration_tests": {

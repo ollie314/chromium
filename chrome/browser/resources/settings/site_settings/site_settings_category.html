@@ -1,7 +1,5 @@
 <link rel="import" href="chrome://resources/html/polymer.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-checkbox/paper-checkbox.html">
-<link rel="import" href="chrome://resources/polymer/v1_0/paper-item/paper-icon-item.html">
-<link rel="import" href="chrome://resources/polymer/v1_0/paper-item/paper-item-body.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-toggle-button/paper-toggle-button.html">
 <link rel="import" href="chrome://resources/html/web_ui_listener_behavior.html">
 <link rel="import" href="/settings_shared_css.html">
@@ -87,18 +85,21 @@
         category="[[category]]"
         category-subtype="[[PermissionValues.BLOCK]]"
         category-enabled="[[categoryEnabled]]"
-        selected-site="{{selectedSite}}">
-    </site-list>
-    <site-list
-        category="[[category]]"
-        category-subtype="[[PermissionValues.ALLOW]]"
-        category-enabled="[[categoryEnabled]]"
+        category-header="$i18n{siteSettingsBlock}"
         selected-site="{{selectedSite}}">
     </site-list>
     <site-list
         category="[[category]]"
         category-subtype="[[PermissionValues.SESSION_ONLY]]"
         category-enabled="[[categoryEnabled]]"
+        category-header="$i18n{siteSettingsSessionOnly}"
+        selected-site="{{selectedSite}}">
+    </site-list>
+    <site-list
+        category="[[category]]"
+        category-subtype="[[PermissionValues.ALLOW]]"
+        category-enabled="[[categoryEnabled]]"
+        category-header="$i18n{siteSettingsAllow}"
         selected-site="{{selectedSite}}">
     </site-list>
 

@@ -80,9 +80,8 @@ RenderWidgetHost* RenderWidgetHostViewBase::GetRenderWidgetHost() const {
 void RenderWidgetHostViewBase::NotifyObserversAboutShutdown() {
   // Note: RenderWidgetHostInputEventRouter is an observer, and uses the
   // following notification to remove this view from its surface owners map.
-  FOR_EACH_OBSERVER(RenderWidgetHostViewBaseObserver,
-                    observers_,
-                    OnRenderWidgetHostViewBaseDestroyed(this));
+  for (auto& observer : observers_)
+    observer.OnRenderWidgetHostViewBaseDestroyed(this);
   // All observers are required to disconnect after they are notified.
   DCHECK(!observers_.might_have_observers());
 }
@@ -440,20 +439,27 @@ gfx::PointF RenderWidgetHostViewBase::TransformPointToRootCoordSpaceF(
       gfx::ToRoundedPoint(point)));
 }
 
-gfx::Point RenderWidgetHostViewBase::TransformPointToLocalCoordSpace(
+bool RenderWidgetHostViewBase::TransformPointToLocalCoordSpace(
     const gfx::Point& point,
-    const cc::SurfaceId& original_surface) {
-  return point;
+    const cc::SurfaceId& original_surface,
+    gfx::Point* transformed_point) {
+  *transformed_point = point;
+  return true;
 }
 
-gfx::Point RenderWidgetHostViewBase::TransformPointToCoordSpaceForView(
+bool RenderWidgetHostViewBase::TransformPointToCoordSpaceForView(
     const gfx::Point& point,
-    RenderWidgetHostViewBase* target_view) {
+    RenderWidgetHostViewBase* target_view,
+    gfx::Point* transformed_point) {
   NOTREACHED();
-  return point;
+  return true;
 }
 
 bool RenderWidgetHostViewBase::IsRenderWidgetHostViewGuest() {
+  return false;
+}
+
+bool RenderWidgetHostViewBase::IsRenderWidgetHostViewChildFrame() {
   return false;
 }
 

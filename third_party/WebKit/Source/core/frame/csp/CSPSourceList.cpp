@@ -46,12 +46,15 @@ CSPSourceList::CSPSourceList(ContentSecurityPolicy* policy,
 bool CSPSourceList::matches(
     const KURL& url,
     ResourceRequest::RedirectStatus redirectStatus) const {
-  // Wildcards match network schemes ('http', 'https', 'ws', 'wss'), and the scheme of the
-  // protected resource: https://w3c.github.io/webappsec-csp/#match-url-to-source-expression.
-  // Other schemes, including custom schemes, must be explicitly listed in a source list.
+  // Wildcards match network schemes ('http', 'https', 'ftp', 'ws', 'wss'), and
+  // the scheme of the protected resource:
+  // https://w3c.github.io/webappsec-csp/#match-url-to-source-expression. Other
+  // schemes, including custom schemes, must be explicitly listed in a source
+  // list.
   if (m_allowStar) {
-    if (url.protocolIsInHTTPFamily() || url.protocolIs("ws") ||
-        url.protocolIs("wss") || m_policy->protocolMatchesSelf(url))
+    if (url.protocolIsInHTTPFamily() || url.protocolIs("ftp") ||
+        url.protocolIs("ws") || url.protocolIs("wss") ||
+        m_policy->protocolMatchesSelf(url))
       return true;
 
     return hasSourceMatchInList(url, redirectStatus);
@@ -346,7 +349,8 @@ bool CSPSourceList::parseHash(
 
   for (const auto& algorithm : kSupportedPrefixes) {
     prefix = algorithm.prefix;
-    // TODO(esprehn): Should be StringView(begin, end - begin).startsWith(prefix).
+    // TODO(esprehn): Should be StringView(begin, end -
+    // begin).startsWith(prefix).
     if (hashLength > prefix.length() &&
         equalIgnoringCase(prefix, StringView(begin, prefix.length()))) {
       hashAlgorithm = algorithm.type;

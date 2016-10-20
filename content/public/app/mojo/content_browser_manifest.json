@@ -1,8 +1,8 @@
 {
   "manifest_version": 1,
-  "name": "exe:content_browser",
+  "name": "service:content_browser",
   "process-group": "browser",
-  "display_name": "Content Browser",
+  "display_name": "Content (browser process)",
   "capabilities": {
     // Remove this once http://crbug.com/632818 is fixed.
     "provided": {
@@ -21,8 +21,10 @@
         "blink::mojom::ShapeDetection",
         "blink::mojom::WebSocket",
         "content::mojom::MemoryCoordinatorHandle",
+        "content::mojom::ServiceWorkerDispatcherHost",
         "content::mojom::StoragePartitionService",
         "content::mojom::URLLoaderFactory",
+        "content::mojom::VideoCaptureHost",
         "device::BatteryMonitor",
         "device::mojom::LightSensor",
         "device::mojom::MotionSensor",
@@ -30,33 +32,26 @@
         "device::mojom::TimeZoneMonitor",
         "media::mojom::ImageCapture",
         "memory_coordinator::mojom::MemoryCoordinatorHandle"
+      ],
+      "service_manager:service_factory": [
+        "service_manager::mojom::ServiceFactory"
       ]
     },
     "required": {
-      "*": { "classes": [ "app" ] },
-
+      "*": [ "app" ],
       // In classic ash, the browser supplies ash interfaces to itself.
-      "exe:content_browser": { "classes": [ "ash" ] },
-
-      "exe:content_gpu": { "classes": [ "browser" ] },
-      "exe:content_plugin": { "classes": [ "browser" ] },
-      "exe:content_renderer": { "classes": [ "browser" ] },
-      "exe:content_utility": { "classes": [ "browser" ] },
-
-      "mojo:shell": {
-        "classes": [
-          "shell:client_process",
-          "shell:instance_name",
-          "shell:user_id"
-        ]
-      },
-      "mojo:file": {
-        "interfaces": [
-          "leveldb::mojom::LevelDBService",
-          "user_service::UserService"
-        ]
-      },
-      "mojo:media": { "interfaces": [ "media::mojom::MediaService" ] }
+      "service:content_browser": [ "ash" ],
+      "service:content_gpu": [ "browser" ],
+      "service:content_plugin": [ "browser" ],
+      "service:content_renderer": [ "browser" ],
+      "service:content_utility": [ "browser" ],
+      "service:service_manager": [
+        "service_manager:client_process",
+        "service_manager:instance_name",
+        "service_manager:user_id"
+      ],
+      "service:file": [ "file:filesystem", "file:leveldb" ],
+      "service:media": [ "media:media" ]
     }
   }
 }

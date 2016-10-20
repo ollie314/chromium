@@ -1,0 +1,69 @@
+// Copyright 2014 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+module service_manager.mojom;
+
+import "services/service_manager/public/interfaces/connector.mojom";
+import "services/service_manager/public/interfaces/interface_provider.mojom";
+import "services/service_manager/public/interfaces/interface_provider_spec.mojom";
+
+// Implemented by any service which is known to the Service Manager, for which
+// instances may be tracked. It allows the implementor to receive lifecycle
+// events and service inbound connection attempts.
+interface Service {
+  // Called by the service manager once an instance for this service has been
+  // created. This method will be called exactly once before any other method is
+  // called.
+  //
+  // Parameters:
+  //
+  //  identity
+  //    The identity of this instance in the service manager. Includes:
+  //    * The resolved name used in the connection request that resulted in this
+  //      instance being initialized.
+  //    * The user associated with this instance in the service manager. This
+  //      will never be kInheritUserID.
+  //    * The instance group this instance belongs to.
+  //
+  // Response parameters:
+  //
+  //  connector_request
+  //    An optional Connector request for the service manager to bind, allowing
+  //    the initialized client to connect to others.
+  //
+  OnStart(Identity identity) => (Connector&? connector_request);
+
+  // Called when another service attempts to open a connection to this
+  // service. A service implements this method to complete the exchange
+  // of interface implementations with the remote service. See also
+  // documentation in service_manager.mojom for Connect(). The service
+  // originating the request is referred to as the "source" and the one
+  // receiving the "target".
+  //
+  // Parameters:
+  //
+  //  source
+  //    The identity of the instance originating the connection.
+  //
+  //  interfaces
+  //    A request for an InterfaceProvider by which the source service may
+  //    seek to bind interface implementations exported by the target.
+  //
+  //  required_interfaces
+  //    A whitelist of interface names that should be made available to the
+  //    source that initiated the connection, in accordance to policy described
+  //    in the source & target's service manifests. Attempts to bind interfaces
+  //    not in this whitelist must not be fulfilled.
+  //
+  //  required_capabilities
+  //    A set of the capability names required by the source initiating the
+  //    connection. |required_interfaces| controls interface binding, so this
+  //    is useful mostly if the target wishes to control behavior based on the
+  //    presence of a value in this set.
+  //
+  OnConnect(Identity source,
+            InterfaceProvider&? interfaces,
+            InterfaceSet required_interfaces,
+            CapabilitySet required_capabilities);
+};

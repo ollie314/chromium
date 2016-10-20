@@ -64,7 +64,8 @@ static inline InlineFlowBox* flowBoxForLayoutObject(
   }
 
   if (layoutObject->isLayoutInline()) {
-    // We're given a LayoutSVGInline or objects that derive from it (LayoutSVGTSpan / LayoutSVGTextPath)
+    // We're given a LayoutSVGInline or objects that derive from it
+    // (LayoutSVGTSpan / LayoutSVGTextPath)
     LayoutInline* layoutInline = toLayoutInline(layoutObject);
 
     // LayoutSVGInline only ever contains a single line box.
@@ -231,7 +232,8 @@ MetricsList::const_iterator findMetricsForCharacter(
     const MetricsList& metricsList,
     const SVGTextFragment& fragment,
     unsigned startInFragment) {
-  // Find the text metrics cell that starts at or contains the character at |startInFragment|.
+  // Find the text metrics cell that starts at or contains the character at
+  // |startInFragment|.
   MetricsList::const_iterator metrics =
       metricsList.begin() + fragment.metricsListOffset;
   unsigned fragmentOffset = 0;
@@ -447,7 +449,8 @@ static FloatRect physicalGlyphExtents(const QueryData* queryData,
                          FloatSize(std::max<float>(metrics.width(), 0),
                                    std::max<float>(metrics.height(), 0)));
 
-  // If RTL, adjust the starting point to align with the LHS of the glyph bounding box.
+  // If RTL, adjust the starting point to align with the LHS of the glyph
+  // bounding box.
   if (!queryData->textBox->isLeftToRightDirection()) {
     if (queryData->isVerticalText)
       glyphExtents.move(0, -glyphExtents.height());
@@ -463,10 +466,14 @@ static inline FloatRect calculateGlyphBoundaries(
     int startPosition) {
   const float scalingFactor = queryData->textLineLayout.scalingFactor();
   ASSERT(scalingFactor);
-  const float baseline =
-      queryData->textLineLayout.scaledFont().getFontMetrics().floatAscent() /
-      scalingFactor;
+  const SimpleFontData* fontData =
+      queryData->textLineLayout.scaledFont().primaryFont();
+  DCHECK(fontData);
+  if (!fontData)
+    return FloatRect();
 
+  const float baseline =
+      fontData->getFontMetrics().floatAscent() / scalingFactor;
   float glyphOffsetInDirection =
       calculateGlyphRange(queryData, fragment, 0, startPosition);
   FloatPoint glyphPosition = logicalGlyphPositionToPhysical(
@@ -563,9 +570,15 @@ static bool characterNumberAtPositionCallback(QueryData* queryData,
 
   const float scalingFactor = data->textLineLayout.scalingFactor();
   ASSERT(scalingFactor);
+
+  const SimpleFontData* fontData =
+      data->textLineLayout.scaledFont().primaryFont();
+  DCHECK(fontData);
+  if (!fontData)
+    return false;
+
   const float baseline =
-      data->textLineLayout.scaledFont().getFontMetrics().floatAscent() /
-      scalingFactor;
+      fontData->getFontMetrics().floatAscent() / scalingFactor;
 
   // Test the query point against the bounds of the entire fragment first.
   if (!fragment.boundingBox(baseline).contains(data->position))

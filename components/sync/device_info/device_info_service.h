@@ -17,25 +17,20 @@
 #include "base/observer_list.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
-#include "components/sync/api/model_type_service.h"
-#include "components/sync/api/model_type_store.h"
-#include "components/sync/core/simple_metadata_change_list.h"
 #include "components/sync/device_info/device_info_tracker.h"
 #include "components/sync/device_info/local_device_info_provider.h"
-
-namespace syncer {
-class SyncError;
-}  // namespace syncer
-
-namespace syncer {
-class ModelTypeChangeProcessor;
-}  // namespace syncer
+#include "components/sync/model/model_type_service.h"
+#include "components/sync/model/model_type_store.h"
+#include "components/sync/model/simple_metadata_change_list.h"
 
 namespace sync_pb {
 class DeviceInfoSpecifics;
 }  // namespace sync_pb
 
 namespace syncer {
+
+class ModelTypeChangeProcessor;
+class SyncError;
 
 // USS service implementation for DEVICE_INFO model type. Handles storage of
 // device info and associated sync metadata, applying/merging foreign changes,
@@ -62,7 +57,6 @@ class DeviceInfoService : public ModelTypeService, public DeviceInfoTracker {
   void GetAllData(DataCallback callback) override;
   std::string GetClientTag(const EntityData& entity_data) override;
   std::string GetStorageKey(const EntityData& entity_data) override;
-  void OnChangeProcessorSet() override;
 
   // DeviceInfoTracker implementation.
   bool IsSyncing() const override;
@@ -167,8 +161,6 @@ class DeviceInfoService : public ModelTypeService, public DeviceInfoTracker {
   bool has_provider_initialized_ = false;
   // If data has been loaded from the store.
   bool has_data_loaded_ = false;
-  // if |change_processor()| has been given metadata.
-  bool has_metadata_loaded_ = false;
 
   // Used to update our local device info once every pulse interval.
   base::OneShotTimer pulse_timer_;

@@ -77,7 +77,13 @@ class MediaRouterDialogDelegate : public WebDialogDelegate {
     // MediaRouterUI adds its own message handlers.
   }
 
-  void GetDialogSize(gfx::Size* size) const override;
+  void GetDialogSize(gfx::Size* size) const override {
+    DCHECK(size);
+    // GetDialogSize() is called when the browser window resizes. We may want to
+    // update the maximum height of the dialog and scale the WebUI to the new
+    // height. |size| is not set because the dialog is auto-resizeable.
+    controller_->UpdateMaxDialogSize();
+  }
 
   std::string GetDialogArgs() const override {
     return std::string();
@@ -103,14 +109,6 @@ class MediaRouterDialogDelegate : public WebDialogDelegate {
 
   DISALLOW_COPY_AND_ASSIGN(MediaRouterDialogDelegate);
 };
-
-void MediaRouterDialogDelegate::GetDialogSize(gfx::Size* size) const {
-  DCHECK(size);
-  // GetDialogSize() is called when the browser window resizes. We may want to
-  // update the maximum height of the dialog and scale the WebUI to the new
-  // height. |size| is not set because the dialog is auto-resizeable.
-  controller_->UpdateMaxDialogSize();
-}
 
 }  // namespace
 
@@ -311,13 +309,10 @@ void MediaRouterDialogControllerImpl::PopulateDialog(
 
   std::unique_ptr<CreatePresentationConnectionRequest>
       create_connection_request(TakeCreateConnectionRequest());
-  // TODO(imcheng): Don't create PresentationServiceDelegateImpl if it doesn't
-  // exist (crbug.com/508695).
-  base::WeakPtr<PresentationServiceDelegateImpl> delegate =
-      PresentationServiceDelegateImpl::GetOrCreateForWebContents(initiator())
-          ->GetWeakPtr();
+  PresentationServiceDelegateImpl* delegate =
+      PresentationServiceDelegateImpl::FromWebContents(initiator());
   if (!create_connection_request.get()) {
-    media_router_ui->InitWithDefaultMediaSource(delegate);
+    media_router_ui->InitWithDefaultMediaSource(initiator(), delegate);
   } else {
     media_router_ui->InitWithPresentationSessionRequest(
         initiator(), delegate, std::move(create_connection_request));

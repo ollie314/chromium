@@ -26,7 +26,6 @@
 
 #include "platform/graphics/GraphicsContext.h"
 
-#include "platform/TraceEvent.h"
 #include "platform/geometry/FloatRect.h"
 #include "platform/geometry/FloatRoundedRect.h"
 #include "platform/geometry/IntRect.h"
@@ -35,6 +34,7 @@
 #include "platform/graphics/ImageBuffer.h"
 #include "platform/graphics/Path.h"
 #include "platform/graphics/paint/PaintController.h"
+#include "platform/tracing/TraceEvent.h"
 #include "platform/weborigin/KURL.h"
 #include "skia/ext/platform_canvas.h"
 #include "third_party/skia/include/core/SkAnnotation.h"
@@ -59,14 +59,12 @@ GraphicsContext::GraphicsContext(PaintController& paintController,
     : m_canvas(nullptr),
       m_paintController(paintController),
       m_paintStateStack(),
-      m_paintStateIndex(0)
+      m_paintStateIndex(0),
 #if DCHECK_IS_ON()
-      ,
       m_layerCount(0),
       m_disableDestructionChecks(false),
-      m_inDrawingRecorder(false)
+      m_inDrawingRecorder(false),
 #endif
-      ,
       m_disabledState(disableContextOrPainting),
       m_deviceScaleFactor(1.0f),
       m_printing(false),
@@ -74,8 +72,8 @@ GraphicsContext::GraphicsContext(PaintController& paintController,
   if (metaData)
     m_metaData = *metaData;
 
-  // FIXME: Do some tests to determine how many states are typically used, and allocate
-  // several here.
+  // FIXME: Do some tests to determine how many states are typically used, and
+  // allocate several here.
   m_paintStateStack.append(GraphicsContextState::create());
   m_paintState = m_paintStateStack.last().get();
 
@@ -212,8 +210,9 @@ SkColorFilter* GraphicsContext::getColorFilter() const {
 void GraphicsContext::setColorFilter(ColorFilter colorFilter) {
   GraphicsContextState* stateToSet = mutableState();
 
-  // We only support one active color filter at the moment. If (when) this becomes a problem,
-  // we should switch to using color filter chains (Skia work in progress).
+  // We only support one active color filter at the moment. If (when) this
+  // becomes a problem, we should switch to using color filter chains (Skia work
+  // in progress).
   DCHECK(!stateToSet->getColorFilter());
   stateToSet->setColorFilter(WebCoreColorFilterToSkiaColorFilter(colorFilter));
 }
@@ -237,7 +236,7 @@ void GraphicsContext::beginLayer(float opacity,
 
   SkPaint layerPaint;
   layerPaint.setAlpha(static_cast<unsigned char>(opacity * 255));
-  layerPaint.setXfermodeMode(xfermode);
+  layerPaint.setBlendMode(static_cast<SkBlendMode>(xfermode));
   layerPaint.setColorFilter(WebCoreColorFilterToSkiaColorFilter(colorFilter));
   layerPaint.setImageFilter(std::move(imageFilter));
 
@@ -312,7 +311,7 @@ void GraphicsContext::compositePicture(sk_sp<SkPicture> picture,
   ASSERT(m_canvas);
 
   SkPaint picturePaint;
-  picturePaint.setXfermodeMode(op);
+  picturePaint.setBlendMode(static_cast<SkBlendMode>(op));
   m_canvas->save();
   SkRect sourceBounds = src;
   SkRect skBounds = dest;
@@ -330,18 +329,18 @@ void GraphicsContext::compositePicture(sk_sp<SkPicture> picture,
 
 void GraphicsContext::drawFocusRingPath(const SkPath& path,
                                         const Color& color,
-                                        int width) {
+                                        float width) {
   drawPlatformFocusRing(path, m_canvas, color.rgb(), width);
 }
 
 void GraphicsContext::drawFocusRingRect(const SkRect& rect,
                                         const Color& color,
-                                        int width) {
+                                        float width) {
   drawPlatformFocusRing(rect, m_canvas, color.rgb(), width);
 }
 
 void GraphicsContext::drawFocusRing(const Path& focusRingPath,
-                                    int width,
+                                    float width,
                                     int offset,
                                     const Color& color) {
   // FIXME: Implement support for offset.
@@ -352,7 +351,7 @@ void GraphicsContext::drawFocusRing(const Path& focusRingPath,
 }
 
 void GraphicsContext::drawFocusRing(const Vector<IntRect>& rects,
-                                    int width,
+                                    float width,
                                     int offset,
                                     const Color& color) {
   if (contextDisabled())
@@ -484,7 +483,8 @@ void GraphicsContext::drawLine(const IntPoint& point1, const IntPoint& point2) {
 
   if (getStrokeStyle() == DottedStroke || getStrokeStyle() == DashedStroke) {
     // Do a rect fill of our endpoints.  This ensures we always have the
-    // appearance of being a border.  We then draw the actual dotted/dashed line.
+    // appearance of being a border.  We then draw the actual dotted/dashed
+    // line.
     SkRect r1, r2;
     r1.set(p1.x(), p1.y(), p1.x() + width, p1.y() + width);
     r2.set(p2.x(), p2.y(), p2.x() + width, p2.y() + width);
@@ -806,7 +806,7 @@ void GraphicsContext::drawImage(
   const FloatRect src = srcPtr ? *srcPtr : image->rect();
 
   SkPaint imagePaint = immutableState()->fillPaint();
-  imagePaint.setXfermodeMode(op);
+  imagePaint.setBlendMode(static_cast<SkBlendMode>(op));
   imagePaint.setColor(SK_ColorBLACK);
   imagePaint.setFilterQuality(computeFilterQuality(image, dest, src));
   imagePaint.setAntiAlias(shouldAntialias());
@@ -836,7 +836,7 @@ void GraphicsContext::drawImageRRect(
     return;
 
   SkPaint imagePaint = immutableState()->fillPaint();
-  imagePaint.setXfermodeMode(op);
+  imagePaint.setBlendMode(static_cast<SkBlendMode>(op));
   imagePaint.setColor(SK_ColorBLACK);
   imagePaint.setFilterQuality(
       computeFilterQuality(image, dest.rect(), srcRect));
@@ -975,7 +975,7 @@ void GraphicsContext::fillRect(const FloatRect& rect,
 
   SkPaint paint = immutableState()->fillPaint();
   paint.setColor(color.rgb());
-  paint.setXfermodeMode(xferMode);
+  paint.setBlendMode(static_cast<SkBlendMode>(xferMode));
 
   drawRect(rect, paint);
 }
@@ -1041,9 +1041,10 @@ bool isSimpleDRRect(const FloatRoundedRect& outer,
           iRadii.bottomLeft().height()))
     return false;
 
-  // We also ignore DRRects with a very thick relative stroke (shapes which are mostly filled by
-  // the stroke): Skia's stroke outline can diverge significantly from the outer/inner contours
-  // in some edge cases, so we fall back to drawDRRect instead.
+  // We also ignore DRRects with a very thick relative stroke (shapes which are
+  // mostly filled by the stroke): Skia's stroke outline can diverge
+  // significantly from the outer/inner contours in some edge cases, so we fall
+  // back to drawDRRect() instead.
   const float kMaxStrokeToSizeRatio = 0.75f;
   if (2 * strokeSize.width() / outer.rect().width() > kMaxStrokeToSizeRatio ||
       2 * strokeSize.height() / outer.rect().height() > kMaxStrokeToSizeRatio)
@@ -1152,7 +1153,8 @@ void GraphicsContext::clipOut(const Path& pathToClip) {
   if (contextDisabled())
     return;
 
-  // Use const_cast and temporarily toggle the inverse fill type instead of copying the path.
+  // Use const_cast and temporarily toggle the inverse fill type instead of
+  // copying the path.
   SkPath& path = const_cast<SkPath&>(pathToClip.getSkPath());
   path.toggleInverseFillType();
   clipPath(path, AntiAliased);
@@ -1274,10 +1276,11 @@ void GraphicsContext::adjustLineToPixelBoundaries(FloatPoint& p1,
                                                   FloatPoint& p2,
                                                   float strokeWidth,
                                                   StrokeStyle penStyle) {
-  // For odd widths, we add in 0.5 to the appropriate x/y so that the float arithmetic
-  // works out.  For example, with a border width of 3, WebKit will pass us (y1+y2)/2, e.g.,
-  // (50+53)/2 = 103/2 = 51 when we want 51.5.  It is always true that an even width gave
-  // us a perfect position, but an odd width gave us a position that is off by exactly 0.5.
+  // For odd widths, we add in 0.5 to the appropriate x/y so that the float
+  // arithmetic works out.  For example, with a border width of 3, WebKit will
+  // pass us (y1+y2)/2, e.g., (50+53)/2 = 103/2 = 51 when we want 51.5.  It is
+  // always true that an even width gave us a perfect position, but an odd width
+  // gave us a position that is off by exactly 0.5.
   if (penStyle == DottedStroke || penStyle == DashedStroke) {
     if (p1.x() == p2.x()) {
       p1.setY(p1.y() + strokeWidth);
@@ -1288,7 +1291,7 @@ void GraphicsContext::adjustLineToPixelBoundaries(FloatPoint& p1,
     }
   }
 
-  if (static_cast<int>(strokeWidth) % 2) {  //odd
+  if (static_cast<int>(strokeWidth) % 2) {  // odd
     if (p1.x() == p2.x()) {
       // We're a vertical line.  Adjust our x.
       p1.setX(p1.x() + 0.5f);

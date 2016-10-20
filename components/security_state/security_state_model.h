@@ -136,6 +136,10 @@ class SecurityStateModel {
 
     // True if pinning was bypassed due to a local trust anchor.
     bool pkp_bypassed;
+
+    // True if the page displayed sensitive user data inputs (like a
+    // password or credit card) on an HTTP page.
+    bool displayed_private_user_data_input_on_http;
   };
 
   // Contains the security state relevant to computing the SecurityInfo
@@ -146,9 +150,7 @@ class SecurityStateModel {
     ~VisibleSecurityState();
     bool operator==(const VisibleSecurityState& other) const;
     GURL url;
-    // The baseline SecurityLevel describing the page or request before
-    // any SecurityStateModel policies have been applied.
-    SecurityLevel initial_security_level;
+
     // True if the page fails the browser's malware or phishing checks.
     bool fails_malware_check;
 

@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Keep this file in sync with the .proto files in this directory.
-
 #ifndef COMPONENTS_SYNC_PROTOCOL_PROTO_VALUE_CONVERSIONS_H_
 #define COMPONENTS_SYNC_PROTOCOL_PROTO_VALUE_CONVERSIONS_H_
 
@@ -60,7 +58,7 @@ class PasswordSpecifics;
 class PasswordSpecificsData;
 class PreferenceSpecifics;
 class PriorityPreferenceSpecifics;
-class PrinterPPDData;
+class PrinterPPDReference;
 class PrinterSpecifics;
 class ReadingListSpecifics;
 class SearchEngineSpecifics;
@@ -84,6 +82,8 @@ class WalletPostalAddress;
 class WifiCredentialSpecifics;
 }  // namespace sync_pb
 
+// Keep this file in sync with the .proto files in this directory.
+//
 // Utility functions to convert sync protocol buffers to dictionaries.
 // Each protocol field is mapped to a key of the same name.  Repeated
 // fields are mapped to array values and sub-messages are mapped to
@@ -162,8 +162,8 @@ std::unique_ptr<base::DictionaryValue> SessionSpecificsToValue(
 
 // Sub-protocol of PrinterSpecifics.
 
-std::unique_ptr<base::DictionaryValue> PrinterPPDDataToValue(
-    const sync_pb::PrinterPPDData& proto);
+std::unique_ptr<base::DictionaryValue> PrinterPPDReferenceToValue(
+    const sync_pb::PrinterPPDReference& proto);
 
 // Main *SpecificsToValue functions.
 

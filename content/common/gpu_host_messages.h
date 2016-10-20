@@ -90,7 +90,6 @@ IPC_STRUCT_TRAITS_BEGIN(gpu::GpuPreferences)
   IPC_STRUCT_TRAITS_MEMBER(force_gpu_mem_available)
   IPC_STRUCT_TRAITS_MEMBER(gpu_program_cache_size)
   IPC_STRUCT_TRAITS_MEMBER(disable_gpu_shader_disk_cache)
-  IPC_STRUCT_TRAITS_MEMBER(enable_share_group_async_texture_upload)
   IPC_STRUCT_TRAITS_MEMBER(enable_threaded_texture_mailboxes)
   IPC_STRUCT_TRAITS_MEMBER(gl_shader_interm_output)
   IPC_STRUCT_TRAITS_MEMBER(emulate_shader_precision)
@@ -161,9 +160,6 @@ IPC_MESSAGE_CONTROL0(GpuMsg_Crash)
 
 // Tells the GPU process to hang.
 IPC_MESSAGE_CONTROL0(GpuMsg_Hang)
-
-// Tells the GPU process to disable the watchdog thread.
-IPC_MESSAGE_CONTROL0(GpuMsg_DisableWatchdog)
 
 // Tells the GPU process that the browser has seen a GPU switch.
 IPC_MESSAGE_CONTROL0(GpuMsg_GpuSwitched)

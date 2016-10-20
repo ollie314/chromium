@@ -34,18 +34,19 @@ BlimpContentsImpl::BlimpContentsImpl(
     RenderWidgetFeature* render_widget_feature,
     TabControlFeature* tab_control_feature)
     : navigation_controller_(id, this, navigation_feature),
-      compositor_manager_(id, render_widget_feature, compositor_deps),
+      document_manager_(id, render_widget_feature, compositor_deps),
       id_(id),
       ime_feature_(ime_feature),
       window_(window),
       tab_control_feature_(tab_control_feature) {
   blimp_contents_view_ =
-      BlimpContentsViewImpl::Create(this, compositor_manager_.layer());
+      BlimpContentsViewImpl::Create(this, document_manager_.layer());
   ime_feature_->set_delegate(blimp_contents_view_->GetImeDelegate());
 }
 
 BlimpContentsImpl::~BlimpContentsImpl() {
-  FOR_EACH_OBSERVER(BlimpContentsObserver, observers_, BlimpContentsDying());
+  for (auto& observer : observers_)
+    observer.BlimpContentsDying();
   ime_feature_->set_delegate(nullptr);
 }
 
@@ -89,12 +90,12 @@ BlimpContentsViewImpl* BlimpContentsImpl::GetView() {
 }
 
 void BlimpContentsImpl::Show() {
-  compositor_manager_.SetVisible(true);
+  document_manager_.SetVisible(true);
   UMA_HISTOGRAM_BOOLEAN("Blimp.Tab.Visible", true);
 }
 
 void BlimpContentsImpl::Hide() {
-  compositor_manager_.SetVisible(false);
+  document_manager_.SetVisible(false);
   UMA_HISTOGRAM_BOOLEAN("Blimp.Tab.Visible", false);
 }
 
@@ -103,18 +104,18 @@ bool BlimpContentsImpl::HasObserver(BlimpContentsObserver* observer) {
 }
 
 void BlimpContentsImpl::OnNavigationStateChanged() {
-  FOR_EACH_OBSERVER(BlimpContentsObserver, observers_,
-                    OnNavigationStateChanged());
+  for (auto& observer : observers_)
+    observer.OnNavigationStateChanged();
 }
 
 void BlimpContentsImpl::OnLoadingStateChanged(bool loading) {
-  FOR_EACH_OBSERVER(BlimpContentsObserver, observers_,
-                    OnLoadingStateChanged(loading));
+  for (auto& observer : observers_)
+    observer.OnLoadingStateChanged(loading);
 }
 
 void BlimpContentsImpl::OnPageLoadingStateChanged(bool loading) {
-  FOR_EACH_OBSERVER(BlimpContentsObserver, observers_,
-                    OnPageLoadingStateChanged(loading));
+  for (auto& observer : observers_)
+    observer.OnPageLoadingStateChanged(loading);
 }
 
 void BlimpContentsImpl::SetSizeAndScale(const gfx::Size& size,

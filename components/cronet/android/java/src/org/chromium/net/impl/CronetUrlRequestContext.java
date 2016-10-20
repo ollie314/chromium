@@ -82,7 +82,8 @@ public class CronetUrlRequestContext extends CronetEngine {
 
     /**
      * Locks operations on the list of RequestFinishedInfo.Listeners, because operations can happen
-     * on any thread.
+     * on any thread. This should be used for fine-grained locking only. In particular, don't call
+     * any UrlRequest methods that acquire mUrlRequestAdapterLock while holding this lock.
      */
     private final Object mFinishedListenerLock = new Object();
 
@@ -192,13 +193,8 @@ public class CronetUrlRequestContext extends CronetEngine {
             boolean disableConnectionMigration, boolean allowDirectExecutor) {
         synchronized (mLock) {
             checkHaveAdapter();
-            boolean metricsCollectionEnabled = false;
-            synchronized (mFinishedListenerLock) {
-                metricsCollectionEnabled = !mFinishedListenerList.isEmpty();
-            }
             return new CronetUrlRequest(this, url, priority, callback, executor, requestAnnotations,
-                    metricsCollectionEnabled, disableCache, disableConnectionMigration,
-                    allowDirectExecutor);
+                    disableCache, disableConnectionMigration, allowDirectExecutor);
         }
     }
 
@@ -427,6 +423,12 @@ public class CronetUrlRequestContext extends CronetEngine {
     public void removeRequestFinishedListener(RequestFinishedInfo.Listener listener) {
         synchronized (mFinishedListenerLock) {
             mFinishedListenerList.remove(listener);
+        }
+    }
+
+    boolean hasRequestFinishedListener() {
+        synchronized (mFinishedListenerLock) {
+            return !mFinishedListenerList.isEmpty();
         }
     }
 

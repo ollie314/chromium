@@ -248,6 +248,15 @@ void NormalizeDisposition(chrome::NavigateParams* params) {
 
 // Obtain the profile used by the code that originated the Navigate() request.
 Profile* GetSourceProfile(chrome::NavigateParams* params) {
+  // |source_site_instance| needs to be checked before |source_contents|. This
+  // might matter when chrome.windows.create is used to open multiple URLs,
+  // which would reuse |params| and modify |params->source_contents| across
+  // navigations.
+  if (params->source_site_instance) {
+    return Profile::FromBrowserContext(
+        params->source_site_instance->GetBrowserContext());
+  }
+
   if (params->source_contents) {
     return Profile::FromBrowserContext(
         params->source_contents->GetBrowserContext());
@@ -462,7 +471,8 @@ void Navigate(NavigateParams* params) {
   if (GetSourceProfile(params) != params->browser->profile()) {
     // A tab is being opened from a link from a different profile, we must reset
     // source information that may cause state to be shared.
-    params->source_contents = NULL;
+    params->source_contents = nullptr;
+    params->source_site_instance = nullptr;
     params->referrer = content::Referrer();
   }
 

@@ -5,14 +5,15 @@
 #include "components/sync/driver/glue/sync_backend_registrar.h"
 
 #include "base/location.h"
+#include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
-#include "components/sync/core/test/test_user_share.h"
 #include "components/sync/driver/change_processor_mock.h"
 #include "components/sync/driver/fake_sync_client.h"
 #include "components/sync/driver/glue/browser_thread_model_worker.h"
 #include "components/sync/driver/sync_api_component_factory_mock.h"
 #include "components/sync/engine/passive_model_worker.h"
+#include "components/sync/syncable/test_user_share.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -26,7 +27,7 @@ using ::testing::Return;
 using ::testing::StrictMock;
 
 void TriggerChanges(SyncBackendRegistrar* registrar, ModelType type) {
-  registrar->OnChangesApplied(type, 0, NULL, ImmutableChangeRecordList());
+  registrar->OnChangesApplied(type, 0, nullptr, ImmutableChangeRecordList());
   registrar->OnChangesComplete(type);
 }
 
@@ -80,7 +81,7 @@ class SyncBackendRegistrarTest : public testing::Test {
   SyncBackendRegistrarTest()
       : db_thread_("DBThreadForTest"),
         file_thread_("FileThreadForTest"),
-        sync_thread_(NULL) {}
+        sync_thread_(nullptr) {}
 
   ~SyncBackendRegistrarTest() override {}
 
@@ -88,11 +89,11 @@ class SyncBackendRegistrarTest : public testing::Test {
     db_thread_.StartAndWaitForTesting();
     file_thread_.StartAndWaitForTesting();
     test_user_share_.SetUp();
-    sync_client_.reset(new RegistrarSyncClient(
-        ui_task_runner(), db_task_runner(), file_task_runner()));
-    registrar_.reset(new SyncBackendRegistrar(
+    sync_client_ = base::MakeUnique<RegistrarSyncClient>(
+        ui_task_runner(), db_task_runner(), file_task_runner());
+    registrar_ = base::MakeUnique<SyncBackendRegistrar>(
         "test", sync_client_.get(), std::unique_ptr<base::Thread>(),
-        ui_task_runner(), db_task_runner(), file_task_runner()));
+        ui_task_runner(), db_task_runner(), file_task_runner());
     sync_thread_ = registrar_->sync_thread();
   }
 
@@ -223,7 +224,7 @@ TEST_F(SyncBackendRegistrarTest, ActivateDeactivateUIDataType) {
   StrictMock<ChangeProcessorMock> change_processor_mock;
   EXPECT_CALL(change_processor_mock, StartImpl());
   EXPECT_CALL(change_processor_mock, IsRunning()).WillRepeatedly(Return(true));
-  EXPECT_CALL(change_processor_mock, ApplyChangesFromSyncModel(NULL, _, _));
+  EXPECT_CALL(change_processor_mock, ApplyChangesFromSyncModel(nullptr, _, _));
   EXPECT_CALL(change_processor_mock, IsRunning()).WillRepeatedly(Return(true));
   EXPECT_CALL(change_processor_mock, CommitChangesFromSyncModel());
   EXPECT_CALL(change_processor_mock, IsRunning()).WillRepeatedly(Return(false));
@@ -255,7 +256,7 @@ TEST_F(SyncBackendRegistrarTest, ActivateDeactivateNonUIDataType) {
   StrictMock<ChangeProcessorMock> change_processor_mock;
   EXPECT_CALL(change_processor_mock, StartImpl());
   EXPECT_CALL(change_processor_mock, IsRunning()).WillRepeatedly(Return(true));
-  EXPECT_CALL(change_processor_mock, ApplyChangesFromSyncModel(NULL, _, _));
+  EXPECT_CALL(change_processor_mock, ApplyChangesFromSyncModel(nullptr, _, _));
   EXPECT_CALL(change_processor_mock, IsRunning()).WillRepeatedly(Return(true));
   EXPECT_CALL(change_processor_mock, CommitChangesFromSyncModel());
   EXPECT_CALL(change_processor_mock, IsRunning()).WillRepeatedly(Return(false));
@@ -328,8 +329,8 @@ class SyncBackendRegistrarShutdownTest : public testing::Test {
   void SetUp() override {
     db_thread_.StartAndWaitForTesting();
     file_thread_.StartAndWaitForTesting();
-    sync_client_.reset(new RegistrarSyncClient(
-        ui_task_runner(), db_task_runner(), file_task_runner()));
+    sync_client_ = base::MakeUnique<RegistrarSyncClient>(
+        ui_task_runner(), db_task_runner(), file_task_runner());
   }
 
   void PostQuitOnUIMessageLoop() {

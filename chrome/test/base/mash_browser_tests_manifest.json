@@ -3,8 +3,13 @@
   "name": "exe:mash_browser_tests",
   "display_name": "Mash Browser Tests",
   "capabilities": {
+    "provided": {
+      "service_manager:service_factory":  [
+        "service_manager::mojom::ServiceFactory"
+      ]
+    },
     "required": {
-      "*": { "classes": [ "app" ] }
+      "*": [ "app" ]
     }
   }
 }

@@ -161,6 +161,9 @@ class ImageDecodeTaskImpl : public TileTask {
   void RunOnWorkerThread() override {
     TRACE_EVENT2("cc", "ImageDecodeTaskImpl::RunOnWorkerThread", "mode", "gpu",
                  "source_prepare_tiles_id", tracing_info_.prepare_tiles_id);
+    devtools_instrumentation::ScopedImageDecodeTask image_decode_task(
+        image_.image().get(),
+        devtools_instrumentation::ScopedImageDecodeTask::GPU);
     controller_->DecodeImage(image_);
   }
 
@@ -377,7 +380,7 @@ bool GpuImageDecodeController::GetTaskForImageAndRef(
     const DrawImage& draw_image,
     const TracingInfo& tracing_info,
     scoped_refptr<TileTask>* task) {
-  TRACE_EVENT0("disabled-by-default-cc.debug",
+  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("cc.debug"),
                "GpuImageDecodeController::GetTaskForImageAndRef");
   if (SkipImage(draw_image)) {
     *task = nullptr;
@@ -439,7 +442,7 @@ bool GpuImageDecodeController::GetTaskForImageAndRef(
 }
 
 void GpuImageDecodeController::UnrefImage(const DrawImage& draw_image) {
-  TRACE_EVENT0("disabled-by-default-cc.debug",
+  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("cc.debug"),
                "GpuImageDecodeController::UnrefImage");
   base::AutoLock lock(lock_);
   UnrefImageInternal(draw_image);
@@ -517,7 +520,7 @@ void GpuImageDecodeController::DrawWithImageFinished(
 }
 
 void GpuImageDecodeController::ReduceCacheUsage() {
-  TRACE_EVENT0("disabled-by-default-cc.debug",
+  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("cc.debug"),
                "GpuImageDecodeController::ReduceCacheUsage");
   base::AutoLock lock(lock_);
   EnsureCapacity(0);
@@ -525,7 +528,7 @@ void GpuImageDecodeController::ReduceCacheUsage() {
 
 void GpuImageDecodeController::SetShouldAggressivelyFreeResources(
     bool aggressively_free_resources) {
-  TRACE_EVENT1("disabled-by-default-cc.debug",
+  TRACE_EVENT1(TRACE_DISABLED_BY_DEFAULT("cc.debug"),
                "GpuImageDecodeController::SetShouldAggressivelyFreeResources",
                "agressive_free_resources", aggressively_free_resources);
   if (aggressively_free_resources) {
@@ -548,7 +551,7 @@ void GpuImageDecodeController::SetShouldAggressivelyFreeResources(
 bool GpuImageDecodeController::OnMemoryDump(
     const base::trace_event::MemoryDumpArgs& args,
     base::trace_event::ProcessMemoryDump* pmd) {
-  TRACE_EVENT0("disabled-by-default-cc.debug",
+  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("cc.debug"),
                "GpuImageDecodeController::OnMemoryDump");
   for (const auto& image_pair : persistent_cache_) {
     const ImageData* image_data = image_pair.second.get();
@@ -608,7 +611,7 @@ bool GpuImageDecodeController::OnMemoryDump(
 }
 
 void GpuImageDecodeController::DecodeImage(const DrawImage& draw_image) {
-  TRACE_EVENT0("disabled-by-default-cc.debug",
+  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("cc.debug"),
                "GpuImageDecodeController::DecodeImage");
   base::AutoLock lock(lock_);
   ImageData* image_data = GetImageDataForDrawImage(draw_image);
@@ -618,7 +621,7 @@ void GpuImageDecodeController::DecodeImage(const DrawImage& draw_image) {
 }
 
 void GpuImageDecodeController::UploadImage(const DrawImage& draw_image) {
-  TRACE_EVENT0("disabled-by-default-cc.debug",
+  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("cc.debug"),
                "GpuImageDecodeController::UploadImage");
   ContextProvider::ScopedContextLock context_lock(context_);
   base::AutoLock lock(lock_);
@@ -630,7 +633,7 @@ void GpuImageDecodeController::UploadImage(const DrawImage& draw_image) {
 
 void GpuImageDecodeController::OnImageDecodeTaskCompleted(
     const DrawImage& draw_image) {
-  TRACE_EVENT0("disabled-by-default-cc.debug",
+  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("cc.debug"),
                "GpuImageDecodeController::OnImageDecodeTaskCompleted");
   base::AutoLock lock(lock_);
   // Decode task is complete, remove our reference to it.
@@ -646,7 +649,7 @@ void GpuImageDecodeController::OnImageDecodeTaskCompleted(
 
 void GpuImageDecodeController::OnImageUploadTaskCompleted(
     const DrawImage& draw_image) {
-  TRACE_EVENT0("disabled-by-default-cc.debug",
+  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("cc.debug"),
                "GpuImageDecodeController::OnImageUploadTaskCompleted");
   base::AutoLock lock(lock_);
   // Upload task is complete, remove our reference to it.
@@ -667,7 +670,7 @@ void GpuImageDecodeController::OnImageUploadTaskCompleted(
 scoped_refptr<TileTask> GpuImageDecodeController::GetImageDecodeTaskAndRef(
     const DrawImage& draw_image,
     const TracingInfo& tracing_info) {
-  TRACE_EVENT0("disabled-by-default-cc.debug",
+  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("cc.debug"),
                "GpuImageDecodeController::GetImageDecodeTaskAndRef");
   lock_.AssertAcquired();
 
@@ -698,7 +701,7 @@ scoped_refptr<TileTask> GpuImageDecodeController::GetImageDecodeTaskAndRef(
 }
 
 void GpuImageDecodeController::RefImageDecode(const DrawImage& draw_image) {
-  TRACE_EVENT0("disabled-by-default-cc.debug",
+  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("cc.debug"),
                "GpuImageDecodeController::RefImageDecode");
   lock_.AssertAcquired();
   auto found = in_use_cache_.find(GenerateInUseCacheKey(draw_image));
@@ -709,7 +712,7 @@ void GpuImageDecodeController::RefImageDecode(const DrawImage& draw_image) {
 }
 
 void GpuImageDecodeController::UnrefImageDecode(const DrawImage& draw_image) {
-  TRACE_EVENT0("disabled-by-default-cc.debug",
+  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("cc.debug"),
                "GpuImageDecodeController::UnrefImageDecode");
   lock_.AssertAcquired();
   auto found = in_use_cache_.find(GenerateInUseCacheKey(draw_image));
@@ -725,7 +728,7 @@ void GpuImageDecodeController::UnrefImageDecode(const DrawImage& draw_image) {
 }
 
 void GpuImageDecodeController::RefImage(const DrawImage& draw_image) {
-  TRACE_EVENT0("disabled-by-default-cc.debug",
+  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("cc.debug"),
                "GpuImageDecodeController::RefImage");
   lock_.AssertAcquired();
   InUseCacheKey key = GenerateInUseCacheKey(draw_image);
@@ -865,7 +868,7 @@ void GpuImageDecodeController::OwnershipChanged(const DrawImage& draw_image,
 // doing so, this function will free unreferenced image data as necessary to
 // create rooom.
 bool GpuImageDecodeController::EnsureCapacity(size_t required_size) {
-  TRACE_EVENT0("disabled-by-default-cc.debug",
+  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("cc.debug"),
                "GpuImageDecodeController::EnsureCapacity");
   lock_.AssertAcquired();
 
@@ -1091,7 +1094,7 @@ void GpuImageDecodeController::UploadImageIfNecessary(
 
 scoped_refptr<GpuImageDecodeController::ImageData>
 GpuImageDecodeController::CreateImageData(const DrawImage& draw_image) {
-  TRACE_EVENT0("disabled-by-default-cc.debug",
+  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("cc.debug"),
                "GpuImageDecodeController::CreateImageData");
   lock_.AssertAcquired();
 
@@ -1138,7 +1141,7 @@ SkImageInfo GpuImageDecodeController::CreateImageInfoForDrawImage(
 GpuImageDecodeController::ImageData*
 GpuImageDecodeController::GetImageDataForDrawImage(
     const DrawImage& draw_image) {
-  TRACE_EVENT0("disabled-by-default-cc.debug",
+  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("cc.debug"),
                "GpuImageDecodeController::GetImageDataForDrawImage");
   lock_.AssertAcquired();
   auto found_in_use = in_use_cache_.find(GenerateInUseCacheKey(draw_image));

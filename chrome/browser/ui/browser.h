@@ -479,7 +479,7 @@ class Browser : public TabStripModelObserver,
   bool CanDragEnter(content::WebContents* source,
                     const content::DropData& data,
                     blink::WebDragOperationsMask operations_allowed) override;
-  content::SecurityStyle GetSecurityStyle(
+  blink::WebSecurityStyle GetSecurityStyle(
       content::WebContents* web_contents,
       content::SecurityStyleExplanations* security_style_explanations) override;
   void ShowCertificateViewerInDevTools(
@@ -578,7 +578,7 @@ class Browser : public TabStripModelObserver,
       const content::OpenURLParams& params) override;
   void NavigationStateChanged(content::WebContents* source,
                               content::InvalidateTypes changed_flags) override;
-  void VisibleSSLStateChanged(const content::WebContents* source) override;
+  void VisibleSSLStateChanged(content::WebContents* source) override;
   void AddNewContents(content::WebContents* source,
                       content::WebContents* new_contents,
                       WindowOpenDisposition disposition,
@@ -599,7 +599,6 @@ class Browser : public TabStripModelObserver,
                           bool exited) override;
   void ContentsZoomChange(bool zoom_in) override;
   bool TakeFocus(content::WebContents* source, bool reverse) override;
-  gfx::Rect GetRootWindowResizerRect() const override;
   void BeforeUnloadFired(content::WebContents* source,
                          bool proceed,
                          bool* proceed_to_fire_unload) override;
@@ -626,7 +625,9 @@ class Browser : public TabStripModelObserver,
                           const std::string& frame_name,
                           const GURL& target_url,
                           content::WebContents* new_contents) override;
-  void RendererUnresponsive(content::WebContents* source) override;
+  void RendererUnresponsive(
+      content::WebContents* source,
+      const content::WebContentsUnresponsiveState& unresponsive_state) override;
   void RendererResponsive(content::WebContents* source) override;
   void DidNavigateMainFramePostCommit(
       content::WebContents* web_contents) override;

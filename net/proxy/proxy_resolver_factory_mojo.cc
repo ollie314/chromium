@@ -12,9 +12,9 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/stl_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_checker.h"
 #include "base/values.h"
-#include "mojo/common/common_type_converters.h"
 #include "mojo/public/cpp/bindings/binding.h"
 #include "net/base/load_states.h"
 #include "net/base/net_errors.h"
@@ -26,7 +26,6 @@
 #include "net/log/net_log_event_type.h"
 #include "net/log/net_log_with_source.h"
 #include "net/proxy/mojo_proxy_resolver_factory.h"
-#include "net/proxy/mojo_proxy_type_converters.h"
 #include "net/proxy/proxy_info.h"
 #include "net/proxy/proxy_resolver.h"
 #include "net/proxy/proxy_resolver_error_observer.h"
@@ -38,7 +37,7 @@ namespace {
 
 std::unique_ptr<base::Value> NetLogErrorCallback(
     int line_number,
-    const base::string16* message,
+    const std::string* message,
     NetLogCaptureMode /* capture_mode */) {
   std::unique_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
   dict->SetInteger("line_number", line_number);
@@ -62,27 +61,27 @@ class ClientMixin : public ClientInterface {
         net_log_with_source_(net_log_with_source) {}
 
   // Overridden from ClientInterface:
-  void Alert(const mojo::String& message) override {
-    base::string16 message_str = message.To<base::string16>();
-    auto callback = NetLog::StringCallback("message", &message_str);
+  void Alert(const std::string& message) override {
+    auto callback = NetLog::StringCallback("message", &message);
     net_log_with_source_.AddEvent(NetLogEventType::PAC_JAVASCRIPT_ALERT,
                                   callback);
     if (net_log_)
       net_log_->AddGlobalEntry(NetLogEventType::PAC_JAVASCRIPT_ALERT, callback);
   }
 
-  void OnError(int32_t line_number, const mojo::String& message) override {
-    base::string16 message_str = message.To<base::string16>();
-    auto callback = base::Bind(&NetLogErrorCallback, line_number, &message_str);
+  void OnError(int32_t line_number, const std::string& message) override {
+    auto callback = base::Bind(&NetLogErrorCallback, line_number, &message);
     net_log_with_source_.AddEvent(NetLogEventType::PAC_JAVASCRIPT_ERROR,
                                   callback);
     if (net_log_)
       net_log_->AddGlobalEntry(NetLogEventType::PAC_JAVASCRIPT_ERROR, callback);
-    if (error_observer_)
-      error_observer_->OnPACScriptError(line_number, message_str);
+    if (error_observer_) {
+      error_observer_->OnPACScriptError(line_number,
+                                        base::UTF8ToUTF16(message));
+    }
   }
 
-  void ResolveDns(interfaces::HostResolverRequestInfoPtr request_info,
+  void ResolveDns(std::unique_ptr<HostResolver::RequestInfo> request_info,
                   interfaces::HostResolverRequestClientPtr client) override {
     host_resolver_.Resolve(std::move(request_info), std::move(client));
   }
@@ -177,9 +176,7 @@ class ProxyResolverMojo::Job
   void OnConnectionError();
 
   // Overridden from interfaces::ProxyResolverRequestClient:
-  void ReportResult(
-      int32_t error,
-      mojo::Array<interfaces::ProxyServerPtr> proxy_servers) override;
+  void ReportResult(int32_t error, const net::ProxyInfo& proxy_info) override;
 
   ProxyResolverMojo* resolver_;
   const GURL url_;
@@ -234,14 +231,13 @@ void ProxyResolverMojo::Job::OnConnectionError() {
   resolver_->RemoveJob(this);
 }
 
-void ProxyResolverMojo::Job::ReportResult(
-    int32_t error,
-    mojo::Array<interfaces::ProxyServerPtr> proxy_servers) {
+void ProxyResolverMojo::Job::ReportResult(int32_t error,
+                                          const ProxyInfo& proxy_info) {
   DCHECK(thread_checker_.CalledOnValidThread());
   DVLOG(1) << "ProxyResolverMojo::Job::ReportResult: " << error;
 
   if (error == OK) {
-    *results_ = proxy_servers.To<ProxyInfo>();
+    *results_ = proxy_info;
     DVLOG(1) << "Servers: " << results_->ToPacString();
   }
 
@@ -346,7 +342,7 @@ class ProxyResolverFactoryMojo::Job
         binding_(this),
         error_observer_(std::move(error_observer)) {
     on_delete_callback_runner_ = factory_->mojo_proxy_factory_->CreateResolver(
-        mojo::String::From(pac_script->utf16()), mojo::GetProxy(&resolver_ptr_),
+        base::UTF16ToUTF8(pac_script->utf16()), mojo::GetProxy(&resolver_ptr_),
         binding_.CreateInterfacePtrAndBind());
     resolver_ptr_.set_connection_error_handler(
         base::Bind(&ProxyResolverFactoryMojo::Job::OnConnectionError,

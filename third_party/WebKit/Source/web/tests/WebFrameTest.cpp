@@ -167,10 +167,10 @@ const int touchPointPadding = 32;
     EXPECT_EQ(expected.height(), actual.height()); \
   } while (false)
 
-#define EXPECT_POINT_EQ(expected, actual) \
-  do {                                    \
-    EXPECT_EQ(expected.x(), actual.x());  \
-    EXPECT_EQ(expected.y(), actual.y());  \
+#define EXPECT_SIZE_EQ(expected, actual)           \
+  do {                                             \
+    EXPECT_EQ(expected.width(), actual.width());   \
+    EXPECT_EQ(expected.height(), actual.height()); \
   } while (false)
 
 #define EXPECT_FLOAT_POINT_EQ(expected, actual) \
@@ -227,21 +227,11 @@ class WebFrameTest : public ::testing::Test {
 
   void applyViewportStyleOverride(
       FrameTestHelpers::WebViewHelper* webViewHelper) {
-    StyleSheetContents* styleSheet =
-        StyleSheetContents::create(CSSParserContext(UASheetMode, nullptr));
-    styleSheet->parseString(loadResourceAsASCIIString("viewportAndroid.css"));
-    RuleSet* ruleSet = RuleSet::create();
-    ruleSet->addRulesFromSheet(styleSheet, MediaQueryEvaluator("screen"));
-
-    Document* document =
-        toLocalFrame(webViewHelper->webView()->page()->mainFrame())->document();
-    document->ensureStyleResolver()
-        .viewportStyleResolver()
-        ->collectViewportRules(ruleSet, ViewportStyleResolver::UserAgentOrigin);
-    document->ensureStyleResolver().viewportStyleResolver()->resolve();
+    webViewHelper->webView()->settings()->setViewportStyle(
+        WebViewportStyle::Mobile);
   }
 
-  static void configueCompositingWebView(WebSettings* settings) {
+  static void configureCompositingWebView(WebSettings* settings) {
     settings->setAcceleratedCompositingEnabled(true);
     settings->setPreferCompositingToLCDTextEnabled(true);
   }
@@ -2706,6 +2696,26 @@ TEST_P(ParameterizedWebFrameTest,
   EXPECT_NEAR(5.0f, webViewHelper.webView()->maximumPageScaleFactor(), 0.01f);
 }
 
+// TODO(rune@opera.com): Does not pass until we collect author @viewport rules
+// before constructing the RuleSets. https://crbug.com/332763
+TEST_P(ParameterizedWebFrameTest,
+       DISABLED_AtViewportInsideAtMediaInitialViewport) {
+  registerMockedHttpURLLoad("viewport-inside-media.html");
+
+  FixedLayoutTestWebViewClient client;
+  FrameTestHelpers::WebViewHelper webViewHelper;
+  webViewHelper.initializeAndLoad(m_baseURL + "viewport-inside-media.html",
+                                  true, nullptr, &client, nullptr,
+                                  enableViewportSettings);
+  webViewHelper.resize(WebSize(640, 480));
+
+  EXPECT_EQ(2000, webViewHelper.webView()
+                      ->mainFrameImpl()
+                      ->frameView()
+                      ->layoutSize()
+                      .width());
+}
+
 class WebFrameResizeTest : public ParameterizedWebFrameTest {
  protected:
   static FloatSize computeRelativeOffset(const IntPoint& absoluteOffset,
@@ -2912,7 +2922,7 @@ TEST_F(WebFrameTest, updateOverlayScrollbarLayers)
       wrapUnique(new FakeCompositingWebViewClient());
   FrameTestHelpers::WebViewHelper webViewHelper;
   webViewHelper.initialize(true, nullptr, fakeCompositingWebViewClient.get(),
-                           nullptr, &configueCompositingWebView);
+                           nullptr, &configureCompositingWebView);
 
   webViewHelper.resize(WebSize(viewWidth, viewHeight));
   FrameTestHelpers::loadFrame(webViewHelper.webView()->mainFrame(),
@@ -2939,9 +2949,10 @@ void setScaleAndScrollAndLayout(WebViewImpl* webView,
 }
 
 void simulatePageScale(WebViewImpl* webViewImpl, float& scale) {
-  IntSize scrollDelta =
-      webViewImpl->fakePageScaleAnimationTargetPositionForTesting() -
-      webViewImpl->mainFrameImpl()->frameView()->scrollPosition();
+  ScrollOffset scrollDelta =
+      toScrollOffset(
+          webViewImpl->fakePageScaleAnimationTargetPositionForTesting()) -
+      webViewImpl->mainFrameImpl()->frameView()->scrollOffset();
   float scaleDelta = webViewImpl->fakePageScaleAnimationPageScaleForTesting() /
                      webViewImpl->pageScaleFactor();
   webViewImpl->applyViewportDeltas(WebFloatSize(), FloatSize(scrollDelta),
@@ -5757,14 +5768,14 @@ TEST_F(WebFrameTest, DisambiguationPopupVisualViewport) {
 
   // Scroll main frame to the bottom of the document
   webViewImpl->mainFrame()->setScrollOffset(WebSize(0, 400));
-  EXPECT_POINT_EQ(IntPoint(0, 400), frame->view()->scrollPosition());
+  EXPECT_SIZE_EQ(ScrollOffset(0, 400), frame->view()->scrollOffset());
 
   webViewImpl->setPageScaleFactor(2.0);
 
   // Scroll visual viewport to the top of the main frame.
   VisualViewport& visualViewport = frame->page()->frameHost().visualViewport();
   visualViewport.setLocation(FloatPoint(0, 0));
-  EXPECT_FLOAT_POINT_EQ(FloatPoint(0, 0), visualViewport.location());
+  EXPECT_SIZE_EQ(ScrollOffset(0, 0), visualViewport.scrollOffset());
 
   // Tap at the top: there is nothing there.
   client.resetTriggered();
@@ -5773,7 +5784,7 @@ TEST_F(WebFrameTest, DisambiguationPopupVisualViewport) {
 
   // Scroll visual viewport to the bottom of the main frame.
   visualViewport.setLocation(FloatPoint(0, 200));
-  EXPECT_FLOAT_POINT_EQ(FloatPoint(0, 200), visualViewport.location());
+  EXPECT_SIZE_EQ(ScrollOffset(0, 200), visualViewport.scrollOffset());
 
   // Now the tap with the same coordinates should hit two elements.
   client.resetTriggered();
@@ -6675,7 +6686,7 @@ TEST_P(ParameterizedWebFrameTest, ModifiedClickNewWindow) {
       PlatformMouseEvent::RealOrIndistinguishable, String(), nullptr);
   FrameLoadRequest frameRequest(document, ResourceRequest(destination));
   frameRequest.setTriggeringEvent(event);
-  UserGestureIndicator gesture(DefinitelyProcessingUserGesture);
+  UserGestureIndicator gesture(UserGestureToken::create());
   toLocalFrame(webViewHelper.webView()->page()->mainFrame())
       ->loader()
       .load(frameRequest);
@@ -7166,7 +7177,7 @@ TEST_F(WebFrameTest, overflowHiddenRewrite) {
       wrapUnique(new FakeCompositingWebViewClient());
   FrameTestHelpers::WebViewHelper webViewHelper;
   webViewHelper.initialize(true, nullptr, fakeCompositingWebViewClient.get(),
-                           nullptr, &configueCompositingWebView);
+                           nullptr, &configureCompositingWebView);
 
   webViewHelper.resize(WebSize(100, 100));
   FrameTestHelpers::loadFrame(webViewHelper.webView()->mainFrame(),
@@ -7306,24 +7317,24 @@ TEST_F(WebFrameTest, FrameViewScrollAccountsForTopControls) {
   webView->updateAllLifecyclePhases();
 
   webView->mainFrame()->setScrollOffset(WebSize(0, 2000));
-  EXPECT_POINT_EQ(IntPoint(0, 1900), IntPoint(frameView->scrollOffset()));
+  EXPECT_SIZE_EQ(ScrollOffset(0, 1900), frameView->scrollOffset());
 
   // Simulate the top controls showing by 20px, thus shrinking the viewport
   // and allowing it to scroll an additional 20px.
   webView->applyViewportDeltas(WebFloatSize(), WebFloatSize(), WebFloatSize(),
                                1.0f, 20.0f / topControlsHeight);
-  EXPECT_POINT_EQ(IntPoint(0, 1920), frameView->maximumScrollPosition());
+  EXPECT_SIZE_EQ(ScrollOffset(0, 1920), frameView->maximumScrollOffset());
 
   // Show more, make sure the scroll actually gets clamped.
   webView->applyViewportDeltas(WebFloatSize(), WebFloatSize(), WebFloatSize(),
                                1.0f, 20.0f / topControlsHeight);
   webView->mainFrame()->setScrollOffset(WebSize(0, 2000));
-  EXPECT_POINT_EQ(IntPoint(0, 1940), IntPoint(frameView->scrollOffset()));
+  EXPECT_SIZE_EQ(ScrollOffset(0, 1940), frameView->scrollOffset());
 
   // Hide until there's 10px showing.
   webView->applyViewportDeltas(WebFloatSize(), WebFloatSize(), WebFloatSize(),
                                1.0f, -30.0f / topControlsHeight);
-  EXPECT_POINT_EQ(IntPoint(0, 1910), frameView->maximumScrollPosition());
+  EXPECT_SIZE_EQ(ScrollOffset(0, 1910), frameView->maximumScrollOffset());
 
   // Simulate a LayoutPart::resize. The frame is resized to accomodate
   // the top controls and Blink's view of the top controls matches that of
@@ -7332,19 +7343,19 @@ TEST_F(WebFrameTest, FrameViewScrollAccountsForTopControls) {
                                1.0f, 30.0f / topControlsHeight);
   webView->resizeWithTopControls(WebSize(100, 60), 40.0f, true);
   webView->updateAllLifecyclePhases();
-  EXPECT_POINT_EQ(IntPoint(0, 1940), frameView->maximumScrollPosition());
+  EXPECT_SIZE_EQ(ScrollOffset(0, 1940), frameView->maximumScrollOffset());
 
   // Now simulate hiding.
   webView->applyViewportDeltas(WebFloatSize(), WebFloatSize(), WebFloatSize(),
                                1.0f, -10.0f / topControlsHeight);
-  EXPECT_POINT_EQ(IntPoint(0, 1930), frameView->maximumScrollPosition());
+  EXPECT_SIZE_EQ(ScrollOffset(0, 1930), frameView->maximumScrollOffset());
 
   // Reset to original state: 100px widget height, top controls fully hidden.
   webView->applyViewportDeltas(WebFloatSize(), WebFloatSize(), WebFloatSize(),
                                1.0f, -30.0f / topControlsHeight);
   webView->resizeWithTopControls(WebSize(100, 100), topControlsHeight, false);
   webView->updateAllLifecyclePhases();
-  EXPECT_POINT_EQ(IntPoint(0, 1900), frameView->maximumScrollPosition());
+  EXPECT_SIZE_EQ(ScrollOffset(0, 1900), frameView->maximumScrollOffset());
 
   // Show the top controls by just 1px, since we're zoomed in to 2X, that
   // should allow an extra 0.5px of scrolling in the visual viewport. Make
@@ -7352,11 +7363,11 @@ TEST_F(WebFrameTest, FrameViewScrollAccountsForTopControls) {
   // main frame.
   webView->applyViewportDeltas(WebFloatSize(), WebFloatSize(), WebFloatSize(),
                                1.0f, 1.0f / topControlsHeight);
-  EXPECT_POINT_EQ(IntPoint(0, 1901), frameView->maximumScrollPosition());
+  EXPECT_SIZE_EQ(ScrollOffset(0, 1901), frameView->maximumScrollOffset());
 
   webView->applyViewportDeltas(WebFloatSize(), WebFloatSize(), WebFloatSize(),
                                1.0f, 2.0f / topControlsHeight);
-  EXPECT_POINT_EQ(IntPoint(0, 1903), frameView->maximumScrollPosition());
+  EXPECT_SIZE_EQ(ScrollOffset(0, 1903), frameView->maximumScrollOffset());
 }
 
 TEST_F(WebFrameTest, MaximumScrollPositionCanBeNegative) {
@@ -7379,7 +7390,7 @@ TEST_F(WebFrameTest, MaximumScrollPositionCanBeNegative) {
   webViewHelper.webView()->updateAllLifecyclePhases();
 
   FrameView* frameView = webViewHelper.webView()->mainFrameImpl()->frameView();
-  EXPECT_LT(frameView->maximumScrollPosition().x(), 0);
+  EXPECT_LT(frameView->maximumScrollOffset().width(), 0);
 }
 
 TEST_P(ParameterizedWebFrameTest, FullscreenLayerSize) {
@@ -7397,7 +7408,7 @@ TEST_P(ParameterizedWebFrameTest, FullscreenLayerSize) {
   webViewImpl->updateAllLifecyclePhases();
 
   Document* document = webViewImpl->mainFrameImpl()->frame()->document();
-  UserGestureIndicator gesture(DefinitelyProcessingUserGesture);
+  UserGestureIndicator gesture(UserGestureToken::create());
   Element* divFullscreen = document->getElementById("div1");
   Fullscreen::requestFullscreen(*divFullscreen, Fullscreen::PrefixedRequest);
   webViewImpl->didEnterFullscreen();
@@ -7432,7 +7443,7 @@ TEST_F(WebFrameTest, FullscreenLayerNonScrollable) {
   webViewImpl->updateAllLifecyclePhases();
 
   Document* document = webViewImpl->mainFrameImpl()->frame()->document();
-  UserGestureIndicator gesture(DefinitelyProcessingUserGesture);
+  UserGestureIndicator gesture(UserGestureToken::create());
   Element* divFullscreen = document->getElementById("div1");
   Fullscreen::requestFullscreen(*divFullscreen, Fullscreen::PrefixedRequest);
   webViewImpl->didEnterFullscreen();
@@ -7476,7 +7487,7 @@ TEST_P(ParameterizedWebFrameTest, FullscreenMainFrame) {
   webViewImpl->updateAllLifecyclePhases();
 
   Document* document = webViewImpl->mainFrameImpl()->frame()->document();
-  UserGestureIndicator gesture(DefinitelyProcessingUserGesture);
+  UserGestureIndicator gesture(UserGestureToken::create());
   Fullscreen::requestFullscreen(*document->documentElement(),
                                 Fullscreen::PrefixedRequest);
   webViewImpl->didEnterFullscreen();
@@ -7517,7 +7528,7 @@ TEST_P(ParameterizedWebFrameTest, FullscreenSubframe) {
       toWebLocalFrameImpl(webViewHelper.webView()->mainFrame()->firstChild())
           ->frame()
           ->document();
-  UserGestureIndicator gesture(DefinitelyProcessingUserGesture);
+  UserGestureIndicator gesture(UserGestureToken::create());
   Element* divFullscreen = document->getElementById("div1");
   Fullscreen::requestFullscreen(*divFullscreen, Fullscreen::PrefixedRequest);
   webViewImpl->didEnterFullscreen();
@@ -7561,7 +7572,7 @@ TEST_P(ParameterizedWebFrameTest, FullscreenWithTinyViewport) {
   EXPECT_FLOAT_EQ(5.0, webViewImpl->maximumPageScaleFactor());
 
   Document* document = webViewImpl->mainFrameImpl()->frame()->document();
-  UserGestureIndicator gesture(DefinitelyProcessingUserGesture);
+  UserGestureIndicator gesture(UserGestureToken::create());
   Fullscreen::requestFullscreen(*document->documentElement(),
                                 Fullscreen::PrefixedRequest);
   webViewImpl->didEnterFullscreen();
@@ -7598,7 +7609,7 @@ TEST_P(ParameterizedWebFrameTest, FullscreenResizeWithTinyViewport) {
   LayoutViewItem layoutViewItem =
       webViewHelper.webView()->mainFrameImpl()->frameView()->layoutViewItem();
   Document* document = webViewImpl->mainFrameImpl()->frame()->document();
-  UserGestureIndicator gesture(DefinitelyProcessingUserGesture);
+  UserGestureIndicator gesture(UserGestureToken::create());
   Fullscreen::requestFullscreen(*document->documentElement(),
                                 Fullscreen::PrefixedRequest);
   webViewImpl->didEnterFullscreen();
@@ -7660,7 +7671,7 @@ TEST_P(ParameterizedWebFrameTest, FullscreenRestoreScaleFactorUponExiting) {
 
   {
     Document* document = webViewImpl->mainFrameImpl()->frame()->document();
-    UserGestureIndicator gesture(DefinitelyProcessingUserGesture);
+    UserGestureIndicator gesture(UserGestureToken::create());
     Fullscreen::requestFullscreen(*document->body(),
                                   Fullscreen::PrefixedRequest);
   }
@@ -7721,7 +7732,8 @@ TEST_P(ParameterizedWebFrameTest, ClearFullscreenConstraintsOnNavigation) {
   EXPECT_FLOAT_EQ(5.0, webViewImpl->maximumPageScaleFactor());
 
   Document* document = webViewImpl->mainFrameImpl()->frame()->document();
-  UserGestureIndicator gesture(DefinitelyProcessingUserGesture);
+  UserGestureIndicator gesture(
+      UserGestureToken::create(UserGestureToken::NewGesture));
   Fullscreen::requestFullscreen(*document->documentElement(),
                                 Fullscreen::PrefixedRequest);
   webViewImpl->didEnterFullscreen();
@@ -7887,7 +7899,10 @@ TEST_P(ParameterizedWebFrameTest, ManifestCSPFetchSelf) {
   Resource* resource = fetchManifest(
       document, toKURL(m_notBaseURL + "link-manifest-fetch.json"));
 
-  EXPECT_EQ(0, resource);  // Fetching resource wasn't allowed.
+  // Fetching resource wasn't allowed.
+  ASSERT_TRUE(resource);
+  EXPECT_TRUE(resource->errorOccurred());
+  EXPECT_TRUE(resource->resourceError().isAccessCheck());
 }
 
 TEST_P(ParameterizedWebFrameTest, ManifestCSPFetchSelfReportOnly) {
@@ -10163,6 +10178,39 @@ TEST_F(WebFrameTest, ImageDocumentDecodeError) {
   EXPECT_TRUE(document->isImageDocument());
   EXPECT_EQ(Resource::DecodeError,
             toImageDocument(document)->cachedImage()->getStatus());
+}
+
+// Load a page with display:none set and try to scroll it. It shouldn't crash
+// due to lack of layoutObject. crbug.com/653327.
+TEST_F(WebFrameTest, ScrollBeforeLayoutDoesntCrash) {
+  registerMockedHttpURLLoad("display-none.html");
+  FrameTestHelpers::WebViewHelper webViewHelper;
+  webViewHelper.initializeAndLoad(m_baseURL + "display-none.html");
+  WebViewImpl* webView = webViewHelper.webView();
+  webViewHelper.resize(WebSize(640, 480));
+
+  Document* document = webView->mainFrameImpl()->frame()->document();
+  document->documentElement()->setLayoutObject(nullptr);
+
+  WebGestureEvent beginEvent;
+  beginEvent.type = WebInputEvent::GestureScrollEnd;
+  beginEvent.sourceDevice = WebGestureDeviceTouchpad;
+  WebGestureEvent updateEvent;
+  updateEvent.type = WebInputEvent::GestureScrollEnd;
+  updateEvent.sourceDevice = WebGestureDeviceTouchpad;
+  WebGestureEvent endEvent;
+  endEvent.type = WebInputEvent::GestureScrollEnd;
+  endEvent.sourceDevice = WebGestureDeviceTouchpad;
+
+  // Try GestureScrollEnd and GestureScrollUpdate first to make sure that not
+  // seeing a Begin first doesn't break anything. (This currently happens).
+  webViewHelper.webView()->handleInputEvent(endEvent);
+  webViewHelper.webView()->handleInputEvent(updateEvent);
+
+  // Try a full Begin/Update/End cycle.
+  webViewHelper.webView()->handleInputEvent(beginEvent);
+  webViewHelper.webView()->handleInputEvent(updateEvent);
+  webViewHelper.webView()->handleInputEvent(endEvent);
 }
 
 }  // namespace blink

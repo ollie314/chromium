@@ -46,12 +46,14 @@ void ImagePainter::paintAreaElementFocusRing(const PaintInfo& paintInfo,
   if (areaElement.imageElement() != m_layoutImage.node())
     return;
 
-  // Even if the theme handles focus ring drawing for entire elements, it won't do it for
-  // an area within an image, so we don't call LayoutTheme::themeDrawsFocusRing here.
+  // Even if the theme handles focus ring drawing for entire elements, it won't
+  // do it for an area within an image, so we don't call
+  // LayoutTheme::themeDrawsFocusRing here.
 
   const ComputedStyle& areaElementStyle = *areaElement.ensureComputedStyle();
-  int outlineWidth = areaElementStyle.outlineWidth();
-  if (!outlineWidth)
+  // If the outline width is 0 we want to avoid drawing anything even if we
+  // don't use the value directly.
+  if (!areaElementStyle.outlineWidth())
     return;
 
   Path path = areaElement.getPath(&m_layoutImage);
@@ -78,7 +80,8 @@ void ImagePainter::paintAreaElementFocusRing(const PaintInfo& paintInfo,
   paintInfo.context.save();
   paintInfo.context.clip(pixelSnappedIntRect(focusRect));
   paintInfo.context.drawFocusRing(
-      path, outlineWidth, areaElementStyle.outlineOffset(),
+      path, areaElementStyle.getOutlineStrokeWidthForFocusRing(),
+      areaElementStyle.outlineOffset(),
       m_layoutImage.resolveColor(areaElementStyle, CSSPropertyOutlineColor));
   paintInfo.context.restore();
 }
@@ -132,7 +135,8 @@ void ImagePainter::paintIntoRect(GraphicsContext& context,
                                  const LayoutRect& contentRect) {
   if (!m_layoutImage.imageResource()->hasImage() ||
       m_layoutImage.imageResource()->errorOccurred())
-    return;  // FIXME: should we just ASSERT these conditions? (audit all callers).
+    return;  // FIXME: should we just ASSERT these conditions? (audit all
+             // callers).
 
   IntRect pixelSnappedDestRect = pixelSnappedIntRect(destRect);
   if (pixelSnappedDestRect.isEmpty())
@@ -143,14 +147,16 @@ void ImagePainter::paintIntoRect(GraphicsContext& context,
   if (!image || image->isNull())
     return;
 
-  // FIXME: why is interpolation quality selection not included in the Instrumentation reported cost of drawing an image?
+  // FIXME: why is interpolation quality selection not included in the
+  // Instrumentation reported cost of drawing an image?
   InterpolationQuality interpolationQuality =
       BoxPainter::chooseInterpolationQuality(
           m_layoutImage, image.get(), image.get(),
           LayoutSize(pixelSnappedDestRect.size()));
 
   FloatRect srcRect = image->rect();
-  // If the content rect requires clipping, adjust |srcRect| and |pixelSnappedDestRect| over using a clip.
+  // If the content rect requires clipping, adjust |srcRect| and
+  // |pixelSnappedDestRect| over using a clip.
   if (!contentRect.contains(destRect)) {
     IntRect pixelSnappedContentRect = pixelSnappedIntRect(contentRect);
     pixelSnappedContentRect.intersect(pixelSnappedDestRect);

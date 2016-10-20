@@ -27,8 +27,8 @@
 #include <string>
 
 #include "base/bind.h"
+#include "base/command_line.h"
 #include "base/containers/hash_tables.h"
-#include "base/feature_list.h"
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
 #include "base/single_thread_task_runner.h"
@@ -49,9 +49,10 @@
 #include "media/midi/midi_port_info.h"
 #include "media/midi/midi_switches.h"
 
-namespace media {
 namespace midi {
 namespace {
+
+using mojom::Result;
 
 static const size_t kBufferLength = 32 * 1024;
 
@@ -1193,11 +1194,11 @@ void MidiManagerWin::OnReceiveMidiData(uint32_t port_index,
 }
 
 MidiManager* MidiManager::Create() {
-  if (base::FeatureList::IsEnabled(features::kMidiManagerWinrt) &&
+  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kDisableWinrtMidiApi) &&
       base::win::GetVersion() >= base::win::VERSION_WIN10)
     return new MidiManagerWinrt();
   return new MidiManagerWin();
 }
 
 }  // namespace midi
-}  // namespace media

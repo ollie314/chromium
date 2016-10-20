@@ -128,9 +128,6 @@ class CORE_EXPORT ImageResource final
                         std::unique_ptr<WebDataConsumerHandle>) override;
   void finish(double finishTime = 0.0) override;
 
-  void onMemoryDump(WebMemoryDumpLevelOfDetail,
-                    WebProcessMemoryDump*) const override;
-
   // For compatibility, images keep loading even if there are HTTP errors.
   bool shouldIgnoreHTTPStatusCodeErrors() const override { return true; }
 
@@ -204,6 +201,10 @@ class CORE_EXPORT ImageResource final
   bool m_hasDevicePixelRatioHeaderValue;
   HashCountedSet<ImageResourceObserver*> m_observers;
   HashCountedSet<ImageResourceObserver*> m_finishedObservers;
+
+  // Indicates if the ImageResource is currently scheduling a reload, e.g.
+  // because reloadIfLoFi() was called.
+  bool m_isSchedulingReload;
 };
 
 DEFINE_RESOURCE_TYPE_CASTS(Image);

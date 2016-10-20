@@ -62,7 +62,9 @@ int TextTrackList::getTrackIndex(TextTrack* textTrack) {
 }
 
 int TextTrackList::getTrackIndexRelativeToRenderedTracks(TextTrack* textTrack) {
-  // Calculate the "Let n be the number of text tracks whose text track mode is showing and that are in the media element's list of text tracks before track."
+  // Calculate the "Let n be the number of text tracks whose text track mode is
+  // showing and that are in the media element's list of text tracks before
+  // track."
   int trackIndex = 0;
 
   for (size_t i = 0; i < m_elementTracks.size(); ++i) {
@@ -100,10 +102,13 @@ int TextTrackList::getTrackIndexRelativeToRenderedTracks(TextTrack* textTrack) {
 TextTrack* TextTrackList::anonymousIndexedGetter(unsigned index) {
   // 4.8.10.12.1 Text track model
   // The text tracks are sorted as follows:
-  // 1. The text tracks corresponding to track element children of the media element, in tree order.
-  // 2. Any text tracks added using the addTextTrack() method, in the order they were added, oldest first.
-  // 3. Any media-resource-specific text tracks (text tracks corresponding to data in the media
-  // resource), in the order defined by the media resource's format specification.
+  // 1. The text tracks corresponding to track element children of the media
+  // element, in tree order.
+  // 2. Any text tracks added using the addTextTrack() method, in the order they
+  // were added, oldest first.
+  // 3. Any media-resource-specific text tracks (text tracks corresponding to
+  // data in the media resource), in the order defined by the media resource's
+  // format specification.
 
   if (index < m_elementTracks.size())
     return m_elementTracks[index];
@@ -135,7 +140,7 @@ TextTrack* TextTrackList::getTrackById(const AtomicString& id) {
 }
 
 void TextTrackList::invalidateTrackIndexesAfterTrack(TextTrack* track) {
-  HeapVector<Member<TextTrack>>* tracks = nullptr;
+  HeapVector<TraceWrapperMember<TextTrack>>* tracks = nullptr;
 
   if (track->trackType() == TextTrack::TrackElement) {
     tracks = &m_elementTracks;
@@ -163,13 +168,13 @@ void TextTrackList::invalidateTrackIndexesAfterTrack(TextTrack* track) {
 
 void TextTrackList::append(TextTrack* track) {
   if (track->trackType() == TextTrack::AddTrack) {
-    m_addTrackTracks.append(track);
+    m_addTrackTracks.append(TraceWrapperMember<TextTrack>(this, track));
   } else if (track->trackType() == TextTrack::TrackElement) {
     // Insert tracks added for <track> element in tree order.
     size_t index = static_cast<LoadableTextTrack*>(track)->trackElementIndex();
-    m_elementTracks.insert(index, track);
+    m_elementTracks.insert(index, TraceWrapperMember<TextTrack>(this, track));
   } else if (track->trackType() == TextTrack::InBand) {
-    m_inbandTracks.append(track);
+    m_inbandTracks.append(TraceWrapperMember<TextTrack>(this, track));
   } else {
     NOTREACHED();
   }
@@ -183,7 +188,7 @@ void TextTrackList::append(TextTrack* track) {
 }
 
 void TextTrackList::remove(TextTrack* track) {
-  HeapVector<Member<TextTrack>>* tracks = nullptr;
+  HeapVector<TraceWrapperMember<TextTrack>>* tracks = nullptr;
 
   if (track->trackType() == TextTrack::TrackElement) {
     tracks = &m_elementTracks;
@@ -217,7 +222,7 @@ void TextTrackList::removeAllInbandTracks() {
 }
 
 bool TextTrackList::contains(TextTrack* track) const {
-  const HeapVector<Member<TextTrack>>* tracks = nullptr;
+  const HeapVector<TraceWrapperMember<TextTrack>>* tracks = nullptr;
 
   if (track->trackType() == TextTrack::TrackElement)
     tracks = &m_elementTracks;
@@ -247,10 +252,10 @@ void TextTrackList::scheduleTrackEvent(const AtomicString& eventName,
 void TextTrackList::scheduleAddTrackEvent(TextTrack* track) {
   // 4.8.10.12.3 Sourcing out-of-band text tracks
   // 4.8.10.12.4 Text track API
-  // ... then queue a task to fire an event with the name addtrack, that does not
-  // bubble and is not cancelable, and that uses the TrackEvent interface, with
-  // the track attribute initialized to the text track's TextTrack object, at
-  // the media element's textTracks attribute's TextTrackList object.
+  // ... then queue a task to fire an event with the name addtrack, that does
+  // not bubble and is not cancelable, and that uses the TrackEvent interface,
+  // with the track attribute initialized to the text track's TextTrack object,
+  // at the media element's textTracks attribute's TextTrackList object.
   scheduleTrackEvent(EventTypeNames::addtrack, track);
 }
 

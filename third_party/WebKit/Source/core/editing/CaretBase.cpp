@@ -63,7 +63,8 @@ LayoutBlock* CaretBase::caretLayoutObject(Node* node) {
   if (!layoutObject)
     return nullptr;
 
-  // if caretNode is a block and caret is inside it then caret should be painted by that block
+  // if caretNode is a block and caret is inside it then caret should be painted
+  // by that block
   bool paintedByBlock =
       layoutObject->isLayoutBlock() && caretRendersInsideNode(node);
   // TODO(yoichio): This function is called at least
@@ -103,10 +104,10 @@ static void mapCaretRectToCaretPainter(LayoutItem caretLayoutItem,
 void CaretBase::updateCaretRect(const PositionWithAffinity& caretPosition) {
   m_caretLocalRect = LayoutRect();
 
-  if (caretPosition.position().isNull())
+  if (caretPosition.isNull())
     return;
 
-  DCHECK(caretPosition.position().anchorNode()->layoutObject());
+  DCHECK(caretPosition.anchorNode()->layoutObject());
 
   // First compute a rect local to the layoutObject at the selection start.
   LayoutObject* layoutObject;
@@ -115,7 +116,7 @@ void CaretBase::updateCaretRect(const PositionWithAffinity& caretPosition) {
   // Get the layoutObject that will be responsible for painting the caret
   // (which is either the layoutObject we just found, or one of its containers).
   LayoutBlockItem caretPainterItem =
-      LayoutBlockItem(caretLayoutObject(caretPosition.position().anchorNode()));
+      LayoutBlockItem(caretLayoutObject(caretPosition.anchorNode()));
 
   mapCaretRectToCaretPainter(LayoutItem(layoutObject), caretPainterItem,
                              m_caretLocalRect);
@@ -150,7 +151,8 @@ void CaretBase::invalidateLocalCaretRect(Node* node, const LayoutRect& rect) {
   LayoutRect inflatedRect = rect;
   inflatedRect.inflate(LayoutUnit(1));
 
-  // FIXME: We should not allow paint invalidation out of paint invalidation state. crbug.com/457415
+  // FIXME: We should not allow paint invalidation out of paint invalidation
+  // state. crbug.com/457415
   DisablePaintInvalidationStateAsserts disabler;
 
   m_visualRect =
@@ -166,22 +168,10 @@ bool CaretBase::shouldRepaintCaret(Node& node) const {
          (node.parentNode() && hasEditableStyle(*node.parentNode()));
 }
 
-bool CaretBase::shouldRepaintCaret(const LayoutViewItem view) const {
-  DCHECK(view);
-  if (FrameView* frameView = view.frameView()) {
-    LocalFrame& frame =
-        frameView->frame();  // The frame where the selection started
-    return frame.settings() && frame.settings()->caretBrowsingEnabled();
-  }
-  return false;
-}
-
 void CaretBase::invalidateCaretRect(Node* node) {
-  if (LayoutViewItem view = node->document().layoutViewItem()) {
-    node->document().updateStyleAndLayoutTree();
-    if (hasEditableStyle(*node) || shouldRepaintCaret(view))
-      invalidateLocalCaretRect(node, localCaretRectWithoutUpdate());
-  }
+  node->document().updateStyleAndLayoutTree();
+  if (hasEditableStyle(*node))
+    invalidateLocalCaretRect(node, localCaretRectWithoutUpdate());
 }
 
 void CaretBase::paintCaret(Node* node,

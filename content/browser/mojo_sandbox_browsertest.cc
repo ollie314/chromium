@@ -13,8 +13,8 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/utility_process_host_client.h"
 #include "content/public/test/content_browser_test.h"
-#include "content/public/test/test_mojo_service.mojom.h"
-#include "services/shell/public/cpp/interface_provider.h"
+#include "content/public/test/test_service.mojom.h"
+#include "services/service_manager/public/cpp/interface_provider.h"
 
 namespace content {
 namespace {
@@ -62,7 +62,7 @@ class MojoSandboxTest : public ContentBrowserTest {
 IN_PROC_BROWSER_TEST_F(MojoSandboxTest, SubprocessSharedBuffer) {
   // Ensures that a shared buffer can be created within a sandboxed process.
 
-  mojom::TestMojoServicePtr test_service;
+  mojom::TestServicePtr test_service;
   host_->GetRemoteInterfaces()->GetInterface(&test_service);
 
   bool got_response = false;

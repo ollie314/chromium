@@ -81,10 +81,13 @@ class OfflinePageModel : public base::SupportsUserData {
   virtual void AddObserver(Observer* observer) = 0;
   virtual void RemoveObserver(Observer* observer) = 0;
 
+  static const int64_t kInvalidOfflineId = 0;
+
   // Attempts to save a page addressed by |url| offline. Requires that the model
   // is loaded.  Generates a new offline id and returns
   // it. |proposed_offline_id| is used for the offline_id for the saved file if
-  // it is non-zero.  If it is zero, a new, random ID will be generated.
+  // it is non-zero.  If it is kInvalidOfflineId, a new, random ID will be
+  // generated.
   virtual void SavePage(const GURL& url,
                         const ClientId& client_id,
                         int64_t proposed_offline_id,
@@ -140,20 +143,6 @@ class OfflinePageModel : public base::SupportsUserData {
   // is returned if not found.
   virtual const OfflinePageItem* MaybeGetPageByOfflineId(
       int64_t offline_id) const = 0;
-
-  // Returns the offline page that is stored under |offline_url|, if any.
-  virtual void GetPageByOfflineURL(
-      const GURL& offline_url,
-      const SingleOfflinePageItemCallback& callback) = 0;
-
-  // Returns an offline page that is stored as |offline_url|. A nullptr is
-  // returned if not found.
-  //
-  // This function is deprecated, and may return |nullptr| even if a page
-  // exists, depending on the implementation details of OfflinePageModel.
-  // Use |GetPageByOfflineURL| instead.
-  virtual const OfflinePageItem* MaybeGetPageByOfflineURL(
-      const GURL& offline_url) const = 0;
 
   // Returns the offline pages that are stored under |online_url|.
   virtual void GetPagesByOnlineURL(

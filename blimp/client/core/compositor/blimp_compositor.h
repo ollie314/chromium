@@ -10,8 +10,8 @@
 
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "base/threading/thread_checker.h"
 #include "blimp/client/core/compositor/blimp_compositor_frame_sink_proxy.h"
-#include "blimp/client/core/input/blimp_input_manager.h"
 #include "blimp/client/public/compositor/compositor_dependencies.h"
 #include "cc/surfaces/surface_factory_client.h"
 #include "cc/trees/layer_tree_host.h"
@@ -27,6 +27,8 @@ class Thread;
 }  // namespace base
 
 namespace cc {
+class InputHandler;
+
 namespace proto {
 class CompositorMessage;
 }  // namespace proto
@@ -35,9 +37,9 @@ class ContextProvider;
 class Layer;
 class LayerTreeHost;
 class LayerTreeSettings;
+class LocalFrameid;
 class Surface;
 class SurfaceFactory;
-class SurfaceId;
 class SurfaceIdAllocator;
 }  // namespace cc
 
@@ -54,16 +56,9 @@ class BlimpCompositorDependencies;
 // render widget of this compositor on the engine.
 class BlimpCompositorClient {
  public:
-  // Should send web gesture events which could not be handled locally by the
-  // compositor to the engine.
-  virtual void SendWebGestureEvent(
-      int render_widget_id,
-      const blink::WebGestureEvent& gesture_event) = 0;
-
   // Should send the compositor messages from the remote client LayerTreeHost of
   // this compositor to the corresponding remote server LayerTreeHost.
   virtual void SendCompositorMessage(
-      int render_widget_id,
       const cc::proto::CompositorMessage& message) = 0;
 
  protected:
@@ -81,21 +76,15 @@ class BlimpCompositorClient {
 // This class should only be accessed from the main thread.
 class BlimpCompositor : public cc::LayerTreeHostClient,
                         public cc::RemoteProtoChannel,
-                        public BlimpInputManagerClient,
                         public BlimpCompositorFrameSinkProxy,
                         public cc::SurfaceFactoryClient {
  public:
-  BlimpCompositor(const int render_widget_id,
-                  BlimpCompositorDependencies* compositor_dependencies,
+  BlimpCompositor(BlimpCompositorDependencies* compositor_dependencies,
                   BlimpCompositorClient* client);
 
   ~BlimpCompositor() override;
 
   virtual void SetVisible(bool visible);
-
-  // Forwards the touch event to the |input_manager_|.
-  // virtual for testing.
-  virtual bool OnTouchEvent(const ui::MotionEvent& motion_event);
 
   // Notifies |callback| when all pending commits have been drawn to the screen.
   // If this compositor is destroyed or becomes hidden |callback| will be
@@ -110,7 +99,9 @@ class BlimpCompositor : public cc::LayerTreeHostClient,
 
   scoped_refptr<cc::Layer> layer() const { return layer_; }
 
-  int render_widget_id() const { return render_widget_id_; }
+  // Returns a reference to the InputHandler used to respond to input events on
+  // the compositor thread.
+  const base::WeakPtr<cc::InputHandler>& GetInputHandler();
 
  private:
   friend class BlimpCompositorForTesting;
@@ -133,21 +124,17 @@ class BlimpCompositor : public cc::LayerTreeHostClient,
   void WillCommit() override {}
   void DidCommit() override {}
   void DidCommitAndDrawFrame() override;
-  void DidCompleteSwapBuffers() override {}
+  void DidReceiveCompositorFrameAck() override {}
   void DidCompletePageScaleAnimation() override {}
 
   // RemoteProtoChannel implementation.
   void SetProtoReceiver(ProtoReceiver* receiver) override;
   void SendCompositorProto(const cc::proto::CompositorMessage& proto) override;
 
-  // BlimpInputManagerClient implementation.
-  void SendWebGestureEvent(
-      const blink::WebGestureEvent& gesture_event) override;
-
   // BlimpCompositorFrameSinkProxy implementation.
   void BindToProxyClient(
       base::WeakPtr<BlimpCompositorFrameSinkProxyClient> proxy_client) override;
-  void SwapCompositorFrame(cc::CompositorFrame frame) override;
+  void SubmitCompositorFrame(cc::CompositorFrame frame) override;
   void UnbindProxyClient() override;
 
   // SurfaceFactoryClient implementation.
@@ -182,8 +169,9 @@ class BlimpCompositor : public cc::LayerTreeHostClient,
   // of the count.
   void CheckPendingCommitCounts(bool flush);
 
-  // The unique identifier for the render widget for this compositor.
-  const int render_widget_id_;
+  // Acks a submitted CompositorFrame when it has been processed and another
+  // frame should be started.
+  void SubmitCompositorFrameAck();
 
   BlimpCompositorClient* client_;
 
@@ -202,7 +190,7 @@ class BlimpCompositor : public cc::LayerTreeHostClient,
   bool compositor_frame_sink_request_pending_;
 
   // Data for the current frame.
-  cc::SurfaceId surface_id_;
+  cc::LocalFrameId local_frame_id_;
   gfx::Size current_surface_size_;
 
   base::ThreadChecker thread_checker_;
@@ -215,13 +203,6 @@ class BlimpCompositor : public cc::LayerTreeHostClient,
   // To be notified of any incoming compositor protos that are specifically sent
   // to |render_widget_id_|.
   cc::RemoteProtoChannel::ProtoReceiver* remote_proto_channel_receiver_;
-
-  // Handles input events for the current render widget. The lifetime of the
-  // input manager is tied to the lifetime of the |host_| which owns the
-  // cc::InputHandler. The input events are forwarded to this input handler by
-  // the manager to be handled by the client compositor for the current render
-  // widget.
-  std::unique_ptr<BlimpInputManager> input_manager_;
 
   // The number of times a START_COMMIT proto has been received but a call to
   // DidCommitAndDrawFrame hasn't been seen.  This should track the number of

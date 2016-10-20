@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "ash/common/session/session_state_delegate.h"
+#include "ash/common/test/test_session_state_delegate.h"
 #include "ash/common/wm/maximize_mode/maximize_mode_controller.h"
 #include "ash/common/wm_shell.h"
 #include "ash/shell.h"
@@ -319,7 +320,7 @@ class LockStateControllerTest : public AshTestBase {
     lock_state_controller_->OnLoginStateChanged(status);
     SetUserLoggedIn(status != LoginStatus::NOT_LOGGED_IN);
     if (status == LoginStatus::GUEST)
-      SetCanLockScreen(false);
+      TestSessionStateDelegate::SetCanLockScreen(false);
     lock_state_controller_->OnLockStateChanged(false);
   }
 

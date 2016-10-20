@@ -28,7 +28,6 @@ namespace blink {
 
 class FrameSelectionTest : public EditingTestBase {
  protected:
-  void setSelection(const VisibleSelection&);
   FrameSelection& selection() const;
   const VisibleSelection& visibleSelectionInDOMTree() const {
     return selection().selection();
@@ -57,10 +56,6 @@ class FrameSelectionTest : public EditingTestBase {
   Persistent<Text> m_textNode;
 };
 
-void FrameSelectionTest::setSelection(const VisibleSelection& newSelection) {
-  dummyPageHolder().frame().selection().setSelection(newSelection);
-}
-
 FrameSelection& FrameSelectionTest::selection() const {
   return dummyPageHolder().frame().selection();
 }
@@ -74,10 +69,10 @@ Text* FrameSelectionTest::appendTextNode(const String& data) {
 TEST_F(FrameSelectionTest, SetValidSelection) {
   Text* text = appendTextNode("Hello, World!");
   document().view()->updateAllLifecyclePhases();
-  VisibleSelection validSelection =
-      createVisibleSelection(Position(text, 0), Position(text, 5));
-  EXPECT_FALSE(validSelection.isNone());
-  setSelection(validSelection);
+  selection().setSelection(
+      SelectionInDOMTree::Builder()
+          .setBaseAndExtent(Position(text, 0), Position(text, 5))
+          .build());
   EXPECT_FALSE(selection().isNone());
 }
 
@@ -85,9 +80,8 @@ TEST_F(FrameSelectionTest, InvalidateCaretRect) {
   Text* text = appendTextNode("Hello, World!");
   document().view()->updateAllLifecyclePhases();
 
-  VisibleSelection validSelection =
-      createVisibleSelection(Position(text, 0), Position(text, 0));
-  setSelection(validSelection);
+  selection().setSelection(
+      SelectionInDOMTree::Builder().collapse(Position(text, 0)).build());
   selection().setCaretRectNeedsUpdate();
   EXPECT_TRUE(selection().isCaretBoundsDirty());
   selection().invalidateCaretRect();
@@ -107,12 +101,11 @@ TEST_F(FrameSelectionTest, PaintCaretShouldNotLayout) {
 
   document().body()->setContentEditable("true", ASSERT_NO_EXCEPTION);
   document().body()->focus();
-  EXPECT_TRUE(document().body()->focused());
+  EXPECT_TRUE(document().body()->isFocused());
 
-  VisibleSelection validSelection =
-      createVisibleSelection(Position(text, 0), Position(text, 0));
   selection().setCaretVisible(true);
-  setSelection(validSelection);
+  selection().setSelection(
+      SelectionInDOMTree::Builder().collapse(Position(text, 0)).build());
   EXPECT_TRUE(selection().isCaret());
   EXPECT_TRUE(shouldPaintCaretForTesting());
 
@@ -140,7 +133,7 @@ TEST_F(FrameSelectionTest, InvalidatePreviousCaretAfterRemovingLastCharacter) {
 
   document().body()->setContentEditable("true", ASSERT_NO_EXCEPTION);
   document().body()->focus();
-  EXPECT_TRUE(document().body()->focused());
+  EXPECT_TRUE(document().body()->isFocused());
 
   selection().setCaretVisible(true);
   EXPECT_TRUE(selection().isCaret());
@@ -176,7 +169,8 @@ TEST_F(FrameSelectionTest, InvalidatePreviousCaretAfterRemovingLastCharacter) {
   // Simulate to remove the last character.
   document().body()->removeChild(text);
   // This line is the objective of this test.
-  // As removing the last character, early previousCaret invalidation is executed.
+  // As removing the last character, early previousCaret invalidation is
+  // executed.
   EXPECT_FALSE(isPreviousCaretDirtyForTesting());
   document().updateStyleAndLayoutIgnorePendingStylesheets();
   selection().setCaretRectNeedsUpdate();
@@ -219,8 +213,10 @@ TEST_F(FrameSelectionTest, ModifyExtendWithFlatTree) {
   Node* const two = FlatTreeTraversal::firstChild(*host);
   // Select "two" for selection in DOM tree
   // Select "twoone" for selection in Flat tree
-  selection().setSelection(createVisibleSelection(
-      PositionInFlatTree(host, 0), PositionInFlatTree(document().body(), 2)));
+  selection().setSelection(SelectionInFlatTree::Builder()
+                               .collapse(PositionInFlatTree(host, 0))
+                               .extend(PositionInFlatTree(document().body(), 2))
+                               .build());
   selection().modify(FrameSelection::AlterationExtend, DirectionForward,
                      WordGranularity);
   EXPECT_EQ(Position(two, 0), visibleSelectionInDOMTree().start());
@@ -233,7 +229,8 @@ TEST_F(FrameSelectionTest, ModifyWithUserTriggered) {
   setBodyContent("<div id=sample>abc</div>");
   Element* sample = document().getElementById("sample");
   const Position endOfText(sample->firstChild(), 3);
-  selection().setSelection(createVisibleSelection(endOfText));
+  selection().setSelection(
+      SelectionInDOMTree::Builder().collapse(endOfText).build());
 
   EXPECT_FALSE(selection().modify(FrameSelection::AlterationMove,
                                   DirectionForward, CharacterGranularity,
@@ -256,7 +253,9 @@ TEST_F(FrameSelectionTest, MoveRangeSelectionTest) {
 
   // Itinitializes with "Foo B|a>r Baz," (| means start and > means end).
   selection().setSelection(
-      createVisibleSelection(Position(text, 5), Position(text, 6)));
+      SelectionInDOMTree::Builder()
+          .setBaseAndExtent(Position(text, 5), Position(text, 6))
+          .build());
   EXPECT_EQ_SELECTED_TEXT("a");
 
   // "Foo B|ar B>az," with the Character granularity.
@@ -338,7 +337,8 @@ TEST_F(FrameSelectionTest, updateIfNeededAndFrameCaret) {
   document().setDesignMode("on");
   updateAllLifecyclePhases();
   Element* sample = document().getElementById("sample");
-  setSelection(createVisibleSelection(Position(sample, 0)));
+  selection().setSelection(
+      SelectionInDOMTree::Builder().collapse(Position(sample, 0)).build());
   EXPECT_EQ(Position(document().body(), 0), selection().start());
   EXPECT_EQ(selection().start(), caretPosition().position());
   document().body()->remove();
@@ -346,6 +346,7 @@ TEST_F(FrameSelectionTest, updateIfNeededAndFrameCaret) {
   // should be Position(HTML, 0).
   EXPECT_EQ(Position(document().documentElement(), 1), selection().start());
   EXPECT_EQ(selection().start(), caretPosition().position());
+  document().updateStyleAndLayout();
   selection().updateIfNeeded();
 
   // TODO(yosin): Once lazy canonicalization implemented, selection.start

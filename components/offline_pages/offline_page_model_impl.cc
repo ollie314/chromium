@@ -357,7 +357,7 @@ void OfflinePageModelImpl::SavePage(
   }
 
   // If we already have an offline id, use it.  If not, generate one.
-  if (proposed_offline_id == 0l)
+  if (proposed_offline_id == kInvalidOfflineId)
     proposed_offline_id = GenerateOfflineId();
 
   archiver->CreateArchive(
@@ -443,9 +443,10 @@ void OfflinePageModelImpl::DoDeleteCachedPagesByURLPredicate(
 
   std::vector<int64_t> offline_ids;
   for (const auto& id_page_pair : offline_pages_) {
-    if (!IsUserRequestedPage(id_page_pair.second) &&
-        predicate.Run(id_page_pair.second.url))
+    if (IsRemovedOnCacheReset(id_page_pair.second) &&
+        predicate.Run(id_page_pair.second.url)) {
       offline_ids.push_back(id_page_pair.first);
+    }
   }
   DoDeletePagesByOfflineId(offline_ids, callback);
 }
@@ -525,7 +526,7 @@ const std::vector<int64_t> OfflinePageModelImpl::MaybeGetOfflineIdsForClientId(
   std::vector<int64_t> results;
 
   // We want only all pages, including those marked for deletion.
-  // TODO(bburns): actually use an index rather than linear scan.
+  // TODO(fgorski): actually use an index rather than linear scan.
   for (const auto& id_page_pair : offline_pages_) {
     if (id_page_pair.second.client_id == client_id &&
         !id_page_pair.second.IsExpired()) {
@@ -555,44 +556,6 @@ const OfflinePageItem* OfflinePageModelImpl::MaybeGetPageByOfflineId(
   return iter != offline_pages_.end() && !iter->second.IsExpired()
              ? &(iter->second)
              : nullptr;
-}
-
-void OfflinePageModelImpl::GetPageByOfflineURL(
-    const GURL& offline_url,
-    const SingleOfflinePageItemCallback& callback) {
-  RunWhenLoaded(
-      base::Bind(&OfflinePageModelImpl::GetPageByOfflineURLWhenLoadDone,
-                 weak_ptr_factory_.GetWeakPtr(), offline_url, callback));
-}
-
-void OfflinePageModelImpl::GetPageByOfflineURLWhenLoadDone(
-    const GURL& offline_url,
-    const SingleOfflinePageItemCallback& callback) const {
-  // Getting pages by offline URL does not exclude expired pages, as the caller
-  // already holds the offline URL and simply needs to look up a corresponding
-  // online URL.
-  const OfflinePageItem* result = nullptr;
-
-  for (const auto& id_page_pair : offline_pages_) {
-    if (id_page_pair.second.GetOfflineURL() == offline_url) {
-      result = &id_page_pair.second;
-      break;
-    }
-  }
-
-  callback.Run(result);
-}
-
-const OfflinePageItem* OfflinePageModelImpl::MaybeGetPageByOfflineURL(
-    const GURL& offline_url) const {
-  // Getting pages by offline URL does not exclude expired pages, as the caller
-  // already holds the offline URL and simply needs to look up a corresponding
-  // online URL.
-  for (const auto& id_page_pair : offline_pages_) {
-    if (id_page_pair.second.GetOfflineURL() == offline_url)
-      return &(id_page_pair.second);
-  }
-  return nullptr;
 }
 
 void OfflinePageModelImpl::GetPagesByOnlineURL(
@@ -1072,10 +1035,10 @@ void OfflinePageModelImpl::PostClearStorageIfNeededTask() {
                                        weak_ptr_factory_.GetWeakPtr())));
 }
 
-bool OfflinePageModelImpl::IsUserRequestedPage(
+bool OfflinePageModelImpl::IsRemovedOnCacheReset(
     const OfflinePageItem& offline_page) const {
-  return (offline_page.client_id.name_space == kAsyncNamespace ||
-          offline_page.client_id.name_space == kDownloadNamespace);
+  return policy_controller_->IsRemovedOnCacheReset(
+      offline_page.client_id.name_space);
 }
 
 void OfflinePageModelImpl::RunWhenLoaded(const base::Closure& task) {

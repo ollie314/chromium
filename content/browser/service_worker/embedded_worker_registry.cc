@@ -229,10 +229,6 @@ bool EmbeddedWorkerRegistry::CanHandle(int embedded_worker_id) const {
 
 MessagePortMessageFilter*
 EmbeddedWorkerRegistry::MessagePortMessageFilterForProcess(int process_id) {
-  // TODO(nhiroki): Change this to DCHECK after https://crbug.com/648477 is
-  // fixed.
-  CHECK(
-      base::ContainsKey(process_message_port_message_filter_map_, process_id));
   return process_message_port_message_filter_map_[process_id];
 }
 
@@ -304,7 +300,13 @@ ServiceWorkerStatusCode EmbeddedWorkerRegistry::Send(
 void EmbeddedWorkerRegistry::RemoveWorker(int process_id,
                                           int embedded_worker_id) {
   DCHECK(base::ContainsKey(worker_map_, embedded_worker_id));
+  DetachWorker(process_id, embedded_worker_id);
   worker_map_.erase(embedded_worker_id);
+}
+
+void EmbeddedWorkerRegistry::DetachWorker(int process_id,
+                                          int embedded_worker_id) {
+  DCHECK(base::ContainsKey(worker_map_, embedded_worker_id));
   if (!base::ContainsKey(worker_process_map_, process_id))
     return;
   worker_process_map_[process_id].erase(embedded_worker_id);

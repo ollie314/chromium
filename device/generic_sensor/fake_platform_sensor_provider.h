@@ -17,10 +17,9 @@ class FakePlatformSensorProvider : public PlatformSensorProvider {
   static FakePlatformSensorProvider* GetInstance();
 
  protected:
-  scoped_refptr<PlatformSensor> CreateSensorInternal(
-      mojom::SensorType type,
-      mojo::ScopedSharedBufferMapping mapping,
-      uint64_t buffer_size) override;
+  void CreateSensorInternal(mojom::SensorType type,
+                            mojo::ScopedSharedBufferMapping mapping,
+                            const CreateSensorCallback& callback) override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(FakePlatformSensorProvider);

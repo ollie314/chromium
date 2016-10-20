@@ -25,7 +25,6 @@ DirectCompositorFrameSink::DirectCompositorFrameSink(
                           std::move(worker_context_provider)),
       frame_sink_id_(frame_sink_id),
       surface_manager_(surface_manager),
-      surface_id_allocator_(frame_sink_id),
       display_(display),
       factory_(frame_sink_id, surface_manager, this) {
   DCHECK(thread_checker_.CalledOnValidThread());
@@ -44,7 +43,6 @@ DirectCompositorFrameSink::DirectCompositorFrameSink(
     : CompositorFrameSink(std::move(vulkan_context_provider)),
       frame_sink_id_(frame_sink_id),
       surface_manager_(surface_manager),
-      surface_id_allocator_(frame_sink_id_),
       display_(display),
       factory_(frame_sink_id_, surface_manager, this) {
   DCHECK(thread_checker_.CalledOnValidThread());
@@ -53,24 +51,22 @@ DirectCompositorFrameSink::DirectCompositorFrameSink(
 
 DirectCompositorFrameSink::~DirectCompositorFrameSink() {
   DCHECK(thread_checker_.CalledOnValidThread());
-  if (HasClient())
-    DetachFromClient();
 }
 
 bool DirectCompositorFrameSink::BindToClient(
     CompositorFrameSinkClient* client) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
-  surface_manager_->RegisterSurfaceFactoryClient(frame_sink_id_, this);
-
   if (!CompositorFrameSink::BindToClient(client))
     return false;
+
+  surface_manager_->RegisterSurfaceFactoryClient(frame_sink_id_, this);
 
   // We want the Display's output surface to hear about lost context, and since
   // this shares a context with it, we should not be listening for lost context
   // callbacks on the context here.
-  if (context_provider())
-    context_provider()->SetLostContextCallback(base::Closure());
+  if (auto* cp = context_provider())
+    cp->SetLostContextCallback(base::Closure());
 
   // Avoid initializing GL context here, as this should be sharing the
   // Display's context.
@@ -79,39 +75,38 @@ bool DirectCompositorFrameSink::BindToClient(
 }
 
 void DirectCompositorFrameSink::DetachFromClient() {
-  DCHECK(HasClient());
   // Unregister the SurfaceFactoryClient here instead of the dtor so that only
   // one client is alive for this namespace at any given time.
   surface_manager_->UnregisterSurfaceFactoryClient(frame_sink_id_);
-  if (!delegated_surface_id_.is_null())
-    factory_.Destroy(delegated_surface_id_);
+  if (!delegated_local_frame_id_.is_null())
+    factory_.Destroy(delegated_local_frame_id_);
 
   CompositorFrameSink::DetachFromClient();
 }
 
-void DirectCompositorFrameSink::SwapBuffers(CompositorFrame frame) {
+void DirectCompositorFrameSink::SubmitCompositorFrame(CompositorFrame frame) {
   gfx::Size frame_size =
       frame.delegated_frame_data->render_pass_list.back()->output_rect.size();
   if (frame_size.IsEmpty() || frame_size != last_swap_frame_size_) {
-    if (!delegated_surface_id_.is_null()) {
-      factory_.Destroy(delegated_surface_id_);
+    if (!delegated_local_frame_id_.is_null()) {
+      factory_.Destroy(delegated_local_frame_id_);
     }
-    delegated_surface_id_ = surface_id_allocator_.GenerateId();
-    factory_.Create(delegated_surface_id_);
+    delegated_local_frame_id_ = surface_id_allocator_.GenerateId();
+    factory_.Create(delegated_local_frame_id_);
     last_swap_frame_size_ = frame_size;
   }
-  display_->SetSurfaceId(delegated_surface_id_,
+  display_->SetSurfaceId(SurfaceId(frame_sink_id_, delegated_local_frame_id_),
                          frame.metadata.device_scale_factor);
 
   factory_.SubmitCompositorFrame(
-      delegated_surface_id_, std::move(frame),
+      delegated_local_frame_id_, std::move(frame),
       base::Bind(&DirectCompositorFrameSink::DidDrawCallback,
                  base::Unretained(this)));
 }
 
 void DirectCompositorFrameSink::ForceReclaimResources() {
-  if (!delegated_surface_id_.is_null()) {
-    factory_.SubmitCompositorFrame(delegated_surface_id_, CompositorFrame(),
+  if (!delegated_local_frame_id_.is_null()) {
+    factory_.SubmitCompositorFrame(delegated_local_frame_id_, CompositorFrame(),
                                    SurfaceFactory::DrawCallback());
   }
 }
@@ -146,9 +141,7 @@ void DirectCompositorFrameSink::DisplayDidDrawAndSwap() {
 }
 
 void DirectCompositorFrameSink::DidDrawCallback() {
-  // TODO(danakj): Why the lost check?
-  if (!is_lost_)
-    client_->DidSwapBuffersComplete();
+  client_->DidReceiveCompositorFrameAck();
 }
 
 }  // namespace cc

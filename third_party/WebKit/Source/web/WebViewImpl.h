@@ -159,7 +159,6 @@ class WEB_EXPORT WebViewImpl final
   void didAcquirePointerLock() override;
   void didNotAcquirePointerLock() override;
   void didLosePointerLock() override;
-  void didChangeWindowResizerRect() override;
 
   // WebView methods:
   virtual bool isWebView() const { return true; }
@@ -231,22 +230,22 @@ class WEB_EXPORT WebViewImpl final
   WebHitTestResult hitTestResultAt(const WebPoint&) override;
   WebHitTestResult hitTestResultForTap(const WebPoint&,
                                        const WebSize&) override;
-  void dragSourceEndedAt(const WebPoint& clientPoint,
+  void dragSourceEndedAt(const WebPoint& pointInViewport,
                          const WebPoint& screenPoint,
                          WebDragOperation) override;
   void dragSourceSystemDragEnded() override;
   WebDragOperation dragTargetDragEnter(const WebDragData&,
-                                       const WebPoint& clientPoint,
+                                       const WebPoint& pointInViewport,
                                        const WebPoint& screenPoint,
                                        WebDragOperationsMask operationsAllowed,
                                        int modifiers) override;
-  WebDragOperation dragTargetDragOver(const WebPoint& clientPoint,
+  WebDragOperation dragTargetDragOver(const WebPoint& pointInViewport,
                                       const WebPoint& screenPoint,
                                       WebDragOperationsMask operationsAllowed,
                                       int modifiers) override;
   void dragTargetDragLeave() override;
   void dragTargetDrop(const WebDragData&,
-                      const WebPoint& clientPoint,
+                      const WebPoint& pointInViewport,
                       const WebPoint& screenPoint,
                       int modifiers) override;
   void spellingMarkers(WebVector<uint32_t>* markers) override;
@@ -554,10 +553,6 @@ class WEB_EXPORT WebViewImpl final
   explicit WebViewImpl(WebViewClient*, WebPageVisibilityState);
   ~WebViewImpl() override;
 
-  int textInputFlags();
-
-  WebString inputModeOfFocusedElement();
-
   // Returns true if the event was actually processed.
   bool keyEventDefault(const WebKeyboardEvent&);
 
@@ -572,7 +567,7 @@ class WEB_EXPORT WebViewImpl final
   // Consolidate some common code between starting a drag over a target and
   // updating a drag over a target. If we're starting a drag, |isEntering|
   // should be true.
-  WebDragOperation dragTargetDragEnterOrOver(const WebPoint& clientPoint,
+  WebDragOperation dragTargetDragEnterOrOver(const WebPoint& pointInViewport,
                                              const WebPoint& screenPoint,
                                              DragAction,
                                              int modifiers);

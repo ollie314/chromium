@@ -47,6 +47,9 @@ public class ExternalNavigationHandler {
     @VisibleForTesting
     static final String EXTRA_BROWSER_FALLBACK_URL = "browser_fallback_url";
 
+    // Supervisor package name
+    private static final Object SUPERVISOR_PKG = "com.google.android.instantapps.supervisor";
+
     // An extra that may be specified on an intent:// URL that contains an encoded value for the
     // referrer field passed to the market:// URL in the case where the app is not present.
     @VisibleForTesting
@@ -129,6 +132,7 @@ public class ExternalNavigationHandler {
     }
 
     private boolean resolversSubsetOf(List<ResolveInfo> infos, List<ResolveInfo> container) {
+        if (container == null) return false;
         HashSet<ComponentName> containerSet = new HashSet<>();
         for (ResolveInfo info : container) {
             containerSet.add(
@@ -153,11 +157,6 @@ public class ExternalNavigationHandler {
         }
         // http://crbug.com/464669 : Disallow firing external intent from background tab.
         if (params.isBackgroundTabNavigation()) {
-            return OverrideUrlLoadingResult.NO_OVERRIDE;
-        }
-
-        // http://crbug.com/605302 : Allow Chrome to handle all pdf file downloads.
-        if (mDelegate.isPdfDownload(params.getUrl())) {
             return OverrideUrlLoadingResult.NO_OVERRIDE;
         }
 
@@ -191,6 +190,11 @@ public class ExternalNavigationHandler {
             return OverrideUrlLoadingResult.NO_OVERRIDE;
         }
 
+        // http://crbug.com/605302 : Allow Chrome to handle all pdf file downloads.
+        if (!isExternalProtocol && mDelegate.isPdfDownload(params.getUrl())) {
+            return OverrideUrlLoadingResult.NO_OVERRIDE;
+        }
+
         // If accessing a file URL, ensure that the user has granted the necessary file access
         // to Chrome.  This check should happen for reloads, navigations, etc..., which is why
         // it occurs before the subsequent blocks.
@@ -206,11 +210,7 @@ public class ExternalNavigationHandler {
         // http://crbug/424029 : Need to stay in Chrome for an intent heading explicitly to Chrome.
         if (params.getRedirectHandler() != null) {
             TabRedirectHandler handler = params.getRedirectHandler();
-            if (handler.isFromCustomTabIntent()) {
-                // http://crbug.com/613667 : Custom tabs forbids external navigation for the first
-                // url, unless the first url is a redirect.
-                if (!params.isRedirect()) return OverrideUrlLoadingResult.NO_OVERRIDE;
-            } else if (handler.shouldStayInChrome(isExternalProtocol)
+            if (handler.shouldStayInChrome(isExternalProtocol)
                     || handler.shouldNotOverrideUrlLoading()) {
                 return OverrideUrlLoadingResult.NO_OVERRIDE;
             }
@@ -262,7 +262,7 @@ public class ExternalNavigationHandler {
             // number=string(phone-number)
             mDelegate.startActivity(new Intent(Intent.ACTION_VIEW,
                     Uri.parse(WebView.SCHEME_TEL
-                            + params.getUrl().substring(SCHEME_WTAI_MC.length()))));
+                            + params.getUrl().substring(SCHEME_WTAI_MC.length()))), false);
             return OverrideUrlLoadingResult.OVERRIDE_WITH_EXTERNAL_INTENT;
         }
 
@@ -310,6 +310,8 @@ public class ExternalNavigationHandler {
         }
 
         List<ResolveInfo> resolvingInfos = mDelegate.queryIntentActivities(intent);
+        if (resolvingInfos == null) return OverrideUrlLoadingResult.NO_OVERRIDE;
+
         boolean canResolveActivity = resolvingInfos.size() > 0;
         // check whether the intent can be resolved. If not, we will see
         // whether we can download it from the Market.
@@ -339,7 +341,7 @@ public class ExternalNavigationHandler {
                     if (params.getReferrerUrl() != null) {
                         intent.putExtra(Intent.EXTRA_REFERRER, Uri.parse(params.getReferrerUrl()));
                     }
-                    mDelegate.startActivity(intent);
+                    mDelegate.startActivity(intent, false);
                     return OverrideUrlLoadingResult.OVERRIDE_WITH_EXTERNAL_INTENT;
                 } catch (ActivityNotFoundException ex) {
                     // ignore the error on devices that does not have
@@ -392,12 +394,16 @@ public class ExternalNavigationHandler {
             if (!mDelegate.isSpecializedHandlerAvailable(resolvingInfos)) {
                 if (params.webApkPackageName() != null) {
                     intent.setPackage(mDelegate.getPackageName());
-                    mDelegate.startActivity(intent);
+                    mDelegate.startActivity(intent, false);
                     return OverrideUrlLoadingResult.OVERRIDE_WITH_EXTERNAL_INTENT;
                 }
 
-                if (linkNotFromIntent && !params.isIncognito() && mDelegate.maybeLaunchInstantApp(
-                        params.getTab(), params.getUrl(), params.getReferrerUrl())) {
+                if (incomingIntentRedirect && mDelegate.maybeLaunchInstantApp(
+                        params.getTab(), params.getUrl(), params.getReferrerUrl(), true)) {
+                    return OverrideUrlLoadingResult.OVERRIDE_WITH_EXTERNAL_INTENT;
+                } else if (linkNotFromIntent && !params.isIncognito()
+                        && mDelegate.maybeLaunchInstantApp(params.getTab(), params.getUrl(),
+                                params.getReferrerUrl(), false)) {
                     return OverrideUrlLoadingResult.OVERRIDE_WITH_EXTERNAL_INTENT;
                 }
 
@@ -430,12 +436,16 @@ public class ExternalNavigationHandler {
 
                     if (previousIntent != null
                             && resolversSubsetOf(resolvingInfos,
-                                       mDelegate.queryIntentActivities(previousIntent))) {
+                                    mDelegate.queryIntentActivities(previousIntent))) {
                         return OverrideUrlLoadingResult.NO_OVERRIDE;
                     }
                 }
             }
         }
+
+        boolean shouldProxyForInstantApps = isExternalProtocol
+                && SUPERVISOR_PKG.equals(intent.getPackage())
+                && mDelegate.isSerpReferrer(params.getReferrerUrl(), params.getTab());
 
         try {
             if (params.isIncognito() && !mDelegate.willChromeHandleIntent(intent)) {
@@ -443,7 +453,8 @@ public class ExternalNavigationHandler {
                 // to apps out side of Chrome.
                 mDelegate.startIncognitoIntent(intent, params.getReferrerUrl(),
                         hasBrowserFallbackUrl ? browserFallbackUrl : null, params.getTab(),
-                        params.shouldCloseContentsOnOverrideUrlLoadingAndLaunchIntent());
+                        params.shouldCloseContentsOnOverrideUrlLoadingAndLaunchIntent(),
+                        shouldProxyForInstantApps);
                 return OverrideUrlLoadingResult.OVERRIDE_WITH_ASYNC_ACTION;
             }
 
@@ -451,8 +462,10 @@ public class ExternalNavigationHandler {
             // user has explicitly chosen Chrome over other intent handlers, so stay in Chrome
             // unless there was a new intent handler after redirection or Chrome cannot handle it
             // any more.
+            // Custom tabs are an exception to this rule, since at no point, the user sees an intent
+            // picker and "picking Chrome" is handled inside the support library.
             if (params.getRedirectHandler() != null && incomingIntentRedirect) {
-                if (!isExternalProtocol
+                if (!isExternalProtocol && !params.getRedirectHandler().isFromCustomTabIntent()
                         && !params.getRedirectHandler().hasNewResolver(intent)) {
                     return OverrideUrlLoadingResult.NO_OVERRIDE;
                 }
@@ -486,7 +499,7 @@ public class ExternalNavigationHandler {
                 }
             }
 
-            if (mDelegate.startActivityIfNeeded(intent)) {
+            if (mDelegate.startActivityIfNeeded(intent, shouldProxyForInstantApps)) {
                 return OverrideUrlLoadingResult.OVERRIDE_WITH_EXTERNAL_INTENT;
             }
 
@@ -532,8 +545,10 @@ public class ExternalNavigationHandler {
         if (url.startsWith(SCHEME_WTAI_MC)) return true;
         try {
             Intent intent = Intent.parseUri(url, Intent.URI_INTENT_SCHEME);
-            return intent.getPackage() != null
-                    || mDelegate.queryIntentActivities(intent).size() > 0;
+            if (intent.getPackage() != null) return true;
+
+            List<ResolveInfo> resolvingInfos = mDelegate.queryIntentActivities(intent);
+            if (resolvingInfos != null && resolvingInfos.size() > 0) return true;
         } catch (Exception ex) {
             // Ignore the error.
             Log.w(TAG, "Bad URI %s", url, ex);

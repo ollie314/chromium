@@ -202,6 +202,7 @@ const char* QuicUtils::StreamErrorToString(QuicRstStreamErrorCode error) {
     RETURN_STRING_LITERAL(QUIC_DUPLICATE_PROMISE_URL);
     RETURN_STRING_LITERAL(QUIC_PROMISE_VARY_MISMATCH);
     RETURN_STRING_LITERAL(QUIC_INVALID_PROMISE_METHOD);
+    RETURN_STRING_LITERAL(QUIC_PUSH_STREAM_TIMED_OUT);
   }
   // Return a default value so that we return this when |error| doesn't match
   // any of the QuicRstStreamErrorCodes. This can happen when the RstStream
@@ -304,6 +305,7 @@ const char* QuicUtils::ErrorToString(QuicErrorCode error) {
     RETURN_STRING_LITERAL(QUIC_MULTIPATH_PATH_NOT_ACTIVE);
     RETURN_STRING_LITERAL(QUIC_TOO_MANY_FRAME_GAPS);
     RETURN_STRING_LITERAL(QUIC_STREAM_SEQUENCER_INVALID_STATE);
+    RETURN_STRING_LITERAL(QUIC_TOO_MANY_SESSIONS_ON_SERVER);
     RETURN_STRING_LITERAL(QUIC_LAST_ERROR);
     // Intentionally have no default case, so we'll break the build
     // if we add errors and don't put them here.

@@ -145,7 +145,8 @@ void NetworkResourcesData::ResourceData::clearWeakMembers(Visitor* visitor) {
                                                    base64Encoded);
     }
   } else {
-    // We could be evicting resource being loaded, save the loaded part, the rest will be appended.
+    // We could be evicting resource being loaded, save the loaded part, the
+    // rest will be appended.
     m_networkResourcesData->maybeAddResourceData(
         requestId(), m_cachedResource->resourceBuffer()->data(),
         m_cachedResource->resourceBuffer()->size());
@@ -216,8 +217,8 @@ void NetworkResourcesData::responseReceived(const String& requestId,
 
   String filePath = response.downloadedFilePath();
   if (!filePath.isEmpty()) {
-    std::unique_ptr<BlobData> blobData = BlobData::create();
-    blobData->appendFile(filePath);
+    std::unique_ptr<BlobData> blobData =
+        BlobData::createForFileWithUnknownSize(filePath);
     AtomicString mimeType;
     if (response.isHTTP())
       mimeType = extractMIMETypeFromMediaType(
@@ -261,7 +262,8 @@ void NetworkResourcesData::setResourceContent(const String& requestId,
   if (resourceData->isContentEvicted())
     return;
   if (ensureFreeSpace(dataLength) && !resourceData->isContentEvicted()) {
-    // We can not be sure that we didn't try to save this request data while it was loading, so remove it, if any.
+    // We can not be sure that we didn't try to save this request data while it
+    // was loading, so remove it, if any.
     if (resourceData->hasContent())
       m_contentSize -= resourceData->removeContent();
     m_requestIdsDeque.append(requestId);

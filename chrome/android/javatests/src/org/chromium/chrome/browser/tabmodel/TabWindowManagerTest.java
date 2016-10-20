@@ -15,10 +15,10 @@ import org.chromium.base.ApplicationStatus;
 import org.chromium.base.test.util.Feature;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.EmbedContentViewActivity;
+import org.chromium.chrome.browser.fullscreen.FullscreenManager;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.TabWindowManager.TabModelSelectorFactory;
 import org.chromium.chrome.test.util.browser.tabmodel.MockTabModelSelector;
-import org.chromium.ui.base.WindowAndroid;
 
 /**
  * Test for {@link TabWindowManager} APIs.  Makes sure the class handles multiple {@link Activity}s
@@ -28,8 +28,9 @@ public class TabWindowManagerTest extends InstrumentationTestCase {
     private final TabModelSelectorFactory mMockTabModelSelectorFactory =
             new TabModelSelectorFactory() {
                 @Override
-                public TabModelSelector buildSelector(ChromeActivity activity,
-                        WindowAndroid windowAndroid, int selectorIndex) {
+                public TabModelSelector buildSelector(Activity activity,
+                        TabCreatorManager tabCreatorManager, FullscreenManager fullscreenManager,
+                        int selectorIndex) {
                     return new MockTabModelSelector(0, 0, null);
                 }
     };
@@ -43,7 +44,8 @@ public class TabWindowManagerTest extends InstrumentationTestCase {
     private MockTabModelSelector requestSelector(ChromeActivity activity, int requestedIndex) {
         final TabWindowManager manager = TabWindowManager.getInstance();
         manager.setTabModelSelectorFactory(mMockTabModelSelectorFactory);
-        return (MockTabModelSelector) manager.requestSelector(activity, null, requestedIndex);
+        return (MockTabModelSelector) manager.requestSelector(activity, activity,
+                activity.getFullscreenManager(), requestedIndex);
     }
 
     /**
@@ -256,7 +258,7 @@ public class TabWindowManagerTest extends InstrumentationTestCase {
         AsyncTabParamsManager.getAsyncTabParams().clear();
         final int asyncTabId = 123;
         final TabReparentingParams dummyParams =
-                new TabReparentingParams(new Tab(0, false, null), null, null, false);
+                new TabReparentingParams(new Tab(0, false, null), null, null);
         assertFalse(manager.tabExistsInAnySelector(asyncTabId));
         AsyncTabParamsManager.add(asyncTabId, dummyParams);
         try {
@@ -290,7 +292,7 @@ public class TabWindowManagerTest extends InstrumentationTestCase {
         AsyncTabParamsManager.getAsyncTabParams().clear();
         final int asyncTabId = 123;
         final TabReparentingParams dummyParams =
-                new TabReparentingParams(new Tab(0, false, null), null, null, false);
+                new TabReparentingParams(new Tab(0, false, null), null, null);
         assertNull(manager.getTabById(asyncTabId));
         AsyncTabParamsManager.add(asyncTabId, dummyParams);
         try {

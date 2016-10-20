@@ -37,8 +37,8 @@
 #include "core/loader/DocumentLoader.h"
 #include "core/page/Page.h"
 #include "platform/RuntimeEnabledFeatures.h"
-#include "platform/TraceEvent.h"
 #include "platform/animation/CompositorAnimationTimeline.h"
+#include "platform/tracing/TraceEvent.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebCompositorSupport.h"
 #include "wtf/PtrUtil.h"
@@ -65,9 +65,8 @@ AnimationTimeline* AnimationTimeline::create(Document* document,
 
 AnimationTimeline::AnimationTimeline(Document* document, PlatformTiming* timing)
     : m_document(document),
-      m_zeroTime(
-          0)  // 0 is used by unit tests which cannot initialize from the loader
-      ,
+      // 0 is used by unit tests which cannot initialize from the loader
+      m_zeroTime(0),
       m_zeroTimeInitialized(false),
       m_outdatedAnimationCount(0),
       m_playbackRate(1),

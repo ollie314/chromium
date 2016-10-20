@@ -42,6 +42,7 @@ const bool PlatformStyle::kDialogDefaultButtonCanBeCancel = true;
 const bool PlatformStyle::kTextfieldDragVerticallyDragsToEnd = false;
 const CustomButton::NotifyAction PlatformStyle::kMenuNotifyActivationAction =
     CustomButton::NOTIFY_ON_RELEASE;
+const bool PlatformStyle::kTreeViewHasFocusRing = false;
 const bool PlatformStyle::kTreeViewSelectionPaintsEntireRow = false;
 const bool PlatformStyle::kUseRipples = true;
 
@@ -50,17 +51,6 @@ gfx::ImageSkia PlatformStyle::CreateComboboxArrow(bool is_enabled,
                                                   Combobox::Style style) {
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   return *rb.GetImageSkiaNamed(IDR_MENU_DROPARROW);
-}
-
-// static
-std::unique_ptr<FocusableBorder> PlatformStyle::CreateComboboxBorder() {
-  return base::MakeUnique<FocusableBorder>();
-}
-
-// static
-std::unique_ptr<Background> PlatformStyle::CreateComboboxBackground(
-    int shoulder_width) {
-  return nullptr;
 }
 
 // static
@@ -76,7 +66,7 @@ SkColor PlatformStyle::TextColorForButton(
 }
 
 // static
-void PlatformStyle::OnTextfieldKeypressUnhandled() {}
+void PlatformStyle::OnTextfieldEditFailed() {}
 
 #endif  // OS_MACOSX
 

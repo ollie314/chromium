@@ -7,13 +7,13 @@
 namespace video_capture {
 
 VideoCaptureServiceTest::VideoCaptureServiceTest()
-    : shell::test::ServiceTest("exe:video_capture_unittests") {}
+    : service_manager::test::ServiceTest("exe:video_capture_unittests") {}
 
 VideoCaptureServiceTest::~VideoCaptureServiceTest() = default;
 
 void VideoCaptureServiceTest::SetUp() {
   ServiceTest::SetUp();
-  connector()->ConnectToInterface("mojo:video_capture", &service_);
+  connector()->ConnectToInterface("service:video_capture", &service_);
   service_->ConnectToFakeDeviceFactory(mojo::GetProxy(&factory_));
 }
 

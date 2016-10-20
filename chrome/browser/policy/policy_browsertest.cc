@@ -203,6 +203,8 @@
 #include "chrome/browser/chromeos/login/test/js_checker.h"
 #include "chrome/browser/chromeos/system/timezone_resolver_manager.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/ui/app_list/arc/arc_app_list_prefs.h"
+#include "chrome/browser/ui/app_list/arc/arc_default_app_list.h"
 #include "chrome/browser/ui/ash/chrome_screenshot_grabber.h"
 #include "chrome/browser/ui/ash/multi_user/multi_user_util.h"
 #include "chromeos/audio/cras_audio_handler.h"
@@ -214,7 +216,7 @@
 #include "components/arc/arc_bridge_service.h"
 #include "components/arc/arc_bridge_service_impl.h"
 #include "components/arc/arc_service_manager.h"
-#include "components/arc/test/fake_arc_bridge_bootstrap.h"
+#include "components/arc/test/fake_arc_session.h"
 #include "components/signin/core/account_id/account_id.h"
 #include "components/user_manager/user_manager.h"
 #include "ui/keyboard/keyboard_util.h"
@@ -881,13 +883,16 @@ class PolicyTest : public InProcessBrowserTest {
   void ApplySafeSearchPolicy(
       std::unique_ptr<base::FundamentalValue> legacy_safe_search,
       std::unique_ptr<base::FundamentalValue> google_safe_search,
-      std::unique_ptr<base::FundamentalValue> youtube_safety_mode) {
+      std::unique_ptr<base::FundamentalValue> legacy_youtube,
+      std::unique_ptr<base::FundamentalValue> youtube_restrict) {
     PolicyMap policies;
     SetPolicy(&policies, key::kForceSafeSearch, std::move(legacy_safe_search));
     SetPolicy(&policies, key::kForceGoogleSafeSearch,
               std::move(google_safe_search));
     SetPolicy(&policies, key::kForceYouTubeSafetyMode,
-              std::move(youtube_safety_mode));
+              std::move(legacy_youtube));
+    SetPolicy(&policies, key::kForceYouTubeRestrict,
+              std::move(youtube_restrict));
     UpdateProviderPolicy(policies);
   }
 
@@ -1167,7 +1172,88 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, PolicyPreprocessing) {
   EXPECT_TRUE(expected.Equals(actual_from_profile));
 }
 
-IN_PROC_BROWSER_TEST_F(PolicyTest, ForceSafeSearch) {
+IN_PROC_BROWSER_TEST_F(PolicyTest, LegacySafeSearch) {
+  static_assert(safe_search_util::YOUTUBE_RESTRICT_OFF      == 0 &&
+                safe_search_util::YOUTUBE_RESTRICT_MODERATE == 1 &&
+                safe_search_util::YOUTUBE_RESTRICT_STRICT   == 2 &&
+                safe_search_util::YOUTUBE_RESTRICT_COUNT    == 3,
+                "This test relies on mapping ints to enum values.");
+
+  // Go over all combinations of (undefined, true, false) for the policies
+  // ForceSafeSearch, ForceGoogleSafeSearch and ForceYouTubeSafetyMode as well
+  // as (undefined, off, moderate, strict) for ForceYouTubeRestrict and make
+  // sure the prefs are set as expected.
+  const int num_restrict_modes = 1 + safe_search_util::YOUTUBE_RESTRICT_COUNT;
+  for (int i = 0; i < 3 * 3 * 3 * num_restrict_modes; i++) {
+    int val = i;
+    int legacy_safe_search = val % 3; val /= 3;
+    int google_safe_search = val % 3; val /= 3;
+    int legacy_youtube     = val % 3; val /= 3;
+    int youtube_restrict   = val % num_restrict_modes;
+
+    // Override the default SafeSearch setting using policies.
+    ApplySafeSearchPolicy(
+        legacy_safe_search == 0
+            ? nullptr
+            : base::MakeUnique<base::FundamentalValue>(legacy_safe_search == 1),
+        google_safe_search == 0
+            ? nullptr
+            : base::MakeUnique<base::FundamentalValue>(google_safe_search == 1),
+        legacy_youtube == 0
+            ? nullptr
+            : base::MakeUnique<base::FundamentalValue>(legacy_youtube == 1),
+        youtube_restrict == 0
+            ? nullptr  // subtracting 1 gives 0,1,2, see above
+            : base::MakeUnique<base::FundamentalValue>(youtube_restrict - 1));
+
+    // The legacy ForceSafeSearch policy should only have an effect if none of
+    // the other 3 policies are defined.
+    bool legacy_safe_search_in_effect =
+        google_safe_search == 0 && legacy_youtube == 0 &&
+        youtube_restrict == 0 && legacy_safe_search != 0;
+    bool legacy_safe_search_enabled =
+        legacy_safe_search_in_effect && legacy_safe_search == 1;
+
+    // Likewise, ForceYouTubeSafetyMode should only have an effect if
+    // ForceYouTubeRestrict is not set.
+    bool legacy_youtube_in_effect =
+        youtube_restrict == 0 && legacy_youtube != 0;
+    bool legacy_youtube_enabled =
+        legacy_youtube_in_effect && legacy_youtube == 1;
+
+    // Consistency check, can't have both legacy modes at the same time.
+    EXPECT_FALSE(legacy_youtube_in_effect && legacy_safe_search_in_effect);
+
+    // Google safe search can be triggered by the ForceGoogleSafeSearch policy
+    // or the legacy safe search mode.
+    PrefService* prefs = browser()->profile()->GetPrefs();
+    EXPECT_EQ(google_safe_search != 0 || legacy_safe_search_in_effect,
+              prefs->IsManagedPreference(prefs::kForceGoogleSafeSearch));
+    EXPECT_EQ(google_safe_search == 1 || legacy_safe_search_enabled,
+              prefs->GetBoolean(prefs::kForceGoogleSafeSearch));
+
+    // YouTube restrict mode can be triggered by the ForceYouTubeRestrict policy
+    // or any of the legacy modes.
+    EXPECT_EQ(youtube_restrict != 0 || legacy_safe_search_in_effect ||
+              legacy_youtube_in_effect,
+              prefs->IsManagedPreference(prefs::kForceYouTubeRestrict));
+
+    if (youtube_restrict != 0) {
+      // The ForceYouTubeRestrict policy should map directly to the pref.
+      EXPECT_EQ(youtube_restrict - 1,
+          prefs->GetInteger(prefs::kForceYouTubeRestrict));
+    } else {
+      // The legacy modes should result in MODERATE strictness, if enabled.
+      safe_search_util::YouTubeRestrictMode expected_mode =
+          legacy_safe_search_enabled || legacy_youtube_enabled
+            ? safe_search_util::YOUTUBE_RESTRICT_MODERATE
+            : safe_search_util::YOUTUBE_RESTRICT_OFF;
+      EXPECT_EQ(prefs->GetInteger(prefs::kForceYouTubeRestrict), expected_mode);
+    }
+  }
+}
+
+IN_PROC_BROWSER_TEST_F(PolicyTest, ForceGoogleSafeSearch) {
   // Makes the requests fail since all we want to check is that the redirection
   // is done properly.
   MakeRequestFail make_request_fail("google.com");
@@ -1177,38 +1263,28 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, ForceSafeSearch) {
   // First check that nothing happens.
   CheckSafeSearch(false);
 
-  // Go over all combinations of (undefined,true,false) for the three policies.
-  for (int i = 0; i < 3 * 3 * 3; i++) {
-    int legacy = i % 3;
-    int google = (i / 3) % 3;
-    int youtube = i / (3 * 3);
-
-    // Override the default SafeSearch setting using policies.
+  // Go over all combinations of (undefined, true, false) for the
+  // ForceGoogleSafeSearch policy.
+  for (int safe_search = 0; safe_search < 3; safe_search++) {
+    // Override the Google safe search policy.
     ApplySafeSearchPolicy(
-        legacy == 0 ? nullptr
-                    : base::MakeUnique<base::FundamentalValue>(legacy == 1),
-        google == 0 ? nullptr
-                    : base::MakeUnique<base::FundamentalValue>(google == 1),
-        youtube == 0 ? nullptr
-                     : base::MakeUnique<base::FundamentalValue>(youtube == 1));
+        nullptr,          // ForceSafeSearch
+        safe_search == 0  // ForceGoogleSafeSearch
+            ? nullptr
+            : base::MakeUnique<base::FundamentalValue>(safe_search == 1),
+        nullptr,          // ForceYouTubeSafetyMode
+        nullptr           // ForceYouTubeRestrict
+    );
 
-    // The legacy policy should only have an effect if both google and youtube
-    // are undefined.
-    bool legacy_in_effect = (google == 0 && youtube == 0 && legacy != 0);
-    bool legacy_enabled = legacy_in_effect && legacy == 1;
-
+    // Verify that the safe search pref behaves the way we expect.
     PrefService* prefs = browser()->profile()->GetPrefs();
-    EXPECT_EQ(google != 0 || legacy_in_effect,
+    EXPECT_EQ(safe_search != 0,
               prefs->IsManagedPreference(prefs::kForceGoogleSafeSearch));
-    EXPECT_EQ(google == 1 || legacy_enabled,
+    EXPECT_EQ(safe_search == 1,
               prefs->GetBoolean(prefs::kForceGoogleSafeSearch));
 
-    EXPECT_EQ(youtube != 0 || legacy_in_effect,
-              prefs->IsManagedPreference(prefs::kForceYouTubeSafetyMode));
-    EXPECT_EQ(youtube == 1 || legacy_enabled,
-              prefs->GetBoolean(prefs::kForceYouTubeSafetyMode));
-
-    CheckSafeSearch(google == 1 || legacy_enabled);
+    // Verify that safe search actually works.
+    CheckSafeSearch(safe_search == 1);
   }
 }
 
@@ -3177,12 +3253,10 @@ class MediaStreamDevicesControllerBrowserTest
   }
 
   void FinishAudioTest() {
-    content::MediaStreamRequest request(0, 0, 0,
-                                        request_url_.GetOrigin(), false,
-                                        content::MEDIA_DEVICE_ACCESS,
-                                        std::string(), std::string(),
-                                        content::MEDIA_DEVICE_AUDIO_CAPTURE,
-                                        content::MEDIA_NO_SERVICE);
+    content::MediaStreamRequest request(
+        0, 0, 0, request_url_.GetOrigin(), false, content::MEDIA_DEVICE_ACCESS,
+        std::string(), std::string(), content::MEDIA_DEVICE_AUDIO_CAPTURE,
+        content::MEDIA_NO_SERVICE, false);
     // TODO(raymes): Test MEDIA_DEVICE_OPEN (Pepper) which grants both webcam
     // and microphone permissions at the same time.
     MediaStreamDevicesController controller(
@@ -3196,13 +3270,10 @@ class MediaStreamDevicesControllerBrowserTest
   }
 
   void FinishVideoTest() {
-    content::MediaStreamRequest request(0, 0, 0,
-                                        request_url_.GetOrigin(), false,
-                                        content::MEDIA_DEVICE_ACCESS,
-                                        std::string(),
-                                        std::string(),
-                                        content::MEDIA_NO_SERVICE,
-                                        content::MEDIA_DEVICE_VIDEO_CAPTURE);
+    content::MediaStreamRequest request(
+        0, 0, 0, request_url_.GetOrigin(), false, content::MEDIA_DEVICE_ACCESS,
+        std::string(), std::string(), content::MEDIA_NO_SERVICE,
+        content::MEDIA_DEVICE_VIDEO_CAPTURE, false);
     // TODO(raymes): Test MEDIA_DEVICE_OPEN (Pepper) which grants both webcam
     // and microphone permissions at the same time.
     MediaStreamDevicesController controller(
@@ -4120,8 +4191,8 @@ class ArcPolicyTest : public PolicyTest {
             fake_session_manager_client_));
 
     auto service = base::MakeUnique<arc::ArcBridgeServiceImpl>();
-    service->SetArcBridgeBootstrapFactoryForTesting(
-        base::Bind(arc::FakeArcBridgeBootstrap::Create));
+    service->SetArcSessionFactoryForTesting(
+        base::Bind(arc::FakeArcSession::Create));
     arc::ArcServiceManager::SetArcBridgeServiceForTesting(std::move(service));
   }
 
@@ -4131,10 +4202,38 @@ class ArcPolicyTest : public PolicyTest {
     command_line->AppendSwitch(chromeos::switches::kEnableArc);
   }
 
+  void SetArcEnabledByPolicy(bool enabled) {
+    PolicyMap policies;
+    policies.Set(key::kArcEnabled, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
+                 POLICY_SOURCE_CLOUD,
+                 base::WrapUnique(new base::FundamentalValue(enabled)),
+                 nullptr);
+    UpdateProviderPolicy(policies);
+    if (browser()) {
+      const PrefService* const prefs = browser()->profile()->GetPrefs();
+      EXPECT_EQ(prefs->GetBoolean(prefs::kArcEnabled), enabled);
+    }
+  }
+
  private:
   chromeos::FakeSessionManagerClient *fake_session_manager_client_;
 
   DISALLOW_COPY_AND_ASSIGN(ArcPolicyTest);
+};
+
+class ArcPolicyDefaultAppTest : public ArcPolicyTest {
+ public:
+  ArcPolicyDefaultAppTest() {}
+  ~ArcPolicyDefaultAppTest() override {}
+
+ protected:
+  void SetUpInProcessBrowserTestFixture() override {
+    ArcDefaultAppList::UseTestAppsDirectory();
+    ArcPolicyTest::SetUpInProcessBrowserTestFixture();
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(ArcPolicyDefaultAppTest);
 };
 
 // Test ArcEnabled policy.
@@ -4142,29 +4241,47 @@ IN_PROC_BROWSER_TEST_F(ArcPolicyTest, ArcEnabled) {
   SetUpTest();
 
   const PrefService* const pref = browser()->profile()->GetPrefs();
-  const arc::ArcBridgeService* const arc_bridge_service
-      = arc::ArcBridgeService::Get();
+  const arc::ArcBridgeService* const arc_bridge_service =
+      arc::ArcBridgeService::Get();
 
   // ARC is switched off by default.
   EXPECT_TRUE(arc_bridge_service->stopped());
   EXPECT_FALSE(pref->GetBoolean(prefs::kArcEnabled));
 
   // Enable ARC.
-  PolicyMap policies;
-  policies.Set(key::kArcEnabled, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
-               POLICY_SOURCE_CLOUD,
-               base::WrapUnique(new base::FundamentalValue(true)), nullptr);
-  UpdateProviderPolicy(policies);
-  EXPECT_TRUE(pref->GetBoolean(prefs::kArcEnabled));
+  SetArcEnabledByPolicy(true);
   EXPECT_TRUE(arc_bridge_service->ready());
 
   // Disable ARC.
-  policies.Set(key::kArcEnabled, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
-               POLICY_SOURCE_CLOUD,
-               base::WrapUnique(new base::FundamentalValue(false)), nullptr);
-  UpdateProviderPolicy(policies);
-  EXPECT_FALSE(pref->GetBoolean(prefs::kArcEnabled));
+  SetArcEnabledByPolicy(false);
   EXPECT_TRUE(arc_bridge_service->stopped());
+
+  TearDownTest();
+}
+
+// Test Arc default apps do not appear when Arc is disabled by policy.
+IN_PROC_BROWSER_TEST_F(ArcPolicyDefaultAppTest, DefaultApps) {
+  // Started disabled.
+  SetArcEnabledByPolicy(false);
+
+  SetUpTest();
+
+  ArcAppListPrefs* prefs = ArcAppListPrefs::Get(browser()->profile());
+  ASSERT_NE(nullptr, prefs);
+
+  base::RunLoop run_loop;
+  prefs->SetDefaltAppsReadyCallback(run_loop.QuitClosure());
+  run_loop.Run();
+
+  EXPECT_TRUE(prefs->GetAppIds().empty());
+
+  // Enable Arc
+  SetArcEnabledByPolicy(true);
+  EXPECT_FALSE(prefs->GetAppIds().empty());
+
+  // Disable Arc again.
+  SetArcEnabledByPolicy(false);
+  EXPECT_TRUE(prefs->GetAppIds().empty());
 
   TearDownTest();
 }

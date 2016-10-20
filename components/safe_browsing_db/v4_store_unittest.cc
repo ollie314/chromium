@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/base64.h"
 #include "base/bind.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
@@ -56,12 +57,18 @@ class V4StoreTest : public PlatformTest {
                     file_format_string.size());
   }
 
-  void UpdatedStoreReadyAfterRiceRemovals(bool* called_back,
-                                          std::unique_ptr<V4Store> new_store) {
+  void UpdatedStoreReady(bool* called_back,
+                         bool expect_store,
+                         std::unique_ptr<V4Store> store) {
     *called_back = true;
-    EXPECT_EQ(2u, new_store->hash_prefix_map_.size());
-    EXPECT_EQ("22222", new_store->hash_prefix_map_[5]);
-    EXPECT_EQ("abcd", new_store->hash_prefix_map_[4]);
+    if (expect_store) {
+      ASSERT_TRUE(store);
+      EXPECT_EQ(2u, store->hash_prefix_map_.size());
+      EXPECT_EQ("22222", store->hash_prefix_map_[5]);
+      EXPECT_EQ("abcd", store->hash_prefix_map_[4]);
+    } else {
+      ASSERT_FALSE(store);
+    }
   }
 
   base::ScopedTempDir temp_dir_;
@@ -125,36 +132,9 @@ TEST_F(V4StoreTest, TestReadFromNoHashPrefixesFile) {
   list_update_response.set_platform_type(LINUX_PLATFORM);
   list_update_response.set_response_type(ListUpdateResponse::FULL_UPDATE);
   WriteFileFormatProtoToFile(0x600D71FE, 9, &list_update_response);
-  EXPECT_EQ(READ_SUCCESS, V4Store(task_runner_, store_path_).ReadFromDisk());
-}
-
-TEST_F(V4StoreTest, TestWriteNoResponseType) {
-  EXPECT_EQ(INVALID_RESPONSE_TYPE_FAILURE,
-            V4Store(task_runner_, store_path_)
-                .WriteToDisk(base::WrapUnique(new ListUpdateResponse)));
-}
-
-TEST_F(V4StoreTest, TestWritePartialResponseType) {
-  std::unique_ptr<ListUpdateResponse> list_update_response(
-      new ListUpdateResponse);
-  list_update_response->set_response_type(ListUpdateResponse::PARTIAL_UPDATE);
-  EXPECT_EQ(INVALID_RESPONSE_TYPE_FAILURE,
-            V4Store(task_runner_, store_path_)
-                .WriteToDisk(std::move(list_update_response)));
-}
-
-TEST_F(V4StoreTest, TestWriteFullResponseType) {
-  std::unique_ptr<ListUpdateResponse> list_update_response(
-      new ListUpdateResponse);
-  list_update_response->set_response_type(ListUpdateResponse::FULL_UPDATE);
-  list_update_response->set_new_client_state("test_client_state");
-  EXPECT_EQ(WRITE_SUCCESS, V4Store(task_runner_, store_path_)
-                               .WriteToDisk(std::move(list_update_response)));
-
-  V4Store read_store(task_runner_, store_path_);
-  EXPECT_EQ(READ_SUCCESS, read_store.ReadFromDisk());
-  EXPECT_EQ("test_client_state", read_store.state_);
-  EXPECT_TRUE(read_store.hash_prefix_map_.empty());
+  V4Store store(task_runner_, store_path_);
+  EXPECT_EQ(READ_SUCCESS, store.ReadFromDisk());
+  EXPECT_TRUE(store.hash_prefix_map_.empty());
 }
 
 TEST_F(V4StoreTest, TestAddUnlumpedHashesWithInvalidAddition) {
@@ -568,22 +548,13 @@ TEST_F(V4StoreTest, TestMergeUpdatesRemovesMultipleAcrossDifferentSizes) {
 }
 
 TEST_F(V4StoreTest, TestReadFullResponseWithValidHashPrefixMap) {
-  std::unique_ptr<ListUpdateResponse> lur(new ListUpdateResponse);
-  lur->set_response_type(ListUpdateResponse::FULL_UPDATE);
-  lur->set_new_client_state("test_client_state");
-  lur->set_platform_type(WINDOWS_PLATFORM);
-  lur->set_threat_entry_type(URL);
-  lur->set_threat_type(MALWARE_THREAT);
-  ThreatEntrySet* additions = lur->add_additions();
-  additions->set_compression_type(RAW);
-  additions->mutable_raw_hashes()->set_prefix_size(5);
-  additions->mutable_raw_hashes()->set_raw_hashes("00000abcde");
-  additions = lur->add_additions();
-  additions->set_compression_type(RAW);
-  additions->mutable_raw_hashes()->set_prefix_size(4);
-  additions->mutable_raw_hashes()->set_raw_hashes("00000abc");
-  EXPECT_EQ(WRITE_SUCCESS,
-            V4Store(task_runner_, store_path_).WriteToDisk(std::move(lur)));
+  V4Store write_store(task_runner_, store_path_);
+  write_store.hash_prefix_map_[4] = "00000abc";
+  write_store.hash_prefix_map_[5] = "00000abcde";
+  write_store.state_ = "test_client_state";
+  EXPECT_FALSE(base::PathExists(write_store.store_path_));
+  EXPECT_EQ(WRITE_SUCCESS, write_store.WriteToDisk(Checksum()));
+  EXPECT_TRUE(base::PathExists(write_store.store_path_));
 
   V4Store read_store (task_runner_, store_path_);
   EXPECT_EQ(READ_SUCCESS, read_store.ReadFromDisk());
@@ -598,18 +569,12 @@ TEST_F(V4StoreTest, TestReadFullResponseWithValidHashPrefixMap) {
 // size is 5 so the parser isn't able to split the hash prefixes list
 // completely.
 TEST_F(V4StoreTest, TestReadFullResponseWithInvalidHashPrefixMap) {
-  std::unique_ptr<ListUpdateResponse> lur(new ListUpdateResponse);
-  lur->set_response_type(ListUpdateResponse::FULL_UPDATE);
-  lur->set_new_client_state("test_client_state");
-  lur->set_platform_type(WINDOWS_PLATFORM);
-  lur->set_threat_entry_type(URL);
-  lur->set_threat_type(MALWARE_THREAT);
-  ThreatEntrySet* additions = lur->add_additions();
-  additions->set_compression_type(RAW);
-  additions->mutable_raw_hashes()->set_prefix_size(5);
-  additions->mutable_raw_hashes()->set_raw_hashes("abcdef");
-  EXPECT_EQ(WRITE_SUCCESS,
-            V4Store(task_runner_, store_path_).WriteToDisk(std::move(lur)));
+  V4Store write_store(task_runner_, store_path_);
+  write_store.hash_prefix_map_[5] = "abcdef";
+  write_store.state_ = "test_client_state";
+  EXPECT_FALSE(base::PathExists(write_store.store_path_));
+  EXPECT_EQ(WRITE_SUCCESS, write_store.WriteToDisk(Checksum()));
+  EXPECT_TRUE(base::PathExists(write_store.store_path_));
 
   V4Store read_store(task_runner_, store_path_);
   EXPECT_EQ(HASH_PREFIX_MAP_GENERATION_FAILURE, read_store.ReadFromDisk());
@@ -710,7 +675,8 @@ TEST_F(V4StoreTest, TestAdditionsWithRiceEncodingFailsWithInvalidInput) {
   HashPrefixMap additions_map;
   EXPECT_EQ(RICE_DECODING_FAILURE,
             V4Store(task_runner_, store_path_)
-                .UpdateHashPrefixMapFromAdditions(additions, &additions_map));
+                .UpdateHashPrefixMapFromAdditions("V4Metric", additions,
+                                                  &additions_map));
 }
 #endif
 
@@ -731,7 +697,8 @@ TEST_F(V4StoreTest, TestAdditionsWithRiceEncodingSucceeds) {
   HashPrefixMap additions_map;
   EXPECT_EQ(APPLY_UPDATE_SUCCESS,
             V4Store(task_runner_, store_path_)
-                .UpdateHashPrefixMapFromAdditions(additions, &additions_map));
+                .UpdateHashPrefixMapFromAdditions("V4Metric", additions,
+                                                  &additions_map));
   EXPECT_EQ(1u, additions_map.size());
   EXPECT_EQ(std::string("\x5\0\0\0\fL\x93\xADV\x7F\xF6o\xCEo1\x81", 16),
             additions_map[4]);
@@ -773,9 +740,12 @@ TEST_F(V4StoreTest, TestRemovalsWithRiceEncodingSucceeds) {
 
   bool called_back = false;
   UpdatedStoreReadyCallback store_ready_callback =
-      base::Bind(&V4StoreTest::UpdatedStoreReadyAfterRiceRemovals,
-                 base::Unretained(this), &called_back);
+      base::Bind(&V4StoreTest::UpdatedStoreReady, base::Unretained(this),
+                 &called_back, true /* expect_store */);
+  EXPECT_FALSE(base::PathExists(store.store_path_));
   store.ApplyUpdate(std::move(lur), task_runner_, store_ready_callback);
+  EXPECT_TRUE(base::PathExists(store.store_path_));
+
   task_runner_->RunPendingTasks();
   base::RunLoop().RunUntilIdle();
 
@@ -798,6 +768,84 @@ TEST_F(V4StoreTest, TestMergeUpdatesFailsChecksum) {
   EXPECT_EQ(CHECKSUM_MISMATCH_FAILURE,
             V4Store(task_runner_, store_path_)
                 .MergeUpdate(prefix_map_old, HashPrefixMap(), nullptr, "aawc"));
+}
+
+TEST_F(V4StoreTest, TestChecksumErrorOnStartup) {
+  // First the case of checksum not matching after reading from disk.
+  ListUpdateResponse list_update_response;
+  list_update_response.set_new_client_state("test_client_state");
+  list_update_response.set_platform_type(LINUX_PLATFORM);
+  list_update_response.set_response_type(ListUpdateResponse::FULL_UPDATE);
+  list_update_response.mutable_checksum()->set_sha256(
+      std::string(crypto::kSHA256Length, 0));
+  WriteFileFormatProtoToFile(0x600D71FE, 9, &list_update_response);
+  V4Store store(task_runner_, store_path_);
+  EXPECT_TRUE(store.expected_checksum_.empty());
+  EXPECT_EQ(READ_SUCCESS, store.ReadFromDisk());
+  EXPECT_TRUE(!store.expected_checksum_.empty());
+  EXPECT_EQ("test_client_state", store.state());
+
+  EXPECT_FALSE(store.VerifyChecksum());
+
+  // Now the case of checksum matching after reading from disk.
+  // Proof of checksum mismatch using python:
+  // >>> import hashlib
+  // >>> m = hashlib.sha256()
+  // >>> m.update("abcde")
+  // >>> import base64
+  // >>> encoded = base64.b64encode(m.digest())
+  // >>> encoded
+  // 'NrvlDtloQdEEQ7y2cNZVTwo0t2G+Z+ycSorSwMRMpCw='
+  std::string expected_checksum;
+  base::Base64Decode("NrvlDtloQdEEQ7y2cNZVTwo0t2G+Z+ycSorSwMRMpCw=",
+                     &expected_checksum);
+  ThreatEntrySet* additions = list_update_response.add_additions();
+  additions->set_compression_type(RAW);
+  additions->mutable_raw_hashes()->set_prefix_size(5);
+  additions->mutable_raw_hashes()->set_raw_hashes("abcde");
+  list_update_response.mutable_checksum()->set_sha256(expected_checksum);
+  WriteFileFormatProtoToFile(0x600D71FE, 9, &list_update_response);
+  V4Store another_store(task_runner_, store_path_);
+  EXPECT_TRUE(another_store.expected_checksum_.empty());
+
+  EXPECT_EQ(READ_SUCCESS, another_store.ReadFromDisk());
+  EXPECT_TRUE(!another_store.expected_checksum_.empty());
+  EXPECT_EQ("test_client_state", another_store.state());
+
+  EXPECT_TRUE(another_store.VerifyChecksum());
+}
+
+TEST_F(V4StoreTest, WriteToDiskFails) {
+  // Pass the directory name as file name so that when the code tries to rename
+  // the temp store file to |store_path_| it fails.
+  EXPECT_EQ(UNABLE_TO_RENAME_FAILURE,
+            V4Store(task_runner_, temp_dir_.GetPath()).WriteToDisk(Checksum()));
+}
+
+TEST_F(V4StoreTest, FullUpdateFailsChecksumSynchronously) {
+  V4Store store(task_runner_, store_path_);
+  bool called_back = false;
+  UpdatedStoreReadyCallback store_ready_callback =
+      base::Bind(&V4StoreTest::UpdatedStoreReady, base::Unretained(this),
+                 &called_back, false /* expect_store */);
+  EXPECT_FALSE(base::PathExists(store.store_path_));
+
+  // Now create a response with invalid checksum.
+  std::unique_ptr<ListUpdateResponse> lur(new ListUpdateResponse);
+  lur->set_response_type(ListUpdateResponse::FULL_UPDATE);
+  lur->mutable_checksum()->set_sha256(std::string(crypto::kSHA256Length, 0));
+  store.ApplyUpdate(std::move(lur), task_runner_, store_ready_callback);
+  // The update should fail synchronously and not create a store file.
+  EXPECT_FALSE(base::PathExists(store.store_path_));
+
+  // Run everything on the task runner to ensure there are no pending tasks.
+  task_runner_->RunPendingTasks();
+  base::RunLoop().RunUntilIdle();
+
+  // This ensures that the callback was called.
+  EXPECT_TRUE(called_back);
+  // Ensure that the file is still not created.
+  EXPECT_FALSE(base::PathExists(store.store_path_));
 }
 
 }  // namespace safe_browsing

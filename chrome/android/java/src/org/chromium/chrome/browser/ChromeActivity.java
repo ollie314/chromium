@@ -166,6 +166,11 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
      */
     static final int NO_CONTROL_CONTAINER = -1;
 
+    /**
+     * No toolbar layout to inflate during initialization.
+     */
+    static final int NO_TOOLBAR_LAYOUT = -1;
+
     private static final int RECORD_MULTI_WINDOW_SCREEN_WIDTH_DELAY_MS = 5000;
 
     /**
@@ -314,6 +319,7 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
         // Inform the WindowAndroid of the keyboard accessory view.
         mWindowAndroid.setKeyboardAccessoryView((ViewGroup) findViewById(R.id.keyboard_accessory));
         initializeToolbar();
+        mFullscreenManager = createFullscreenManager();
     }
 
     @Override
@@ -337,13 +343,15 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
         setLowEndTheme();
         int controlContainerLayoutId = getControlContainerLayoutId();
         WarmupManager warmupManager = WarmupManager.getInstance();
-        if (warmupManager.hasBuiltOrClearViewHierarchyWithToolbar(controlContainerLayoutId)) {
+        if (warmupManager.hasViewHierarchyWithToolbar(controlContainerLayoutId)) {
             View placeHolderView = new View(this);
             setContentView(placeHolderView);
             ViewGroup contentParent = (ViewGroup) placeHolderView.getParent();
-            WarmupManager.getInstance().transferViewHierarchyTo(contentParent);
+            warmupManager.transferViewHierarchyTo(contentParent);
             contentParent.removeView(placeHolderView);
         } else {
+            warmupManager.clearViewHierarchy();
+
             // Allow disk access for the content view and toolbar container setup.
             // On certain android devices this setup sequence results in disk writes outside
             // of our control, so we have to disable StrictMode to work. See crbug.com/639352.
@@ -355,6 +363,17 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
                             ((ViewStub) findViewById(R.id.control_container_stub));
                     toolbarContainerStub.setLayoutResource(controlContainerLayoutId);
                     toolbarContainerStub.inflate();
+                }
+
+                // It cannot be assumed that the result of toolbarContainerStub.inflate() will be
+                // the control container since it may be wrapped in another view.
+                ControlContainer controlContainer =
+                        (ControlContainer) findViewById(R.id.control_container);
+
+                // Inflate the correct toolbar layout for the device.
+                int toolbarLayoutId = getToolbarLayoutId();
+                if (toolbarLayoutId != NO_TOOLBAR_LAYOUT && controlContainer != null) {
+                    controlContainer.initWithToolbar(toolbarLayoutId);
                 }
             } finally {
                 StrictMode.setThreadPolicy(oldPolicy);
@@ -459,6 +478,13 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
      */
     protected int getControlContainerLayoutId() {
         return NO_CONTROL_CONTAINER;
+    }
+
+    /**
+     * @return The layout ID for the toolbar to use.
+     */
+    protected int getToolbarLayoutId() {
+        return NO_TOOLBAR_LAYOUT;
     }
 
     /**
@@ -1036,8 +1062,8 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
         final Activity mainActivity = this;
         WebContents webContents = currentTab.getWebContents();
 
-        boolean isOfflinePage = currentTab.isOfflinePage();
-        RecordHistogram.recordBooleanHistogram("OfflinePages.SharedPageWasOffline", isOfflinePage);
+        RecordHistogram.recordBooleanHistogram(
+                "OfflinePages.SharedPageWasOffline", currentTab.isOfflinePage());
         boolean canShareOfflinePage = OfflinePageBridge.isPageSharingEnabled();
 
         // Share an empty blockingUri in place of screenshot file. The file ready notification is
@@ -1047,7 +1073,7 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
                 : ChromeFileProvider.generateUriAndBlockAccess(mainActivity);
         if (canShareOfflinePage) {
             OfflinePageUtils.shareOfflinePage(shareDirectly, true, mainActivity, null,
-                    currentTab.getUrl(), blockingUri, null, currentTab, isOfflinePage);
+                    blockingUri, null, currentTab);
         } else {
             ShareHelper.share(shareDirectly, true, mainActivity, currentTab.getTitle(), null,
                     currentTab.getUrl(), null, blockingUri, null);
@@ -1336,14 +1362,11 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
 
     /**
      * Create a full-screen manager to be used by this activity.
-     * @param controlContainer The control container that will be controlled by the full-screen
-     *                         manager.
+     * Note: This is called during {@link #postInflationStartup}, so native code may not have been
+     * initialized, but Android Views will have been.
      * @return A {@link ChromeFullscreenManager} instance that's been created.
      */
-    protected ChromeFullscreenManager createFullscreenManager(ControlContainer controlContainer) {
-        return new ChromeFullscreenManager(this, controlContainer, getTabModelSelector(),
-                getControlContainerHeightResource(), true);
-    }
+    protected abstract ChromeFullscreenManager createFullscreenManager();
 
     /**
      * Exits the fullscreen mode, if any. Does nothing if no fullscreen is present.
@@ -1378,10 +1401,6 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
     protected void initializeCompositorContent(
             LayoutManagerDocument layoutManager, View urlBar, ViewGroup contentContainer,
             ControlContainer controlContainer) {
-        if (controlContainer != null) {
-            mFullscreenManager = createFullscreenManager(controlContainer);
-        }
-
         if (mContextualSearchManager != null) {
             mContextualSearchManager.initialize(contentContainer);
             mContextualSearchManager.setSearchContentViewDelegate(layoutManager);
@@ -1795,9 +1814,21 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
         mContextMenuCloseObservers.removeObserver(callback);
     }
 
+    private boolean shouldDisableHardwareAcceleration() {
+        // Low end devices should disable hardware acceleration for memory gains.
+        if (SysUtils.isLowEndDevice()) return true;
+        // GT-S7580 on JDQ39 accounts for 42% of crashes in libPowerStretch.so. Speculative fix to
+        // see if turning off hardware acceleration fixes this. See http://crbug.com/651918.
+        if (Build.VERSION.SDK_INT == Build.VERSION_CODES.JELLY_BEAN_MR1
+                && Build.MODEL.equals("GT-S7580")) {
+            return true;
+        }
+        return false;
+    }
+
     private void enableHardwareAcceleration() {
-        // HW acceleration is disabled in the manifest. Enable it only on high-end devices.
-        if (!SysUtils.isLowEndDevice()) {
+        // HW acceleration is disabled in the manifest and may be re-enabled here.
+        if (!shouldDisableHardwareAcceleration()) {
             getWindow().addFlags(WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED);
 
             // When HW acceleration is enabled manually for an activity, child windows (e.g.

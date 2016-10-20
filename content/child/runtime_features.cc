@@ -90,8 +90,11 @@ void SetRuntimeFeaturesDefaultsAndUpdateFromArgs(
   // For the time being, enable wasm serialization when wasm is enabled,
   // since the whole wasm space is experimental. We have the flexibility
   // to decouple the two.
-  if (command_line.HasSwitch(switches::kEnableWasm))
+  if (base::FeatureList::IsEnabled(features::kWebAssembly))
     WebRuntimeFeatures::enableWebAssemblySerialization(true);
+
+  WebRuntimeFeatures::enableSharedArrayBuffer(
+      base::FeatureList::IsEnabled(features::kSharedArrayBuffer));
 
   if (command_line.HasSwitch(switches::kDisableSharedWorkers))
     WebRuntimeFeatures::enableSharedWorker(false);
@@ -116,12 +119,6 @@ void SetRuntimeFeaturesDefaultsAndUpdateFromArgs(
 
   if (command_line.HasSwitch(switches::kForceDisplayList2dCanvas))
     WebRuntimeFeatures::forceDisplayList2dCanvas(true);
-
-  if (command_line.HasSwitch(switches::kDisableGpuCompositing) ||
-      command_line.HasSwitch(switches::kDisableGpu))
-    WebRuntimeFeatures::enableGpuCompositing(false);
-  else
-    WebRuntimeFeatures::enableGpuCompositing(true);
 
   if (command_line.HasSwitch(
       switches::kEnableCanvas2dDynamicRenderingModeSwitching))
@@ -287,6 +284,10 @@ void SetRuntimeFeaturesDefaultsAndUpdateFromArgs(
   if (command_line.HasSwitch(switches::kDisableBackgroundTimerThrottling))
     WebRuntimeFeatures::enableTimerThrottlingForBackgroundTabs(false);
 
+  WebRuntimeFeatures::enableExpensiveBackgroundTimerThrottling(
+      base::FeatureList::IsEnabled(
+          features::kExpensiveBackgroundTimerThrottling));
+
   WebRuntimeFeatures::enableRenderingPipelineThrottling(
     base::FeatureList::IsEnabled(features::kRenderingPipelineThrottling));
 
@@ -311,6 +312,9 @@ void SetRuntimeFeaturesDefaultsAndUpdateFromArgs(
   if (!base::FeatureList::IsEnabled(features::kCompositeOpaqueScrollers))
     WebRuntimeFeatures::enableFeatureFromString("CompositeOpaqueScrollers",
         false);
+
+  if (base::FeatureList::IsEnabled(features::kGenericSensor))
+    WebRuntimeFeatures::enableGenericSensor(true);
 
   // Enable explicitly enabled features, and then disable explicitly disabled
   // ones.

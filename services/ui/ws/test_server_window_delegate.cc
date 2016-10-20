@@ -11,7 +11,8 @@ namespace ui {
 namespace ws {
 
 TestServerWindowDelegate::TestServerWindowDelegate()
-    : root_window_(nullptr), display_compositor_(new DisplayCompositor()) {}
+    : root_window_(nullptr),
+      display_compositor_(new DisplayCompositor(nullptr)) {}
 
 TestServerWindowDelegate::~TestServerWindowDelegate() {}
 
@@ -25,9 +26,6 @@ const ServerWindow* TestServerWindowDelegate::GetRootWindow(
     const ServerWindow* window) const {
   return root_window_;
 }
-
-void TestServerWindowDelegate::ScheduleSurfaceDestruction(
-    ServerWindow* window) {}
 
 }  // namespace ws
 

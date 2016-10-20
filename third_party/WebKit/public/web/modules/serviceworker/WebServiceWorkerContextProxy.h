@@ -68,17 +68,16 @@ class WebServiceWorkerContextProxy {
       std::unique_ptr<WebServiceWorker::Handle>) = 0;
   virtual void dispatchInstallEvent(int eventID) = 0;
   virtual void dispatchFetchEvent(
-      int responseID,
-      int eventFinishID,
+      int fetchEventID,
       const WebServiceWorkerRequest& webRequest) = 0;
   virtual void dispatchForeignFetchEvent(
-      int responseID,
-      int eventFinishID,
+      int fetchEventID,
       const WebServiceWorkerRequest& webRequest) = 0;
   virtual void dispatchNotificationClickEvent(int eventID,
                                               const WebString& notificationID,
                                               const WebNotificationData&,
-                                              int actionIndex) = 0;
+                                              int actionIndex,
+                                              const WebString& reply) = 0;
   virtual void dispatchNotificationCloseEvent(int eventID,
                                               const WebString& notificationID,
                                               const WebNotificationData&) = 0;

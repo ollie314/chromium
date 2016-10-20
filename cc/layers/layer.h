@@ -206,7 +206,6 @@ class CC_EXPORT Layer : public base::RefCounted<Layer> {
   void SetScrollParent(Layer* parent);
 
   Layer* scroll_parent() { return inputs_.scroll_parent; }
-  const Layer* scroll_parent() const { return inputs_.scroll_parent; }
 
   std::set<Layer*>* scroll_children() { return scroll_children_.get(); }
   const std::set<Layer*>* scroll_children() const {
@@ -216,7 +215,6 @@ class CC_EXPORT Layer : public base::RefCounted<Layer> {
   void SetClipParent(Layer* ancestor);
 
   Layer* clip_parent() { return inputs_.clip_parent; }
-  const Layer* clip_parent() const { return inputs_.clip_parent; }
 
   std::set<Layer*>* clip_children() { return clip_children_.get(); }
   const std::set<Layer*>* clip_children() const {
@@ -318,8 +316,6 @@ class CC_EXPORT Layer : public base::RefCounted<Layer> {
   void SetFiltersOrigin(const gfx::PointF& origin);
   gfx::PointF filters_origin() const { return inputs_.filters_origin; }
 
-  bool has_mask() const { return !!inputs_.mask_layer.get(); }
-
   int NumDescendantsThatDrawContent() const;
 
   // This is only virtual for tests.
@@ -358,7 +354,7 @@ class CC_EXPORT Layer : public base::RefCounted<Layer> {
   // hierarchical structure to the given LayerNode proto. In addition to the
   // structure itself, the Layer id and type is also written to facilitate
   // construction of the correct layer on the client.
-  void ToLayerNodeProto(proto::LayerNode* proto) const;
+  virtual void ToLayerNodeProto(proto::LayerNode* proto) const;
 
   // Recursively iterate over this layer and all children and reset the
   // properties sent with the hierarchical structure in the LayerNode protos.
@@ -371,9 +367,9 @@ class CC_EXPORT Layer : public base::RefCounted<Layer> {
   // into this node and its children. The |layer_map| should be used to look
   // for previously existing Layers, since they should be re-used between each
   // hierarchy update.
-  void FromLayerNodeProto(const proto::LayerNode& proto,
-                          const LayerIdMap& layer_map,
-                          LayerTreeHost* layer_tree_host);
+  virtual void FromLayerNodeProto(const proto::LayerNode& proto,
+                                  const LayerIdMap& layer_map,
+                                  LayerTreeHost* layer_tree_host);
 
   // This method is similar to PushPropertiesTo, but instead of pushing to
   // a LayerImpl, it pushes the properties to proto::LayerProperties. It is
@@ -460,8 +456,6 @@ class CC_EXPORT Layer : public base::RefCounted<Layer> {
     visible_layer_rect_ = rect;
   }
 
-  void set_clip_rect(const gfx::Rect& rect) {}
-
   void SetSubtreePropertyChanged();
   bool subtree_property_changed() const { return subtree_property_changed_; }
 
@@ -484,9 +478,22 @@ class CC_EXPORT Layer : public base::RefCounted<Layer> {
     return inputs_.has_will_change_transform_hint;
   }
 
+  void SetPreferredRasterScale(float preferred_raster_scale);
+  bool has_preferred_raster_scale() {
+    return inputs_.has_preferred_raster_scale;
+  }
+  float preferred_raster_scale() const {
+    return inputs_.preferred_raster_scale;
+  }
+  void ClearPreferredRasterScale();
+
   AnimationHost* GetAnimationHost() const;
 
   ElementListType GetElementTypeForAnimation() const;
+
+  // Tests in remote mode need to explicitly set the layer id so it matches the
+  // layer id for the corresponding Layer on the engine.
+  void SetLayerIdForTesting(int id);
 
  protected:
   friend class LayerImpl;
@@ -494,12 +501,7 @@ class CC_EXPORT Layer : public base::RefCounted<Layer> {
   virtual ~Layer();
   Layer();
 
-  // Tests in remote mode need to explicitly set the layer id so it matches the
-  // layer id for the corresponding Layer on the engine.
-  explicit Layer(int layer_id);
-
   LayerTreeHost* layer_tree_host() { return layer_tree_host_; }
-  const LayerTreeHost* layer_tree_host() const { return layer_tree_host_; }
 
   // These SetNeeds functions are in order of severity of update:
   //
@@ -678,6 +680,7 @@ class CC_EXPORT Layer : public base::RefCounted<Layer> {
     Layer* clip_parent;
 
     bool has_will_change_transform_hint : 1;
+    bool has_preferred_raster_scale : 1;
 
     bool hide_layer_and_subtree : 1;
 
@@ -685,6 +688,8 @@ class CC_EXPORT Layer : public base::RefCounted<Layer> {
     LayerClient* client;
     base::Closure did_scroll_callback;
     std::vector<std::unique_ptr<CopyOutputRequest>> copy_requests;
+
+    float preferred_raster_scale;
   };
 
   Layer* parent_;

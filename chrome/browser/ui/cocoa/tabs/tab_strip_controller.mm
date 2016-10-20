@@ -144,6 +144,14 @@ CGFloat FlipXInView(NSView* view, CGFloat width, CGFloat x) {
 
 }  // namespace
 
+@interface NSView (PrivateAPI)
+// Called by AppKit to check if dragging this view should move the window.
+// NSButton overrides this method in the same way so dragging window buttons
+// has no effect. NSView implementation returns NSZeroRect so the whole view
+// area can be dragged.
+- (NSRect)_opaqueRectForWindowMoveWhenInTitlebar;
+@end
+
 @interface TabStripController (Private)
 - (void)addSubviewToPermanentList:(NSView*)aView;
 - (void)regenerateSubviewList;
@@ -227,6 +235,10 @@ CGFloat FlipXInView(NSView* view, CGFloat width, CGFloat x) {
 @implementation TabStripControllerDragBlockingView
 - (BOOL)mouseDownCanMoveWindow {
   return NO;
+}
+
+- (NSRect)_opaqueRectForWindowMoveWhenInTitlebar {
+ return [self bounds];
 }
 
 - (id)initWithFrame:(NSRect)frameRect
@@ -1168,14 +1180,17 @@ CGFloat FlipXInView(NSView* view, CGFloat width, CGFloat x) {
       [self setNewTabButtonHoverState:shouldShowHover];
 
       // Move the new tab button into place. We want to animate the new tab
-      // button if it's moving to the left (closing a tab), but not when it's
-      // moving to the right (inserting a new tab). If moving right, we need
+      // button if it's moving back (closing a tab), but not when it's
+      // moving forward (inserting a new tab). If moving forward, we need
       // to use a very small duration to make sure we cancel any in-flight
       // animation to the left.
       if (visible && animate) {
         ScopedNSAnimationContextGroup localAnimationGroup(true);
-        BOOL movingLeft = NSMinX(newTabNewFrame) < NSMinX(newTabTargetFrame_);
-        if (!movingLeft) {
+        BOOL movingBack = NSMinX(newTabNewFrame) < NSMinX(newTabTargetFrame_);
+        if (cocoa_l10n_util::ShouldDoExperimentalRTLLayout())
+          movingBack = !movingBack;
+
+        if (!movingBack) {
           localAnimationGroup.SetCurrentContextShortestDuration();
         }
         [[newTabButton_ animator] setFrame:newTabNewFrame];

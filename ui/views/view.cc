@@ -560,11 +560,11 @@ LayoutManager* View::GetLayoutManager() const {
 }
 
 void View::SetLayoutManager(LayoutManager* layout_manager) {
-  if (layout_manager_.get())
-    layout_manager_->Uninstalled(this);
+  if (layout_manager == layout_manager_.get())
+    return;
 
   layout_manager_.reset(layout_manager);
-  if (layout_manager_.get())
+  if (layout_manager_)
     layout_manager_->Installed(this);
 }
 
@@ -1080,6 +1080,10 @@ ViewTargeter* View::GetEffectiveViewTargeter() const {
   return view_targeter;
 }
 
+WordLookupClient* View::GetWordLookupClient() {
+  return nullptr;
+}
+
 bool View::CanAcceptEvent(const ui::Event& event) {
   return IsDrawn();
 }
@@ -1521,10 +1525,6 @@ void View::OnDeviceScaleFactorChanged(float device_scale_factor) {
       (device_scale_factor - std::floor(device_scale_factor)) != 0.0f;
   SnapLayerToPixelBoundary();
   // Repainting with new scale factor will paint the content at the right scale.
-}
-
-base::Closure View::PrepareForLayerBoundsChange() {
-  return base::Closure();
 }
 
 void View::ReorderLayers() {

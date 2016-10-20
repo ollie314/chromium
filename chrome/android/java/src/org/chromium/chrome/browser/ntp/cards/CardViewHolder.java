@@ -26,8 +26,7 @@ import org.chromium.chrome.browser.util.ViewUtils;
  *
  * Specific behaviors added to the cards:
  *
- * - Cards can shrink and fade their appearance so that they can be made peeking above the screen
- *   limit.
+ * - Cards can peek above the fold if there is enough space.
  *
  * - When peeking, tapping on cards will make them request a scroll up (see
  *   {@link NewTabPageRecyclerView#scrollToFirstCard()}). Tap events in non-peeking state will be
@@ -139,13 +138,16 @@ public class CardViewHolder extends NewTabPageViewHolder {
         // Nothing to do for dismissed cards.
         if (getAdapterPosition() == RecyclerView.NO_POSITION) return;
 
+        NewTabPageAdapter adapter = mRecyclerView.getNewTabPageAdapter();
+
         // Each card has the full elevation effect (the shadow) in the 9-patch. If the next item is
         // a card a negative bottom margin is set so the next card is overlaid slightly on top of
         // this one and hides the bottom shadow.
-        boolean hasCardAbove =
-                isCard(mRecyclerView.getAdapter().getItemViewType(getAdapterPosition() - 1));
-        boolean hasCardBelow =
-                isCard(mRecyclerView.getAdapter().getItemViewType(getAdapterPosition() + 1));
+        int abovePosition = getAdapterPosition() - 1;
+        boolean hasCardAbove = abovePosition >= 0 && isCard(adapter.getItemViewType(abovePosition));
+        int belowPosition = getAdapterPosition() + 1;
+        boolean hasCardBelow = belowPosition < adapter.getItemCount()
+                && isCard(adapter.getItemViewType(belowPosition));
 
         getParams().bottomMargin = hasCardBelow ? -mCards9PatchAdjustment : 0;
 
@@ -234,18 +236,19 @@ public class CardViewHolder extends NewTabPageViewHolder {
         return LayoutInflater.from(parent.getContext()).inflate(resourceId, parent, false);
     }
 
-    private static boolean isCard(@NewTabPageItem.ViewType int type) {
+    public static boolean isCard(@ItemViewType int type) {
         switch (type) {
-            case NewTabPageItem.VIEW_TYPE_SNIPPET:
-            case NewTabPageItem.VIEW_TYPE_STATUS:
-            case NewTabPageItem.VIEW_TYPE_ACTION:
-            case NewTabPageItem.VIEW_TYPE_PROMO:
+            case ItemViewType.SNIPPET:
+            case ItemViewType.STATUS:
+            case ItemViewType.ACTION:
+            case ItemViewType.PROMO:
                 return true;
-            case NewTabPageItem.VIEW_TYPE_ABOVE_THE_FOLD:
-            case NewTabPageItem.VIEW_TYPE_HEADER:
-            case NewTabPageItem.VIEW_TYPE_SPACING:
-            case NewTabPageItem.VIEW_TYPE_PROGRESS:
-            case NewTabPageItem.VIEW_TYPE_FOOTER:
+            case ItemViewType.ABOVE_THE_FOLD:
+            case ItemViewType.HEADER:
+            case ItemViewType.SPACING:
+            case ItemViewType.PROGRESS:
+            case ItemViewType.FOOTER:
+            case ItemViewType.ALL_DISMISSED:
                 return false;
             default:
                 assert false;

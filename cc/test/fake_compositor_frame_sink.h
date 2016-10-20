@@ -10,6 +10,7 @@
 #include "base/callback.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
+#include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
 #include "cc/output/begin_frame_args.h"
 #include "cc/output/compositor_frame.h"
@@ -47,14 +48,14 @@ class FakeCompositorFrameSink : public CompositorFrameSink {
     return base::WrapUnique(new FakeCompositorFrameSink(nullptr, nullptr));
   }
 
+  // CompositorFrameSink implementation.
+  void SubmitCompositorFrame(CompositorFrame frame) override;
+  void DetachFromClient() override;
+
   CompositorFrame* last_sent_frame() { return last_sent_frame_.get(); }
   size_t num_sent_frames() { return num_sent_frames_; }
 
-  void SwapBuffers(CompositorFrame frame) override;
-
   CompositorFrameSinkClient* client() { return client_; }
-  bool BindToClient(CompositorFrameSinkClient* client) override;
-  void DetachFromClient() override;
 
   const TransferableResourceArray& resources_held_by_parent() {
     return resources_held_by_parent_;
@@ -72,12 +73,16 @@ class FakeCompositorFrameSink : public CompositorFrameSink {
       scoped_refptr<ContextProvider> context_provider,
       scoped_refptr<ContextProvider> worker_context_provider);
 
-  CompositorFrameSinkClient* client_ = nullptr;
   std::unique_ptr<CompositorFrame> last_sent_frame_;
   size_t num_sent_frames_ = 0;
   TransferableResourceArray resources_held_by_parent_;
   bool last_swap_rect_valid_ = false;
   gfx::Rect last_swap_rect_;
+
+ private:
+  void DidReceiveCompositorFrameAck();
+
+  base::WeakPtrFactory<FakeCompositorFrameSink> weak_ptr_factory_;
 };
 
 }  // namespace cc

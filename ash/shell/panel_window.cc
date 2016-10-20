@@ -4,9 +4,9 @@
 
 #include "ash/shell/panel_window.h"
 
+#include "ash/common/wm/panels/panel_frame_view.h"
 #include "ash/screen_util.h"
 #include "ash/shell.h"
-#include "ash/wm/panels/panel_frame_view.h"
 #include "base/strings/utf_string_conversions.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_event_dispatcher.h"
@@ -64,10 +64,6 @@ void PanelWindow::OnPaint(gfx::Canvas* canvas) {
 
 base::string16 PanelWindow::GetWindowTitle() const {
   return base::ASCIIToUTF16(name_);
-}
-
-views::View* PanelWindow::GetContentsView() {
-  return this;
 }
 
 bool PanelWindow::CanResize() const {

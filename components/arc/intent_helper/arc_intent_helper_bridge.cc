@@ -9,11 +9,12 @@
 
 #include "ash/common/new_window_delegate.h"
 #include "ash/common/shell_delegate.h"
-#include "ash/common/wallpaper/wallpaper_delegate.h"
+#include "ash/common/wallpaper/wallpaper_controller.h"
 #include "ash/common/wm_shell.h"
 #include "ash/shell.h"
 #include "base/command_line.h"
 #include "base/memory/weak_ptr.h"
+#include "components/arc/arc_bridge_service.h"
 #include "components/arc/intent_helper/activity_icon_loader.h"
 #include "components/arc/intent_helper/link_handler_model_impl.h"
 #include "components/arc/intent_helper/local_activity_resolver.h"
@@ -82,7 +83,7 @@ void ArcIntentHelperBridge::OnOpenUrl(const mojo::String& url) {
 
 void ArcIntentHelperBridge::OpenWallpaperPicker() {
   DCHECK(thread_checker_.CalledOnValidThread());
-  ash::WmShell::Get()->wallpaper_delegate()->OpenSetWallpaperPage();
+  ash::WmShell::Get()->wallpaper_controller()->OpenSetWallpaperPage();
 }
 
 void ArcIntentHelperBridge::SetWallpaperDeprecated(

@@ -92,7 +92,7 @@
 #endif  // defined(OS_POSIX)
 
 #if defined(USE_AURA)
-#include "content/public/common/mojo_shell_connection.h"
+#include "content/public/common/service_manager_connection.h"
 #include "content/renderer/mus/render_widget_mus_connection.h"
 #endif
 
@@ -195,15 +195,15 @@ content::RenderWidgetInputHandlerDelegate* GetRenderWidgetInputHandlerDelegate(
     content::RenderWidget* widget) {
 #if defined(USE_AURA)
   const base::CommandLine& cmdline = *base::CommandLine::ForCurrentProcess();
-  if (content::MojoShellConnection::GetForProcess() &&
+  if (content::ServiceManagerConnection::GetForProcess() &&
       cmdline.HasSwitch(switches::kUseMusInRenderer)) {
     return content::RenderWidgetMusConnection::GetOrCreate(
         widget->routing_id());
   }
 #endif
-  // If we don't have a connection to the Mojo shell, then we want to route IPCs
-  // back to the browser process rather than Mus so we use the |widget| as the
-  // RenderWidgetInputHandlerDelegate.
+  // If we don't have a connection to the Service Manager, then we want to route
+  // IPCs back to the browser process rather than Mus so we use the |widget| as
+  // the RenderWidgetInputHandlerDelegate.
   return widget;
 }
 
@@ -385,6 +385,20 @@ void RenderWidget::SetRoutingID(int32_t routing_id) {
       GetRenderWidgetInputHandlerDelegate(this), this));
 }
 
+void RenderWidget::SetSwappedOut(bool is_swapped_out) {
+  // We should only toggle between states.
+  DCHECK(is_swapped_out_ != is_swapped_out);
+  is_swapped_out_ = is_swapped_out;
+
+  // If we are swapping out, we will call ReleaseProcess, allowing the process
+  // to exit if all of its RenderViews are swapped out.  We wait until the
+  // WasSwappedOut call to do this, to allow the unload handler to finish.
+  // If we are swapping in, we call AddRefProcess to prevent the process from
+  // exiting.
+  if (!is_swapped_out_)
+    RenderProcess::current()->AddRefProcess();
+}
+
 bool RenderWidget::Init(int32_t opener_id) {
   bool success = DoInit(
       opener_id, RenderWidget::CreateWebWidget(this),
@@ -429,20 +443,6 @@ bool RenderWidget::DoInit(int32_t opener_id,
     // The above Send can fail when the tab is closing.
     return false;
   }
-}
-
-void RenderWidget::SetSwappedOut(bool is_swapped_out) {
-  // We should only toggle between states.
-  DCHECK(is_swapped_out_ != is_swapped_out);
-  is_swapped_out_ = is_swapped_out;
-
-  // If we are swapping out, we will call ReleaseProcess, allowing the process
-  // to exit if all of its RenderViews are swapped out.  We wait until the
-  // WasSwappedOut call to do this, to allow the unload handler to finish.
-  // If we are swapping in, we call AddRefProcess to prevent the process from
-  // exiting.
-  if (!is_swapped_out_)
-    RenderProcess::current()->AddRefProcess();
 }
 
 void RenderWidget::WasSwappedOut() {
@@ -513,7 +513,6 @@ bool RenderWidget::OnMessageReceived(const IPC::Message& message) {
                         OnEnableDeviceEmulation)
     IPC_MESSAGE_HANDLER(ViewMsg_DisableDeviceEmulation,
                         OnDisableDeviceEmulation)
-    IPC_MESSAGE_HANDLER(ViewMsg_ChangeResizeRect, OnChangeResizeRect)
     IPC_MESSAGE_HANDLER(ViewMsg_WasHidden, OnWasHidden)
     IPC_MESSAGE_HANDLER(ViewMsg_WasShown, OnWasShown)
     IPC_MESSAGE_HANDLER(ViewMsg_Repaint, OnRepaint)
@@ -564,7 +563,6 @@ void RenderWidget::SetWindowRectSynchronously(
   params.physical_backing_size =
       gfx::ScaleToCeiledSize(new_window_rect.size(), device_scale_factor_);
   params.visible_viewport_size = new_window_rect.size();
-  params.resizer_rect = gfx::Rect();
   params.is_fullscreen_granted = is_fullscreen_granted_;
   params.display_mode = display_mode_;
   params.needs_resize_ack = false;
@@ -630,7 +628,6 @@ void RenderWidget::OnEnableDeviceEmulation(
     resize_params.new_size = size_;
     resize_params.physical_backing_size = physical_backing_size_;
     resize_params.visible_viewport_size = visible_viewport_size_;
-    resize_params.resizer_rect = resizer_rect_;
     resize_params.is_fullscreen_granted = is_fullscreen_granted_;
     resize_params.display_mode = display_mode_;
     screen_metrics_emulator_.reset(new RenderWidgetScreenMetricsEmulator(
@@ -645,20 +642,12 @@ void RenderWidget::OnDisableDeviceEmulation() {
   screen_metrics_emulator_.reset();
 }
 
-void RenderWidget::OnChangeResizeRect(const gfx::Rect& resizer_rect) {
-  if (resizer_rect_ == resizer_rect)
-    return;
-  resizer_rect_ = resizer_rect;
-  if (GetWebWidget())
-    GetWebWidget()->didChangeWindowResizerRect();
-}
-
 void RenderWidget::OnWasHidden() {
   TRACE_EVENT0("renderer", "RenderWidget::OnWasHidden");
   // Go into a mode where we stop generating paint and scrolling events.
   SetHidden(true);
-  FOR_EACH_OBSERVER(RenderFrameImpl, render_frames_,
-                    WasHidden());
+  for (auto& observer : render_frames_)
+    observer.WasHidden();
 }
 
 void RenderWidget::OnWasShown(bool needs_repainting,
@@ -670,8 +659,8 @@ void RenderWidget::OnWasShown(bool needs_repainting,
 
   // See OnWasHidden
   SetHidden(false);
-  FOR_EACH_OBSERVER(RenderFrameImpl, render_frames_,
-                    WasShown());
+  for (auto& observer : render_frames_)
+    observer.WasShown();
 
   if (!needs_repainting)
     return;
@@ -724,8 +713,8 @@ void RenderWidget::OnSetFocus(bool enable) {
   if (GetWebWidget())
     GetWebWidget()->setFocus(enable);
 
-  FOR_EACH_OBSERVER(RenderFrameImpl, render_frames_,
-                    RenderWidgetSetFocus(enable));
+  for (auto& observer : render_frames_)
+    observer.RenderWidgetSetFocus(enable);
 }
 
 void RenderWidget::SetNeedsMainFrame() {
@@ -776,18 +765,18 @@ void RenderWidget::DidCommitAndDrawCompositorFrame() {
   // tab_capture_performancetest.cc.
   TRACE_EVENT0("gpu", "RenderWidget::DidCommitAndDrawCompositorFrame");
 
-  FOR_EACH_OBSERVER(RenderFrameImpl, render_frames_,
-                    DidCommitAndDrawCompositorFrame());
+  for (auto& observer : render_frames_)
+    observer.DidCommitAndDrawCompositorFrame();
 
   // Notify subclasses that we initiated the paint operation.
   DidInitiatePaint();
 }
 
 void RenderWidget::DidCommitCompositorFrame() {
-  FOR_EACH_OBSERVER(RenderFrameImpl, render_frames_,
-                    DidCommitCompositorFrame());
-  FOR_EACH_OBSERVER(RenderFrameProxy, render_frame_proxies_,
-                    DidCommitCompositorFrame());
+  for (auto& observer : render_frames_)
+    observer.DidCommitCompositorFrame();
+  for (auto& observer : render_frame_proxies_)
+    observer.DidCommitCompositorFrame();
   input_handler_->FlushPendingInputEventAck();
 }
 
@@ -854,8 +843,8 @@ void RenderWidget::WillBeginCompositorFrame() {
   UpdateTextInputState(ShowIme::HIDE_IME, ChangeSource::FROM_NON_IME);
   UpdateSelectionBounds();
 
-  FOR_EACH_OBSERVER(RenderFrameProxy, render_frame_proxies_,
-                    WillBeginCompositorFrame());
+  for (auto& observer : render_frame_proxies_)
+    observer.WillBeginCompositorFrame();
 }
 
 std::unique_ptr<cc::SwapPromise> RenderWidget::RequestCopyOfOutputForLayoutTest(
@@ -1012,8 +1001,8 @@ bool RenderWidget::WillHandleGestureEvent(const blink::WebGestureEvent& event) {
 }
 
 bool RenderWidget::WillHandleMouseEvent(const blink::WebMouseEvent& event) {
-  FOR_EACH_OBSERVER(RenderFrameImpl, render_frames_,
-                    RenderWidgetWillHandleMouseEvent());
+  for (auto& observer : render_frames_)
+    observer.RenderWidgetWillHandleMouseEvent();
 
   if (owner_delegate_)
     return owner_delegate_->RenderWidgetWillHandleMouseEvent(event);
@@ -1071,7 +1060,6 @@ void RenderWidget::Resize(const ResizeParams& params) {
   }
 
   visible_viewport_size_ = params.visible_viewport_size;
-  resizer_rect_ = params.resizer_rect;
 
   // NOTE: We may have entered fullscreen mode without changing our size.
   bool fullscreen_change =
@@ -1182,8 +1170,8 @@ void RenderWidget::didMeaningfulLayout(blink::WebMeaningfulLayout layout_type) {
                  MESSAGE_DELIVERY_POLICY_WITH_VISUAL_STATE);
   }
 
-  FOR_EACH_OBSERVER(RenderFrameImpl, render_frames_,
-                    DidMeaningfulLayout(layout_type));
+  for (auto& observer : render_frames_)
+    observer.DidMeaningfulLayout(layout_type);
 }
 
 void RenderWidget::ScheduleComposite() {
@@ -1288,7 +1276,8 @@ void RenderWidget::DoDeferredClose() {
 }
 
 void RenderWidget::NotifyOnClose() {
-  FOR_EACH_OBSERVER(RenderFrameImpl, render_frames_, WidgetWillClose());
+  for (auto& observer : render_frames_)
+    observer.WidgetWillClose();
 }
 
 void RenderWidget::closeWidgetSoon() {
@@ -1336,21 +1325,53 @@ void RenderWidget::Close() {
   }
 }
 
+void RenderWidget::ScreenRectToEmulatedIfNeeded(WebRect* window_rect) const {
+  DCHECK(window_rect);
+  float scale = popup_origin_scale_for_emulation_;
+  if (!scale)
+    return;
+  window_rect->x =
+      popup_view_origin_for_emulation_.x() +
+      (window_rect->x - popup_screen_origin_for_emulation_.x()) / scale;
+  window_rect->y =
+      popup_view_origin_for_emulation_.y() +
+      (window_rect->y - popup_screen_origin_for_emulation_.y()) / scale;
+}
+
+void RenderWidget::EmulatedToScreenRectIfNeeded(WebRect* window_rect) const {
+  DCHECK(window_rect);
+  float scale = popup_origin_scale_for_emulation_;
+  if (!scale)
+    return;
+  window_rect->x =
+      popup_screen_origin_for_emulation_.x() +
+      (window_rect->x - popup_view_origin_for_emulation_.x()) * scale;
+  window_rect->y =
+      popup_screen_origin_for_emulation_.y() +
+      (window_rect->y - popup_view_origin_for_emulation_.y()) * scale;
+}
+
 WebRect RenderWidget::windowRect() {
+  WebRect rect;
   if (pending_window_rect_count_) {
     // NOTE(mbelshe): If there is a pending_window_rect_, then getting
     // the RootWindowRect is probably going to return wrong results since the
     // browser may not have processed the Move yet.  There isn't really anything
     // good to do in this case, and it shouldn't happen - since this size is
     // only really needed for windowToScreen, which is only used for Popups.
-    return pending_window_rect_;
+    rect = pending_window_rect_;
+  } else {
+    rect = window_screen_rect_;
   }
 
-  return window_screen_rect_;
+  ScreenRectToEmulatedIfNeeded(&rect);
+  return rect;
 }
 
 WebRect RenderWidget::viewRect() {
-    return view_screen_rect_;
+  WebRect rect = view_screen_rect_;
+  ScreenRectToEmulatedIfNeeded(&rect);
+  return rect;
 }
 
 void RenderWidget::setToolTipText(const blink::WebString& text,
@@ -1360,13 +1381,7 @@ void RenderWidget::setToolTipText(const blink::WebString& text,
 
 void RenderWidget::setWindowRect(const WebRect& rect_in_screen) {
   WebRect window_rect = rect_in_screen;
-  if (popup_origin_scale_for_emulation_) {
-    float scale = popup_origin_scale_for_emulation_;
-    window_rect.x = popup_screen_origin_for_emulation_.x() +
-        (window_rect.x - popup_view_origin_for_emulation_.x()) * scale;
-    window_rect.y = popup_screen_origin_for_emulation_.y() +
-        (window_rect.y - popup_view_origin_for_emulation_.y()) * scale;
-  }
+  EmulatedToScreenRectIfNeeded(&window_rect);
 
   if (!resizing_mode_selector_->is_synchronous_mode()) {
     if (did_show_) {
@@ -1390,10 +1405,6 @@ void RenderWidget::SetPendingWindowRect(const WebRect& rect) {
       window_screen_rect_ = rect;
       view_screen_rect_ = rect;
   }
-}
-
-WebRect RenderWidget::windowResizerRect() {
-  return resizer_rect_;
 }
 
 void RenderWidget::OnImeSetComposition(

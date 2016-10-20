@@ -53,7 +53,6 @@
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/task_manager/task_manager_interface.h"
 #include "chrome/browser/tracing/chrome_tracing_delegate.h"
-#include "chrome/browser/ui/app_list/app_list_prefs.h"
 #include "chrome/browser/ui/app_list/app_list_service.h"
 #include "chrome/browser/ui/browser_ui_prefs.h"
 #include "chrome/browser/ui/navigation_correction_tab_observer.h"
@@ -78,6 +77,7 @@
 #include "components/metrics/metrics_service.h"
 #include "components/network_time/network_time_tracker.h"
 #include "components/ntp_snippets/bookmarks/bookmark_suggestions_provider.h"
+#include "components/ntp_snippets/content_suggestions_service.h"
 #include "components/ntp_snippets/remote/ntp_snippets_service.h"
 #include "components/ntp_snippets/remote/request_throttler.h"
 #include "components/ntp_snippets/sessions/foreign_sessions_suggestions_provider.h"
@@ -97,8 +97,9 @@
 #include "components/ssl_config/ssl_config_service_manager.h"
 #include "components/startup_metric_utils/browser/startup_metric_utils.h"
 #include "components/subresource_filter/core/browser/ruleset_service.h"
-#include "components/sync/driver/sync_prefs.h"
+#include "components/sync/base/sync_prefs.h"
 #include "components/syncable_prefs/pref_service_syncable.h"
+#include "components/translate/core/browser/language_model.h"
 #include "components/translate/core/browser/translate_prefs.h"
 #include "components/update_client/update_client.h"
 #include "components/variations/service/variations_service.h"
@@ -106,7 +107,7 @@
 #include "content/public/browser/render_process_host.h"
 #include "net/http/http_server_properties_manager.h"
 
-#if defined(ENABLE_APP_LIST)
+#if BUILDFLAG(ENABLE_APP_LIST)
 #include "chrome/browser/apps/drive/drive_app_mapping.h"
 #endif
 
@@ -130,7 +131,7 @@
 #include "extensions/browser/extension_prefs.h"
 #endif  // defined(ENABLE_EXTENSIONS)
 
-#if defined(ENABLE_PLUGIN_INSTALLATION)
+#if BUILDFLAG(ENABLE_PLUGIN_INSTALLATION)
 #include "chrome/browser/plugins/plugins_resource_service.h"
 #endif
 
@@ -142,7 +143,7 @@
 #include "chrome/browser/supervised_user/supervised_user_whitelist_service.h"
 #endif
 
-#if defined(ENABLE_SERVICE_DISCOVERY)
+#if BUILDFLAG(ENABLE_SERVICE_DISCOVERY)
 #include "chrome/browser/ui/webui/local_discovery/local_discovery_ui.h"
 #endif
 
@@ -192,6 +193,7 @@
 #include "chrome/browser/chromeos/power/power_prefs.h"
 #include "chrome/browser/chromeos/preferences.h"
 #include "chrome/browser/chromeos/printing/printer_pref_manager.h"
+#include "chrome/browser/chromeos/resource_reporter/resource_reporter.h"
 #include "chrome/browser/chromeos/settings/device_oauth2_token_service.h"
 #include "chrome/browser/chromeos/settings/device_settings_cache.h"
 #include "chrome/browser/chromeos/status/data_promo_notification.h"
@@ -214,7 +216,7 @@
 #include "chrome/browser/extensions/default_apps.h"
 #endif
 
-#if defined(OS_CHROMEOS) && defined(ENABLE_APP_LIST)
+#if defined(OS_CHROMEOS) && BUILDFLAG(ENABLE_APP_LIST)
 #include "chrome/browser/ui/app_list/arc/arc_app_list_prefs.h"
 #endif
 
@@ -377,7 +379,7 @@ void RegisterLocalState(PrefRegistrySimple* registry) {
   PluginFinder::RegisterPrefs(registry);
 #endif
 
-#if defined(ENABLE_PLUGIN_INSTALLATION)
+#if BUILDFLAG(ENABLE_PLUGIN_INSTALLATION)
   PluginsResourceService::RegisterPrefs(registry);
 #endif
 
@@ -418,6 +420,7 @@ void RegisterLocalState(PrefRegistrySimple* registry) {
   chromeos::proxy_config::RegisterPrefs(registry);
   chromeos::RegisterDisplayLocalStatePrefs(registry);
   chromeos::ResetScreenHandler::RegisterPrefs(registry);
+  chromeos::ResourceReporter::RegisterPrefs(registry);
   chromeos::ServicesCustomizationDocument::RegisterPrefs(registry);
   chromeos::SigninScreenHandler::RegisterPrefs(registry);
   chromeos::StartupUtils::RegisterPrefs(registry);
@@ -482,6 +485,7 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
   ntp_snippets::ForeignSessionsSuggestionsProvider::RegisterProfilePrefs(
       registry);
   ntp_snippets::NTPSnippetsService::RegisterProfilePrefs(registry);
+  ntp_snippets::ContentSuggestionsService::RegisterProfilePrefs(registry);
   ntp_snippets::RequestThrottler::RegisterProfilePrefs(registry);
   ntp_snippets::UserClassifier::RegisterProfilePrefs(registry);
   password_bubble_experiment::RegisterPrefs(registry);
@@ -495,13 +499,10 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
   RegisterBrowserUserPrefs(registry);
   SessionStartupPref::RegisterProfilePrefs(registry);
   TemplateURLPrepopulateData::RegisterProfilePrefs(registry);
+  translate::LanguageModel::RegisterProfilePrefs(registry);
   translate::TranslatePrefs::RegisterProfilePrefs(registry);
   ZeroSuggestProvider::RegisterProfilePrefs(registry);
   browsing_data::prefs::RegisterBrowserUserPrefs(registry);
-
-#if defined(ENABLE_APP_LIST)
-  app_list::AppListPrefs::RegisterProfilePrefs(registry);
-#endif
 
   policy::URLBlacklistManager::RegisterProfilePrefs(registry);
   certificate_transparency::CTPolicyManager::RegisterPrefs(registry);
@@ -537,7 +538,7 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
   printing::StickySettings::RegisterProfilePrefs(registry);
 #endif
 
-#if defined(ENABLE_SERVICE_DISCOVERY)
+#if BUILDFLAG(ENABLE_SERVICE_DISCOVERY)
   LocalDiscoveryUI::RegisterProfilePrefs(registry);
 #endif
 
@@ -561,7 +562,7 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
   AppShortcutManager::RegisterProfilePrefs(registry);
   DeviceIDFetcher::RegisterProfilePrefs(registry);
   DevToolsWindow::RegisterProfilePrefs(registry);
-#if defined(ENABLE_APP_LIST)
+#if BUILDFLAG(ENABLE_APP_LIST)
   DriveAppMapping::RegisterProfilePrefs(registry);
 #endif
   extensions::CommandService::RegisterProfilePrefs(registry);
@@ -604,7 +605,7 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
   flags_ui::PrefServiceFlagsStorage::RegisterProfilePrefs(registry);
 #endif
 
-#if defined(OS_CHROMEOS) && defined(ENABLE_APP_LIST)
+#if defined(OS_CHROMEOS) && BUILDFLAG(ENABLE_APP_LIST)
   ArcAppListPrefs::RegisterProfilePrefs(registry);
 #endif
 

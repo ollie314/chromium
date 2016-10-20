@@ -208,7 +208,7 @@ const AtomicString& FileReader::interfaceName() const {
   return EventTargetNames::FileReader;
 }
 
-void FileReader::stop() {
+void FileReader::contextDestroyed() {
   // The delayed abort task tidies up and advances to the DONE state.
   if (m_loadingState == LoadingStateAborted)
     return;
@@ -267,7 +267,8 @@ void FileReader::readAsDataURL(Blob* blob, ExceptionState& exceptionState) {
 void FileReader::readInternal(Blob* blob,
                               FileReaderLoader::ReadType type,
                               ExceptionState& exceptionState) {
-  // If multiple concurrent read methods are called on the same FileReader, InvalidStateError should be thrown when the state is kLoading.
+  // If multiple concurrent read methods are called on the same FileReader,
+  // InvalidStateError should be thrown when the state is kLoading.
   if (m_state == kLoading) {
     exceptionState.throwDOMException(
         InvalidStateError, "The object is already busy reading Blobs.");
@@ -288,7 +289,8 @@ void FileReader::readInternal(Blob* blob,
     return;
   }
 
-  // A document loader will not load new resources once the Document has detached from its frame.
+  // A document loader will not load new resources once the Document has
+  // detached from its frame.
   if (context->isDocument() && !toDocument(context)->frame()) {
     exceptionState.throwDOMException(
         AbortError,
@@ -333,7 +335,9 @@ void FileReader::abort() {
   }
   m_loadingState = LoadingStateAborted;
 
-  // Schedule to have the abort done later since abort() might be called from the event handler and we do not want the resource loading code to be in the stack.
+  // Schedule to have the abort done later since abort() might be called from
+  // the event handler and we do not want the resource loading code to be in the
+  // stack.
   getExecutionContext()->postTask(
       BLINK_FROM_HERE,
       createSameThreadTask(&delayedAbort, wrapPersistent(this)));

@@ -55,15 +55,16 @@ TEST_F(LayoutBoxTest, BackgroundRect) {
       "<div id='target5'></div>"
       "<div id='target6'></div>");
 
-  // #target1's opaque background color only fills the content box but its translucent image extends to the borders.
+  // #target1's opaque background color only fills the content box but its
+  // translucent image extends to the borders.
   LayoutBox* layoutBox = toLayoutBox(getLayoutObjectByElementId("target1"));
   EXPECT_EQ(LayoutRect(20, 20, 100, 100),
             layoutBox->backgroundRect(BackgroundKnownOpaqueRect));
   EXPECT_EQ(LayoutRect(0, 0, 140, 140),
             layoutBox->backgroundRect(BackgroundClipRect));
 
-  // #target2's background color is opaque but only fills the padding-box because it has local attachment.
-  // This eclipses the content-box image.
+  // #target2's background color is opaque but only fills the padding-box
+  // because it has local attachment. This eclipses the content-box image.
   layoutBox = toLayoutBox(getLayoutObjectByElementId("target2"));
   EXPECT_EQ(LayoutRect(10, 10, 120, 120),
             layoutBox->backgroundRect(BackgroundKnownOpaqueRect));
@@ -82,17 +83,17 @@ TEST_F(LayoutBoxTest, BackgroundRect) {
   EXPECT_EQ(LayoutRect(0, 0, 140, 140),
             layoutBox->backgroundRect(BackgroundClipRect));
 
-  // #target5's solid background only covers the content-box but it has a "none" background
-  // covering the border box.
+  // #target5's solid background only covers the content-box but it has a "none"
+  // background covering the border box.
   layoutBox = toLayoutBox(getLayoutObjectByElementId("target5"));
   EXPECT_EQ(LayoutRect(20, 20, 100, 100),
             layoutBox->backgroundRect(BackgroundKnownOpaqueRect));
   EXPECT_EQ(LayoutRect(0, 0, 140, 140),
             layoutBox->backgroundRect(BackgroundClipRect));
 
-  // Because it can scroll due to local attachment, the opaque local background in #target6
-  // is treated as padding box for the clip rect, but remains the content box for the known
-  // opaque rect.
+  // Because it can scroll due to local attachment, the opaque local background
+  // in #target6 is treated as padding box for the clip rect, but remains the
+  // content box for the known opaque rect.
   layoutBox = toLayoutBox(getLayoutObjectByElementId("target6"));
   EXPECT_EQ(LayoutRect(20, 20, 100, 100),
             layoutBox->backgroundRect(BackgroundKnownOpaqueRect));
@@ -173,12 +174,8 @@ TEST_F(LayoutBoxTest, TableRowCellTopLeftLocationFlipped) {
   EXPECT_EQ(LayoutPoint(300, 0), cell1->topLeftLocation());
 
   const LayoutBox* row2 = toLayoutBox(getLayoutObjectByElementId("row2"));
-  // TODO(crbug.com/652496): LayoutTableRow's location is in logical coordinates
-  // of the containing section, and topLeftLocation() is incorrect.
-  // This should be (100, 0).
-  EXPECT_EQ(LayoutPoint(0, 100), row2->location());
-  // This should be (0, 0).
-  EXPECT_EQ(LayoutPoint(100, 100), row2->topLeftLocation());
+  EXPECT_EQ(LayoutPoint(100, 0), row2->location());
+  EXPECT_EQ(LayoutPoint(0, 0), row2->topLeftLocation());
 
   const LayoutBox* cell2 = toLayoutBox(getLayoutObjectByElementId("cell2"));
   EXPECT_EQ(LayoutPoint(100, 0), cell2->location());

@@ -12,6 +12,11 @@
 #define CLANG_BUILD
 #endif
 
+typedef union {
+  int32_t intVal;
+  float floatVal;
+} FloatInt;
+
 #ifdef CLANG_BUILD
 #define SRLI_B(a, b) __msa_srli_b((v16i8)a, b)
 #define SRLI_H(a, b) __msa_srli_h((v8i16)a, b)
@@ -142,6 +147,14 @@ MSA_STORE_FUNC(uint32_t, usw, msa_usw);
 #define LD_UH4(...) LD_V4(v8u16, __VA_ARGS__)
 #define LD_SP4(...) LD_V4(v4f32, __VA_ARGS__)
 
+#define LD_V5(RTYPE, psrc, stride, out0, out1, out2, out3, out4) \
+  {                                                              \
+    LD_V4(RTYPE, psrc, stride, out0, out1, out2, out3);          \
+    out4 = LD_V(RTYPE, psrc);                                    \
+    psrc += stride;                                              \
+  }
+#define LD_UB5(...) LD_V5(v16u8, __VA_ARGS__)
+
 #define LD_V6(RTYPE, psrc, stride, out0, out1, out2, out3, out4, out5) \
   {                                                                    \
     LD_V4(RTYPE, psrc, stride, out0, out1, out2, out3);                \
@@ -150,6 +163,13 @@ MSA_STORE_FUNC(uint32_t, usw, msa_usw);
 #define LD_UB6(...) LD_V6(v16u8, __VA_ARGS__)
 #define LD_UH6(...) LD_V6(v8u16, __VA_ARGS__)
 #define LD_SP6(...) LD_V6(v4f32, __VA_ARGS__)
+
+#define LD_V7(RTYPE, psrc, stride, out0, out1, out2, out3, out4, out5, out6) \
+  {                                                                          \
+    LD_V5(RTYPE, psrc, stride, out0, out1, out2, out3, out4);                \
+    LD_V2(RTYPE, psrc, stride, out5, out6);                                  \
+  }
+#define LD_UB7(...) LD_V7(v16u8, __VA_ARGS__)
 
 #define LD_V8(RTYPE, psrc, stride, out0, out1, out2, out3, out4, out5, out6, \
               out7)                                                          \
@@ -211,6 +231,17 @@ MSA_STORE_FUNC(uint32_t, usw, msa_usw);
   }
 #define ST_UB8(...) ST_V8(v16u8, __VA_ARGS__)
 #define ST_SP8(...) ST_V8(v4f32, __VA_ARGS__)
+
+/* Description : Store 8x1 byte block to destination memory from input vector
+   Arguments   : Inputs - in, pdst
+   Details     : Index 0 double word element from 'in' vector is copied to the
+                 GP register and stored to (pdst)
+*/
+#define ST8x1_UB(in, pdst)                               \
+  {                                                      \
+    const uint64_t out0m = __msa_copy_s_d((v2i64)in, 0); \
+    SD(out0m, pdst);                                     \
+  }
 
 /* Description : Logical and in0 and in1.
    Arguments   : Inputs  - in0, in1, in2, in3,
@@ -297,6 +328,14 @@ MSA_STORE_FUNC(uint32_t, usw, msa_usw);
 #define SHF_B2_UB(...) SHF_B2(v16u8, __VA_ARGS__)
 #define SHF_B2_UH(...) SHF_B2(v8u16, __VA_ARGS__)
 
+#define SHF_B3(RTYPE, in0, in1, in2, shf_val)      \
+  {                                                \
+    SHF_B2(RTYPE, in0, in1, shf_val);              \
+    in2 = (RTYPE)__msa_shf_b((v16i8)in2, shf_val); \
+  }
+#define SHF_B3_UB(...) SHF_B3(v16u8, __VA_ARGS__)
+#define SHF_B3_UH(...) SHF_B3(v8u16, __VA_ARGS__)
+
 #define SHF_B4(RTYPE, in0, in1, in2, in3, shf_val) \
   {                                                \
     SHF_B2(RTYPE, in0, in1, shf_val);              \
@@ -304,6 +343,17 @@ MSA_STORE_FUNC(uint32_t, usw, msa_usw);
   }
 #define SHF_B4_UB(...) SHF_B4(v16u8, __VA_ARGS__)
 #define SHF_B4_UH(...) SHF_B4(v8u16, __VA_ARGS__)
+
+/* Description : Shuffle byte vector elements as per mask vector
+   Arguments   : Inputs  - in0, in1, in2, in3, mask0, mask1
+                 Outputs - out0, out1
+                 Return Type - as per RTYPE
+   Details     : Byte elements from 'in0' & 'in1' are copied selectively to
+                 'out0' as per control vector 'mask0'
+*/
+#define VSHF_B(RTYPE, in0, in1, mask) \
+  (RTYPE) __msa_vshf_b((v16i8)mask, (v16i8)in1, (v16i8)in0);
+#define VSHF_UB(...) VSHF_B(v16u8, __VA_ARGS__)
 
 /* Description : Interleave even byte elements from vectors
    Arguments   : Inputs  - in0, in1, in2, in3
@@ -341,6 +391,35 @@ MSA_STORE_FUNC(uint32_t, usw, msa_usw);
   }
 #define ILVEV_H2_UB(...) ILVEV_H2(v16u8, __VA_ARGS__)
 
+/* Description : Interleave right half of double word elements from vectors
+ * Arguments   : Inputs  - in0, in1, in2, in3
+ *               Outputs - out0, out1
+ *               Return Type - as per RTYPE
+ * Details     : Right half of double word elements of 'in0' and 'in1' are
+ *               interleaved and written to 'out0'.
+ */
+#define ILVR_D2(RTYPE, in0, in1, in2, in3, out0, out1)  \
+  {                                                     \
+    out0 = (RTYPE)__msa_ilvr_d((v2i64)in0, (v2i64)in1); \
+    out1 = (RTYPE)__msa_ilvr_d((v2i64)in2, (v2i64)in3); \
+  }
+#define ILVR_D2_UB(...) ILVR_D2(v16u8, __VA_ARGS__)
+
+#define ILVR_D3(RTYPE, in0, in1, in2, in3, in4, in5, out0, out1, out2) \
+  {                                                                    \
+    ILVR_D2(RTYPE, in0, in1, in2, in3, out0, out1);                    \
+    out2 = (RTYPE)__msa_ilvr_d((v2i64)in4, (v2i64)in5);                \
+  }
+#define ILVR_D3_UB(...) ILVR_D3(v16u8, __VA_ARGS__)
+
+#define ILVR_D4(RTYPE, in0, in1, in2, in3, in4, in5, in6, in7, out0, out1, \
+                out2, out3)                                                \
+  {                                                                        \
+    ILVR_D2(RTYPE, in0, in1, in2, in3, out0, out1);                        \
+    ILVR_D2(RTYPE, in4, in5, in6, in7, out2, out3);                        \
+  }
+#define ILVR_D4_UB(...) ILVR_D4(v16u8, __VA_ARGS__)
+
 /* Description : Interleave both left and right half of input vectors
    Arguments   : Inputs  - in0, in1
                  Outputs - out0, out1
@@ -375,6 +454,37 @@ MSA_STORE_FUNC(uint32_t, usw, msa_usw);
     out1 = (RTYPE)__msa_ilvev_b((v16i8)in0, (v16i8)in1); \
   }
 #define ILVODEV_B2_UB(...) ILVODEV_B2(v16u8, __VA_ARGS__)
+
+/* Description : Pack even byte elements of vector pairs
+ *  Arguments   : Inputs  - in0, in1, in2, in3
+ *                Outputs - out0, out1
+ *                Return Type - as per RTYPE
+ *  Details     : Even byte elements of 'in0' are copied to the left half of
+ *                'out0' & even byte elements of 'in1' are copied to the right
+ *                half of 'out0'.
+ */
+#define PCKEV_B2(RTYPE, in0, in1, in2, in3, out0, out1)  \
+  {                                                      \
+    out0 = (RTYPE)__msa_pckev_b((v16i8)in0, (v16i8)in1); \
+    out1 = (RTYPE)__msa_pckev_b((v16i8)in2, (v16i8)in3); \
+  }
+#define PCKEV_B2_UB(...) PCKEV_B2(v16u8, __VA_ARGS__)
+#define PCKEV_B2_UH(...) PCKEV_B2(v8u16, __VA_ARGS__)
+
+#define PCKEV_B3(RTYPE, in0, in1, in2, in3, in4, in5, out0, out1, out2) \
+  {                                                                     \
+    PCKEV_B2(RTYPE, in0, in1, in2, in3, out0, out1);                    \
+    out2 = (RTYPE)__msa_pckev_b((v16i8)in4, (v16i8)in5);                \
+  }
+#define PCKEV_B3_UH(...) PCKEV_B3(v8u16, __VA_ARGS__)
+
+#define PCKEV_B4(RTYPE, in0, in1, in2, in3, in4, in5, in6, in7, out0, out1, \
+                 out2, out3)                                                \
+  {                                                                         \
+    PCKEV_B2(RTYPE, in0, in1, in2, in3, out0, out1);                        \
+    PCKEV_B2(RTYPE, in4, in5, in6, in7, out2, out3);                        \
+  }
+#define PCKEV_B4_UH(...) PCKEV_B4(v8u16, __VA_ARGS__)
 
 /* Description : Pack even halfword elements of vector pairs
    Arguments   : Inputs  - in0, in1, in2, in3
@@ -464,6 +574,43 @@ MSA_STORE_FUNC(uint32_t, usw, msa_usw);
   }
 #define SRLI_B4_UB(...) SRLI_B4(v16u8, __VA_ARGS__)
 
+/* Description : Logical shift right all elements of vector (immediate)
+   Arguments   : Inputs  - in0, in1, in2, in3, shift
+                 Outputs - out0, out1, out2, out3
+                 Return Type - as per RTYPE
+   Details     : Each element of vector 'in0' is right shifted by 'shift' and
+                 the result is written in 'out0'. 'shift' is an immediate value.
+*/
+#define SRLI_H2(RTYPE, in0, in1, out0, out1, shift) \
+  {                                                 \
+    out0 = (RTYPE)SRLI_H((v8i16)in0, shift);        \
+    out1 = (RTYPE)SRLI_H((v8i16)in1, shift);        \
+  }
+#define SRLI_H2_UB(...) SRLI_H2(v16u8, __VA_ARGS__)
+
+#define SRLI_H4(RTYPE, in0, in1, in2, in3, out0, out1, out2, out3, shift) \
+  {                                                                       \
+    SRLI_H2(RTYPE, in0, in1, out0, out1, shift);                          \
+    SRLI_H2(RTYPE, in2, in3, out2, out3, shift);                          \
+  }
+#define SRLI_H4_UB(...) SRLI_H4(v16u8, __VA_ARGS__)
+
+/* Description : Immediate Bit Insert Left (immediate)
+   Arguments   : Inputs  - in0, in1, in2, in3, shift
+                 Outputs - out0, out1
+                 Return Type - as per RTYPE
+   Details     : Copy most significant (left) bits in each element of vector
+                 'in1' to elements in vector in0 while preserving the least
+                 significant (right) bits. The number of bits to copy is given
+                 by the immediate 'shift + 1'.
+*/
+#define BINSLI_B2(RTYPE, in0, in1, in2, in3, out0, out1, shift)  \
+  {                                                              \
+    out0 = (RTYPE)__msa_binsli_b((v16u8)in0, (v16u8)in1, shift); \
+    out1 = (RTYPE)__msa_binsli_b((v16u8)in2, (v16u8)in3, shift); \
+  }
+#define BINSLI_B2_UB(...) BINSLI_B2(v16u8, __VA_ARGS__)
+
 /* Description : Immediate Bit Insert Right (immediate)
    Arguments   : Inputs  - in0, in1, in2, in3, shift
                  Outputs - out0, out1
@@ -522,10 +669,58 @@ MSA_STORE_FUNC(uint32_t, usw, msa_usw);
     DIV2(in4, in5, in6, in7, out2, out3);                                    \
   }
 
+/* Description : Logical AND of 4 pairs of vectors with mask
+   Arguments   : Inputs  - in0, in1, in2, in3, mask
+                 Outputs - in0, in1, in2, in3
+   Details     : Each element in 'in0' is logically AND'ed with mask
+                 Each element in 'in1' is logically AND'ed with mask
+                 Each element in 'in2' is logically AND'ed with mask
+                 Each element in 'in3' is logically AND'ed with mask
+*/
+#define AND_W4(RTYPE, in0, in1, in2, in3, mask) \
+  {                                             \
+    in0 = (RTYPE)((v16i8)in0 & (v16i8)mask);    \
+    in1 = (RTYPE)((v16i8)in1 & (v16i8)mask);    \
+    in2 = (RTYPE)((v16i8)in2 & (v16i8)mask);    \
+    in3 = (RTYPE)((v16i8)in3 & (v16i8)mask);    \
+  }
+#define AND_W4_SP(...) AND_W4(v4f32, __VA_ARGS__)
+
+/* Description : Addition of 2 pairs of vectors
+   Arguments   : Inputs  - in0, in1, in2, in3
+                 Outputs - out0, out1
+   Details     : Each element in 'in0' is added to 'in1' and result is written
+                 to 'out0'
+                 Each element in 'in2' is added to 'in3' and result is written
+                 to 'out1'
+*/
+#define ADD2(in0, in1, in2, in3, out0, out1) \
+  {                                          \
+    out0 = in0 + in1;                        \
+    out1 = in2 + in3;                        \
+  }
+
+/* Description : Addition of 4 pairs of vectors
+   Arguments   : Inputs  - in0, in1, in2, in3, in4, in5, in6, in7
+                 Outputs - out0, out1
+   Details     : Each element in 'in0' is added to 'in1' and result is written
+                 to 'out0'
+                 Each element in 'in2' is added to 'in3' and result is written
+                 to 'out1'
+                 Each element in 'in4' is added to 'in5' and result is written
+                 to 'out2'
+                 Each element in 'in6' is added to 'in7' and result is written
+                 to 'out3'
+*/
+#define ADD4(in0, in1, in2, in3, in4, in5, in6, in7, out0, out1, out2, out3) \
+  {                                                                          \
+    ADD2(in0, in1, in2, in3, out0, out1);                                    \
+    ADD2(in4, in5, in6, in7, out2, out3);                                    \
+  }
+
 /* Description : Vector Floating-Point Convert from Unsigned Integer
    Arguments   : Inputs  - in0, in1
                  Outputs - out0, out1
-   Details     :
 */
 #define FFINTU_W2(RTYPE, in0, in1, out0, out1) \
   {                                            \
@@ -534,6 +729,10 @@ MSA_STORE_FUNC(uint32_t, usw, msa_usw);
   }
 #define FFINTU_W2_SP(...) FFINTU_W2(v4f32, __VA_ARGS__)
 
+/* Description : Vector Floating-Point Convert from Unsigned Integer
+   Arguments   : Inputs  - in0, in1, in2, in3
+                 Outputs - out0, out1, out2, out3
+*/
 #define FFINTU_W4(RTYPE, in0, in1, in2, in3, out0, out1, out2, out3) \
   {                                                                  \
     FFINTU_W2(RTYPE, in0, in1, out0, out1);                          \
@@ -544,7 +743,6 @@ MSA_STORE_FUNC(uint32_t, usw, msa_usw);
 /* Description : Vector Floating-Point Truncate and Convert to Unsigned Integer
    Arguments   : Inputs  - in0, in1
                  Outputs - out0, out1
-   Details     :
 */
 #define FTRUNCU_W2(RTYPE, in0, in1, out0, out1) \
   {                                             \
@@ -553,11 +751,64 @@ MSA_STORE_FUNC(uint32_t, usw, msa_usw);
   }
 #define FTRUNCU_W2_UB(...) FTRUNCU_W2(v16u8, __VA_ARGS__)
 
+/* Description : Vector Floating-Point Truncate and Convert to Unsigned Integer
+   Arguments   : Inputs  - in0, in1, in2, in3
+                 Outputs - out0, out1, out2, out3
+*/
 #define FTRUNCU_W4(RTYPE, in0, in1, in2, in3, out0, out1, out2, out3) \
   {                                                                   \
     FTRUNCU_W2(RTYPE, in0, in1, out0, out1);                          \
     FTRUNCU_W2(RTYPE, in2, in3, out2, out3);                          \
   }
 #define FTRUNCU_W4_UB(...) FTRUNCU_W4(v16u8, __VA_ARGS__)
+
+/* Description : Vector Floating-Point multiply with scale and accumulate
+   Arguments   : Inputs  - in0, in1, in2, in3, out0, out1, out2, out3, scale
+                 Outputs - out0, out1, out2, out3
+*/
+#define VSMA4(in0, in1, in2, in3, out0, out1, out2, out3, scale) \
+  {                                                              \
+    out0 += in0 * scale;                                         \
+    out1 += in1 * scale;                                         \
+    out2 += in2 * scale;                                         \
+    out3 += in3 * scale;                                         \
+  }
+
+/* Description : Vector Floating-Point multiply with scale
+   Arguments   : Inputs  - in0, in1, in2, in3, scale
+                 Outputs - out0, out1, out2, out3
+*/
+#define VSMUL4(in0, in1, in2, in3, out0, out1, out2, out3, scale) \
+  {                                                               \
+    out0 = in0 * scale;                                           \
+    out1 = in1 * scale;                                           \
+    out2 = in2 * scale;                                           \
+    out3 = in3 * scale;                                           \
+  }
+
+/* Description : Vector Floating-Point max value
+   Arguments   : Inputs - in0, in1, in2, in3, max
+                 Output - max
+*/
+#define VMAX_W4(RTYPE, in0, in1, in2, in3, max)        \
+  {                                                    \
+    max = (RTYPE)__msa_fmax_w((v4f32)max, (v4f32)in0); \
+    max = (RTYPE)__msa_fmax_w((v4f32)max, (v4f32)in1); \
+    max = (RTYPE)__msa_fmax_w((v4f32)max, (v4f32)in2); \
+    max = (RTYPE)__msa_fmax_w((v4f32)max, (v4f32)in3); \
+  }
+#define VMAX_W4_SP(...) VMAX_W4(v4f32, __VA_ARGS__)
+
+/* Description : Vector Floating-Point clip to min max
+   Arguments   : Inputs  - in0, in1, in2, in3, min, max
+                 Outputs - out0, out1, out2, out3
+*/
+#define VCLIP4(in0, in1, in2, in3, min, max, out0, out1, out2, out3) \
+  {                                                                  \
+    out0 = __msa_fmax_w(__msa_fmin_w(in0, max), min);                \
+    out1 = __msa_fmax_w(__msa_fmin_w(in1, max), min);                \
+    out2 = __msa_fmax_w(__msa_fmin_w(in2, max), min);                \
+    out3 = __msa_fmax_w(__msa_fmin_w(in3, max), min);                \
+  }
 
 #endif  // CommonMacrosMSA_h

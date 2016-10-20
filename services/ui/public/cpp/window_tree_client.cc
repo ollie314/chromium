@@ -12,10 +12,11 @@
 
 #include "base/bind.h"
 #include "base/memory/ptr_util.h"
-#include "services/shell/public/cpp/connector.h"
+#include "services/service_manager/public/cpp/connector.h"
 #include "services/ui/common/util.h"
 #include "services/ui/public/cpp/in_flight_change.h"
 #include "services/ui/public/cpp/input_event_handler.h"
+#include "services/ui/public/cpp/surface_id_handler.h"
 #include "services/ui/public/cpp/window_drop_target.h"
 #include "services/ui/public/cpp/window_manager_delegate.h"
 #include "services/ui/public/cpp/window_observer.h"
@@ -91,8 +92,8 @@ WindowTreeClient::WindowTreeClient(
 WindowTreeClient::~WindowTreeClient() {
   in_destructor_ = true;
 
-  FOR_EACH_OBSERVER(WindowTreeClientObserver, observers_,
-                    OnWillDestroyClient(this));
+  for (auto& observer : observers_)
+    observer.OnWillDestroyClient(this);
 
   std::vector<Window*> non_owned;
   WindowTracker tracker;
@@ -113,28 +114,29 @@ WindowTreeClient::~WindowTreeClient() {
   while (!tracker.windows().empty())
     delete tracker.windows().front();
 
-  FOR_EACH_OBSERVER(WindowTreeClientObserver, observers_,
-                    OnDidDestroyClient(this));
+  for (auto& observer : observers_)
+    observer.OnDidDestroyClient(this);
 }
 
 void WindowTreeClient::ConnectViaWindowTreeFactory(
-    shell::Connector* connector) {
+    service_manager::Connector* connector) {
   // The client id doesn't really matter, we use 101 purely for debugging.
   client_id_ = 101;
 
   mojom::WindowTreeFactoryPtr factory;
-  connector->ConnectToInterface("mojo:ui", &factory);
+  connector->ConnectToInterface("service:ui", &factory);
   mojom::WindowTreePtr window_tree;
   factory->CreateWindowTree(GetProxy(&window_tree),
                             binding_.CreateInterfacePtrAndBind());
   SetWindowTree(std::move(window_tree));
 }
 
-void WindowTreeClient::ConnectAsWindowManager(shell::Connector* connector) {
+void WindowTreeClient::ConnectAsWindowManager(
+    service_manager::Connector* connector) {
   DCHECK(window_manager_delegate_);
 
   mojom::WindowManagerWindowTreeFactoryPtr factory;
-  connector->ConnectToInterface("mojo:ui", &factory);
+  connector->ConnectToInterface("service:ui", &factory);
   mojom::WindowTreePtr window_tree;
   factory->CreateWindowTree(GetProxy(&window_tree),
                             binding_.CreateInterfacePtrAndBind());
@@ -356,17 +358,24 @@ void WindowTreeClient::AttachSurface(
   tree_->AttachSurface(window_id, type, std::move(surface), std::move(client));
 }
 
+void WindowTreeClient::OnWindowSurfaceDetached(
+    Id window_id,
+    const cc::SurfaceSequence& sequence) {
+  DCHECK(tree_);
+  tree_->OnWindowSurfaceDetached(window_id, sequence);
+}
+
 void WindowTreeClient::LocalSetCapture(Window* window) {
   if (capture_window_ == window)
     return;
   Window* lost_capture = capture_window_;
   capture_window_ = window;
   if (lost_capture) {
-    FOR_EACH_OBSERVER(WindowObserver, *WindowPrivate(lost_capture).observers(),
-                      OnWindowLostCapture(lost_capture));
+    for (auto& observer : *WindowPrivate(lost_capture).observers())
+      observer.OnWindowLostCapture(lost_capture);
   }
-  FOR_EACH_OBSERVER(WindowTreeClientObserver, observers_,
-                    OnWindowTreeCaptureChanged(window, lost_capture));
+  for (auto& observer : observers_)
+    observer.OnWindowTreeCaptureChanged(window, lost_capture);
 }
 
 void WindowTreeClient::LocalSetFocus(Window* focused) {
@@ -376,15 +385,15 @@ void WindowTreeClient::LocalSetFocus(Window* focused) {
   // |WindowTreeClient::GetFocusedWindow()| etc.
   focused_window_ = focused;
   if (blurred) {
-    FOR_EACH_OBSERVER(WindowObserver, *WindowPrivate(blurred).observers(),
-                      OnWindowFocusChanged(focused, blurred));
+    for (auto& observer : *WindowPrivate(blurred).observers())
+      observer.OnWindowFocusChanged(focused, blurred);
   }
   if (focused) {
-    FOR_EACH_OBSERVER(WindowObserver, *WindowPrivate(focused).observers(),
-                      OnWindowFocusChanged(focused, blurred));
+    for (auto& observer : *WindowPrivate(focused).observers())
+      observer.OnWindowFocusChanged(focused, blurred);
   }
-  FOR_EACH_OBSERVER(WindowTreeClientObserver, observers_,
-                    OnWindowTreeFocusChanged(focused, blurred));
+  for (auto& observer : observers_)
+    observer.OnWindowTreeFocusChanged(focused, blurred);
 }
 
 void WindowTreeClient::AddWindow(Window* window) {
@@ -562,8 +571,8 @@ void WindowTreeClient::OnEmbedImpl(mojom::WindowTree* window_tree,
   delegate_->OnEmbed(root);
 
   if (focused_window_) {
-    FOR_EACH_OBSERVER(WindowTreeClientObserver, observers_,
-                      OnWindowTreeFocusChanged(focused_window_, nullptr));
+    for (auto& observer : observers_)
+      observer.OnWindowTreeFocusChanged(focused_window_, nullptr);
   }
 }
 
@@ -775,8 +784,8 @@ void WindowTreeClient::OnEmbed(ClientSpecificId client_id,
 void WindowTreeClient::OnEmbeddedAppDisconnected(Id window_id) {
   Window* window = GetWindowByServerId(window_id);
   if (window) {
-    FOR_EACH_OBSERVER(WindowObserver, *WindowPrivate(window).observers(),
-                      OnWindowEmbeddedAppDisconnected(window));
+    for (auto& observer : *WindowPrivate(window).observers())
+      observer.OnWindowEmbeddedAppDisconnected(window);
   }
 }
 
@@ -1092,6 +1101,23 @@ void WindowTreeClient::OnWindowPredefinedCursorChanged(
   WindowPrivate(window).LocalSetPredefinedCursor(cursor);
 }
 
+void WindowTreeClient::OnWindowSurfaceChanged(
+    Id window_id,
+    const cc::SurfaceId& surface_id,
+    const cc::SurfaceSequence& surface_sequence,
+    const gfx::Size& frame_size,
+    float device_scale_factor) {
+  Window* window = GetWindowByServerId(window_id);
+  if (!window)
+    return;
+  std::unique_ptr<SurfaceInfo> surface_info(base::MakeUnique<SurfaceInfo>());
+  surface_info->surface_id = surface_id;
+  surface_info->surface_sequence = surface_sequence;
+  surface_info->frame_size = frame_size;
+  surface_info->device_scale_factor = device_scale_factor;
+  WindowPrivate(window).LocalSetSurfaceId(std::move(surface_info));
+}
+
 void WindowTreeClient::OnDragDropStart(
     mojo::Map<mojo::String, mojo::Array<uint8_t>> mime_data) {
   mime_drag_data_ = std::move(mime_data);
@@ -1222,8 +1248,8 @@ void WindowTreeClient::RequestClose(uint32_t window_id) {
   if (!window || !IsRoot(window))
     return;
 
-  FOR_EACH_OBSERVER(WindowObserver, *WindowPrivate(window).observers(),
-                    OnRequestClose(window));
+  for (auto& observer : *WindowPrivate(window).observers())
+    observer.OnRequestClose(window);
 }
 
 void WindowTreeClient::OnConnect(ClientSpecificId client_id) {

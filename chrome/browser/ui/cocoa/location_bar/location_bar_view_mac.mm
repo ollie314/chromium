@@ -122,7 +122,9 @@ LocationBarViewMac::LocationBarViewMac(AutocompleteTextField* field,
       browser_(browser),
       location_bar_visible_(true),
       should_show_secure_verbose_(false),
-      should_animate_security_verbose_(false),
+      should_show_nonsecure_verbose_(false),
+      should_animate_secure_verbose_(false),
+      should_animate_nonsecure_verbose_(false),
       is_width_available_for_security_verbose_(false),
       weak_ptr_factory_(this) {
   ScopedVector<ContentSettingImageModel> models =
@@ -146,21 +148,26 @@ LocationBarViewMac::LocationBarViewMac(AutocompleteTextField* field,
       !browser->SupportsWindowFeature(Browser::FEATURE_TABSTRIP)];
 
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
-  if (command_line->HasSwitch(switches::kMaterialSecurityVerbose)) {
-    std::string security_verbose_flag =
-        command_line->GetSwitchValueASCII(switches::kMaterialSecurityVerbose);
-
+  if (command_line->HasSwitch(switches::kSecurityChip)) {
+    std::string security_chip_flag =
+        command_line->GetSwitchValueASCII(switches::kSecurityChip);
     should_show_secure_verbose_ =
-        security_verbose_flag ==
-            switches::kMaterialSecurityVerboseShowAllAnimated ||
-        security_verbose_flag ==
-            switches::kMaterialSecurityVerboseShowAllNonAnimated;
+        security_chip_flag == switches::kSecurityChipShowAll;
+    should_show_nonsecure_verbose_ =
+        security_chip_flag == switches::kSecurityChipShowAll ||
+        security_chip_flag == switches::kSecurityChipShowNonSecureOnly;
+  }
 
-    should_animate_security_verbose_ =
-        security_verbose_flag ==
-            switches::kMaterialSecurityVerboseShowAllAnimated ||
-        security_verbose_flag ==
-            switches::kMaterialSecurityVerboseShowNonSecureAnimated;
+  if (command_line->HasSwitch(switches::kSecurityChipAnimation)) {
+    std::string security_chip_animation_flag =
+        command_line->GetSwitchValueASCII(switches::kSecurityChipAnimation);
+    should_animate_secure_verbose_ =
+        security_chip_animation_flag == switches::kSecurityChipAnimationAll;
+
+    should_animate_nonsecure_verbose_ =
+        security_chip_animation_flag ==
+            switches::kSecurityChipAnimationNonSecureOnly ||
+        security_chip_animation_flag == switches::kSecurityChipAnimationAll;
   }
 
   // Sets images for the decorations, and performs a layout. This call ensures
@@ -527,6 +534,9 @@ void LocationBarViewMac::Layout() {
     }
   }
 
+  if (!security_state_bubble_decoration_->IsVisible())
+    security_state_bubble_decoration_->ResetAnimation();
+
   // These need to change anytime the layout changes.
   // TODO(shess): Anytime the field editor might have changed, the
   // cursor rects almost certainly should have changed.  The tooltips
@@ -672,20 +682,27 @@ WebContents* LocationBarViewMac::GetWebContents() {
 }
 
 bool LocationBarViewMac::ShouldShowEVBubble() const {
-  return (GetToolbarModel()->GetSecurityLevel(false) ==
-          security_state::SecurityStateModel::EV_SECURE) &&
-         should_show_secure_verbose_;
+  return GetToolbarModel()->GetSecurityLevel(false) ==
+         security_state::SecurityStateModel::EV_SECURE;
 }
 
 bool LocationBarViewMac::ShouldShowSecurityState() const {
+  if (omnibox_view_->IsEditingOrEmpty() ||
+      omnibox_view_->model()->is_keyword_hint()) {
+    return false;
+  }
+
   security_state::SecurityStateModel::SecurityLevel security =
       GetToolbarModel()->GetSecurityLevel(false);
-  bool has_verbose_for_security =
-      security == security_state::SecurityStateModel::DANGEROUS ||
-      (IsSecureConnection(security) && should_show_secure_verbose_);
 
-  return has_verbose_for_security && !omnibox_view_->IsEditingOrEmpty() &&
-         !omnibox_view_->model()->is_keyword_hint();
+  if (security == security_state::SecurityStateModel::EV_SECURE)
+    return true;
+  else if (security == security_state::SecurityStateModel::SECURE)
+    return should_show_secure_verbose_;
+
+  return should_show_nonsecure_verbose_ &&
+         (security == security_state::SecurityStateModel::DANGEROUS ||
+          security == security_state::SecurityStateModel::HTTP_SHOW_WARNING);
 }
 
 bool LocationBarViewMac::IsLocationBarDark() const {
@@ -720,8 +737,10 @@ SkColor LocationBarViewMac::GetLocationBarIconColor() const {
   security_state::SecurityStateModel::SecurityLevel security_level =
       GetToolbarModel()->GetSecurityLevel(false);
 
-  if (security_level == security_state::SecurityStateModel::NONE)
+  if (security_level == security_state::SecurityStateModel::NONE ||
+      security_level == security_state::SecurityStateModel::HTTP_SHOW_WARNING) {
     return gfx::kChromeIconGrey;
+  }
 
   NSColor* srgb_color =
       OmniboxViewMac::GetSecureTextColor(security_level, in_dark_mode);
@@ -870,8 +889,9 @@ void LocationBarViewMac::UpdateSecurityState(bool tab_changed) {
 
   security_state::SecurityStateModel::SecurityLevel new_security_level =
       GetToolbarModel()->GetSecurityLevel(false);
-  bool is_secure_to_secure = IsSecureConnection(new_security_level) &&
-                             IsSecureConnection(security_level_);
+  bool is_new_level_secure = IsSecureConnection(new_security_level);
+  bool is_secure_to_secure =
+      is_new_level_secure && IsSecureConnection(security_level_);
   bool is_new_security_level =
       security_level_ != new_security_level && !is_secure_to_secure;
   security_level_ = new_security_level;
@@ -881,9 +901,13 @@ void LocationBarViewMac::UpdateSecurityState(bool tab_changed) {
   // animate the decoration if animation is enabled and the state changed is
   // not from a tab switch.
   if (is_width_available_for_security_verbose_) {
-    if (security_state_bubble_decoration_->HasAnimatedOut())
+    bool is_animated =
+        (is_new_level_secure && should_animate_secure_verbose_) ||
+        (!is_new_level_secure && should_animate_nonsecure_verbose_);
+
+    if (!tab_changed && security_state_bubble_decoration_->HasAnimatedOut())
       security_state_bubble_decoration_->AnimateIn(false);
-    else if (!should_animate_security_verbose_ || tab_changed)
+    else if (tab_changed || !is_animated)
       security_state_bubble_decoration_->ShowWithoutAnimation();
     else if (is_new_security_level)
       security_state_bubble_decoration_->AnimateIn();

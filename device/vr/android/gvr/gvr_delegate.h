@@ -7,24 +7,13 @@
 
 #include "device/vr/android/gvr/gvr_device_provider.h"
 #include "device/vr/vr_export.h"
+#include "third_party/gvr-android-sdk/src/ndk/include/vr/gvr/capi/include/gvr_types.h"
 
 namespace gvr {
 class GvrApi;
 }  // namespace gvr
 
 namespace device {
-
-class DEVICE_VR_EXPORT GvrDelegateProvider {
- public:
-  static void SetInstance(GvrDelegateProvider* delegate_provider);
-  static GvrDelegateProvider* GetInstance();
-
-  virtual bool RequestWebVRPresent(GvrDeviceProvider* device_provider) = 0;
-  virtual void ExitWebVRPresent() = 0;
-
- private:
-  static GvrDelegateProvider* delegate_provider_;
-};
 
 class DEVICE_VR_EXPORT GvrDelegate {
  public:
@@ -35,8 +24,23 @@ class DEVICE_VR_EXPORT GvrDelegate {
                                         float top,
                                         float width,
                                         float height) = 0;
-
+  virtual void SetGvrPoseForWebVr(const gvr::Mat4f& pose,
+                                  uint32_t pose_index) = 0;
   virtual gvr::GvrApi* gvr_api() = 0;
+};
+
+class DEVICE_VR_EXPORT GvrDelegateProvider {
+ public:
+  static void SetInstance(GvrDelegateProvider* delegate_provider);
+  static GvrDelegateProvider* GetInstance();
+
+  virtual bool RequestWebVRPresent(GvrDeviceProvider* device_provider) = 0;
+  virtual void ExitWebVRPresent() = 0;
+  virtual GvrDelegate* GetNonPresentingDelegate() = 0;
+  virtual void DestroyNonPresentingDelegate() = 0;
+
+ private:
+  static GvrDelegateProvider* delegate_provider_;
 };
 
 }  // namespace device

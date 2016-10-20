@@ -4,10 +4,7 @@
   "display_name": "Navigation Unittests",
   "capabilities": {
     "required": {
-      "exe:navigation": {
-        "interfaces":  [ "navigation::mojom::ViewFactory" ]
-      },
-      "*": { "classes": [ "app" ] }
+      "*": [ "app" ]
     }
   }
 }

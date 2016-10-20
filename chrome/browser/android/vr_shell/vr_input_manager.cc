@@ -2,10 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/android/scoped_java_ref.h"
-#include "base/task_runner_util.h"
 #include "chrome/browser/android/vr_shell/vr_input_manager.h"
+
+#include "base/task_runner_util.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/render_widget_host.h"
+#include "content/public/browser/render_widget_host_view.h"
+#include "content/public/browser/web_contents.h"
 
 using blink::WebGestureEvent;
 using blink::WebMouseEvent;
@@ -41,6 +44,8 @@ void VrInputManager::SendGesture(VrGesture gesture) {
                     gesture.details.scroll.delta.x,
                     gesture.details.scroll.delta.y, gesture.type);
   } else if (gesture.type == WebInputEvent::GestureTap) {
+    // TODO(asimjour): Set the correct source for cardboard trigger. See
+    // crbug.com/654832
     SendClickEvent(event_time_milliseconds, gesture.details.buttons.pos.x,
                    gesture.details.buttons.pos.y);
   } else if (gesture.type == WebInputEvent::MouseMove ||
@@ -122,9 +127,9 @@ void VrInputManager::SendScrollEvent(int64_t time_ms,
 }
 
 void VrInputManager::SendMouseEvent(int64_t time_ms,
-                                        float x,
-                                        float y,
-                                        WebInputEvent::Type type) {
+                                    float x,
+                                    float y,
+                                    WebInputEvent::Type type) {
   WebMouseEvent result;
 
   result.type = type;
@@ -215,7 +220,7 @@ WebGestureEvent VrInputManager::MakeGestureEvent(WebInputEvent::Type type,
   result.x = x / dpi_scale_;
   result.y = y / dpi_scale_;
   result.timeStampSeconds = time_ms / 1000.0;
-  result.sourceDevice = blink::WebGestureDeviceTouchscreen;
+  result.sourceDevice = blink::WebGestureDeviceTouchpad;
 
   return result;
 }

@@ -21,7 +21,7 @@
 #include "media/mojo/interfaces/renderer.mojom.h"
 #include "media/mojo/interfaces/service_factory.mojom.h"
 #include "mojo/public/cpp/bindings/associated_binding.h"
-#include "services/shell/public/cpp/service_test.h"
+#include "services/service_manager/public/cpp/service_test.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
 using testing::Exactly;
@@ -48,7 +48,7 @@ class MockRendererClient : public mojom::RendererClient {
                void(base::TimeDelta time,
                     base::TimeDelta max_time,
                     base::TimeTicks capture_time));
-  MOCK_METHOD1(OnBufferingStateChange, void(mojom::BufferingState state));
+  MOCK_METHOD1(OnBufferingStateChange, void(BufferingState state));
   MOCK_METHOD0(OnEnded, void());
   MOCK_METHOD0(OnError, void());
   MOCK_METHOD1(OnVideoOpacityChange, void(bool opaque));
@@ -62,7 +62,7 @@ class MockRendererClient : public mojom::RendererClient {
   DISALLOW_COPY_AND_ASSIGN(MockRendererClient);
 };
 
-class MediaServiceTest : public shell::test::ServiceTest {
+class MediaServiceTest : public service_manager::test::ServiceTest {
  public:
   MediaServiceTest()
       : ServiceTest("exe:media_mojo_unittests"),
@@ -73,7 +73,7 @@ class MediaServiceTest : public shell::test::ServiceTest {
   void SetUp() override {
     ServiceTest::SetUp();
 
-    connection_ = connector()->Connect("mojo:media");
+    connection_ = connector()->Connect("service:media");
     connection_->SetConnectionLostClosure(base::Bind(
         &MediaServiceTest::ConnectionClosed, base::Unretained(this)));
 
@@ -146,7 +146,7 @@ class MediaServiceTest : public shell::test::ServiceTest {
   std::unique_ptr<MojoDemuxerStreamImpl> mojo_video_stream_;
 
  private:
-  std::unique_ptr<shell::Connection> connection_;
+  std::unique_ptr<service_manager::Connection> connection_;
 
   DISALLOW_COPY_AND_ASSIGN(MediaServiceTest);
 };

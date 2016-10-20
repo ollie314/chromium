@@ -10,6 +10,8 @@
 #include "core/dom/DOMSharedArrayBuffer.h"
 #include "core/dom/MessagePort.h"
 #include "core/fileapi/Blob.h"
+#include "core/fileapi/File.h"
+#include "core/fileapi/FileList.h"
 #include "core/frame/ImageBitmap.h"
 #include "core/html/ImageData.h"
 #include "core/offscreencanvas/OffscreenCanvas.h"
@@ -17,6 +19,7 @@
 #include "platform/graphics/CompositorMutableProperties.h"
 #include "public/platform/WebBlobInfo.h"
 #include "wtf/CheckedNumeric.h"
+#include "wtf/DateMath.h"
 
 namespace blink {
 
@@ -139,11 +142,45 @@ ScriptWrappable* V8ScriptValueDeserializer::readDOMObject(
       const uint32_t validPropertiesMask = static_cast<uint32_t>(
           (1u << CompositorMutableProperty::kNumProperties) - 1);
       if (!RuntimeEnabledFeatures::compositorWorkerEnabled() ||
-          !readUint64(&element) || !readUint32(&properties) ||
+          !readUint64(&element) || !readUint32(&properties) || !properties ||
           (properties & ~validPropertiesMask))
         return nullptr;
       return CompositorProxy::create(m_scriptState->getExecutionContext(),
                                      element, properties);
+    }
+    case FileTag:
+      return readFile();
+    case FileIndexTag:
+      return readFileIndex();
+    case FileListTag: {
+      // This does not presently deduplicate a File object and its entry in a
+      // FileList, which is non-standard behavior.
+      uint32_t length;
+      if (!readUint32(&length))
+        return nullptr;
+      FileList* fileList = FileList::create();
+      for (uint32_t i = 0; i < length; i++) {
+        if (File* file = readFile())
+          fileList->append(file);
+        else
+          return nullptr;
+      }
+      return fileList;
+    }
+    case FileListIndexTag: {
+      // This does not presently deduplicate a File object and its entry in a
+      // FileList, which is non-standard behavior.
+      uint32_t length;
+      if (!readUint32(&length))
+        return nullptr;
+      FileList* fileList = FileList::create();
+      for (uint32_t i = 0; i < length; i++) {
+        if (File* file = readFileIndex())
+          fileList->append(file);
+        else
+          return nullptr;
+      }
+      return fileList;
     }
     case ImageBitmapTag: {
       uint32_t originClean = 0, isPremultiplied = 0, width = 0, height = 0,
@@ -175,10 +212,17 @@ ScriptWrappable* V8ScriptValueDeserializer::readDOMObject(
       if (!readUint32(&width) || !readUint32(&height) ||
           !readUint32(&pixelLength) || !readRawBytes(pixelLength, &pixels))
         return nullptr;
-      ImageData* imageData = ImageData::create(IntSize(width, height));
-      DOMUint8ClampedArray* pixelArray = imageData->data();
-      if (pixelArray->length() < pixelLength)
+      CheckedNumeric<uint32_t> computedPixelLength = width;
+      computedPixelLength *= height;
+      computedPixelLength *= 4;
+      if (!computedPixelLength.IsValid() ||
+          computedPixelLength.ValueOrDie() != pixelLength)
         return nullptr;
+      ImageData* imageData = ImageData::create(IntSize(width, height));
+      if (!imageData)
+        return nullptr;
+      DOMUint8ClampedArray* pixelArray = imageData->data();
+      DCHECK_EQ(pixelArray->length(), pixelLength);
       memcpy(pixelArray->data(), pixels, pixelLength);
       return imageData;
     }
@@ -190,21 +234,65 @@ ScriptWrappable* V8ScriptValueDeserializer::readDOMObject(
       return (*m_transferredMessagePorts)[index].get();
     }
     case OffscreenCanvasTransferTag: {
-      uint32_t width = 0, height = 0, canvasId = 0, clientId = 0, localId = 0;
+      uint32_t width = 0, height = 0, canvasId = 0, clientId = 0, sinkId = 0,
+               localId = 0;
       uint64_t nonce = 0;
       if (!readUint32(&width) || !readUint32(&height) ||
           !readUint32(&canvasId) || !readUint32(&clientId) ||
-          !readUint32(&localId) || !readUint64(&nonce))
+          !readUint32(&sinkId) || !readUint32(&localId) || !readUint64(&nonce))
         return nullptr;
       OffscreenCanvas* canvas = OffscreenCanvas::create(width, height);
       canvas->setAssociatedCanvasId(canvasId);
-      canvas->setSurfaceId(clientId, localId, nonce);
+      canvas->setSurfaceId(clientId, sinkId, localId, nonce);
       return canvas;
     }
     default:
       break;
   }
   return nullptr;
+}
+
+File* V8ScriptValueDeserializer::readFile() {
+  if (version() < 3)
+    return nullptr;
+  String path, name, relativePath, uuid, type;
+  uint32_t hasSnapshot = 0;
+  uint64_t size = 0;
+  double lastModifiedMs = 0;
+  if (!readUTF8String(&path) || (version() >= 4 && !readUTF8String(&name)) ||
+      (version() >= 4 && !readUTF8String(&relativePath)) ||
+      !readUTF8String(&uuid) || !readUTF8String(&type) ||
+      (version() >= 4 && !readUint32(&hasSnapshot)))
+    return nullptr;
+  if (hasSnapshot) {
+    if (!readUint64(&size) || !readDouble(&lastModifiedMs))
+      return nullptr;
+    if (version() < 8)
+      lastModifiedMs *= msPerSecond;
+  }
+  uint32_t isUserVisible = 1;
+  if (version() >= 7 && !readUint32(&isUserVisible))
+    return nullptr;
+  const File::UserVisibility userVisibility =
+      isUserVisible ? File::IsUserVisible : File::IsNotUserVisible;
+  const uint64_t sizeForDataHandle = static_cast<uint64_t>(-1);
+  return File::createFromSerialization(
+      path, name, relativePath, userVisibility, hasSnapshot, size,
+      lastModifiedMs, getOrCreateBlobDataHandle(uuid, type, sizeForDataHandle));
+}
+
+File* V8ScriptValueDeserializer::readFileIndex() {
+  if (version() < 6 || !m_blobInfoArray)
+    return nullptr;
+  uint32_t index;
+  if (!readUint32(&index) || index >= m_blobInfoArray->size())
+    return nullptr;
+  const WebBlobInfo& info = (*m_blobInfoArray)[index];
+  // FIXME: transition WebBlobInfo.lastModified to be milliseconds-based also.
+  double lastModifiedMs = info.lastModified() * msPerSecond;
+  return File::createFromIndexedSerialization(
+      info.filePath(), info.fileName(), info.size(), lastModifiedMs,
+      getOrCreateBlobDataHandle(info.uuid(), info.type(), info.size()));
 }
 
 RefPtr<BlobDataHandle> V8ScriptValueDeserializer::getOrCreateBlobDataHandle(
@@ -225,12 +313,8 @@ RefPtr<BlobDataHandle> V8ScriptValueDeserializer::getOrCreateBlobDataHandle(
   // For example in sharedWorker.postMessage(...).
   BlobDataHandleMap& handles = m_serializedScriptValue->blobDataHandles();
   BlobDataHandleMap::const_iterator it = handles.find(uuid);
-  if (it != handles.end()) {
-    RefPtr<BlobDataHandle> handle = it->value;
-    DCHECK_EQ(handle->type(), type);
-    DCHECK_EQ(handle->size(), size);
-    return handle;
-  }
+  if (it != handles.end())
+    return it->value;
   return BlobDataHandle::create(uuid, type, size);
 }
 

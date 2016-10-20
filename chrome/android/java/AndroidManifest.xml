@@ -113,6 +113,7 @@ by a child template that "extends" this file.
         android:allowBackup="true"
         android:manageSpaceActivity="@string/manage_space_activity"
         android:fullBackupContent="@xml/chromebackupscheme"
+        android:fullBackupOnly="true"
         android:restoreAnyVersion="true"
         {% block android_backup_agent %}
         android:backupAgent="org.chromium.chrome.browser.ChromeBackupAgent"
@@ -411,12 +412,13 @@ by a child template that "extends" this file.
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|mcc|mnc|screenLayout|smallestScreenSize">
         </activity>
         <activity android:name="org.chromium.chrome.browser.bookmarks.BookmarkActivity"
-            android:theme="@style/DrawerDialog"
+            android:theme="@style/FullscreenWhiteActivityTheme"
+            android:exported="false"
             android:windowSoftInputMode="stateAlwaysHidden"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|mcc|mnc|screenLayout|smallestScreenSize">
         </activity>
         <activity android:name="org.chromium.chrome.browser.bookmarks.BookmarkAddActivity"
-            android:theme="@style/DrawerDialogWhite"
+            android:theme="@style/DialogWhenLarge"
             android:windowSoftInputMode="stateHidden"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|mcc|mnc|screenLayout|smallestScreenSize">
             <intent-filter>
@@ -425,26 +427,30 @@ by a child template that "extends" this file.
             </intent-filter>
         </activity>
         <activity android:name="org.chromium.chrome.browser.bookmarks.BookmarkEditActivity"
-            android:theme="@style/DrawerDialogWhite"
+            android:theme="@style/DialogWhenLarge"
             android:windowSoftInputMode="stateHidden"
+            android:exported="false"
             android:label="@string/edit_bookmark"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|mcc|mnc|screenLayout|smallestScreenSize">
         </activity>
         <activity android:name="org.chromium.chrome.browser.bookmarks.BookmarkAddEditFolderActivity"
-            android:theme="@style/DrawerDialogWhite"
+            android:theme="@style/DialogWhenLarge"
+            android:exported="false"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|mcc|mnc|screenLayout|smallestScreenSize">
         </activity>
         <activity android:name="org.chromium.chrome.browser.bookmarks.BookmarkFolderSelectActivity"
-            android:theme="@style/DrawerDialogWhite"
+            android:theme="@style/DialogWhenLarge"
             android:windowSoftInputMode="stateAlwaysHidden"
             android:label="@string/bookmark_choose_folder"
+            android:exported="false"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|mcc|mnc|screenLayout|smallestScreenSize">
         </activity>
 
         <!-- Activities for downloads. -->
         <activity android:name="org.chromium.chrome.browser.download.DownloadActivity"
-            android:theme="@style/DownloadActivityTheme"
+            android:theme="@style/FullscreenWhiteActivityTheme"
             android:windowSoftInputMode="stateAlwaysHidden"
+            android:exported="false"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|mcc|mnc|screenLayout|smallestScreenSize">
         </activity>
 
@@ -557,6 +563,15 @@ by a child template that "extends" this file.
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="text/plain" />
             </intent-filter>
+        </activity>
+
+        <!-- Activity for dispatching intents to Instant Apps. -->
+        <activity
+            android:name="org.chromium.chrome.browser.instantapps.AuthenticatedProxyActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.NoDisplay"
+            android:noHistory="true"
+            android:excludeFromRecents="true">
         </activity>
 
         <!-- Activity to list Physical Web Urls -->
@@ -796,17 +811,6 @@ android:value="true" />
             android:isolatedProcess="false"
             android:exported="false" />
         {% endfor %}
-
-        <!-- Background download process, it may outlive chrome if download does not finish
-             when user kills chrome. Once created, the process will manage its own lifecycle.
-             To work around an issue in earlier android versions that a bound service will
-             get killed when chrome goes away, this service will only communicate with the
-             browser process through callbacks. -->
-        <service android:name="org.chromium.content.app.DownloadProcessService"
-            android:process=":download"
-            android:permission="{{ manifest_package }}.permission.CHILD_SERVICE"
-            android:isolatedProcess="false"
-            android:exported="false"/>
 
         <receiver android:name="org.chromium.chrome.browser.download.DownloadBroadcastReceiver"
             android:exported="false">

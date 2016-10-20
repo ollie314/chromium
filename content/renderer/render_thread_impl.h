@@ -14,6 +14,7 @@
 
 #include "base/cancelable_callback.h"
 #include "base/macros.h"
+#include "base/memory/memory_coordinator_client.h"
 #include "base/memory/memory_pressure_listener.h"
 #include "base/memory/ref_counted.h"
 #include "base/metrics/user_metrics_action.h"
@@ -22,6 +23,7 @@
 #include "base/threading/thread_checker.h"
 #include "base/timer/timer.h"
 #include "build/build_config.h"
+#include "content/child/child_discardable_shared_memory_manager.h"
 #include "content/child/child_thread_impl.h"
 #include "content/child/memory/child_memory_coordinator_impl.h"
 #include "content/common/associated_interface_registry_impl.h"
@@ -42,6 +44,7 @@
 #include "net/base/network_change_notifier.h"
 #include "third_party/WebKit/public/platform/WebConnectionType.h"
 #include "third_party/WebKit/public/platform/scheduler/renderer/renderer_scheduler.h"
+#include "third_party/WebKit/public/web/WebMemoryStatistics.h"
 #include "ui/gfx/native_widget_types.h"
 
 #if defined(OS_MACOSX)
@@ -50,7 +53,6 @@
 
 class GrContext;
 class SkBitmap;
-struct ViewMsg_UpdateScrollbarTheme_Params;
 struct WorkerProcessMsg_CreateWorker_Params;
 
 namespace blink {
@@ -126,7 +128,6 @@ class RenderThreadObserver;
 class RendererBlinkPlatformImpl;
 class RendererGpuVideoAcceleratorFactories;
 class ResourceDispatchThrottler;
-class V8SamplingProfiler;
 class VideoCaptureImplManager;
 
 #if defined(OS_ANDROID)
@@ -155,6 +156,7 @@ class CONTENT_EXPORT RenderThreadImpl
       public gpu::GpuChannelHostFactory,
       public blink::scheduler::RendererScheduler::RAILModeObserver,
       public ChildMemoryCoordinatorDelegate,
+      public base::MemoryCoordinatorClient,
       NON_EXPORTED_BASE(public mojom::Renderer),
       // TODO(blundell): Separate this impl out into Blink.
       NON_EXPORTED_BASE(public device::mojom::TimeZoneMonitorClient),
@@ -494,6 +496,11 @@ class CONTENT_EXPORT RenderThreadImpl
   std::unique_ptr<base::SharedMemory> AllocateSharedMemory(
       size_t size) override;
 
+  // base::MemoryCoordinatorClient implementation:
+  void OnMemoryStateChange(base::MemoryState state) override;
+
+  void ClearMemory();
+
   void Init(scoped_refptr<base::SingleThreadTaskRunner>& resource_task_queue);
 
   void InitializeCompositorThread();
@@ -502,12 +509,6 @@ class CONTENT_EXPORT RenderThreadImpl
       scoped_refptr<base::SingleThreadTaskRunner>& resource_task_queue);
 
   void OnTransferBitmap(const SkBitmap& bitmap, int resource_id);
-#if defined(ENABLE_PLUGINS)
-  void OnPurgePluginListCache(bool reload_pages);
-#endif
-  void OnNetworkConnectionChanged(
-      net::NetworkChangeNotifier::ConnectionType type,
-      double max_bandwidth_mbps);
   void OnGetAccessibilityTree();
 
   // mojom::Renderer:
@@ -518,26 +519,29 @@ class CONTENT_EXPORT RenderThreadImpl
                         int32_t opener_routing_id,
                         int32_t parent_routing_id,
                         const FrameReplicationState& replicated_state) override;
+  void OnNetworkConnectionChanged(
+      net::NetworkChangeNotifier::ConnectionType type,
+      double max_bandwidth_mbps) override;
+  void SetWebKitSharedTimersSuspended(bool suspend) override;
+  void UpdateScrollbarTheme(
+      mojom::UpdateScrollbarThemeParamsPtr params) override;
+  void OnSystemColorsChanged(int32_t aqua_color_variant,
+                             const std::string& highlight_text_color,
+                             const std::string& highlight_color) override;
+  void PurgePluginListCache(bool reload_pages) override;
 
   // device::mojom::TimeZoneClient:
   void OnTimeZoneChange(const std::string& zoneId) override;
   void OnMemoryPressure(
       base::MemoryPressureListener::MemoryPressureLevel memory_pressure_level);
-#if defined(OS_ANDROID)
-  void OnSetWebKitSharedTimersSuspended(bool suspend);
-#endif
-#if defined(OS_MACOSX)
-  void OnUpdateScrollbarTheme(
-      const ViewMsg_UpdateScrollbarTheme_Params& params);
-  void OnSystemColorsChanged(int aqua_color_variant,
-                             const std::string& highlight_text_color,
-                             const std::string& highlight_color);
-#endif
+
   void OnCreateNewSharedWorker(
       const WorkerProcessMsg_CreateWorker_Params& params);
   bool RendererIsHidden() const;
   void OnRendererHidden();
   void OnRendererVisible();
+
+  void RecordPurgeAndSuspendMetrics() const;
 
   void ReleaseFreeMemory();
 
@@ -569,7 +573,6 @@ class CONTENT_EXPORT RenderThreadImpl
   scoped_refptr<AudioMessageFilter> audio_message_filter_;
   scoped_refptr<MidiMessageFilter> midi_message_filter_;
   scoped_refptr<DevToolsAgentFilter> devtools_agent_message_filter_;
-  std::unique_ptr<V8SamplingProfiler> v8_sampling_profiler_;
 
   std::unique_ptr<BrowserPluginManager> browser_plugin_manager_;
 
@@ -737,6 +740,7 @@ class CONTENT_EXPORT RenderThreadImpl
   mojom::RenderFrameMessageFilterAssociatedPtr render_frame_message_filter_;
   mojom::RenderMessageFilterAssociatedPtr render_message_filter_;
 
+  base::CancelableClosure record_purge_suspend_metric_closure_;
   bool is_renderer_suspended_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderThreadImpl);

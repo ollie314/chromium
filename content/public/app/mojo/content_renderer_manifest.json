@@ -1,7 +1,7 @@
 {
   "manifest_version":  1,
-  "name": "exe:content_renderer",
-  "display_name": "Content Renderer",
+  "name": "service:content_renderer",
+  "display_name": "Content (renderer process)",
   "capabilities": {
     "provided": {
       "browser": [
@@ -13,16 +13,14 @@
         "mojom::ResourceUsageReporter",
         "visitedlink::mojom::VisitedLinkNotificationSink",
         "web_cache::mojom::WebCache"
+      ],
+      "service_manager:service_factory": [
+        "service_manager::mojom::ServiceFactory"
       ]
     },
     "required": {
-      "exe:content_browser": { "classes":  [ "renderer" ] },
-      "mojo:ui": {
-        "interfaces": [
-          "ui::mojom::Gpu",
-          "ui::mojom::GpuService"
-        ]
-      }
+      "service:content_browser": [ "renderer" ],
+      "service:ui": [ "ui:gpu_client" ]
     }
   }
 }

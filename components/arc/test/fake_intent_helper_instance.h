@@ -10,7 +10,6 @@
 
 #include "base/callback.h"
 #include "components/arc/common/intent_helper.mojom.h"
-#include "components/arc/test/fake_arc_bridge_instance.h"
 #include "mojo/public/cpp/bindings/binding.h"
 
 namespace arc {
@@ -40,10 +39,13 @@ class FakeIntentHelperInstance : public mojom::IntentHelperInstance {
 
   const std::vector<Broadcast>& broadcasts() const { return broadcasts_; }
 
-  // mojom::HelpIntentInstance:
+  // mojom::IntentHelperInstance:
   ~FakeIntentHelperInstance() override;
 
   void AddPreferredPackage(const mojo::String& package_name) override;
+
+  void HandleIntent(mojom::IntentInfoPtr intent,
+                    mojom::ActivityNamePtr activity) override;
 
   void HandleUrl(const mojo::String& url,
                  const mojo::String& package_name) override;
@@ -52,16 +54,16 @@ class FakeIntentHelperInstance : public mojom::IntentHelperInstance {
                      mojom::ActivityNamePtr activity,
                      mojom::ActionType action) override;
 
-  void HandleUrlListDeprecated(mojo::Array<mojom::UrlWithMimeTypePtr> urls,
-                               const mojo::String& package_name,
-                               mojom::ActionType action) override;
-
   void Init(mojom::IntentHelperHostPtr host_ptr) override;
 
   void RequestActivityIcons(
       mojo::Array<mojom::ActivityNamePtr> activities,
       ::arc::mojom::ScaleFactor scale_factor,
       const RequestActivityIconsCallback& callback) override;
+
+  void RequestIntentHandlerList(
+      mojom::IntentInfoPtr intent,
+      const RequestIntentHandlerListCallback& callback) override;
 
   void RequestUrlHandlerList(
       const mojo::String& url,

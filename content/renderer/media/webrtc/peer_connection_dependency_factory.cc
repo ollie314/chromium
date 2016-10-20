@@ -238,8 +238,11 @@ void PeerConnectionDependencyFactory::InitializeSignalingThread(
     if (!cmd_line->HasSwitch(switches::kDisableWebRtcHWDecoding))
       decoder_factory.reset(new RTCVideoDecoderFactory(gpu_factories));
 
-    if (!cmd_line->HasSwitch(switches::kDisableWebRtcHWEncoding))
+    if (!cmd_line->HasSwitch(switches::kDisableWebRtcHWEncoding) ||
+        !cmd_line->GetSwitchValueASCII(switches::kDisableWebRtcHWEncoding)
+             .empty()) {
       encoder_factory.reset(new RTCVideoEncoderFactory(gpu_factories));
+    }
   }
 
 #if defined(OS_ANDROID)
@@ -256,13 +259,6 @@ void PeerConnectionDependencyFactory::InitializeSignalingThread(
   factory_options.disable_sctp_data_channels = false;
   factory_options.disable_encryption =
       cmd_line->HasSwitch(switches::kDisableWebRtcEncryption);
-
-  // DTLS 1.2 is the default now but could be changed to 1.0 by the experiment.
-  factory_options.ssl_max_version = rtc::SSL_PROTOCOL_DTLS_12;
-  std::string group_name =
-      base::FieldTrialList::FindFullName("WebRTC-PeerConnectionDTLS1.2");
-  if (StartsWith(group_name, "Control", base::CompareCase::SENSITIVE))
-    factory_options.ssl_max_version = rtc::SSL_PROTOCOL_DTLS_10;
 
   pc_factory_->SetOptions(factory_options);
 

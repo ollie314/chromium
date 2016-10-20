@@ -8,7 +8,6 @@
 #include "ash/common/wm/wm_screen_util.h"
 #include "ash/common/wm_shell.h"
 #include "ash/display/display_manager.h"
-#include "ash/screen_util.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
 #include "base/run_loop.h"
@@ -233,9 +232,9 @@ TEST_F(ToastManagerTest, PositionWithVisibleLeftShelf) {
 
   gfx::Rect shelf_bounds = shelf->GetIdealBounds();
   EXPECT_FALSE(toast_bounds.Intersects(shelf_bounds));
-  EXPECT_EQ(round(shelf_bounds.right() +
-                  (root_bounds.width() - shelf_bounds.width()) / 2.0),
-            round(precise_toast_bounds.CenterPoint().x()));
+  EXPECT_NEAR(
+      shelf_bounds.right() + (root_bounds.width() - shelf_bounds.width()) / 2.0,
+      precise_toast_bounds.CenterPoint().x(), 1.f /* accepted error */);
 }
 
 TEST_F(ToastManagerTest, PositionWithUnifiedDesktop) {

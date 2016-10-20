@@ -38,6 +38,7 @@ const int kMaxCompletedTries = 1;
 const bool kPreferUntried = false;
 const bool kPreferEarlier = true;
 const bool kPreferRetryCount = true;
+const int kBackgroundProcessingTimeBudgetSeconds = 170;
 
 // Default request
 const SavePageRequest kEmptyRequest(0UL,
@@ -155,6 +156,7 @@ void RequestPickerTest::RequestNotPicked(
 void RequestPickerTest::QueueRequestsAndChooseOne(
     const SavePageRequest& request1, const SavePageRequest& request2) {
   DeviceConditions conditions;
+  std::set<int64_t> disabled_requests;
   // Add test requests on the Queue.
   queue_->AddRequest(request1, base::Bind(&RequestPickerTest::AddRequestDone,
                                           base::Unretained(this)));
@@ -168,7 +170,7 @@ void RequestPickerTest::QueueRequestsAndChooseOne(
   picker_->ChooseNextRequest(
       base::Bind(&RequestPickerTest::RequestPicked, base::Unretained(this)),
       base::Bind(&RequestPickerTest::RequestNotPicked, base::Unretained(this)),
-      &conditions);
+      &conditions, disabled_requests);
 
   // Pump the loop again to give the async queue the opportunity to return
   // results from the Get operation, and for the picker to call the "picked"
@@ -178,10 +180,11 @@ void RequestPickerTest::QueueRequestsAndChooseOne(
 
 TEST_F(RequestPickerTest, PickFromEmptyQueue) {
   DeviceConditions conditions;
+  std::set<int64_t> disabled_requests;
   picker_->ChooseNextRequest(
       base::Bind(&RequestPickerTest::RequestPicked, base::Unretained(this)),
       base::Bind(&RequestPickerTest::RequestNotPicked, base::Unretained(this)),
-      &conditions);
+      &conditions, disabled_requests);
 
   // Pump the loop again to give the async queue the opportunity to return
   // results from the Get operation, and for the picker to call the "QueueEmpty"
@@ -192,9 +195,9 @@ TEST_F(RequestPickerTest, PickFromEmptyQueue) {
 }
 
 TEST_F(RequestPickerTest, ChooseRequestWithHigherRetryCount) {
-  policy_.reset(new OfflinerPolicy(kPreferUntried, kPreferEarlier,
-                                   kPreferRetryCount, kMaxStartedTries,
-                                   kMaxCompletedTries + 1));
+  policy_.reset(new OfflinerPolicy(
+      kPreferUntried, kPreferEarlier, kPreferRetryCount, kMaxStartedTries,
+      kMaxCompletedTries + 1, kBackgroundProcessingTimeBudgetSeconds));
   picker_.reset(new RequestPicker(queue_.get(), policy_.get(), notifier_.get(),
                                   &event_logger_));
 
@@ -228,9 +231,9 @@ TEST_F(RequestPickerTest, ChooseRequestWithSameRetryCountButEarlier) {
 
 TEST_F(RequestPickerTest, ChooseEarlierRequest) {
   // We need a custom policy object prefering recency to retry count.
-  policy_.reset(new OfflinerPolicy(kPreferUntried, kPreferEarlier,
-                                   !kPreferRetryCount, kMaxStartedTries,
-                                   kMaxCompletedTries));
+  policy_.reset(new OfflinerPolicy(
+      kPreferUntried, kPreferEarlier, !kPreferRetryCount, kMaxStartedTries,
+      kMaxCompletedTries, kBackgroundProcessingTimeBudgetSeconds));
   picker_.reset(new RequestPicker(queue_.get(), policy_.get(), notifier_.get(),
                                   &event_logger_));
 
@@ -251,9 +254,9 @@ TEST_F(RequestPickerTest, ChooseEarlierRequest) {
 
 TEST_F(RequestPickerTest, ChooseSameTimeRequestWithHigherRetryCount) {
   // We need a custom policy object preferring recency to retry count.
-  policy_.reset(new OfflinerPolicy(kPreferUntried, kPreferEarlier,
-                                   !kPreferRetryCount, kMaxStartedTries,
-                                   kMaxCompletedTries + 1));
+  policy_.reset(new OfflinerPolicy(
+      kPreferUntried, kPreferEarlier, !kPreferRetryCount, kMaxStartedTries,
+      kMaxCompletedTries + 1, kBackgroundProcessingTimeBudgetSeconds));
   picker_.reset(new RequestPicker(queue_.get(), policy_.get(), notifier_.get(),
                                   &event_logger_));
 
@@ -272,9 +275,9 @@ TEST_F(RequestPickerTest, ChooseSameTimeRequestWithHigherRetryCount) {
 
 TEST_F(RequestPickerTest, ChooseRequestWithLowerRetryCount) {
   // We need a custom policy object preferring lower retry count.
-  policy_.reset(new OfflinerPolicy(!kPreferUntried, kPreferEarlier,
-                                   kPreferRetryCount, kMaxStartedTries,
-                                   kMaxCompletedTries + 1));
+  policy_.reset(new OfflinerPolicy(
+      !kPreferUntried, kPreferEarlier, kPreferRetryCount, kMaxStartedTries,
+      kMaxCompletedTries + 1, kBackgroundProcessingTimeBudgetSeconds));
   picker_.reset(new RequestPicker(queue_.get(), policy_.get(), notifier_.get(),
                                   &event_logger_));
 
@@ -293,9 +296,9 @@ TEST_F(RequestPickerTest, ChooseRequestWithLowerRetryCount) {
 
 TEST_F(RequestPickerTest, ChooseLaterRequest) {
   // We need a custom policy preferring recency over retry, and later requests.
-  policy_.reset(new OfflinerPolicy(kPreferUntried, !kPreferEarlier,
-                                   !kPreferRetryCount, kMaxStartedTries,
-                                   kMaxCompletedTries));
+  policy_.reset(new OfflinerPolicy(
+      kPreferUntried, !kPreferEarlier, !kPreferRetryCount, kMaxStartedTries,
+      kMaxCompletedTries, kBackgroundProcessingTimeBudgetSeconds));
   picker_.reset(new RequestPicker(queue_.get(), policy_.get(), notifier_.get(),
                                   &event_logger_));
 
@@ -370,6 +373,50 @@ TEST_F(RequestPickerTest, ChooseRequestThatHasNotExceededCompletionLimit) {
   QueueRequestsAndChooseOne(request1, request2);
 
   EXPECT_EQ(kRequestId2, last_picked_->request_id());
+  EXPECT_FALSE(request_queue_not_picked_called_);
+}
+
+
+TEST_F(RequestPickerTest, ChooseRequestThatIsNotDisabled) {
+  policy_.reset(new OfflinerPolicy(
+      kPreferUntried, kPreferEarlier, kPreferRetryCount, kMaxStartedTries,
+      kMaxCompletedTries + 1, kBackgroundProcessingTimeBudgetSeconds));
+  picker_.reset(new RequestPicker(queue_.get(), policy_.get(), notifier_.get(),
+                                  &event_logger_));
+
+  base::Time creation_time = base::Time::Now();
+  SavePageRequest request1(
+      kRequestId1, kUrl1, kClientId1, creation_time, kUserRequested);
+  SavePageRequest request2(
+      kRequestId2, kUrl2, kClientId2, creation_time, kUserRequested);
+  request2.set_completed_attempt_count(kAttemptCount);
+
+  // put request 2 on disabled list, ensure request1 picked instead,
+  // even though policy would prefer 2.
+  std::set<int64_t> disabled_requests {kRequestId2};
+  DeviceConditions conditions;
+
+  // Add test requests on the Queue.
+  queue_->AddRequest(request1, base::Bind(&RequestPickerTest::AddRequestDone,
+                                          base::Unretained(this)));
+  queue_->AddRequest(request2, base::Bind(&RequestPickerTest::AddRequestDone,
+                                          base::Unretained(this)));
+
+  // Pump the loop to give the async queue the opportunity to do the adds.
+  PumpLoop();
+
+  // Call the method under test.
+  picker_->ChooseNextRequest(
+      base::Bind(&RequestPickerTest::RequestPicked, base::Unretained(this)),
+      base::Bind(&RequestPickerTest::RequestNotPicked, base::Unretained(this)),
+      &conditions, disabled_requests);
+
+  // Pump the loop again to give the async queue the opportunity to return
+  // results from the Get operation, and for the picker to call the "picked"
+  // callback.
+  PumpLoop();
+
+  EXPECT_EQ(kRequestId1, last_picked_->request_id());
   EXPECT_FALSE(request_queue_not_picked_called_);
 }
 }  // namespace offline_pages

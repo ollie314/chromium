@@ -36,6 +36,7 @@
 #include "cc/output/context_provider.h"
 #include "cc/output/output_surface.h"
 #include "cc/output/output_surface_client.h"
+#include "cc/output/output_surface_frame.h"
 #include "cc/output/texture_mailbox_deleter.h"
 #include "cc/output/vulkan_in_process_context_provider.h"
 #include "cc/raster/single_thread_task_graph_runner.h"
@@ -48,10 +49,8 @@
 #include "cc/trees/layer_tree_settings.h"
 #include "components/display_compositor/compositor_overlay_candidate_validator_android.h"
 #include "components/display_compositor/gl_helper.h"
-#include "content/browser/android/child_process_launcher_android.h"
 #include "content/browser/gpu/browser_gpu_memory_buffer_manager.h"
 #include "content/browser/gpu/compositor_util.h"
-#include "content/browser/gpu/gpu_surface_tracker.h"
 #include "content/browser/renderer_host/context_provider_factory_impl_android.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/common/gpu/client/context_provider_command_buffer.h"
@@ -63,6 +62,7 @@
 #include "gpu/command_buffer/client/gles2_interface.h"
 #include "gpu/ipc/client/command_buffer_proxy_impl.h"
 #include "gpu/ipc/client/gpu_channel_host.h"
+#include "gpu/ipc/common/gpu_surface_tracker.h"
 #include "gpu/vulkan/vulkan_surface.h"
 #include "third_party/khronos/GLES2/gl2.h"
 #include "third_party/khronos/GLES2/gl2ext.h"
@@ -230,13 +230,12 @@ class AndroidOutputSurface : public cc::OutputSurface {
 
   ~AndroidOutputSurface() override = default;
 
-  void SwapBuffers(cc::CompositorFrame frame) override {
-    GetCommandBufferProxy()->SetLatencyInfo(frame.metadata.latency_info);
-    if (frame.gl_frame_data->sub_buffer_rect.IsEmpty()) {
+  void SwapBuffers(cc::OutputSurfaceFrame frame) override {
+    GetCommandBufferProxy()->SetLatencyInfo(frame.latency_info);
+    if (frame.sub_buffer_rect.IsEmpty()) {
       context_provider_->ContextSupport()->CommitOverlayPlanes();
     } else {
-      DCHECK(frame.gl_frame_data->sub_buffer_rect ==
-             gfx::Rect(frame.gl_frame_data->size));
+      DCHECK(frame.sub_buffer_rect == gfx::Rect(frame.size));
       context_provider_->ContextSupport()->Swap();
     }
   }
@@ -261,6 +260,14 @@ class AndroidOutputSurface : public cc::OutputSurface {
 
   void BindFramebuffer() override {
     context_provider()->ContextGL()->BindFramebuffer(GL_FRAMEBUFFER, 0);
+  }
+
+  void Reshape(const gfx::Size& size,
+               float device_scale_factor,
+               const gfx::ColorSpace& color_space,
+               bool has_alpha) override {
+    context_provider()->ContextGL()->ResizeCHROMIUM(
+        size.width(), size.height(), device_scale_factor, has_alpha);
   }
 
   cc::OverlayCandidateValidator* GetOverlayCandidateValidator() const override {
@@ -294,7 +301,7 @@ class AndroidOutputSurface : public cc::OutputSurface {
       gfx::SwapResult result,
       const gpu::GpuProcessHostedCALayerTreeParamsMac* params_mac) {
     RenderWidgetHostImpl::CompositorFrameDrawn(latency_info);
-    client_->DidSwapBuffersComplete();
+    client_->DidReceiveSwapBuffersAck();
   }
 
  private:
@@ -311,8 +318,11 @@ class AndroidOutputSurface : public cc::OutputSurface {
 class VulkanOutputSurface : public cc::OutputSurface {
  public:
   explicit VulkanOutputSurface(
-      scoped_refptr<cc::VulkanContextProvider> vulkan_context_provider)
-      : OutputSurface(std::move(vulkan_context_provider)) {}
+      scoped_refptr<cc::VulkanContextProvider> vulkan_context_provider,
+      scoped_refptr<base::SingleThreadTaskRunner> task_runner)
+      : OutputSurface(std::move(vulkan_context_provider)),
+        task_runner_(std::move(task_runner)),
+        weak_ptr_factory_(this) {}
 
   ~VulkanOutputSurface() override { Destroy(); }
 
@@ -337,7 +347,9 @@ class VulkanOutputSurface : public cc::OutputSurface {
 
   void SwapBuffers(cc::CompositorFrame frame) override {
     surface_->SwapBuffers();
-    PostSwapBuffersComplete();
+    task_runner_->PostTask(FROM_HERE,
+                           base::Bind(&VulkanOutputSurface::SwapBuffersAck,
+                                      weak_ptr_factory_.GetWeakPtr()));
   }
 
   void Destroy() {
@@ -347,14 +359,12 @@ class VulkanOutputSurface : public cc::OutputSurface {
     }
   }
 
-  void OnSwapBuffersCompleted(const std::vector<ui::LatencyInfo>& latency_info,
-                              gfx::SwapResult result) {
-    RenderWidgetHostImpl::CompositorFrameDrawn(latency_info);
-    OutputSurface::OnSwapBuffersComplete();
-  }
-
  private:
+  void SwapBuffersAck() { client_->DidReceiveSwapBuffersAck(); }
+
   std::unique_ptr<gpu::VulkanSurface> surface_;
+  scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
+  base::WeakPtrFactory<VulkanOutputSurface> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(VulkanOutputSurface);
 };
@@ -460,7 +470,7 @@ void CompositorImpl::SetSurface(jobject surface) {
   JNIEnv* env = base::android::AttachCurrentThread();
   base::android::ScopedJavaLocalRef<jobject> j_surface(env, surface);
 
-  GpuSurfaceTracker* tracker = GpuSurfaceTracker::Get();
+  gpu::GpuSurfaceTracker* tracker = gpu::GpuSurfaceTracker::Get();
 
   if (window_) {
     // Shut down GL context before unregistering surface.
@@ -468,7 +478,8 @@ void CompositorImpl::SetSurface(jobject surface) {
     tracker->RemoveSurface(surface_handle_);
     ANativeWindow_release(window_);
     window_ = NULL;
-    UnregisterViewSurface(surface_handle_);
+
+    tracker->UnregisterViewSurface(surface_handle_);
     surface_handle_ = gpu::kNullSurfaceHandle;
   }
 
@@ -486,7 +497,7 @@ void CompositorImpl::SetSurface(jobject surface) {
     ANativeWindow_acquire(window);
     surface_handle_ = tracker->AddSurfaceForNativeWidget(window);
     // Register first, SetVisible() might create a CompositorFrameSink.
-    RegisterViewSurface(surface_handle_, j_surface);
+    tracker->RegisterViewSurface(surface_handle_, j_surface);
     SetVisible(true);
     ANativeWindow_release(window);
   }
@@ -641,8 +652,8 @@ void CompositorImpl::CreateVulkanOutputSurface() {
   if (!vulkan_context_provider)
     return;
 
-  auto vulkan_surface =
-      base::MakeUnique<VulkanOutputSurface>(vulkan_context_provider);
+  auto vulkan_surface = base::MakeUnique<VulkanOutputSurface>(
+      vulkan_context_provider, base::ThreadTaskRunnerHandle::Get());
   if (!vulkan_surface->Initialize(window_))
     return;
 
@@ -768,8 +779,8 @@ void CompositorImpl::DidPostSwapBuffers() {
   pending_swapbuffers_++;
 }
 
-void CompositorImpl::DidCompleteSwapBuffers() {
-  TRACE_EVENT0("compositor", "CompositorImpl::DidCompleteSwapBuffers");
+void CompositorImpl::DidReceiveCompositorFrameAck() {
+  TRACE_EVENT0("compositor", "CompositorImpl::DidReceiveCompositorFrameAck");
   DCHECK_GT(pending_swapbuffers_, 0U);
   pending_swapbuffers_--;
   client_->OnSwapBuffersCompleted(pending_swapbuffers_);
@@ -800,8 +811,8 @@ void CompositorImpl::RequestCopyOfOutputOnRootLayer(
 
 void CompositorImpl::OnVSync(base::TimeTicks frame_time,
                              base::TimeDelta vsync_period) {
-  FOR_EACH_OBSERVER(VSyncObserver, observer_list_,
-                    OnVSync(frame_time, vsync_period));
+  for (auto& observer : observer_list_)
+    observer.OnVSync(frame_time, vsync_period);
   if (needs_begin_frames_)
     root_window_->RequestVSyncUpdate();
 }

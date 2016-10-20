@@ -79,7 +79,9 @@ TEST_F(VisibleSelectionTest, expandUsingGranularity) {
   selection = createVisibleSelection(createVisiblePosition(Position(one, 1)));
   selection.expandUsingGranularity(WordGranularity);
   selectionInFlatTree =
-      createVisibleSelection(createVisiblePosition(PositionInFlatTree(one, 1)));
+      createVisibleSelection(SelectionInFlatTree::Builder()
+                                 .collapse(PositionInFlatTree(one, 1))
+                                 .build());
   selectionInFlatTree.expandUsingGranularity(WordGranularity);
 
   EXPECT_EQ(Position(one, 1), selection.base());
@@ -96,7 +98,9 @@ TEST_F(VisibleSelectionTest, expandUsingGranularity) {
   selection = createVisibleSelection(createVisiblePosition(Position(two, 1)));
   selection.expandUsingGranularity(WordGranularity);
   selectionInFlatTree =
-      createVisibleSelection(createVisiblePosition(PositionInFlatTree(two, 1)));
+      createVisibleSelection(SelectionInFlatTree::Builder()
+                                 .collapse(PositionInFlatTree(two, 1))
+                                 .build());
   selectionInFlatTree.expandUsingGranularity(WordGranularity);
 
   EXPECT_EQ(Position(two, 1), selection.base());
@@ -112,8 +116,10 @@ TEST_F(VisibleSelectionTest, expandUsingGranularity) {
   // From a position at node in shadow tree
   selection = createVisibleSelection(createVisiblePosition(Position(three, 1)));
   selection.expandUsingGranularity(WordGranularity);
-  selectionInFlatTree = createVisibleSelection(
-      createVisiblePosition(PositionInFlatTree(three, 1)));
+  selectionInFlatTree =
+      createVisibleSelection(SelectionInFlatTree::Builder()
+                                 .collapse(PositionInFlatTree(three, 1))
+                                 .build());
   selectionInFlatTree.expandUsingGranularity(WordGranularity);
 
   EXPECT_EQ(Position(three, 1), selection.base());
@@ -129,8 +135,10 @@ TEST_F(VisibleSelectionTest, expandUsingGranularity) {
   // From a position at node in shadow tree
   selection = createVisibleSelection(createVisiblePosition(Position(four, 1)));
   selection.expandUsingGranularity(WordGranularity);
-  selectionInFlatTree = createVisibleSelection(
-      createVisiblePosition(PositionInFlatTree(four, 1)));
+  selectionInFlatTree =
+      createVisibleSelection(SelectionInFlatTree::Builder()
+                                 .collapse(PositionInFlatTree(four, 1))
+                                 .build());
   selectionInFlatTree.expandUsingGranularity(WordGranularity);
 
   EXPECT_EQ(Position(four, 1), selection.base());
@@ -146,8 +154,10 @@ TEST_F(VisibleSelectionTest, expandUsingGranularity) {
   // From a position at node in shadow tree
   selection = createVisibleSelection(createVisiblePosition(Position(five, 1)));
   selection.expandUsingGranularity(WordGranularity);
-  selectionInFlatTree = createVisibleSelection(
-      createVisiblePosition(PositionInFlatTree(five, 1)));
+  selectionInFlatTree =
+      createVisibleSelection(SelectionInFlatTree::Builder()
+                                 .collapse(PositionInFlatTree(five, 1))
+                                 .build());
   selectionInFlatTree.expandUsingGranularity(WordGranularity);
 
   EXPECT_EQ(Position(five, 1), selection.base());
@@ -403,7 +413,7 @@ TEST_F(VisibleSelectionTest, WordGranularity) {
 
 // This is for crbug.com/627783, simulating restoring selection
 // in undo stack.
-TEST_F(VisibleSelectionTest, validatePositionsIfNeededWithShadowHost) {
+TEST_F(VisibleSelectionTest, updateIfNeededWithShadowHost) {
   setBodyContent("<div id=host></div><div id=sample>foo</div>");
   setShadowContent("<content>", "host");
   Element* sample = document().getElementById("sample");
@@ -416,9 +426,10 @@ TEST_F(VisibleSelectionTest, validatePositionsIfNeededWithShadowHost) {
   // Simulates modifying DOM tree to invalidate distribution.
   Element* host = document().getElementById("host");
   host->appendChild(sample);
+  document().updateStyleAndLayout();
 
   // Simulates to restore selection from undo stack.
-  selection.validatePositionsIfNeeded();
+  selection.updateIfNeeded();
   EXPECT_EQ(Position(sample->firstChild(), 0), selection.start());
 
   VisibleSelectionInFlatTree selectionInFlatTree;

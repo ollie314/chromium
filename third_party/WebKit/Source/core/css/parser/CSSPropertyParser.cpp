@@ -146,7 +146,8 @@ bool CSSPropertyParser::parseValueStart(CSSPropertyID unresolvedProperty,
   bool isShorthand = isShorthandProperty(propertyId);
 
   if (isShorthand) {
-    // Variable references will fail to parse here and will fall out to the variable ref parser below.
+    // Variable references will fail to parse here and will fall out to the
+    // variable ref parser below.
     if (parseShorthand(unresolvedProperty, important))
       return true;
   } else {
@@ -159,8 +160,9 @@ bool CSSPropertyParser::parseValueStart(CSSPropertyID unresolvedProperty,
   }
 
   if (CSSVariableParser::containsValidVariableReferences(originalRange)) {
+    bool isAnimationTainted = false;
     CSSVariableReferenceValue* variable = CSSVariableReferenceValue::create(
-        CSSVariableData::create(originalRange));
+        CSSVariableData::create(originalRange, isAnimationTainted, true));
 
     if (isShorthand) {
       const CSSPendingSubstitutionValue& pendingValue =
@@ -361,7 +363,8 @@ static CSSFontFeatureValue* consumeFontFeatureTag(CSSParserTokenRange& range) {
     return nullptr;
   AtomicString tag = token.value().toAtomicString();
   for (unsigned i = 0; i < tagNameLength; ++i) {
-    // Limits the range of characters to 0x20-0x7E, following the tag name rules defiend in the OpenType specification.
+    // Limits the range of characters to 0x20-0x7E, following the tag name rules
+    // defiend in the OpenType specification.
     UChar character = tag[i];
     if (character < 0x20 || character > 0x7E)
       return nullptr;
@@ -1074,8 +1077,8 @@ static CSSValue* consumeLocale(CSSParserTokenRange& range) {
 static CSSValue* consumeColumnWidth(CSSParserTokenRange& range) {
   if (range.peek().id() == CSSValueAuto)
     return consumeIdent(range);
-  // Always parse lengths in strict mode here, since it would be ambiguous otherwise when used in
-  // the 'columns' shorthand property.
+  // Always parse lengths in strict mode here, since it would be ambiguous
+  // otherwise when used in the 'columns' shorthand property.
   CSSPrimitiveValue* columnWidth =
       consumeLength(range, HTMLStandardMode, ValueRangeNonNegative);
   if (!columnWidth ||
@@ -1520,6 +1523,24 @@ static CSSValue* consumeTextDecorationLine(CSSParserTokenRange& range) {
   return list;
 }
 
+static CSSValue* consumeTextDecorationSkip(CSSParserTokenRange& range) {
+  CSSValueList* list = CSSValueList::createSpaceSeparated();
+  while (true) {
+    CSSIdentifierValue* ident =
+        consumeIdent<CSSValueObjects, CSSValueInk>(range);
+    if (!ident)
+      break;
+    if (list->hasValue(*ident))
+      return nullptr;
+    list->append(*ident);
+  }
+
+  if (!list->length())
+    return nullptr;
+
+  return list;
+}
+
 // none | strict | content | [ layout || style || paint || size ]
 static CSSValue* consumeContain(CSSParserTokenRange& range) {
   CSSValueID id = range.peek().id();
@@ -1597,12 +1618,61 @@ static CSSValue* consumeOffsetRotation(CSSParserTokenRange& range) {
   return list;
 }
 
-CSSValue* consumeOffsetPosition(CSSParserTokenRange& range,
-                                CSSParserMode cssParserMode) {
+static CSSValue* consumeOffsetAnchor(CSSParserTokenRange& range,
+                                     CSSParserMode cssParserMode) {
   CSSValueID id = range.peek().id();
   if (id == CSSValueAuto)
     return consumeIdent(range);
   return consumePosition(range, cssParserMode, UnitlessQuirk::Forbid);
+}
+
+static CSSValue* consumeOffsetPosition(CSSParserTokenRange& range,
+                                       CSSParserMode cssParserMode,
+                                       UseCounter* useCounter) {
+  CSSValueID id = range.peek().id();
+  if (id == CSSValueAuto)
+    return consumeIdent(range);
+  CSSValue* value =
+      consumePosition(range, cssParserMode, UnitlessQuirk::Forbid);
+
+  // Count when we receive a valid position other than 'auto'.
+  if (useCounter && value && value->isValuePair())
+    useCounter->count(UseCounter::CSSOffsetInEffect);
+  return value;
+}
+
+static CSSValue* consumeOffsetPath(CSSParserTokenRange& range,
+                                   UseCounter* useCounter,
+                                   bool isMotionPath) {
+  CSSValue* value = consumePathOrNone(range);
+
+  // Count when we receive a valid path other than 'none'.
+  if (useCounter && value && !value->isIdentifierValue()) {
+    if (isMotionPath)
+      useCounter->count(UseCounter::CSSMotionInEffect);
+    else
+      useCounter->count(UseCounter::CSSOffsetInEffect);
+  }
+  return value;
+}
+
+// offset: <offset-path> <offset-distance> <offset-rotation>
+bool CSSPropertyParser::consumeOffsetShorthand(bool important) {
+  const CSSValue* offsetPath =
+      consumeOffsetPath(m_range, m_context.useCounter(), false);
+  const CSSValue* offsetDistance =
+      consumeLengthOrPercent(m_range, m_context.mode(), ValueRangeAll);
+  const CSSValue* offsetRotation = consumeOffsetRotation(m_range);
+  if (!offsetPath || !offsetDistance || !offsetRotation || !m_range.atEnd())
+    return false;
+
+  addProperty(CSSPropertyOffsetPath, CSSPropertyOffset, *offsetPath, important);
+  addProperty(CSSPropertyOffsetDistance, CSSPropertyOffset, *offsetDistance,
+              important);
+  addProperty(CSSPropertyOffsetRotation, CSSPropertyOffset, *offsetRotation,
+              important);
+
+  return true;
 }
 
 static CSSValue* consumeTextEmphasisStyle(CSSParserTokenRange& range) {
@@ -1911,9 +1981,9 @@ static CSSValue* consumePaintOrder(CSSParserTokenRange& range) {
     paintTypeList.append(id);
   } while (!range.atEnd());
 
-  // After parsing we serialize the paint-order list. Since it is not possible to
-  // pop a last list items from CSSValueList without bigger cost, we create the
-  // list after parsing.
+  // After parsing we serialize the paint-order list. Since it is not possible
+  // to pop a last list items from CSSValueList without bigger cost, we create
+  // the list after parsing.
   CSSValueID firstPaintOrderType = paintTypeList.at(0);
   CSSValueList* paintOrderList = CSSValueList::createSpaceSeparated();
   switch (firstPaintOrderType) {
@@ -2037,7 +2107,7 @@ static CSSValue* consumeCursor(CSSParserTokenRange& range,
 }
 
 static CSSValue* consumeAttr(CSSParserTokenRange args,
-                             CSSParserContext context) {
+                             const CSSParserContext& context) {
   if (args.peek().type() != IdentToken)
     return nullptr;
 
@@ -2089,7 +2159,7 @@ static CSSValue* consumeCounterContent(CSSParserTokenRange args,
 }
 
 static CSSValue* consumeContent(CSSParserTokenRange& range,
-                                CSSParserContext context) {
+                                const CSSParserContext& context) {
   if (identMatches<CSSValueNone, CSSValueNormal>(range.peek().id()))
     return consumeIdent(range);
 
@@ -2305,7 +2375,8 @@ static bool consumeRadii(CSSValue* horizontalRadii[4],
   if (!horizontalRadii[0])
     return false;
   if (range.atEnd()) {
-    // Legacy syntax: -webkit-border-radius: l1 l2; is equivalent to border-radius: l1 / l2;
+    // Legacy syntax: -webkit-border-radius: l1 l2; is equivalent to
+    // border-radius: l1 / l2;
     if (useLegacyParsing && i == 2) {
       verticalRadii[0] = horizontalRadii[1];
       horizontalRadii[1] = nullptr;
@@ -2468,11 +2539,13 @@ static CSSValue* consumeContentDistributionOverflowPosition(
     range.consumeIncludingWhitespace();
   } while (!range.atEnd());
 
-  // The grammar states that we should have at least <content-distribution> or <content-position>.
+  // The grammar states that we should have at least <content-distribution> or
+  // <content-position>.
   if (position == CSSValueInvalid && distribution == CSSValueInvalid)
     return nullptr;
 
-  // The grammar states that <overflow-position> must be associated to <content-position>.
+  // The grammar states that <overflow-position> must be associated to
+  // <content-position>.
   if (overflow != CSSValueInvalid && position == CSSValueInvalid)
     return nullptr;
 
@@ -2517,8 +2590,11 @@ static CSSValue* consumeBorderImageSlice(CSSPropertyID property,
     fill = true;
   }
   complete4Sides(slices);
-  // FIXME: For backwards compatibility, -webkit-border-image, -webkit-mask-box-image and -webkit-box-reflect have to do a fill by default.
-  // FIXME: What do we do with -webkit-box-reflect and -webkit-mask-box-image? Probably just have to leave them filling...
+  // FIXME: For backwards compatibility, -webkit-border-image,
+  // -webkit-mask-box-image and -webkit-box-reflect have to do a fill by
+  // default.
+  // FIXME: What do we do with -webkit-box-reflect and -webkit-mask-box-image?
+  // Probably just have to leave them filling...
   if (property == CSSPropertyWebkitBorderImage ||
       property == CSSPropertyWebkitMaskBoxImage ||
       property == CSSPropertyWebkitBoxReflect)
@@ -2702,7 +2778,8 @@ static CSSValue* consumeMaskSourceType(CSSParserTokenRange& range) {
 static CSSValue* consumePrefixedBackgroundBox(CSSPropertyID property,
                                               CSSParserTokenRange& range,
                                               const CSSParserContext& context) {
-  // The values 'border', 'padding' and 'content' are deprecated and do not apply to the version of the property that has the -webkit- prefix removed.
+  // The values 'border', 'padding' and 'content' are deprecated and do not
+  // apply to the version of the property that has the -webkit- prefix removed.
   if (CSSValue* value =
           consumeIdentRange(range, CSSValueBorder, CSSValuePaddingBox))
     return value;
@@ -2732,7 +2809,8 @@ static CSSValue* consumeBackgroundSize(CSSPropertyID unresolvedProperty,
       vertical = consumeLengthOrPercent(range, cssParserMode, ValueRangeAll,
                                         UnitlessQuirk::Forbid);
   } else if (unresolvedProperty == CSSPropertyAliasWebkitBackgroundSize) {
-    // Legacy syntax: "-webkit-background-size: 10px" is equivalent to "background-size: 10px 10px".
+    // Legacy syntax: "-webkit-background-size: 10px" is equivalent to
+    // "background-size: 10px 10px".
     vertical = horizontal;
   }
   if (!vertical)
@@ -2937,7 +3015,8 @@ static CSSValue* consumeGridLine(CSSParserTokenRange& range) {
   if (spanValue && numericValue && numericValue->getIntValue() < 0)
     return nullptr;  // Negative numbers are not allowed for span.
   if (numericValue && numericValue->getIntValue() == 0)
-    return nullptr;  // An <integer> value of zero makes the declaration invalid.
+    return nullptr;  // An <integer> value of zero makes the declaration
+                     // invalid.
 
   CSSValueList* values = CSSValueList::createSpaceSeparated();
   if (spanValue)
@@ -2983,7 +3062,8 @@ static Vector<String> parseGridTemplateAreasColumnNames(
     const String& gridRowNames) {
   ASSERT(!gridRowNames.isEmpty());
   Vector<String> columnNames;
-  // Using StringImpl to avoid checks and indirection in every call to String::operator[].
+  // Using StringImpl to avoid checks and indirection in every call to
+  // String::operator[].
   StringImpl& text = *gridRowNames.impl();
 
   StringBuilder areaName;
@@ -3033,7 +3113,8 @@ static bool parseGridTemplateAreasRow(const String& gridRowNames,
     if (columnCount == 0)
       return false;
   } else if (columnCount != columnNames.size()) {
-    // The declaration is invalid if all the rows don't have the number of columns.
+    // The declaration is invalid if all the rows don't have the number of
+    // columns.
     return false;
   }
 
@@ -3059,16 +3140,19 @@ static bool parseGridTemplateAreasRow(const String& gridRowNames,
     } else {
       GridArea& gridArea = gridAreaIt->value;
 
-      // The following checks test that the grid area is a single filled-in rectangle.
+      // The following checks test that the grid area is a single filled-in
+      // rectangle.
       // 1. The new row is adjacent to the previously parsed row.
       if (rowCount != gridArea.rows.endLine())
         return false;
 
-      // 2. The new area starts at the same position as the previously parsed area.
+      // 2. The new area starts at the same position as the previously parsed
+      // area.
       if (currentColumn != gridArea.columns.startLine())
         return false;
 
-      // 3. The new area ends at the same position as the previously parsed area.
+      // 3. The new area ends at the same position as the previously parsed
+      // area.
       if (lookAheadColumn != gridArea.columns.endLine())
         return false;
 
@@ -3129,7 +3213,8 @@ static CSSValue* consumeGridTrackSize(CSSParserTokenRange& range,
   return consumeGridBreadth(range, cssParserMode);
 }
 
-// Appends to the passed in CSSGridLineNamesValue if any, otherwise creates a new one.
+// Appends to the passed in CSSGridLineNamesValue if any, otherwise creates a
+// new one.
 static CSSGridLineNamesValue* consumeGridLineNames(
     CSSParserTokenRange& range,
     CSSGridLineNamesValue* lineNames = nullptr) {
@@ -3153,8 +3238,8 @@ static bool consumeGridTrackRepeatFunction(CSSParserTokenRange& range,
                                            bool& isAutoRepeat,
                                            bool& allTracksAreFixedSized) {
   CSSParserTokenRange args = consumeFunction(range);
-  // The number of repetitions for <auto-repeat> is not important at parsing level
-  // because it will be computed later, let's set it to 1.
+  // The number of repetitions for <auto-repeat> is not important at parsing
+  // level because it will be computed later, let's set it to 1.
   size_t repetitions = 1;
   isAutoRepeat =
       identMatches<CSSValueAutoFill, CSSValueAutoFit>(args.peek().id());
@@ -3190,14 +3275,16 @@ static bool consumeGridTrackRepeatFunction(CSSParserTokenRange& range,
     if (lineNames)
       repeatedValues->append(*lineNames);
   }
-  // We should have found at least one <track-size> or else it is not a valid <track-list>.
+  // We should have found at least one <track-size> or else it is not a valid
+  // <track-list>.
   if (!numberOfTracks)
     return false;
 
   if (isAutoRepeat) {
     list.append(*repeatedValues);
   } else {
-    // We clamp the repetitions to a multiple of the repeat() track list's size, while staying below the max grid size.
+    // We clamp the repetitions to a multiple of the repeat() track list's size,
+    // while staying below the max grid size.
     repetitions = std::min(repetitions, kGridMaxTracks / numberOfTracks);
     for (size_t i = 0; i < repetitions; ++i) {
       for (size_t j = 0; j < repeatedValues->length(); ++j)
@@ -3535,7 +3622,7 @@ const CSSValue* CSSPropertyParser::parseSingleValue(
     }
     case CSSPropertyZIndex:
       return consumeZIndex(m_range);
-    case CSSPropertyTextShadow:  // CSS2 property, dropped in CSS2.1, back in CSS3, so treat as CSS3
+    case CSSPropertyTextShadow:
     case CSSPropertyBoxShadow:
       return consumeShadow(m_range, m_context.mode(),
                            property == CSSPropertyBoxShadow);
@@ -3548,12 +3635,21 @@ const CSSValue* CSSPropertyParser::parseSingleValue(
     case CSSPropertyWebkitTextDecorationsInEffect:
     case CSSPropertyTextDecorationLine:
       return consumeTextDecorationLine(m_range);
+    case CSSPropertyTextDecorationSkip:
+      DCHECK(RuntimeEnabledFeatures::css3TextDecorationsEnabled());
+      return consumeTextDecorationSkip(m_range);
     case CSSPropertyOffsetAnchor:
+      return consumeOffsetAnchor(m_range, m_context.mode());
     case CSSPropertyOffsetPosition:
-      return consumeOffsetPosition(m_range, m_context.mode());
+      return consumeOffsetPosition(m_range, m_context.mode(),
+                                   m_context.useCounter());
     case CSSPropertyD:
-    case CSSPropertyOffsetPath:
       return consumePathOrNone(m_range);
+    case CSSPropertyOffsetPath:
+      return consumeOffsetPath(
+          m_range, m_context.useCounter(),
+          currentShorthand == CSSPropertyMotion ||
+              unresolvedProperty == CSSPropertyAliasMotionPath);
     case CSSPropertyOffsetDistance:
       return consumeLengthOrPercent(m_range, m_context.mode(), ValueRangeAll);
     case CSSPropertyOffsetRotation:
@@ -3650,7 +3746,8 @@ const CSSValue* CSSPropertyParser::parseSingleValue(
     case CSSPropertyOrder:
       return consumeInteger(m_range);
     case CSSPropertyTextUnderlinePosition:
-      // auto | [ under || [ left | right ] ], but we only support auto | under for now
+      // auto | [ under || [ left | right ] ], but we only support auto | under
+      // for now
       ASSERT(RuntimeEnabledFeatures::css3TextDecorationsEnabled());
       return consumeIdent<CSSValueAuto, CSSValueUnder>(m_range);
     case CSSPropertyVerticalAlign:
@@ -3779,8 +3876,9 @@ static CSSValue* consumeFontFaceSrcURI(CSSParserTokenRange& range,
   if (range.peek().functionId() != CSSValueFormat)
     return uriValue;
 
-  // FIXME: https://drafts.csswg.org/css-fonts says that format() contains a comma-separated list of strings,
-  // but CSSFontFaceSrcValue stores only one format. Allowing one format for now.
+  // FIXME: https://drafts.csswg.org/css-fonts says that format() contains a
+  // comma-separated list of strings, but CSSFontFaceSrcValue stores only one
+  // format. Allowing one format for now.
   CSSParserTokenRange args = consumeFunction(range);
   const CSSParserToken& arg = args.consumeIncludingWhitespace();
   if ((arg.type() != StringToken) || !args.atEnd())
@@ -3938,7 +4036,8 @@ bool CSSPropertyParser::consumeFont(bool important) {
       continue;
     }
     if (!fontVariantCaps && (id == CSSValueNormal || id == CSSValueSmallCaps)) {
-      // Font variant in the shorthand is particular, it only accepts normal or small-caps.
+      // Font variant in the shorthand is particular, it only accepts normal or
+      // small-caps.
       // See https://drafts.csswg.org/css-fonts/#propdef-font
       fontVariantCaps = consumeFontVariantCSS21(m_range);
       if (fontVariantCaps)
@@ -4006,9 +4105,10 @@ bool CSSPropertyParser::consumeFont(bool important) {
   addProperty(CSSPropertyFontFamily, CSSPropertyFont, *parsedFamilyValue,
               important);
 
-  // FIXME: http://www.w3.org/TR/2011/WD-css3-fonts-20110324/#font-prop requires that
-  // "font-stretch", "font-size-adjust", and "font-kerning" be reset to their initial values
-  // but we don't seem to support them at the moment. They should also be added here once implemented.
+  // FIXME: http://www.w3.org/TR/2011/WD-css3-fonts-20110324/#font-prop requires
+  // that "font-stretch", "font-size-adjust", and "font-kerning" be reset to
+  // their initial values but we don't seem to support them at the moment. They
+  // should also be added here once implemented.
   return m_range.atEnd();
 }
 
@@ -4225,8 +4325,8 @@ bool CSSPropertyParser::consumeColumns(bool important) {
 bool CSSPropertyParser::consumeShorthandGreedily(
     const StylePropertyShorthand& shorthand,
     bool important) {
-  ASSERT(shorthand.length() <=
-         6);  // Existing shorthands have at most 6 longhands.
+  // Existing shorthands have at most 6 longhands.
+  DCHECK_LE(shorthand.length(), 6u);
   const CSSValue* longhands[6] = {nullptr, nullptr, nullptr,
                                   nullptr, nullptr, nullptr};
   const CSSPropertyID* shorthandProperties = shorthand.properties();
@@ -4276,8 +4376,9 @@ bool CSSPropertyParser::consumeFlex(bool important) {
           flexGrow = num;
         else if (flexShrink == unsetValue)
           flexShrink = num;
-        else if (
-            !num)  // flex only allows a basis of 0 (sans units) if flex-grow and flex-shrink values have already been set.
+        else if (!num)  // flex only allows a basis of 0 (sans units) if
+                        // flex-grow and flex-shrink values have already been
+                        // set.
           flexBasis =
               CSSPrimitiveValue::create(0, CSSPrimitiveValue::UnitType::Pixels);
         else
@@ -4488,9 +4589,10 @@ static inline CSSPropertyID mapFromLegacyBreakProperty(CSSPropertyID property) {
 
 bool CSSPropertyParser::consumeLegacyBreakProperty(CSSPropertyID property,
                                                    bool important) {
-  // The fragmentation spec says that page-break-(after|before|inside) are to be treated as
-  // shorthands for their break-(after|before|inside) counterparts. We'll do the same for the
-  // non-standard properties -webkit-column-break-(after|before|inside).
+  // The fragmentation spec says that page-break-(after|before|inside) are to be
+  // treated as shorthands for their break-(after|before|inside) counterparts.
+  // We'll do the same for the non-standard properties
+  // -webkit-column-break-(after|before|inside).
   CSSIdentifierValue* keyword = consumeIdent(m_range);
   if (!keyword)
     return false;
@@ -4583,8 +4685,8 @@ static bool consumeRepeatStyle(CSSParserTokenRange& range,
   return true;
 }
 
-// Note: consumeBackgroundShorthand assumes y properties (for example background-position-y) follow
-// the x properties in the shorthand array.
+// Note: consumeBackgroundShorthand assumes y properties (for example
+// background-position-y) follow the x properties in the shorthand array.
 bool CSSPropertyParser::consumeBackgroundShorthand(
     const StylePropertyShorthand& shorthand,
     bool important) {
@@ -4618,10 +4720,8 @@ bool CSSPropertyParser::consumeBackgroundShorthand(
           if (!consumeSlashIncludingWhitespace(m_range))
             continue;
           value = consumeBackgroundSize(property, m_range, m_context.mode());
-          if (!value ||
-              !parsedLonghand
-                  [i -
-                   1])  // Position must have been parsed in the current layer.
+          if (!value || !parsedLonghand[i - 1])  // Position must have been
+                                                 // parsed in the current layer.
             return false;
         } else if (property == CSSPropertyBackgroundPositionY ||
                    property == CSSPropertyBackgroundRepeatY ||
@@ -4863,7 +4963,8 @@ bool CSSPropertyParser::consumeGridTemplateShorthand(CSSPropertyID shorthandId,
     return true;
   }
 
-  // 3- [ <line-names>? <string> <track-size>? <line-names>? ]+ [ / <track-list> ]?
+  // 3- [ <line-names>? <string> <track-size>? <line-names>? ]+
+  // [ / <track-list> ]?
   m_range = rangeCopy;
   return consumeGridTemplateRowsAndAreasAndColumns(shorthandId, important);
 }
@@ -4896,8 +4997,9 @@ bool CSSPropertyParser::consumeGridShorthand(bool important) {
 
   // 1- <grid-template>
   if (consumeGridTemplateShorthand(CSSPropertyGrid, important)) {
-    // It can only be specified the explicit or the implicit grid properties in a single grid declaration.
-    // The sub-properties not specified are set to their initial value, as normal for shorthands.
+    // It can only be specified the explicit or the implicit grid properties in
+    // a single grid declaration. The sub-properties not specified are set to
+    // their initial value, as normal for shorthands.
     addProperty(CSSPropertyGridAutoFlow, CSSPropertyGrid,
                 *CSSInitialValue::createLegacyImplicit(), important);
     addProperty(CSSPropertyGridAutoColumns, CSSPropertyGrid,
@@ -4964,8 +5066,9 @@ bool CSSPropertyParser::consumeGridShorthand(bool important) {
   if (!m_range.atEnd())
     return false;
 
-  // It can only be specified the explicit or the implicit grid properties in a single grid declaration.
-  // The sub-properties not specified are set to their initial value, as normal for shorthands.
+  // It can only be specified the explicit or the implicit grid properties in a
+  // single grid declaration. The sub-properties not specified are set to their
+  // initial value, as normal for shorthands.
   addProperty(CSSPropertyGridTemplateColumns, CSSPropertyGrid, *templateColumns,
               important);
   addProperty(CSSPropertyGridTemplateRows, CSSPropertyGrid, *templateRows,
@@ -5024,10 +5127,12 @@ bool CSSPropertyParser::parseShorthand(CSSPropertyID unresolvedProperty,
 
       CSSValue* overflowXValue = nullptr;
 
-      // FIXME: -webkit-paged-x or -webkit-paged-y only apply to overflow-y. If this value has been
-      // set using the shorthand, then for now overflow-x will default to auto, but once we implement
-      // pagination controls, it should default to hidden. If the overflow-y value is anything but
-      // paged-x or paged-y, then overflow-x and overflow-y should have the same value.
+      // FIXME: -webkit-paged-x or -webkit-paged-y only apply to overflow-y. If
+      // this value has been set using the shorthand, then for now overflow-x
+      // will default to auto, but once we implement pagination controls, it
+      // should default to hidden. If the overflow-y value is anything but
+      // paged-x or paged-y, then overflow-x and overflow-y should have the same
+      // value.
       if (id == CSSValueWebkitPagedX || id == CSSValueWebkitPagedY)
         overflowXValue = CSSIdentifierValue::create(CSSValueAuto);
       else
@@ -5067,7 +5172,7 @@ bool CSSPropertyParser::parseShorthand(CSSPropertyID unresolvedProperty,
     case CSSPropertyMotion:
       return consumeShorthandGreedily(motionShorthand(), important);
     case CSSPropertyOffset:
-      return consumeShorthandGreedily(offsetShorthand(), important);
+      return consumeOffsetShorthand(important);
     case CSSPropertyWebkitTextEmphasis:
       return consumeShorthandGreedily(webkitTextEmphasisShorthand(), important);
     case CSSPropertyOutline:

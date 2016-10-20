@@ -318,19 +318,13 @@ class TestWebappRegistry : public WebappRegistry {
   TestWebappRegistry() : WebappRegistry() { }
 
   void UnregisterWebappsForUrls(
-      const base::Callback<bool(const GURL&)>& url_filter,
-      const base::Closure& callback) override {
-    // Mocks out a JNI call and runs the callback as a delayed task.
-    BrowserThread::PostDelayedTask(BrowserThread::UI, FROM_HERE, callback,
-                                   base::TimeDelta::FromMilliseconds(10));
+      const base::Callback<bool(const GURL&)>& url_filter) override {
+    // Mocks out a JNI call.
   }
 
   void ClearWebappHistoryForUrls(
-      const base::Callback<bool(const GURL&)>& url_filter,
-      const base::Closure& callback) override {
-    // Mocks out a JNI call and runs the callback as a delayed task.
-    BrowserThread::PostDelayedTask(BrowserThread::UI, FROM_HERE, callback,
-                                   base::TimeDelta::FromMilliseconds(10));
+      const base::Callback<bool(const GURL&)>& url_filter) override {
+    // Mocks out a JNI call.
   }
 };
 #endif
@@ -1037,8 +1031,7 @@ class RemovePasswordsTester {
 class RemovePermissionPromptCountsTest {
  public:
   explicit RemovePermissionPromptCountsTest(TestingProfile* profile)
-      : blocker_(new PermissionDecisionAutoBlocker(profile)),
-        profile_(profile) {}
+      : profile_(profile) {}
 
   int GetDismissCount(const GURL& url, content::PermissionType permission) {
     return PermissionDecisionAutoBlocker::GetDismissCount(
@@ -1051,16 +1044,17 @@ class RemovePermissionPromptCountsTest {
   }
 
   int RecordIgnore(const GURL& url, content::PermissionType permission) {
-    return blocker_->RecordIgnore(url, permission);
+    return PermissionDecisionAutoBlocker::RecordIgnore(url, permission,
+                                                       profile_);
   }
 
   bool ShouldChangeDismissalToBlock(const GURL& url,
                                     content::PermissionType permission) {
-    return blocker_->ShouldChangeDismissalToBlock(url, permission);
+    return PermissionDecisionAutoBlocker::ShouldChangeDismissalToBlock(
+        url, permission, profile_);
   }
 
  private:
-  std::unique_ptr<PermissionDecisionAutoBlocker> blocker_;
   TestingProfile* profile_;
 
   DISALLOW_COPY_AND_ASSIGN(RemovePermissionPromptCountsTest);

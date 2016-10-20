@@ -277,22 +277,10 @@ if (enable_themes) {
     "enable_themes",
   ]
 }
-if (enable_app_list) {
-  grit_defines += [
-    "-D",
-    "enable_app_list",
-  ]
-}
 if (enable_webrtc) {
   grit_defines += [
     "-D",
     "enable_webrtc",
-  ]
-}
-if (enable_hangout_services_extension) {
-  grit_defines += [
-    "-D",
-    "enable_hangout_services_extension",
   ]
 }
 if (enable_task_manager) {
@@ -305,12 +293,6 @@ if (enable_notifications) {
   grit_defines += [
     "-D",
     "enable_notifications",
-  ]
-}
-if (enable_service_discovery) {
-  grit_defines += [
-    "-D",
-    "enable_service_discovery",
   ]
 }
 if (mac_views_browser) {

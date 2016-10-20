@@ -52,10 +52,17 @@ WebInspector.LayerPaintProfilerView.prototype = {
         }
     },
 
+    /**
+     * @param {number} scale
+     */
+    setScale: function(scale)
+    {
+        this._paintProfilerView.setScale(scale);
+    },
+
     _onWindowChanged: function()
     {
-        var window = this._paintProfilerView.windowBoundaries();
-        this._logTreeView.updateWindow(window.left, window.right);
+        this._logTreeView.updateWindow(this._paintProfilerView.selectionWindow());
     },
 
     /**

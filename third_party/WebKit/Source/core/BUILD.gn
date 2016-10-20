@@ -3,6 +3,7 @@
 # found in the LICENSE file.
 
 import("//build/config/chromecast_build.gni")
+import("//build/toolchain/toolchain.gni")
 import("//build/config/ui.gni")
 import("//build/split_static_library.gni")
 import("//testing/libfuzzer/fuzzer_test.gni")
@@ -215,6 +216,8 @@ source_set("testing") {
     "$blink_core_output_dir/testing/InternalSettingsGenerated.h",
     "testing/CallbackFunctionTest.cpp",
     "testing/CallbackFunctionTest.h",
+    "testing/DeathAwareScriptWrappable.cpp",
+    "testing/DeathAwareScriptWrappable.h",
     "testing/DictionaryTest.cpp",
     "testing/DictionaryTest.h",
     "testing/DummyPageHolder.cpp",
@@ -716,6 +719,12 @@ action("make_core_generated_css_tokenizer_codepoints") {
     "--output_dir",
     rel_blink_core_gen_dir,
   ]
+  if (is_mac && !use_system_xcode) {
+    args += [
+      "--developer_dir",
+      hermetic_xcode_path,
+    ]
+  }
 
   deps = make_core_generated_deps
 }
@@ -739,6 +748,12 @@ action("make_core_generated_css_primitive_value_unit_trie") {
     "--output_dir",
     rel_blink_core_gen_dir,
   ]
+  if (is_mac && !use_system_xcode) {
+    args += [
+      "--developer_dir",
+      hermetic_xcode_path,
+    ]
+  }
 
   deps = make_core_generated_deps
 }
@@ -764,6 +779,12 @@ action("make_core_generated_html_element_lookup_trie") {
     "--output_dir",
     rel_blink_core_gen_dir,
   ]
+  if (is_mac && !use_system_xcode) {
+    args += [
+      "--developer_dir",
+      hermetic_xcode_path,
+    ]
+  }
 
   deps = make_core_generated_deps
 }
@@ -787,6 +808,12 @@ action("make_core_generated_origin_trials") {
     "--output_dir",
     "$rel_blink_core_gen_dir/origin_trials",
   ]
+  if (is_mac && !use_system_xcode) {
+    args += [
+      "--developer_dir",
+      hermetic_xcode_path,
+    ]
+  }
 }
 
 action_foreach("make_core_generated_bison") {
@@ -803,6 +830,9 @@ action_foreach("make_core_generated_bison") {
     rel_blink_core_gen_dir,
     bison_exe,
   ]
+  if (is_mac && !use_system_xcode) {
+    args += [ hermetic_xcode_path ]
+  }
 
   deps = make_core_generated_deps
 }
@@ -975,6 +1005,7 @@ source_set("unit_tests") {
     "css/MediaQueryListTest.cpp",
     "css/MediaQueryMatcherTest.cpp",
     "css/MediaQuerySetTest.cpp",
+    "css/MediaValuesInitialViewportTest.cpp",
     "css/MediaValuesTest.cpp",
     "css/RuleFeatureSetTest.cpp",
     "css/RuleSetTest.cpp",
@@ -1005,6 +1036,7 @@ source_set("unit_tests") {
     "dom/DocumentStatisticsCollectorTest.cpp",
     "dom/DocumentTest.cpp",
     "dom/ElementTest.cpp",
+    "dom/ElementVisibilityObserverTest.cpp",
     "dom/ExecutionContextTaskTest.cpp",
     "dom/MainThreadTaskRunnerTest.cpp",
     "dom/NodeTest.cpp",
@@ -1043,6 +1075,7 @@ source_set("unit_tests") {
     "editing/PositionTest.cpp",
     "editing/RelocatablePositionTest.cpp",
     "editing/SelectionAdjusterTest.cpp",
+    "editing/SelectionTemplateTest.cpp",
     "editing/SurroundingTextTest.cpp",
     "editing/VisiblePositionTest.cpp",
     "editing/VisibleSelectionTest.cpp",
@@ -1055,6 +1088,7 @@ source_set("unit_tests") {
     "editing/iterators/SearchBufferTest.cpp",
     "editing/iterators/SimplifiedBackwardsTextIteratorTest.cpp",
     "editing/iterators/TextIteratorTest.cpp",
+    "editing/iterators/TextSearcherICUTest.cpp",
     "editing/markers/DocumentMarkerControllerTest.cpp",
     "editing/serializers/StyledMarkupSerializerTest.cpp",
     "editing/spellcheck/SpellCheckerTest.cpp",
@@ -1115,6 +1149,7 @@ source_set("unit_tests") {
     "html/forms/EmailInputTypeTest.cpp",
     "html/forms/FileInputTypeTest.cpp",
     "html/forms/OptionListTest.cpp",
+    "html/forms/PasswordInputTypeTest.cpp",
     "html/forms/StepRangeTest.cpp",
     "html/parser/AtomicHTMLTokenTest.cpp",
     "html/parser/CSSPreloadScannerTest.cpp",
@@ -1177,7 +1212,6 @@ source_set("unit_tests") {
     "origin_trials/OriginTrialContextTest.cpp",
     "page/ChromeClientTest.cpp",
     "page/ContextMenuControllerTest.cpp",
-    "page/EventSourceParserTest.cpp",
     "page/FocusControllerTest.cpp",
     "page/NetworkStateNotifierTest.cpp",
     "page/PagePopupClientTest.cpp",
@@ -1197,6 +1231,7 @@ source_set("unit_tests") {
     "paint/PaintLayerClipperTest.cpp",
     "paint/PaintLayerPainterTest.cpp",
     "paint/PaintLayerScrollableAreaTest.cpp",
+    "paint/PaintLayerTest.cpp",
     "paint/PaintPropertyTreeBuilderTest.cpp",
     "paint/PaintPropertyTreePrinterTest.cpp",
     "paint/SVGInlineTextBoxPainterTest.cpp",

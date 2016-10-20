@@ -50,7 +50,8 @@ static bool computationallyIndependent(const CSSValue& value) {
     return true;
   }
 
-  // TODO(timloh): Images and transform-function values can also contain lengths.
+  // TODO(timloh): Images and transform-function values can also contain
+  // lengths.
 
   return true;
 }
@@ -90,7 +91,9 @@ void PropertyRegistration::registerProperty(
 
   if (descriptor.hasInitialValue()) {
     CSSTokenizer::Scope scope(descriptor.initialValue());
-    const CSSValue* initial = syntaxDescriptor.parse(scope.tokenRange());
+    bool isAnimationTainted = false;
+    const CSSValue* initial =
+        syntaxDescriptor.parse(scope.tokenRange(), isAnimationTainted);
     if (!initial) {
       exceptionState.throwDOMException(
           SyntaxError,
@@ -104,7 +107,7 @@ void PropertyRegistration::registerProperty(
       return;
     }
     RefPtr<CSSVariableData> initialVariableData =
-        CSSVariableData::create(scope.tokenRange(), false);
+        CSSVariableData::create(scope.tokenRange(), isAnimationTainted, false);
     registry.registerProperty(atomicName, syntaxDescriptor,
                               descriptor.inherits(), initial,
                               initialVariableData.release());
@@ -123,27 +126,6 @@ void PropertyRegistration::registerProperty(
   document->setNeedsStyleRecalc(SubtreeStyleChange,
                                 StyleChangeReasonForTracing::create(
                                     StyleChangeReason::PropertyRegistration));
-}
-
-void PropertyRegistration::unregisterProperty(
-    ExecutionContext* executionContext,
-    const String& property,
-    ExceptionState& exceptionState) {
-  Document* document = toDocument(executionContext);
-  PropertyRegistry& registry = *document->propertyRegistry();
-  AtomicString atomicProperty(property);
-  if (!registry.registration(atomicProperty)) {
-    exceptionState.throwDOMException(
-        NotFoundError,
-        "CSS.unregisterProperty() called with non-registered property " +
-            property);
-    return;
-  }
-  registry.unregisterProperty(atomicProperty);
-
-  document->setNeedsStyleRecalc(SubtreeStyleChange,
-                                StyleChangeReasonForTracing::create(
-                                    StyleChangeReason::PropertyUnregistration));
 }
 
 }  // namespace blink

@@ -17,12 +17,18 @@ class QuicCryptoServerConfigPeer {
       const QuicCryptoServerConfig* server_config)
       : server_config_(server_config) {}
 
+  // Returns the proof source.
+  ProofSource* GetProofSource();
+
   // Returns the primary config.
   scoped_refptr<QuicCryptoServerConfig::Config> GetPrimaryConfig();
 
   // Returns the config associated with |config_id|.
   scoped_refptr<QuicCryptoServerConfig::Config> GetConfig(
       std::string config_id);
+
+  // Returns a pointer to the ProofSource object.
+  ProofSource* GetProofSource() const;
 
   // Generates a new valid source address token.
   std::string NewSourceAddressToken(

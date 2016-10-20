@@ -166,8 +166,6 @@ class CORE_EXPORT EmptyChromeClient : public ChromeClient {
 
   bool tabsToLinks() override { return false; }
 
-  IntRect windowResizerRect(LocalFrame&) const override { return IntRect(); }
-
   void invalidateRect(const IntRect&) override {}
   void scheduleAnimation(Widget*) override {}
 
@@ -199,8 +197,7 @@ class CORE_EXPORT EmptyChromeClient : public ChromeClient {
   void setCursor(const Cursor&, LocalFrame* localRoot) override {}
   Cursor lastSetCursorForTesting() const override { return pointerCursor(); }
 
-  void attachRootGraphicsLayer(GraphicsLayer*, LocalFrame* localRoot) override {
-  }
+  void attachRootGraphicsLayer(GraphicsLayer*, LocalFrame* localRoot) override;
   void attachRootLayer(WebLayer*, LocalFrame* localRoot) override {}
 
   void setEventListenerProperties(WebEventListenerClass,
@@ -329,7 +326,6 @@ class CORE_EXPORT EmptyFrameLoaderClient : public FrameLoaderClient {
       HTMLMediaElement&,
       const WebMediaPlayerSource&,
       WebMediaPlayerClient*) override;
-  std::unique_ptr<WebMediaSession> createWebMediaSession() override;
 
   ObjectContentType getObjectContentType(const KURL&,
                                          const String&,

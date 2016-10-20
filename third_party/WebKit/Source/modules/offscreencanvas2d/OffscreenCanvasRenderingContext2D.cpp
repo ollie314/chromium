@@ -14,6 +14,7 @@
 #include "platform/graphics/UnacceleratedImageBufferSurface.h"
 #include "platform/graphics/gpu/AcceleratedImageBufferSurface.h"
 #include "wtf/Assertions.h"
+#include "wtf/CurrentTime.h"
 
 #define UNIMPLEMENTED ASSERT_NOT_REACHED
 
@@ -55,9 +56,10 @@ void OffscreenCanvasRenderingContext2D::commit(ExceptionState& exceptionState) {
                                      "canvas element.");
     return;
   }
+  double commitStartTime = WTF::monotonicallyIncreasingTime();
   RefPtr<StaticBitmapImage> image = this->transferToStaticBitmapImage();
   getOffscreenCanvas()->getOrCreateFrameDispatcher()->dispatchFrame(
-      std::move(image));
+      std::move(image), commitStartTime);
 }
 
 // BaseRenderingContext2D implementation
@@ -206,11 +208,10 @@ SkImageFilter* OffscreenCanvasRenderingContext2D::stateGetFilter() {
 }
 
 void OffscreenCanvasRenderingContext2D::validateStateStack() const {
-#if ENABLE(ASSERT)
-  SkCanvas* skCanvas = existingDrawingCanvas();
-  if (skCanvas) {
-    ASSERT(static_cast<size_t>(skCanvas->getSaveCount()) ==
-           m_stateStack.size());
+#if DCHECK_IS_ON()
+  if (SkCanvas* skCanvas = existingDrawingCanvas()) {
+    DCHECK_EQ(static_cast<size_t>(skCanvas->getSaveCount()),
+              m_stateStack.size() + 1);
   }
 #endif
 }

@@ -177,12 +177,28 @@
   <message name="IDS_SETTINGS_SET_WALLPAPER" desc="Name of the control which allows the user to set the wallpaper.">
     Wallpaper
   </message>
-  <message name="IDS_SETTINGS_THEME" desc="Name of the control which allows the user to get a theme for the browser.">
-    Theme
+  <message name="IDS_SETTINGS_THEMES" desc="Name of the control which allows the user to get a theme for the browser.">
+    Themes
   </message>
-  <message name="IDS_SETTINGS_RESET_TO_DEFAULT_THEME" desc="Name of the control which resets the browser theme back to the default theme.">
-    Reset to default
-  </message>
+  <if expr="is_linux and not chromeos">
+    <message name="IDS_SETTINGS_SYSTEM_THEME" desc="Text of the label describing the system (GTK+) browser theme on Linux">
+      GTK+
+    </message>
+    <message name="IDS_SETTINGS_USE_SYSTEM_THEME" desc="Text of the button that switches the browser theme to the system (GTK+) theme on Linux">
+      Use GTK+
+    </message>
+    <message name="IDS_SETTINGS_CLASSIC_THEME" desc="Text of the label describing the classic browser theme on Linux">
+      Classic
+    </message>
+    <message name="IDS_SETTINGS_USE_CLASSIC_THEME" desc="Text of the button that switches the browser theme to the classic theme on Linux">
+      Use Classic
+    </message>
+  </if>
+  <if expr="not is_linux or chromeos">
+    <message name="IDS_SETTINGS_RESET_TO_DEFAULT_THEME" desc="Name of the control which resets the browser theme back to the default theme.">
+      Reset to default
+    </message>
+  </if>
   <message name="IDS_SETTINGS_SHOW_HOME_BUTTON" desc="Label for the checkbox which enables or disables showing the home button in the toolbar.">
     Show home button
   </message>
@@ -858,8 +874,23 @@
     <message name="IDS_SETTINGS_PRINTING_CUPS_PRINTER_BUTTON_SELECT_DRIVER" desc="Text for the button which allows user to select a PPD file from the file system.">
       Browse
     </message>
-    <message name="IDS_SETTINGS_PRINTING_CUPS_PRINTER_ADDED_PRINTER_MESSAGE" desc="The message shown when a new printer is set up successfully.">
+    <message name="IDS_SETTINGS_PRINTING_CUPS_PRINTER_ADDED_PRINTER_DONE_MESSAGE" desc="The message shown when a new printer is set up successfully.">
       Added <ph name="PRINTER_NAME">$1<ex>printer</ex></ph>
+    </message>
+    <message name="IDS_SETTINGS_PRINTING_CUPS_PRINTER_NO_PRINTER_NEARBY" desc="The no-printer-found message shown in the auto discovery dialog.">
+      No printers nearby
+    </message>
+    <message name="IDS_SETTINGS_PRINTING_CUPS_PRINTER_SEARCHING_NEARBY_PRINTER" desc="The searching-in-progress message shown in the auto discovery dialog.">
+      Searching...
+    </message>
+    <message name="IDS_SETTINGS_PRINTING_CUPS_PRINTER_ADDED_PRINTER_ERROR_MESSAGE" desc="The message shown when a new printer is not set up successfully.">
+      Error adding printer
+    </message>
+    <message name="IDS_SETTINGS_PRINTING_CUPS_PRINTER_ADDED_PRINTER_TRY_AGAIN_MESSAGE" desc="The try-again message shown when a new printer is not set up successfully.">
+      Try again
+    </message>
+    <message name="IDS_SETTINGS_PRINTING_CUPS_PRINTER_REQUIRE_INTERNET_MESSAGE" desc="The message shown when there is no internet access to set up a printer.">
+      Connect to the internet to add a printer
     </message>
   </if>
   <message name="IDS_SETTINGS_PRINTING_CLOUD_PRINTERS" desc="In Printing Settings, the title of the google cloud printers setting section.">
@@ -886,21 +917,21 @@
     Disconnect Google Drive account
   </message>
 
-  <!-- Date/time Page -->
-  <message name="IDS_SETTINGS_DATE_TIME" desc="Name of the settings page which displays date and time preferences.">
-    Date and time
-  </message>
-  <message name="IDS_SETTINGS_TIME_ZONE" desc="Label for the picker which allows users to choose their time zone.">
-    Time zone:
-  </message>
-  <message name="IDS_SETTINGS_USE_24_HOUR_CLOCK" desc="Label for the checkbox which enables a 24-hour clock (as opposed to a 12-hour clock).">
-    Use 24-hour clock
-  </message>
-  <message name="IDS_SETTINGS_DATE_TIME_SET_AUTOMATICALLY" desc="Text which explains that the date and time are automatically set.">
-    Date and time are set automatically.
-  </message>
-
   <if expr="chromeos">
+    <!-- Date/Time Page -->
+    <message name="IDS_SETTINGS_DATE_TIME" desc="Name of the settings page which displays date and time preferences.">
+      Date and time
+    </message>
+    <message name="IDS_SETTINGS_TIME_ZONE" desc="Label for the picker which allows users to choose their time zone.">
+      Time zone:
+    </message>
+    <message name="IDS_SETTINGS_TIME_ZONE_GEOLOCATION" desc="Label for the checkbox which enables setting the time zone automatically with the detected location of the device.">
+      Set time zone automatically using your location
+    </message>
+    <message name="IDS_SETTINGS_USE_24_HOUR_CLOCK" desc="Label for the checkbox which enables a 24-hour clock (as opposed to a 12-hour clock).">
+      Use 24-hour clock
+    </message>
+
     <!-- Easy Unlock Page -->
     <message name="IDS_SETTINGS_EASY_UNLOCK_SECTION_TITLE" desc="The title of the Easy Unlock section on the settings page.">
       Smart Lock (beta)
@@ -941,9 +972,7 @@
     <message name="IDS_SETTINGS_EASY_UNLOCK_TURN_OFF_RETRY" desc="The label text of the retry button on the Easy unlock turn off dialog when Easy unlock could not be turned off because there is a server error.">
       Retry
     </message>
-  </if>
 
-  <if expr="chromeos">
     <!-- Strings specific to the Settings Internet Page -->
     <message name="IDS_SETTINGS_INTERNET" desc="Name of the settings page which displays internet preferences.">
       Internet connection
@@ -1456,6 +1485,9 @@
   <message name="IDS_SETTINGS_SPELLING_PREF" desc="The documentation string of the 'Use Spelling' preference">
     Use a web service to help resolve spelling errors
   </message>
+  <message name="IDS_SETTINGS_SPELLING_DESCRIPTION" desc="Description of using a web serviced to help resolve spelling errors. It is important to convey that what the user types will be sent to Google.">
+    Smarter spell-checking by sending what you type in the browser to Google
+  </message>
   <message name="IDS_SETTINGS_ENABLE_LOGGING" desc="The label of the checkbox to enable/disable crash and user metrics logging">
     Automatically send usage statistics and crash reports to Google
   </message>
@@ -1477,7 +1509,10 @@
   <message name="IDS_SETTINGS_MANAGE_CERTIFICATES_DESCRIPTION" desc="Secondary, continued explanation of how to manage SSL certificates and settings in Privacy options">
     Manage HTTPS/SSL certificates and settings
   </message>
-  <message name="IDS_SETTINGS_SITE_SETTINGS" desc="Text of the button that takes a user to settings page thats allows users to modify site settings. Also the title of that settings page.">
+  <message name="IDS_SETTINGS_CONTENT_SETTINGS" desc="Text of the button that takes a user to settings page thats allows users to modify site settings. Also the title of that settings page.">
+    Content Settings
+  </message>
+  <message name="IDS_SETTINGS_SITE_SETTINGS" desc="Text of the button that takes a user to the enhanced settings page thats allows users to modify site settings. Also the title of that settings page.">
     Site Settings
   </message>
   <message name="IDS_SETTINGS_SITE_SETTINGS_DESCRIPTION" desc="Secondary, continued explanation of what content settings in Chrome do">
@@ -1788,6 +1823,9 @@
   <message name="IDS_SETTINGS_SITE_SETTINGS_COOKIE_DIALOG" desc="A label for cookie dialog, stating which site we're showing data for.">
     <ph name="SITE">$1<ex>www.example.com</ex></ph> locally stored data
   </message>
+  <message name="IDS_SETTINGS_SITE_SETTINGS_COOKIE" desc="Label prefix for a cookie.">
+    Cookie: <ph name="NAME">$1<ex>cookie_1</ex></ph>
+  </message>
   <message name="IDS_SETTINGS_SITE_SETTINGS_COOKIE_REMOVE" desc="Label for the button to delete a single site cookie.">
     Remove
   </message>
@@ -1796,6 +1834,27 @@
   </message>
   <message name="IDS_SETTINGS_SITE_SETTINGS_COOKIE_REMOVE_ALL_SHOWN" desc="Label for the button to delete all visible cookies for a site.">
     Remove All Shown
+  </message>
+  <message name="IDS_SETTINGS_SITE_SETTINGS_COOKIE_REMOVE_DIALOG_TITLE" desc="Title of the dialog that warns about deleting all site data.">
+    Clear site data
+  </message>
+  <message name="IDS_SETTINGS_SITE_SETTINGS_SITE_REMOVE_DIALOG_TITLE" desc="Title of the dialog that warns about deleting all site data and resetting permissions.">
+    Clear and reset site
+  </message>
+  <message name="IDS_SETTINGS_SITE_SETTINGS_COOKIE_REMOVE_CONFIRMATION" desc="Text for the dialog that warns about deleting all site data.">
+    This will delete any data <ph name="SITE">$1<ex>www.example.com</ex></ph> stored on your device. Do you want to continue?
+  </message>
+  <message name="IDS_SETTINGS_SITE_SETTINGS_SITE_REMOVE_CONFIRMATION" desc="Text for the dialog that warns about deleting all site data and permissions.">
+    This will delete any data <ph name="SITE">$1<ex>www.example.com</ex></ph> stored on your device, and reset any permissions you granted to run. Do you want to continue?
+  </message>
+  <message name="IDS_SETTINGS_SITE_SETTINGS_COOKIE_REMOVE_MULTIPLE" desc="Text for the dialog that warns about deleting all site data.">
+    This will delete any data stored on your device for all the sites shown. Do you want to continue?
+  </message>
+  <message name="IDS_SETTINGS_SITE_SETTINGS_COOKIES_CLEAR_ALL" desc="Text for the button that clears all site data.">
+    Clear all
+  </message>
+  <message name="IDS_SETTINGS_SITE_SETTINGS_SITE_CLEAR_ALL" desc="Text for the button that clears all site data and resets the site.">
+    Clear and reset
   </message>
   <message name="IDS_SETTINGS_SITE_SETTINGS_COOKIE_SEARCH" desc="A placeholder label shown inside the Cookie Data filter textbox as a hint that the user can enter a substring to search for.">
     Search cookies
@@ -1912,7 +1971,7 @@
     <message name="IDS_SETTINGS_PEOPLE_PASSWORD_PROMPT_INVALID_PASSWORD" desc="Text on a password field that tells the user the password is incorrect.">
       Invalid password
     </message>
-    <message name="IDS_SETTINGS_CHANGE_PICTURE_DIALOG_TITLE" desc="Title of the subpage shown when user wants to change his/her picture.">
+    <message name="IDS_SETTINGS_CHANGE_PICTURE_DIALOG_TITLE" desc="Title of the subpage shown when user wants to change their picture.">
       Change picture
     </message>
     <message name="IDS_SETTINGS_CHANGE_PICTURE_DIALOG_TEXT" desc="Text with description of what to do on Change picture subpage.">
@@ -2359,6 +2418,65 @@
     </message>
     <message name="IDS_SETTINGS_DISPLAY_OVERSCAN_SAVE" desc="Label for saving overscan calibration.">
       Save
+    </message>
+
+    <!-- Storage -->
+    <message name="IDS_SETTINGS_STORAGE_TITLE" desc="In Device Settings, the title for storage management.">
+      Storage management
+    </message>
+    <message name="IDS_SETTINGS_STORAGE_ITEM_IN_USE" desc="In Device Settings > Storage, label for the used storage size of Chrome OS internal storage.">
+      In use
+    </message>
+    <message name="IDS_SETTINGS_STORAGE_ITEM_AVAILABLE" desc="In Device Settings > Storage, label for the available storage size of Chrome OS internal storage.">
+      Available
+    </message>
+    <message name="IDS_SETTINGS_STORAGE_ITEM_DOWNLOADS" desc="In Device Settings > Storage, label for the size of Downloads directory.">
+      Downloads
+    </message>
+    <message name="IDS_SETTINGS_STORAGE_ITEM_DRIVE_CACHE" desc="In Device Settings > Storage, label for the size of Google Drive's offline files.">
+      Offline files
+    </message>
+    <message name="IDS_SETTINGS_STORAGE_ITEM_BROWSING_DATA" desc="In Device Settings > Storage, label for the size of browsing data.">
+      Browsing data
+    </message>
+    <message name="IDS_SETTINGS_STORAGE_ITEM_ANDROID" desc="In Device Settings > Storage, label for the total size of Android apps and cache.">
+      Android storage
+    </message>
+    <message name="IDS_SETTINGS_STORAGE_ITEM_OTHER_USERS" desc="In Device Settings > Storage, label for the total size of other users' data directories.">
+      Other users
+    </message>
+    <message name="IDS_SETTINGS_STORAGE_SIZE_CALCULATING" desc="In Device Settings > Storage, label for storage item's size indicating the size is being calculated.">
+      Calculating...
+    </message>
+    <message name="IDS_SETTINGS_STORAGE_SIZE_UNKNOWN" desc="In Device Settings > Storage, label for storage item's size indicating the size is unknown">
+      Unknown
+    </message>
+    <message name="IDS_SETTINGS_STORAGE_SPACE_LOW_MESSAGE_TITLE" desc="Title of a warning message indicating device's available disk space is low.">
+      Device is low on space
+    </message>
+    <message name="IDS_SETTINGS_STORAGE_SPACE_LOW_MESSAGE_LINE_1" desc="The first paragraph of a warning message indicating device's available disk space is low.">
+      To free up space, delete files from device storage.
+    </message>
+    <message name="IDS_SETTINGS_STORAGE_SPACE_LOW_MESSAGE_LINE_2" desc="The second paragraph of a warning message indicating device's available disk space is low.">
+      If space isn’t made available, users and data may be automatically removed.
+    </message>
+    <message name="IDS_SETTINGS_STORAGE_SPACE_CRITICALLY_LOW_MESSAGE_TITLE" desc="Title of a warning message indicating device's available disk space is critically low.">
+      Device space critically low
+    </message>
+    <message name="IDS_SETTINGS_STORAGE_SPACE_CRITICALLY_LOW_MESSAGE_LINE_1" desc="The first paragraph of a warning message indicating device's available disk space is critically low.">
+      Free up at least 512 MB of space or your device will become unresponsive. To free up space, delete files from device storage.
+    </message>
+    <message name="IDS_SETTINGS_STORAGE_SPACE_CRITICALLY_LOW_MESSAGE_LINE_2" desc="The second paragraph of a warning message indicating device's available disk space is critically low.">
+      If you don’t free up space, users and data may be automatically removed.
+    </message>
+    <message name="IDS_SETTINGS_STORAGE_CLEAR_DRIVE_CACHE_DIALOG_TITLE" desc="Title for the storage manager confirmation dialog tab to remove Google Drive offline files.">
+      Delete offline files?
+    </message>
+    <message name="IDS_SETTINGS_STORAGE_CLEAR_DRIVE_CACHE_DESCRIPTION" desc="Description in the storage manager confirmation dialog to remove Google Drive offline files.">
+      Temporary Google Drive offline files will be deleted. Files that you’ve set as available offline won’t be deleted from this device.
+    </message>
+    <message name="IDS_SETTINGS_STORAGE_DELETE_ALL_BUTTON_TITLE" desc="In storage manager confirmation dialog, label for the button to delete offline files.">
+      Delete files
     </message>
   </if>
 

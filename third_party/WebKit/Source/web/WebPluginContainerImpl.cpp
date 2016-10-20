@@ -184,8 +184,8 @@ void WebPluginContainerImpl::invalidateRect(const IntRect& rect) {
   layoutObject->setMayNeedPaintInvalidation();
 }
 
-void WebPluginContainerImpl::setFocus(bool focused, WebFocusType focusType) {
-  Widget::setFocus(focused, focusType);
+void WebPluginContainerImpl::setFocused(bool focused, WebFocusType focusType) {
+  Widget::setFocused(focused, focusType);
   m_webPlugin->updateFocus(focused, focusType);
 }
 
@@ -467,8 +467,9 @@ WebString WebPluginContainerImpl::executeScriptURL(const WebURL& url,
     return WebString();
 
   if (!m_element->document().contentSecurityPolicy()->allowJavaScriptURLs(
-          m_element->document().url(), OrdinalNumber()))
+          m_element, m_element->document().url(), OrdinalNumber())) {
     return WebString();
+  }
 
   const KURL& kurl = url;
   DCHECK(kurl.protocolIs("javascript"));
@@ -476,9 +477,9 @@ WebString WebPluginContainerImpl::executeScriptURL(const WebURL& url,
   String script = decodeURLEscapeSequences(
       kurl.getString().substring(strlen("javascript:")));
 
-  UserGestureIndicator gestureIndicator(popupsAllowed
-                                            ? DefinitelyProcessingNewUserGesture
-                                            : PossiblyProcessingUserGesture);
+  UserGestureIndicator gestureIndicator(
+      popupsAllowed ? UserGestureToken::create(UserGestureToken::NewGesture)
+                    : nullptr);
   v8::HandleScope handleScope(toIsolate(frame));
   v8::Local<v8::Value> result =
       frame->script().executeScriptInMainWorldAndReturnValue(

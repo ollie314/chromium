@@ -61,27 +61,29 @@ class CONTENT_EXPORT NavigatorImpl : public Navigator {
                               const FrameNavigationEntry& frame_entry,
                               ReloadType reload_type,
                               bool is_same_document_history_load) override;
-  bool NavigateNewChildFrame(RenderFrameHostImpl* render_frame_host) override;
+  bool NavigateNewChildFrame(RenderFrameHostImpl* render_frame_host,
+                             const GURL& default_url) override;
   void RequestOpenURL(RenderFrameHostImpl* render_frame_host,
                       const GURL& url,
                       bool uses_post,
                       const scoped_refptr<ResourceRequestBodyImpl>& body,
+                      const std::string& extra_headers,
                       SiteInstance* source_site_instance,
                       const Referrer& referrer,
                       WindowOpenDisposition disposition,
                       bool should_replace_current_entry,
                       bool user_gesture) override;
-  void RequestTransferURL(
-      RenderFrameHostImpl* render_frame_host,
-      const GURL& url,
-      SiteInstance* source_site_instance,
-      const std::vector<GURL>& redirect_chain,
-      const Referrer& referrer,
-      ui::PageTransition page_transition,
-      const GlobalRequestID& transferred_global_request_id,
-      bool should_replace_current_entry,
-      const std::string& method,
-      scoped_refptr<ResourceRequestBodyImpl> post_body) override;
+  void RequestTransferURL(RenderFrameHostImpl* render_frame_host,
+                          const GURL& url,
+                          SiteInstance* source_site_instance,
+                          const std::vector<GURL>& redirect_chain,
+                          const Referrer& referrer,
+                          ui::PageTransition page_transition,
+                          const GlobalRequestID& transferred_global_request_id,
+                          bool should_replace_current_entry,
+                          const std::string& method,
+                          scoped_refptr<ResourceRequestBodyImpl> post_body,
+                          const std::string& extra_headers) override;
   void OnBeforeUnloadACK(FrameTreeNode* frame_tree_node, bool proceed) override;
   void OnBeginNavigation(FrameTreeNode* frame_tree_node,
                          const CommonNavigationParams& common_params,

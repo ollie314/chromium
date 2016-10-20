@@ -679,6 +679,7 @@ WebInspector.StylePropertiesSection = function(parentPane, matchedStyles, style)
         this.propertiesTreeOutline.element.classList.add("read-only");
     }
 
+    this._hoverableSelectorsMode = false;
     this._markSelectorMatches();
     this.onpopulate();
 }
@@ -2917,7 +2918,7 @@ WebInspector.StylesSidebarPane.CSSPropertyPrompt.prototype = {
             break;
         case "Enter":
             // Accept any available autocompletions and advance to the next field.
-            if (this.autoCompleteElement && this.autoCompleteElement.textContent.length) {
+            if (this.text() !== this.userEnteredText()) {
                 this.tabKeyPressed();
                 return;
             }

@@ -55,6 +55,7 @@ WebInspector.TabbedPane = function()
     /** @type {!Object.<string, !WebInspector.TabbedPaneTab>} */
     this._tabsById = {};
     this._currentTabLocked = false;
+    this._autoSelectFirstItemOnShow = true;
 
     this._dropDownButton = this._createDropDownButton();
     WebInspector.zoomManager.addEventListener(WebInspector.ZoomManager.Events.ZoomChanged, this._zoomChanged, this);
@@ -75,6 +76,14 @@ WebInspector.TabbedPane.prototype = {
     {
         this._currentTabLocked = locked;
         this._headerElement.classList.toggle("locked", this._currentTabLocked);
+    },
+
+    /**
+     * @param {boolean} autoSelect
+     */
+    setAutoSelectFirstItemOnShow: function(autoSelect)
+    {
+        this._autoSelectFirstItemOnShow = autoSelect;
     },
 
     /**
@@ -153,6 +162,9 @@ WebInspector.TabbedPane.prototype = {
         this._closeableTabs = closeableTabs;
     },
 
+    /**
+     * @override
+     */
     focus: function()
     {
         if (this.visibleView)
@@ -435,7 +447,7 @@ WebInspector.TabbedPane.prototype = {
         if (tab.view === view)
             return;
 
-        var shouldFocus = tab.view.element.isSelfOrAncestor(WebInspector.currentFocusElement());
+        var shouldFocus = tab.view.hasFocus();
 
         this.suspendInvalidations();
 
@@ -466,7 +478,7 @@ WebInspector.TabbedPane.prototype = {
     wasShown: function()
     {
         var effectiveTab = this._currentTab || this._tabsHistory[0];
-        if (effectiveTab)
+        if (effectiveTab && this._autoSelectFirstItemOnShow)
             this.selectTab(effectiveTab.id);
     },
 

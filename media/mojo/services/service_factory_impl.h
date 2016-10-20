@@ -10,10 +10,10 @@
 #include "base/macros.h"
 #include "media/mojo/interfaces/service_factory.mojom.h"
 #include "media/mojo/services/mojo_cdm_service_context.h"
-#include "services/shell/public/cpp/connector.h"
-#include "services/shell/public/cpp/service_context_ref.h"
+#include "services/service_manager/public/cpp/connector.h"
+#include "services/service_manager/public/cpp/service_context_ref.h"
 
-namespace shell {
+namespace service_manager {
 namespace mojom {
 class InterfaceProvider;
 }
@@ -28,16 +28,17 @@ class RendererFactory;
 
 class ServiceFactoryImpl : public mojom::ServiceFactory {
  public:
-  ServiceFactoryImpl(shell::mojom::InterfaceProviderPtr interfaces,
-                     scoped_refptr<MediaLog> media_log,
-                     std::unique_ptr<shell::ServiceContextRef> connection_ref,
-                     MojoMediaClient* mojo_media_client);
+  ServiceFactoryImpl(
+      service_manager::mojom::InterfaceProviderPtr interfaces,
+      scoped_refptr<MediaLog> media_log,
+      std::unique_ptr<service_manager::ServiceContextRef> connection_ref,
+      MojoMediaClient* mojo_media_client);
   ~ServiceFactoryImpl() final;
 
   // mojom::ServiceFactory implementation.
   void CreateAudioDecoder(mojom::AudioDecoderRequest request) final;
   void CreateVideoDecoder(mojom::VideoDecoderRequest request) final;
-  void CreateRenderer(const mojo::String& audio_device_id,
+  void CreateRenderer(const std::string& audio_device_id,
                       mojom::RendererRequest request) final;
   void CreateCdm(mojom::ContentDecryptionModuleRequest request) final;
 
@@ -58,11 +59,11 @@ class ServiceFactoryImpl : public mojom::ServiceFactory {
 
 #if defined(ENABLE_MOJO_CDM)
   std::unique_ptr<CdmFactory> cdm_factory_;
-  shell::mojom::InterfaceProviderPtr interfaces_;
+  service_manager::mojom::InterfaceProviderPtr interfaces_;
 #endif  // defined(ENABLE_MOJO_CDM)
 
   scoped_refptr<MediaLog> media_log_;
-  std::unique_ptr<shell::ServiceContextRef> connection_ref_;
+  std::unique_ptr<service_manager::ServiceContextRef> connection_ref_;
   MojoMediaClient* mojo_media_client_;
 
   DISALLOW_COPY_AND_ASSIGN(ServiceFactoryImpl);

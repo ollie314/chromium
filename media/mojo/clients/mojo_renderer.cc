@@ -262,16 +262,23 @@ void MojoRenderer::OnTimeUpdate(base::TimeDelta time,
   media_time_interpolator_.SetBounds(time, max_time, capture_time);
 }
 
-void MojoRenderer::OnBufferingStateChange(mojom::BufferingState state) {
+void MojoRenderer::OnBufferingStateChange(BufferingState state) {
   DVLOG(2) << __FUNCTION__;
   DCHECK(task_runner_->BelongsToCurrentThread());
-  client_->OnBufferingStateChange(static_cast<media::BufferingState>(state));
+  client_->OnBufferingStateChange(state);
 }
 
 void MojoRenderer::OnEnded() {
   DVLOG(1) << __FUNCTION__;
   DCHECK(task_runner_->BelongsToCurrentThread());
   client_->OnEnded();
+}
+
+void MojoRenderer::InitiateScopedSurfaceRequest(
+    const ReceiveSurfaceRequestTokenCB& receive_request_token_cb) {
+  DVLOG(1) << __FUNCTION__;
+
+  remote_renderer_->InitiateScopedSurfaceRequest(receive_request_token_cb);
 }
 
 void MojoRenderer::OnError() {
@@ -290,8 +297,10 @@ void MojoRenderer::OnVideoNaturalSizeChange(const gfx::Size& size) {
   DVLOG(2) << __FUNCTION__ << ": " << size.ToString();
   DCHECK(task_runner_->BelongsToCurrentThread());
 
-  video_renderer_sink_->PaintSingleFrame(
-      video_overlay_factory_->CreateFrame(size));
+  if (video_overlay_factory_) {
+    video_renderer_sink_->PaintSingleFrame(
+        video_overlay_factory_->CreateFrame(size));
+  }
   client_->OnVideoNaturalSizeChange(size);
 }
 

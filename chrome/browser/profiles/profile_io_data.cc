@@ -74,9 +74,8 @@
 #include "components/policy/core/common/cloud/policy_header_service.h"
 #include "components/policy/core/common/cloud/user_cloud_policy_manager.h"
 #include "components/prefs/pref_service.h"
-#include "components/previews/core/previews_io_data.h"
 #include "components/signin/core/common/signin_pref_names.h"
-#include "components/sync/driver/pref_names.h"
+#include "components/sync/base/pref_names.h"
 #include "components/url_formatter/url_fixer.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/host_zoom_map.h"
@@ -105,6 +104,7 @@
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_builder.h"
+#include "net/url_request/url_request_context_storage.h"
 #include "net/url_request/url_request_file_job.h"
 #include "net/url_request/url_request_intercepting_job_factory.h"
 #include "net/url_request/url_request_interceptor.h"
@@ -479,7 +479,7 @@ void ProfileIOData::InitializeOnUIThread(Profile* profile) {
       &enable_referrers_,
       &enable_do_not_track_,
       &force_google_safesearch_,
-      &force_youtube_safety_mode_,
+      &force_youtube_restrict_,
       &allowed_domains_for_apps_,
       pref_service);
 
@@ -522,14 +522,11 @@ void ProfileIOData::InitializeOnUIThread(Profile* profile) {
   // ShutdownOnUIThread to release these observers on the right thread.
   // Don't pass it in |profile_params_| to make sure it is correctly cleaned up,
   // in particular when this ProfileIOData isn't |initialized_| during deletion.
-  policy::URLBlacklist::SegmentURLCallback callback =
-      static_cast<policy::URLBlacklist::SegmentURLCallback>(
-          url_formatter::SegmentURL);
   base::SequencedWorkerPool* pool = BrowserThread::GetBlockingPool();
   scoped_refptr<base::SequencedTaskRunner> background_task_runner =
       pool->GetSequencedTaskRunner(pool->GetSequenceToken());
   url_blacklist_manager_.reset(new policy::URLBlacklistManager(
-      pref_service, background_task_runner, io_task_runner, callback,
+      pref_service, background_task_runner, io_task_runner,
       base::Bind(policy::OverrideBlacklistForURL)));
 
   // The CTPolicyManager shares the same constraints of needing to be cleaned
@@ -948,20 +945,6 @@ void ProfileIOData::set_data_reduction_proxy_io_data(
   data_reduction_proxy_io_data_ = std::move(data_reduction_proxy_io_data);
 }
 
-void ProfileIOData::set_previews_io_data(
-    std::unique_ptr<previews::PreviewsIOData> previews_io_data) const {
-  previews_io_data_ = std::move(previews_io_data);
-}
-
-net::HttpServerProperties* ProfileIOData::http_server_properties() const {
-  return http_server_properties_.get();
-}
-
-void ProfileIOData::set_http_server_properties(
-    std::unique_ptr<net::HttpServerProperties> http_server_properties) const {
-  http_server_properties_ = std::move(http_server_properties);
-}
-
 ProfileIOData::ResourceContext::ResourceContext(ProfileIOData* io_data)
     : io_data_(io_data),
       host_resolver_(NULL),
@@ -1033,14 +1016,11 @@ void ProfileIOData::Init(
 
   // Create the common request contexts.
   main_request_context_.reset(new net::URLRequestContext());
+  main_request_context_storage_.reset(
+      new net::URLRequestContextStorage(main_request_context_.get()));
   extensions_request_context_.reset(new net::URLRequestContext());
 
   main_request_context_->set_enable_brotli(io_thread_globals->enable_brotli);
-
-  // TODO(estark): Remove this once the Referrer-Policy header is no
-  // longer an experimental feature. https://crbug.com/619228
-  main_request_context_->set_enable_referrer_policy_header(
-      command_line.HasSwitch(switches::kEnableExperimentalWebPlatformFeatures));
 
   std::unique_ptr<ChromeNetworkDelegate> network_delegate(
       new ChromeNetworkDelegate(
@@ -1065,7 +1045,7 @@ void ProfileIOData::Init(
   network_delegate->set_cookie_settings(profile_params_->cookie_settings.get());
   network_delegate->set_enable_do_not_track(&enable_do_not_track_);
   network_delegate->set_force_google_safe_search(&force_google_safesearch_);
-  network_delegate->set_force_youtube_safety_mode(&force_youtube_safety_mode_);
+  network_delegate->set_force_youtube_restrict(&force_youtube_restrict_);
   network_delegate->set_allowed_domains_for_apps(&allowed_domains_for_apps_);
   network_delegate->set_data_use_aggregator(
       io_thread_globals->data_use_aggregator.get(), IsOffTheRecord());
@@ -1195,7 +1175,7 @@ ProfileIOData::SetUpJobFactoryDefaults(
     std::unique_ptr<ProtocolHandlerRegistry::JobInterceptorFactory>
         protocol_handler_interceptor,
     net::NetworkDelegate* network_delegate,
-    net::FtpTransactionFactory* ftp_transaction_factory) const {
+    net::HostResolver* host_resolver) const {
   // NOTE(willchan): Keep these protocol handlers in sync with
   // ProfileIOData::IsHandledProtocol().
   bool set_protocol = job_factory->SetProtocolHandler(
@@ -1244,11 +1224,10 @@ ProfileIOData::SetUpJobFactoryDefaults(
   job_factory->SetProtocolHandler(
       url::kAboutScheme,
       base::MakeUnique<about_handler::AboutProtocolHandler>());
+
 #if !defined(DISABLE_FTP_SUPPORT)
-  DCHECK(ftp_transaction_factory);
   job_factory->SetProtocolHandler(
-      url::kFtpScheme,
-      base::MakeUnique<net::FtpProtocolHandler>(ftp_transaction_factory));
+      url::kFtpScheme, net::FtpProtocolHandler::Create(host_resolver));
 #endif  // !defined(DISABLE_FTP_SUPPORT)
 
 #if defined(DEBUG_DEVTOOLS)
@@ -1283,7 +1262,7 @@ void ProfileIOData::ShutdownOnUIThread(
   enable_referrers_.Destroy();
   enable_do_not_track_.Destroy();
   force_google_safesearch_.Destroy();
-  force_youtube_safety_mode_.Destroy();
+  force_youtube_restrict_.Destroy();
   allowed_domains_for_apps_.Destroy();
   enable_metrics_.Destroy();
   safe_browsing_enabled_.Destroy();
@@ -1313,11 +1292,6 @@ void ProfileIOData::ShutdownOnUIThread(
   bool posted = BrowserThread::DeleteSoon(BrowserThread::IO, FROM_HERE, this);
   if (!posted)
     delete this;
-}
-
-void ProfileIOData::set_channel_id_service(
-    net::ChannelIDService* channel_id_service) const {
-  channel_id_service_.reset(channel_id_service);
 }
 
 void ProfileIOData::DestroyResourceContext() {

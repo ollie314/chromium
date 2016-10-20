@@ -2,10 +2,12 @@
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 2004-2005 Allan Sandfeld Jensen (kde@carewolf.com)
  * Copyright (C) 2006, 2007 Nicholas Shanks (webkit@nickshanks.com)
- * Copyright (C) 2005, 2006, 2007, 2008, 2009, 2010, 2011, 2012 Apple Inc. All rights reserved.
+ * Copyright (C) 2005, 2006, 2007, 2008, 2009, 2010, 2011, 2012 Apple Inc. All
+ * rights reserved.
  * Copyright (C) 2007 Alexey Proskuryakov <ap@webkit.org>
  * Copyright (C) 2007, 2008 Eric Seidel <eric@webkit.org>
- * Copyright (C) 2008, 2009 Torch Mobile Inc. All rights reserved. (http://www.torchmobile.com/)
+ * Copyright (C) 2008, 2009 Torch Mobile Inc. All rights reserved.
+ * (http://www.torchmobile.com/)
  * Copyright (c) 2011, Code Aurora Forum. All rights reserved.
  * Copyright (C) Research In Motion Limited 2011. All rights reserved.
  * Copyright (C) 2012 Google Inc. All rights reserved.
@@ -71,22 +73,7 @@ static StyleSheetContents* parseUASheet(const String& str) {
   return sheet;
 }
 
-CSSDefaultStyleSheets::CSSDefaultStyleSheets()
-    : m_defaultStyle(nullptr),
-      m_defaultMobileViewportStyle(nullptr),
-      m_defaultTelevisionViewportStyle(nullptr),
-      m_defaultQuirksStyle(nullptr),
-      m_defaultPrintStyle(nullptr),
-      m_defaultViewSourceStyle(nullptr),
-      m_defaultXHTMLMobileProfileStyle(nullptr),
-      m_defaultStyleSheet(nullptr),
-      m_mobileViewportStyleSheet(nullptr),
-      m_televisionViewportStyleSheet(nullptr),
-      m_quirksStyleSheet(nullptr),
-      m_svgStyleSheet(nullptr),
-      m_mathmlStyleSheet(nullptr),
-      m_mediaControlsStyleSheet(nullptr),
-      m_fullscreenStyleSheet(nullptr) {
+CSSDefaultStyleSheets::CSSDefaultStyleSheets() {
   m_defaultStyle = RuleSet::create();
   m_defaultPrintStyle = RuleSet::create();
   m_defaultQuirksStyle = RuleSet::create();
@@ -113,41 +100,30 @@ RuleSet* CSSDefaultStyleSheets::defaultViewSourceStyle() {
         parseUASheet(loadResourceAsASCIIString("view-source.css"));
     m_defaultViewSourceStyle->addRulesFromSheet(stylesheet, screenEval());
   }
-  return m_defaultViewSourceStyle.get();
+  return m_defaultViewSourceStyle;
 }
 
-RuleSet* CSSDefaultStyleSheets::defaultXHTMLMobileProfileStyle() {
-  if (!m_defaultXHTMLMobileProfileStyle) {
-    m_defaultXHTMLMobileProfileStyle = RuleSet::create();
-    // Loaded stylesheet is leaked on purpose.
-    StyleSheetContents* stylesheet =
+StyleSheetContents*
+CSSDefaultStyleSheets::ensureXHTMLMobileProfileStyleSheet() {
+  if (!m_xhtmlMobileProfileStyleSheet)
+    m_xhtmlMobileProfileStyleSheet =
         parseUASheet(loadResourceAsASCIIString("xhtmlmp.css"));
-    m_defaultXHTMLMobileProfileStyle->addRulesFromSheet(stylesheet,
-                                                        screenEval());
-  }
-  return m_defaultXHTMLMobileProfileStyle.get();
+  return m_xhtmlMobileProfileStyleSheet;
 }
 
-RuleSet* CSSDefaultStyleSheets::defaultMobileViewportStyle() {
-  if (!m_defaultMobileViewportStyle) {
-    m_defaultMobileViewportStyle = RuleSet::create();
+StyleSheetContents* CSSDefaultStyleSheets::ensureMobileViewportStyleSheet() {
+  if (!m_mobileViewportStyleSheet)
     m_mobileViewportStyleSheet =
         parseUASheet(loadResourceAsASCIIString("viewportAndroid.css"));
-    m_defaultMobileViewportStyle->addRulesFromSheet(
-        m_mobileViewportStyleSheet.get(), screenEval());
-  }
-  return m_defaultMobileViewportStyle.get();
+  return m_mobileViewportStyleSheet;
 }
 
-RuleSet* CSSDefaultStyleSheets::defaultTelevisionViewportStyle() {
-  if (!m_defaultTelevisionViewportStyle) {
-    m_defaultTelevisionViewportStyle = RuleSet::create();
+StyleSheetContents*
+CSSDefaultStyleSheets::ensureTelevisionViewportStyleSheet() {
+  if (!m_televisionViewportStyleSheet)
     m_televisionViewportStyleSheet =
         parseUASheet(loadResourceAsASCIIString("viewportTelevision.css"));
-    m_defaultTelevisionViewportStyle->addRulesFromSheet(
-        m_televisionViewportStyleSheet.get(), screenEval());
-  }
-  return m_defaultTelevisionViewportStyle.get();
+  return m_televisionViewportStyleSheet;
 }
 
 void CSSDefaultStyleSheets::ensureDefaultStyleSheetsForElement(
@@ -170,7 +146,8 @@ void CSSDefaultStyleSheets::ensureDefaultStyleSheetsForElement(
     changedDefaultStyle = true;
   }
 
-  // FIXME: We should assert that this sheet only contains rules for <video> and <audio>.
+  // FIXME: We should assert that this sheet only contains rules for <video> and
+  // <audio>.
   if (!m_mediaControlsStyleSheet &&
       (isHTMLVideoElement(element) || isHTMLAudioElement(element))) {
     String mediaRules = loadResourceAsASCIIString(
@@ -202,15 +179,13 @@ void CSSDefaultStyleSheets::ensureDefaultStyleSheetForFullscreen() {
 
 DEFINE_TRACE(CSSDefaultStyleSheets) {
   visitor->trace(m_defaultStyle);
-  visitor->trace(m_defaultMobileViewportStyle);
-  visitor->trace(m_defaultTelevisionViewportStyle);
   visitor->trace(m_defaultQuirksStyle);
   visitor->trace(m_defaultPrintStyle);
   visitor->trace(m_defaultViewSourceStyle);
-  visitor->trace(m_defaultXHTMLMobileProfileStyle);
   visitor->trace(m_defaultStyleSheet);
   visitor->trace(m_mobileViewportStyleSheet);
   visitor->trace(m_televisionViewportStyleSheet);
+  visitor->trace(m_xhtmlMobileProfileStyleSheet);
   visitor->trace(m_quirksStyleSheet);
   visitor->trace(m_svgStyleSheet);
   visitor->trace(m_mathmlStyleSheet);

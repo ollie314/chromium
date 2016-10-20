@@ -11,7 +11,6 @@
 #include "ash/common/session/session_state_delegate.h"
 #include "ash/common/shell_delegate.h"
 #include "ash/common/shell_observer.h"
-#include "ash/common/shell_window_ids.h"
 #include "ash/common/system/tray/system_tray_delegate.h"
 #include "ash/common/wallpaper/wallpaper_delegate.h"
 #include "ash/common/wm/maximize_mode/maximize_mode_event_handler.h"
@@ -26,11 +25,11 @@
 #include "ash/mus/bridge/wm_root_window_controller_mus.h"
 #include "ash/mus/bridge/wm_window_mus.h"
 #include "ash/mus/bridge/workspace_event_handler_mus.h"
-#include "ash/mus/container_ids.h"
 #include "ash/mus/drag_window_resizer.h"
 #include "ash/mus/keyboard_ui_mus.h"
 #include "ash/mus/root_window_controller.h"
 #include "ash/mus/window_manager.h"
+#include "ash/public/cpp/shell_window_ids.h"
 #include "ash/shared/immersive_fullscreen_controller.h"
 #include "base/memory/ptr_util.h"
 #include "components/user_manager/user_info_impl.h"
@@ -75,7 +74,9 @@ class SessionStateDelegateStub : public SessionStateDelegate {
     screen_locked_ = false;
   }
   bool IsUserSessionBlocked() const override { return false; }
-  SessionState GetSessionState() const override { return SESSION_STATE_ACTIVE; }
+  session_manager::SessionState GetSessionState() const override {
+    return session_manager::SessionState::ACTIVE;
+  }
   const user_manager::UserInfo* GetUserInfo(UserIndex index) const override {
     return user_info_.get();
   }
@@ -380,12 +381,13 @@ std::unique_ptr<KeyEventWatcher> WmShellMus::CreateKeyEventWatcher() {
 }
 
 void WmShellMus::OnOverviewModeStarting() {
-  FOR_EACH_OBSERVER(ShellObserver, *shell_observers(),
-                    OnOverviewModeStarting());
+  for (auto& observer : *shell_observers())
+    observer.OnOverviewModeStarting();
 }
 
 void WmShellMus::OnOverviewModeEnded() {
-  FOR_EACH_OBSERVER(ShellObserver, *shell_observers(), OnOverviewModeEnded());
+  for (auto& observer : *shell_observers())
+    observer.OnOverviewModeEnded();
 }
 
 SessionStateDelegate* WmShellMus::GetSessionStateDelegate() {
@@ -453,12 +455,12 @@ void WmShellMus::OnWindowTreeFocusChanged(ui::Window* gained_focus,
   if (gained_active)
     set_root_window_for_new_windows(gained_active->GetRootWindow());
 
-  WmWindow* lost_active = GetToplevelAncestor(gained_focus);
+  WmWindow* lost_active = GetToplevelAncestor(lost_focus);
   if (gained_active == lost_active)
     return;
 
-  FOR_EACH_OBSERVER(WmActivationObserver, activation_observers_,
-                    OnWindowActivated(gained_active, lost_active));
+  for (auto& observer : activation_observers_)
+    observer.OnWindowActivated(gained_active, lost_active);
 }
 
 void WmShellMus::OnDidDestroyClient(ui::WindowTreeClient* client) {

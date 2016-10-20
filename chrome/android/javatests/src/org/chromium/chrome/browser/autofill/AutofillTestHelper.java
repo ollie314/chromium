@@ -24,6 +24,16 @@ public class AutofillTestHelper {
 
     public AutofillTestHelper() {
         registerDataObserver();
+        setNormalizationTimeoutForTesting();
+    }
+
+    void setNormalizationTimeoutForTesting() {
+        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
+            @Override
+            public void run() {
+                PersonalDataManager.getInstance().setNormalizationTimeoutForTesting(1);
+            }
+        });
     }
 
     AutofillProfile getProfile(final String guid) throws ExecutionException {
@@ -35,12 +45,12 @@ public class AutofillTestHelper {
         });
     }
 
-    List<AutofillProfile> getProfilesToSuggest(final boolean includeName) throws
+    List<AutofillProfile> getProfilesToSuggest(final boolean includeNameInLabel) throws
             ExecutionException {
         return ThreadUtils.runOnUiThreadBlocking(new Callable<List<AutofillProfile>>() {
             @Override
             public List<AutofillProfile> call() {
-                return PersonalDataManager.getInstance().getProfilesToSuggest(includeName);
+                return PersonalDataManager.getInstance().getProfilesToSuggest(includeNameInLabel);
             }
         });
     }

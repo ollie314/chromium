@@ -102,6 +102,15 @@ UITextField<TextFieldStyling>* ChromeBrowserProvider::CreateStyledTextField(
   return nil;
 }
 
+id<AppRatingPrompt> ChromeBrowserProvider::CreateAppRatingPrompt() const {
+  return nil;
+}
+
+void ChromeBrowserProvider::InitializeCastService(id main_tab_model) const {}
+
+void ChromeBrowserProvider::AttachTabHelpers(web::WebState* web_state,
+                                             id tab) const {}
+
 bool ChromeBrowserProvider::IsSafeBrowsingEnabled(
     const base::Closure& on_update_callback) {
   return false;
@@ -110,6 +119,14 @@ bool ChromeBrowserProvider::IsSafeBrowsingEnabled(
 std::unique_ptr<sync_sessions::SyncedWindowDelegatesGetter>
 ChromeBrowserProvider::CreateSyncedWindowDelegatesGetter(
     ios::ChromeBrowserState* browser_state) {
+  return nullptr;
+}
+
+NSArray* ChromeBrowserProvider::GetAvailableVoiceSearchLanguages() const {
+  return [NSArray array];
+}
+
+VoiceSearchProvider* ChromeBrowserProvider::GetVoiceSearchProvider() const {
   return nullptr;
 }
 

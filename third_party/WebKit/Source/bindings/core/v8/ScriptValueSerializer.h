@@ -122,6 +122,8 @@ class CORE_EXPORT SerializedScriptValueWriter {
   void writeFalse();
   void writeBooleanObject(bool value);
   void writeOneByteString(v8::Local<v8::String>&);
+  void writeRawStringBytes(v8::Local<v8::String>&);
+  void writeUtf8String(v8::Local<v8::String>&);
   void writeUCharString(v8::Local<v8::String>&);
   void writeStringObject(const char* data, int length);
   void writeWebCoreString(const String&);
@@ -164,6 +166,7 @@ class CORE_EXPORT SerializedScriptValueWriter {
                                        uint32_t height,
                                        uint32_t canvasId,
                                        uint32_t clientId,
+                                       uint32_t sinkId,
                                        uint32_t localId,
                                        uint64_t nonce);
   void writeTransferredSharedArrayBuffer(uint32_t index);
@@ -639,6 +642,7 @@ class CORE_EXPORT ScriptValueDeserializer {
                                         uint32_t height,
                                         uint32_t canvasId,
                                         uint32_t clientId,
+                                        uint32_t sinkId,
                                         uint32_t localId,
                                         uint64_t nonce,
                                         v8::Local<v8::Value>*);

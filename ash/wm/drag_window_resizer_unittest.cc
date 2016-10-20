@@ -7,10 +7,10 @@
 #include "ash/aura/wm_window_aura.h"
 #include "ash/common/material_design/material_design_controller.h"
 #include "ash/common/shelf/shelf_layout_manager.h"
-#include "ash/common/shell_window_ids.h"
 #include "ash/common/wm/window_positioning_utils.h"
 #include "ash/display/display_manager.h"
 #include "ash/display/mouse_cursor_event_filter.h"
+#include "ash/public/cpp/shell_window_ids.h"
 #include "ash/root_window_controller.h"
 #include "ash/shell.h"
 #include "ash/test/ash_md_test_base.h"
@@ -53,9 +53,6 @@ class TestLayerDelegate : public ui::LayerDelegate {
   }
   void OnDelegatedFrameDamage(const gfx::Rect& damage_rect_in_dip) override {}
   void OnDeviceScaleFactorChanged(float device_scale_factor) override {}
-  base::Closure PrepareForLayerBoundsChange() override {
-    return base::Closure();
-  }
 
   int paint_count_ = 0;
 
@@ -152,8 +149,8 @@ class DragWindowResizerTest : public test::AshMDTestBase {
   }
 
   bool TestIfMouseWarpsAt(const gfx::Point& point_in_screen) {
-    return test::DisplayManagerTestApi::TestIfMouseWarpsAt(GetEventGenerator(),
-                                                           point_in_screen);
+    return test::AshTestBase::TestIfMouseWarpsAt(GetEventGenerator(),
+                                                 point_in_screen);
   }
 
   aura::test::TestWindowDelegate delegate_;

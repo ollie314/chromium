@@ -5,7 +5,6 @@
 #include "chrome/browser/android/vr_shell/vr_shell_renderer.h"
 
 #include "chrome/browser/android/vr_shell/vr_gl_util.h"
-#include "ui/gl/gl_bindings.h"
 
 namespace {
 
@@ -28,7 +27,7 @@ static constexpr float kTexturedQuadTextureCoordinates[12] =
 
 static constexpr int kTextureCoordinateDataSize = 2;
 
-const float kWebVrVertices[32] = {
+static constexpr float kWebVrVertices[32] = {
   //   x     y    u,   v
     -1.f,  1.f, 0.f, 0.f, // Left Eye
     -1.f, -1.f, 0.f, 1.f,
@@ -39,7 +38,7 @@ const float kWebVrVertices[32] = {
      0.f, -1.f, 0.f, 1.f,
      1.f, -1.f, 1.f, 1.f,
      1.f,  1.f, 1.f, 0.f };
-const int kWebVrVerticesSize = sizeof(float) * 32;
+static constexpr int kWebVrVerticesSize = sizeof(float) * 32;
 
 // Reticle constants
 static constexpr float kRingDiameter = 1.0f;
@@ -297,9 +296,17 @@ void WebVrRenderer::Draw(int texture_handle) {
   glVertexAttribPointer(tex_coord_handle_, TEXCOORD_ELEMENTS, GL_FLOAT, false,
       VERTEX_STRIDE, VOID_OFFSET(TEXCOORD_OFFSET));
 
-  // Bind texture.
+  // Bind texture. Ideally this should be a 1:1 pixel copy. (Or even more
+  // ideally, a zero copy reuse of the texture.) For now, we're using an
+  // undersized render target for WebVR, so GL_LINEAR makes it look slightly
+  // less chunky. TODO(klausw): change this to GL_NEAREST once we're doing
+  // a 1:1 copy since that should be more efficient.
   glActiveTexture(GL_TEXTURE0);
   glBindTexture(GL_TEXTURE_EXTERNAL_OES, texture_handle);
+  glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
   glUniform1i(tex_uniform_handle_, 0);
 
   // TODO(bajones): Should be able handle both eyes in a single draw call.

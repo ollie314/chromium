@@ -81,8 +81,8 @@
 #include "chrome/browser/performance_monitor/performance_monitor.h"
 #include "chrome/browser/plugins/plugin_prefs.h"
 #include "chrome/browser/power/process_power_collector.h"
+#include "chrome/browser/prefs/chrome_command_line_pref_store.h"
 #include "chrome/browser/prefs/chrome_pref_service_factory.h"
-#include "chrome/browser/prefs/command_line_pref_store.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/prefs/pref_metrics_service.h"
 #include "chrome/browser/printing/cloud_print/cloud_print_proxy_service.h"
@@ -120,6 +120,7 @@
 #include "chrome/common/net/net_resource_provider.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/profiling.h"
+#include "chrome/common/stack_sampling_configuration.h"
 #include "chrome/common/variations/variations_util.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/installer/util/google_update_settings.h"
@@ -270,8 +271,8 @@
 
 #if defined(USE_AURA)
 #include "chrome/browser/lifetime/application_lifetime.h"
-#include "content/public/common/mojo_shell_connection.h"
-#include "services/shell/runner/common/client_util.h"
+#include "content/public/common/service_manager_connection.h"
+#include "services/service_manager/runner/common/client_util.h"
 #endif
 
 #if defined(OS_WIN) || defined(OS_MACOSX) || \
@@ -764,7 +765,8 @@ ChromeBrowserMainParts::ChromeBrowserMainParts(
       browser_field_trials_(parameters.command_line),
       sampling_profiler_(
           base::PlatformThread::CurrentId(),
-          sampling_profiler_config_.GetSamplingParams(),
+          StackSamplingConfiguration::Get()->
+              GetSamplingParamsForCurrentProcess(),
           metrics::CallStackProfileMetricsProvider::GetProfilerCallback(
               metrics::CallStackProfileParams(
                   metrics::CallStackProfileParams::BROWSER_PROCESS,
@@ -774,7 +776,7 @@ ChromeBrowserMainParts::ChromeBrowserMainParts(
       profile_(NULL),
       run_message_loop_(true),
       local_state_(NULL) {
-  if (sampling_profiler_config_.IsProfilerEnabled())
+  if (StackSamplingConfiguration::Get()->IsProfilerEnabledForCurrentProcess())
     sampling_profiler_.Start();
 
   // If we're running tests (ui_task is non-null).
@@ -942,8 +944,8 @@ void ChromeBrowserMainParts::StartMetricsRecording() {
   // Register a synthetic field trial for the sampling profiler configuration
   // that was already chosen.
   std::string trial_name, group_name;
-  if (sampling_profiler_config_.GetSyntheticFieldTrial(&trial_name,
-                                                       &group_name)) {
+  if (StackSamplingConfiguration::Get()->GetSyntheticFieldTrial(&trial_name,
+                                                                &group_name)) {
     ChromeMetricsServiceAccessor::RegisterSyntheticFieldTrial(trial_name,
                                                               group_name);
   }
@@ -1188,7 +1190,7 @@ int ChromeBrowserMainParts::PreCreateThreadsImpl() {
 #endif  // OS_WIN
 
   local_state_->UpdateCommandLinePrefStore(
-      new CommandLinePrefStore(base::CommandLine::ForCurrentProcess()));
+      new ChromeCommandLinePrefStore(base::CommandLine::ForCurrentProcess()));
 
   // Reset the command line in the crash report details, since we may have
   // just changed it to include experiments.
@@ -1365,17 +1367,18 @@ int ChromeBrowserMainParts::PreCreateThreadsImpl() {
   return content::RESULT_CODE_NORMAL_EXIT;
 }
 
-void ChromeBrowserMainParts::MojoShellConnectionStarted(
-    content::MojoShellConnection* connection) {
+void ChromeBrowserMainParts::ServiceManagerConnectionStarted(
+    content::ServiceManagerConnection* connection) {
   for (size_t i = 0; i < chrome_extra_parts_.size(); ++i)
-    chrome_extra_parts_[i]->MojoShellConnectionStarted(connection);
+    chrome_extra_parts_[i]->ServiceManagerConnectionStarted(connection);
 }
 
 void ChromeBrowserMainParts::PreMainMessageLoopRun() {
 #if defined(USE_AURA)
-  if (content::MojoShellConnection::GetForProcess() && shell::ShellIsRemote()) {
-    content::MojoShellConnection::GetForProcess()->SetConnectionLostClosure(
-        base::Bind(&chrome::SessionEnding));
+  if (content::ServiceManagerConnection::GetForProcess() &&
+      service_manager::ServiceManagerIsRemote()) {
+    content::ServiceManagerConnection::GetForProcess()->
+        SetConnectionLostClosure(base::Bind(&chrome::SessionEnding));
   }
 #endif
   TRACE_EVENT0("startup", "ChromeBrowserMainParts::PreMainMessageLoopRun");
@@ -1646,6 +1649,9 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
   // 20 seconds to respond. Note that this needs to be done before we attempt
   // to read the profile.
   notify_result_ = process_singleton_->NotifyOtherProcessOrCreate();
+  UMA_HISTOGRAM_ENUMERATION("Chrome.ProcessSingleton.NotifyResult",
+                            notify_result_,
+                            ProcessSingleton::kNumNotifyResults);
   switch (notify_result_) {
     case ProcessSingleton::PROCESS_NONE:
       // No process already running, fall through to starting a new one.
@@ -1678,9 +1684,6 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
                     "opening a new window in the existing process. Aborting "
                     "now to avoid profile corruption.";
       return chrome::RESULT_CODE_PROFILE_IN_USE;
-
-    default:
-      NOTREACHED();
   }
 #endif  // !defined(OS_ANDROID)
 

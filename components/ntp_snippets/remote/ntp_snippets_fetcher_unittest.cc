@@ -18,6 +18,7 @@
 #include "components/ntp_snippets/category_factory.h"
 #include "components/ntp_snippets/ntp_snippets_constants.h"
 #include "components/ntp_snippets/remote/ntp_snippet.h"
+#include "components/ntp_snippets/user_classifier.h"
 #include "components/prefs/testing_pref_service.h"
 #include "components/signin/core/browser/account_tracker_service.h"
 #include "components/signin/core/browser/fake_profile_oauth2_token_service.h"
@@ -63,16 +64,17 @@ MATCHER(HasValue, "") {
 }
 
 MATCHER(IsEmptyArticleList, "is an empty list of articles") {
-  NTPSnippetsFetcher::OptionalSnippets& snippets = *arg;
-  return snippets && snippets->size() == 1 &&
-         snippets->begin()->snippets.empty();
+  NTPSnippetsFetcher::OptionalFetchedCategories& fetched_categories = *arg;
+  return fetched_categories && fetched_categories->size() == 1 &&
+         fetched_categories->begin()->snippets.empty();
 }
 
 MATCHER_P(IsSingleArticle, url, "is a list with the single article %(url)s") {
-  NTPSnippetsFetcher::OptionalSnippets& snippets = *arg;
-  return snippets && snippets->size() == 1 &&
-         snippets->begin()->snippets.size() == 1 &&
-         snippets->begin()->snippets[0]->best_source().url.spec() == url;
+  NTPSnippetsFetcher::OptionalFetchedCategories& fetched_categories = *arg;
+  return fetched_categories && fetched_categories->size() == 1 &&
+         fetched_categories->begin()->snippets.size() == 1 &&
+         fetched_categories->begin()->snippets[0]->best_source().url.spec() ==
+             url;
 }
 
 MATCHER_P(EqualsJSON, json, "equals JSON") {
@@ -97,11 +99,14 @@ MATCHER_P(EqualsJSON, json, "equals JSON") {
 class MockSnippetsAvailableCallback {
  public:
   // Workaround for gMock's lack of support for movable arguments.
-  void WrappedRun(NTPSnippetsFetcher::OptionalSnippets snippets) {
-    Run(&snippets);
+  void WrappedRun(
+      NTPSnippetsFetcher::OptionalFetchedCategories fetched_categories) {
+    Run(&fetched_categories);
   }
 
-  MOCK_METHOD1(Run, void(NTPSnippetsFetcher::OptionalSnippets* snippets));
+  MOCK_METHOD1(
+      Run,
+      void(NTPSnippetsFetcher::OptionalFetchedCategories* fetched_categories));
 };
 
 // Factory for FakeURLFetcher objects that always generate errors.
@@ -159,20 +164,21 @@ class NTPSnippetsFetcherTest : public testing::Test {
         test_lang_("en-US"),
         test_url_(gurl) {
     RequestThrottler::RegisterProfilePrefs(pref_service_->registry());
+    UserClassifier::RegisterProfilePrefs(pref_service_->registry());
+    user_classifier_ = base::MakeUnique<UserClassifier>(pref_service_.get());
 
     snippets_fetcher_ = base::MakeUnique<NTPSnippetsFetcher>(
         fake_signin_manager_.get(), fake_token_service_.get(),
         scoped_refptr<net::TestURLRequestContextGetter>(
             new net::TestURLRequestContextGetter(mock_task_runner_.get())),
-        pref_service_.get(), &category_factory_, base::Bind(&ParseJsonDelayed),
-        kAPIKey);
+        pref_service_.get(), &category_factory_, nullptr,
+        base::Bind(&ParseJsonDelayed), kAPIKey, user_classifier_.get());
 
     snippets_fetcher_->SetCallback(
         base::Bind(&MockSnippetsAvailableCallback::WrappedRun,
                    base::Unretained(&mock_callback_)));
     snippets_fetcher_->SetTickClockForTesting(
         mock_task_runner_->GetMockTickClock());
-    test_hosts_.insert("www.somehost.com");
     test_excluded_.insert("1234567890");
     // Increase initial time such that ticks are non-zero.
     mock_task_runner_->FastForwardBy(base::TimeDelta::FromMilliseconds(1234));
@@ -219,6 +225,7 @@ class NTPSnippetsFetcherTest : public testing::Test {
   std::unique_ptr<OAuth2TokenService> fake_token_service_;
   std::unique_ptr<NTPSnippetsFetcher> snippets_fetcher_;
   std::unique_ptr<TestingPrefServiceSimple> pref_service_;
+  std::unique_ptr<UserClassifier> user_classifier_;
   CategoryFactory category_factory_;
   MockSnippetsAvailableCallback mock_callback_;
   const std::string test_lang_;
@@ -238,13 +245,6 @@ class NTPSnippetsContentSuggestionsFetcherTest : public NTPSnippetsFetcherTest {
             {{"content_suggestions_backend", kContentSuggestionsServer}}) {}
 };
 
-class NTPSnippetsFetcherHostRestrictedTest : public NTPSnippetsFetcherTest {
- public:
-  NTPSnippetsFetcherHostRestrictedTest()
-      : NTPSnippetsFetcherTest(GURL(kTestChromeReaderUrl),
-                               {{"fetching_host_restrict", "on"}}) {}
-};
-
 TEST_F(NTPSnippetsFetcherTest, BuildRequestAuthenticated) {
   NTPSnippetsFetcher::RequestParams params;
   params.obfuscated_gaia_id = "0BFUSGAIA";
@@ -254,6 +254,8 @@ TEST_F(NTPSnippetsFetcherTest, BuildRequestAuthenticated) {
   params.excluded_ids = {"1234567890"};
   params.count_to_fetch = 25;
   params.interactive_request = false;
+  params.user_class = "ACTIVE_NTP_USER";
+
 
   params.fetch_api = NTPSnippetsFetcher::CHROME_READER_API;
   EXPECT_THAT(params.BuildRequest(),
@@ -304,7 +306,8 @@ TEST_F(NTPSnippetsFetcherTest, BuildRequestAuthenticated) {
                          "  ],"
                          "  \"excludedSuggestionIds\": ["
                          "    \"1234567890\""
-                         "  ]"
+                         "  ],"
+                         "  \"userActivenessClass\": \"ACTIVE_NTP_USER\""
                          "}"));
 }
 
@@ -315,7 +318,7 @@ TEST_F(NTPSnippetsFetcherTest, BuildRequestUnauthenticated) {
   params.count_to_fetch = 10;
   params.excluded_ids = {};
   params.interactive_request = true;
-
+  params.user_class = "ACTIVE_NTP_USER";
 
   params.fetch_api = NTPSnippetsFetcher::CHROME_READER_API;
   EXPECT_THAT(params.BuildRequest(),
@@ -354,7 +357,8 @@ TEST_F(NTPSnippetsFetcherTest, BuildRequestUnauthenticated) {
               EqualsJSON("{"
                          "  \"regularlyVisitedHostNames\": [],"
                          "  \"priority\": \"USER_ACTION\","
-                         "  \"excludedSuggestionIds\": []"
+                         "  \"excludedSuggestionIds\": [],"
+                         "  \"userActivenessClass\": \"ACTIVE_NTP_USER\""
                          "}"));
 }
 
@@ -367,6 +371,7 @@ TEST_F(NTPSnippetsFetcherTest, BuildRequestExcludedIds) {
   for (int i = 0; i < 200; ++i) {
     params.excluded_ids.insert(base::StringPrintf("%03d", i));
   }
+  params.user_class = "ACTIVE_NTP_USER";
 
   params.fetch_api = NTPSnippetsFetcher::CHROME_CONTENT_SUGGESTIONS_API;
   EXPECT_THAT(params.BuildRequest(),
@@ -396,7 +401,98 @@ TEST_F(NTPSnippetsFetcherTest, BuildRequestExcludedIds) {
                          "    \"095\", \"096\", \"097\", \"098\", \"099\""
                          // Truncated to 100 entries. Currently, they happen to
                          // be those lexically first.
+                         "  ],"
+                         "  \"userActivenessClass\": \"ACTIVE_NTP_USER\""
+                         "}"));
+}
+
+TEST_F(NTPSnippetsFetcherTest, BuildRequestNoUserClass) {
+  NTPSnippetsFetcher::RequestParams params;
+  params.only_return_personalized_results = false;
+  params.host_restricts = {};
+  params.count_to_fetch = 10;
+  params.interactive_request = false;
+
+  params.fetch_api = NTPSnippetsFetcher::CHROME_CONTENT_SUGGESTIONS_API;
+  EXPECT_THAT(params.BuildRequest(),
+              EqualsJSON("{"
+                         "  \"regularlyVisitedHostNames\": [],"
+                         "  \"priority\": \"BACKGROUND_PREFETCH\","
+                         "  \"excludedSuggestionIds\": []"
+                         "}"));
+}
+
+TEST_F(NTPSnippetsFetcherTest, BuildRequestWithTwoLanguages) {
+  NTPSnippetsFetcher::RequestParams params;
+  params.only_return_personalized_results = false;
+  params.host_restricts = {};
+  params.count_to_fetch = 10;
+  params.interactive_request = true;
+  params.ui_language.language_code = "en";
+  params.ui_language.frequency = 0.5f;
+  params.other_top_language.language_code = "de";
+  params.other_top_language.frequency = 0.5f;
+
+  params.fetch_api = NTPSnippetsFetcher::CHROME_CONTENT_SUGGESTIONS_API;
+  EXPECT_THAT(params.BuildRequest(),
+              EqualsJSON("{"
+                         "  \"regularlyVisitedHostNames\": [],"
+                         "  \"priority\": \"USER_ACTION\","
+                         "  \"excludedSuggestionIds\": [],"
+                         "  \"topLanguages\": ["
+                         "    {"
+                         "      \"language\" : \"en\","
+                         "      \"frequency\" : 0.5"
+                         "    },"
+                         "    {"
+                         "      \"language\" : \"de\","
+                         "      \"frequency\" : 0.5"
+                         "    }"
                          "  ]"
+                         "}"));
+}
+
+TEST_F(NTPSnippetsFetcherTest, BuildRequestWithUILanguageOnly) {
+  NTPSnippetsFetcher::RequestParams params;
+  params.only_return_personalized_results = false;
+  params.host_restricts = {};
+  params.count_to_fetch = 10;
+  params.interactive_request = true;
+  params.ui_language.language_code = "en";
+  params.ui_language.frequency = 0.5f;
+
+  params.fetch_api = NTPSnippetsFetcher::CHROME_CONTENT_SUGGESTIONS_API;
+  EXPECT_THAT(params.BuildRequest(),
+              EqualsJSON("{"
+                         "  \"regularlyVisitedHostNames\": [],"
+                         "  \"priority\": \"USER_ACTION\","
+                         "  \"excludedSuggestionIds\": [],"
+                         "  \"topLanguages\": [{"
+                         "    \"language\" : \"en\","
+                         "    \"frequency\" : 0.5"
+                         "  }]"
+                         "}"));
+}
+
+TEST_F(NTPSnippetsFetcherTest, BuildRequestWithOtherLanguageOnly) {
+  NTPSnippetsFetcher::RequestParams params;
+  params.only_return_personalized_results = false;
+  params.host_restricts = {};
+  params.count_to_fetch = 10;
+  params.interactive_request = true;
+  params.other_top_language.language_code = "de";
+  params.other_top_language.frequency = 0.5f;
+
+  params.fetch_api = NTPSnippetsFetcher::CHROME_CONTENT_SUGGESTIONS_API;
+  EXPECT_THAT(params.BuildRequest(),
+              EqualsJSON("{"
+                         "  \"regularlyVisitedHostNames\": [],"
+                         "  \"priority\": \"USER_ACTION\","
+                         "  \"excludedSuggestionIds\": [],"
+                         "  \"topLanguages\": [{"
+                         "    \"language\" : \"de\","
+                         "    \"frequency\" : 0.5"
+                         "  }]"
                          "}"));
 }
 
@@ -536,18 +632,18 @@ TEST_F(NTPSnippetsContentSuggestionsFetcherTest, ServerCategories) {
       "}]}";
   SetFakeResponse(/*response_data=*/kJsonStr, net::HTTP_OK,
                   net::URLRequestStatus::SUCCESS);
-  NTPSnippetsFetcher::OptionalSnippets snippets;
+  NTPSnippetsFetcher::OptionalFetchedCategories fetched_categories;
   EXPECT_CALL(mock_callback(), Run(_))
-      .WillOnce(WithArg<0>(MovePointeeTo(&snippets)));
+      .WillOnce(WithArg<0>(MovePointeeTo(&fetched_categories)));
   snippets_fetcher().FetchSnippetsFromHosts(test_hosts(), test_lang(),
                                             test_excluded(),
                                             /*count=*/1,
                                             /*interactive_request=*/true);
   FastForwardUntilNoTasksRemain();
 
-  ASSERT_TRUE(snippets);
-  ASSERT_THAT(snippets->size(), Eq(2u));
-  for (const auto& category : *snippets) {
+  ASSERT_TRUE(fetched_categories);
+  ASSERT_THAT(fetched_categories->size(), Eq(2u));
+  for (const auto& category : *fetched_categories) {
     const auto& articles = category.snippets;
     switch (category.category.id()) {
       case static_cast<int>(KnownCategories::ARTICLES):
@@ -595,30 +691,7 @@ TEST_F(NTPSnippetsFetcherTest, ShouldFetchSuccessfullyEmptyList) {
               ElementsAre(base::Bucket(/*min=*/200, /*count=*/1)));
 }
 
-TEST_F(NTPSnippetsFetcherHostRestrictedTest, ShouldReportEmptyHostsError) {
-  EXPECT_CALL(mock_callback(), Run(/*snippets=*/Not(HasValue()))).Times(1);
-  snippets_fetcher().FetchSnippetsFromHosts(/*hosts=*/std::set<std::string>(),
-                                            /*language_code=*/"en-US",
-                                            test_excluded(),
-                                            /*count=*/1,
-                                            /*interactive_request=*/true);
-  FastForwardUntilNoTasksRemain();
-  EXPECT_THAT(snippets_fetcher().last_status(),
-              Eq("Cannot fetch for empty hosts list."));
-  EXPECT_THAT(snippets_fetcher().last_json(), IsEmpty());
-  EXPECT_THAT(
-      histogram_tester().GetAllSamples("NewTabPage.Snippets.FetchResult"),
-      ElementsAre(base::Bucket(/*min=*/1, /*count=*/1)));
-  // This particular error gets triggered prior to fetching, so no fetch time
-  // or response should get recorded.
-  EXPECT_THAT(histogram_tester().GetAllSamples(
-                  "NewTabPage.Snippets.FetchHttpResponseOrErrorCode"),
-              IsEmpty());
-  EXPECT_THAT(histogram_tester().GetAllSamples("NewTabPage.Snippets.FetchTime"),
-              IsEmpty());
-}
-
-TEST_F(NTPSnippetsFetcherHostRestrictedTest, ShouldRestrictToHosts) {
+TEST_F(NTPSnippetsFetcherTest, ShouldRestrictToHosts) {
   net::TestURLFetcherFactory test_url_fetcher_factory;
   snippets_fetcher().FetchSnippetsFromHosts(
       {"www.somehost1.com", "www.somehost2.com"}, test_lang(), test_excluded(),
@@ -796,11 +869,11 @@ TEST_F(NTPSnippetsFetcherTest, ShouldCancelOngoingFetch) {
 
 ::std::ostream& operator<<(
     ::std::ostream& os,
-    const NTPSnippetsFetcher::OptionalSnippets& snippets) {
-  if (snippets) {
+    const NTPSnippetsFetcher::OptionalFetchedCategories& fetched_categories) {
+  if (fetched_categories) {
     // Matchers above aren't any more precise than this, so this is sufficient
     // for test-failure diagnostics.
-    return os << "list with " << snippets->size() << " elements";
+    return os << "list with " << fetched_categories->size() << " elements";
   }
   return os << "null";
 }

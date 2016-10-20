@@ -258,9 +258,8 @@ void ContentViewCoreImpl::RemoveObserver(
 
 ContentViewCoreImpl::~ContentViewCoreImpl() {
   view_.GetLayer()->RemoveFromParent();
-  FOR_EACH_OBSERVER(ContentViewCoreImplObserver,
-                    observer_list_,
-                    OnContentViewCoreDestroyed());
+  for (auto& observer : observer_list_)
+    observer.OnContentViewCoreDestroyed();
   observer_list_.Clear();
 
   JNIEnv* env = base::android::AttachCurrentThread();
@@ -281,13 +280,11 @@ void ContentViewCoreImpl::UpdateWindowAndroid(
     ui::WindowAndroid* window =
         reinterpret_cast<ui::WindowAndroid*>(window_android);
     window->AddChild(&view_);
-    FOR_EACH_OBSERVER(ContentViewCoreImplObserver,
-                      observer_list_,
-                      OnAttachedToWindow());
+    for (auto& observer : observer_list_)
+      observer.OnAttachedToWindow();
   } else {
-    FOR_EACH_OBSERVER(ContentViewCoreImplObserver,
-                      observer_list_,
-                      OnDetachedFromWindow());
+    for (auto& observer : observer_list_)
+      observer.OnDetachedFromWindow();
     view_.RemoveFromParent();
   }
 }
@@ -400,13 +397,6 @@ jint ContentViewCoreImpl::GetBackgroundColor(JNIEnv* env, jobject obj) {
   if (!rwhva)
     return SK_ColorWHITE;
   return rwhva->GetCachedBackgroundColor();
-}
-
-void ContentViewCoreImpl::PauseOrResumeGeolocation(bool should_pause) {
-  if (should_pause)
-    web_contents_->GetGeolocationServiceContext()->PauseUpdates();
-  else
-    web_contents_->GetGeolocationServiceContext()->ResumeUpdates();
 }
 
 // All positions and sizes are in CSS pixels.

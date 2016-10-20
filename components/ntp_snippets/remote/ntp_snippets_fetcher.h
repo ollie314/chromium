@@ -16,8 +16,10 @@
 #include "base/optional.h"
 #include "base/time/tick_clock.h"
 #include "base/time/time.h"
+#include "components/ntp_snippets/category.h"
 #include "components/ntp_snippets/remote/ntp_snippet.h"
 #include "components/ntp_snippets/remote/request_throttler.h"
+#include "components/translate/core/browser/language_model.h"
 #include "google_apis/gaia/oauth2_token_service.h"
 #include "net/url_request/url_fetcher_delegate.h"
 #include "net/url_request/url_request_context_getter.h"
@@ -26,10 +28,13 @@ class PrefService;
 class SigninManagerBase;
 
 namespace base {
+class ListValue;
 class Value;
 }  // namespace base
 
 namespace ntp_snippets {
+
+class UserClassifier;
 
 // Fetches snippet data for the NTP from the server.
 class NTPSnippetsFetcher : public OAuth2TokenService::Consumer,
@@ -54,20 +59,20 @@ class NTPSnippetsFetcher : public OAuth2TokenService::Consumer,
     FetchedCategory& operator=(FetchedCategory&&);  // = default, in .cc
   };
   using FetchedCategoriesVector = std::vector<FetchedCategory>;
-  using OptionalSnippets = base::Optional<FetchedCategoriesVector>;
+  using OptionalFetchedCategories = base::Optional<FetchedCategoriesVector>;
 
   // |snippets| contains parsed snippets if a fetch succeeded. If problems
   // occur, |snippets| contains no value (no actual vector in base::Optional).
   // Error details can be retrieved using last_status().
   using SnippetsAvailableCallback =
-      base::Callback<void(OptionalSnippets snippets)>;
+      base::Callback<void(OptionalFetchedCategories fetched_categories)>;
 
   // Enumeration listing all possible outcomes for fetch attempts. Used for UMA
   // histograms, so do not change existing values. Insert new values at the end,
   // and update the histogram definition.
   enum class FetchResult {
     SUCCESS,
-    EMPTY_HOSTS,
+    DEPRECATED_EMPTY_HOSTS,
     URL_REQUEST_STATUS_ERROR,
     HTTP_ERROR,
     JSON_PARSE_ERROR,
@@ -91,8 +96,10 @@ class NTPSnippetsFetcher : public OAuth2TokenService::Consumer,
       scoped_refptr<net::URLRequestContextGetter> url_request_context_getter,
       PrefService* pref_service,
       CategoryFactory* category_factory,
+      translate::LanguageModel* language_model,
       const ParseJSONCallback& parse_json_callback,
-      const std::string& api_key);
+      const std::string& api_key,
+      const UserClassifier* user_classifier);
   ~NTPSnippetsFetcher() override;
 
   // Set a callback that is called when a new set of snippets are downloaded,
@@ -100,8 +107,8 @@ class NTPSnippetsFetcher : public OAuth2TokenService::Consumer,
   void SetCallback(const SnippetsAvailableCallback& callback);
 
   // Fetches snippets from the server. |hosts| restricts the results to a set of
-  // hosts, e.g. "www.google.com". If host restrictions are enabled, an empty
-  // host set produces an error without issuing a fetch.
+  // hosts, e.g. "www.google.com". If |hosts| is empty, no host restrictions are
+  // applied.
   //
   // |excluded_ids| will be reported to the server; the server should not return
   // suggestions with those IDs.
@@ -132,8 +139,6 @@ class NTPSnippetsFetcher : public OAuth2TokenService::Consumer,
   // Returns the URL endpoint used by the fetcher.
   GURL fetch_url() const { return fetch_url_; }
 
-  // Does the fetcher use host restrictions?
-  bool UsesHostRestrictions() const;
   // Does the fetcher use authentication to get personalized results?
   bool UsesAuthentication() const;
 
@@ -150,6 +155,13 @@ class NTPSnippetsFetcher : public OAuth2TokenService::Consumer,
   FRIEND_TEST_ALL_PREFIXES(NTPSnippetsFetcherTest, BuildRequestAuthenticated);
   FRIEND_TEST_ALL_PREFIXES(NTPSnippetsFetcherTest, BuildRequestUnauthenticated);
   FRIEND_TEST_ALL_PREFIXES(NTPSnippetsFetcherTest, BuildRequestExcludedIds);
+  FRIEND_TEST_ALL_PREFIXES(NTPSnippetsFetcherTest, BuildRequestNoUserClass);
+  FRIEND_TEST_ALL_PREFIXES(NTPSnippetsFetcherTest,
+                           BuildRequestWithTwoLanguages);
+  FRIEND_TEST_ALL_PREFIXES(NTPSnippetsFetcherTest,
+                           BuildRequestWithUILanguageOnly);
+  FRIEND_TEST_ALL_PREFIXES(NTPSnippetsFetcherTest,
+                           BuildRequestWithOtherLanguageOnly);
 
   enum FetchAPI {
     CHROME_READER_API,
@@ -165,6 +177,9 @@ class NTPSnippetsFetcher : public OAuth2TokenService::Consumer,
     std::set<std::string> excluded_ids;
     int count_to_fetch;
     bool interactive_request;
+    std::string user_class;
+    translate::LanguageModel::LanguageInfo ui_language;
+    translate::LanguageModel::LanguageInfo other_top_language;
 
     RequestParams();
     ~RequestParams();
@@ -175,6 +190,7 @@ class NTPSnippetsFetcher : public OAuth2TokenService::Consumer,
   void FetchSnippetsImpl(const GURL& url,
                          const std::string& auth_header,
                          const std::string& request);
+  void SetUpCommonFetchingParameters(RequestParams* params) const;
   void FetchSnippetsNonAuthenticated();
   void FetchSnippetsAuthenticated(const std::string& account_id,
                                   const std::string& oauth_access_token);
@@ -197,9 +213,11 @@ class NTPSnippetsFetcher : public OAuth2TokenService::Consumer,
                       FetchedCategoriesVector* categories);
   void OnJsonParsed(std::unique_ptr<base::Value> parsed);
   void OnJsonError(const std::string& error);
-  void FetchFinished(OptionalSnippets snippets,
+  void FetchFinished(OptionalFetchedCategories fetched_categories,
                      FetchResult result,
                      const std::string& extra_message);
+
+  bool DemandQuotaForRequest(bool interactive_request);
 
   // Authorization for signed-in users.
   SigninManagerBase* signin_manager_;
@@ -210,7 +228,10 @@ class NTPSnippetsFetcher : public OAuth2TokenService::Consumer,
   // Holds the URL request context.
   scoped_refptr<net::URLRequestContextGetter> url_request_context_getter_;
 
+  // Weak references, not owned.
   CategoryFactory* const category_factory_;
+  translate::LanguageModel* const language_model_;
+
   const ParseJSONCallback parse_json_callback_;
   base::TimeTicks fetch_start_time_;
   std::string last_status_;
@@ -244,8 +265,6 @@ class NTPSnippetsFetcher : public OAuth2TokenService::Consumer,
 
   // The variant of the fetching to use, loaded from variation parameters.
   Personalization personalization_;
-  // Should we apply host restriction? It is loaded from variation parameters.
-  bool use_host_restriction_;
 
   // Is the request user initiated?
   bool interactive_request_;
@@ -253,8 +272,13 @@ class NTPSnippetsFetcher : public OAuth2TokenService::Consumer,
   // Allow for an injectable tick clock for testing.
   std::unique_ptr<base::TickClock> tick_clock_;
 
-  // Request throttler for limiting requests.
-  RequestThrottler request_throttler_;
+  // Classifier that tells us how active the user is. Not owned.
+  const UserClassifier* user_classifier_;
+
+  // Request throttlers for limiting requests for different classes of users.
+  RequestThrottler request_throttler_rare_ntp_user_;
+  RequestThrottler request_throttler_active_ntp_user_;
+  RequestThrottler request_throttler_active_suggestions_consumer_;
 
   // When a token request gets canceled, we want to retry once.
   bool oauth_token_retried_;

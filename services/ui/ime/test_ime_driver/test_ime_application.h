@@ -5,21 +5,21 @@
 #ifndef SERVICES_UI_IME_TEST_IME_DRIVER_TEST_IME_APPLICATION_H_
 #define SERVICES_UI_IME_TEST_IME_DRIVER_TEST_IME_APPLICATION_H_
 
-#include "services/shell/public/cpp/service.h"
+#include "services/service_manager/public/cpp/service.h"
 
 namespace ui {
 namespace test {
 
-class TestIMEApplication : public shell::Service {
+class TestIMEApplication : public service_manager::Service {
  public:
   TestIMEApplication();
   ~TestIMEApplication() override;
 
  private:
-  // shell::Service:
-  bool OnConnect(const shell::Identity& remote_identity,
-                 shell::InterfaceRegistry* registry) override;
-  void OnStart(const shell::Identity& identity) override;
+  // service_manager::Service:
+  bool OnConnect(const service_manager::Identity& remote_identity,
+                 service_manager::InterfaceRegistry* registry) override;
+  void OnStart(const service_manager::Identity& identity) override;
 
   DISALLOW_COPY_AND_ASSIGN(TestIMEApplication);
 };

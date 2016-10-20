@@ -23,7 +23,7 @@
 #include "content/common/service_worker/service_worker_status_code.h"
 #include "content/common/service_worker/service_worker_types.h"
 #include "ipc/ipc_listener.h"
-#include "services/shell/public/interfaces/interface_provider.mojom.h"
+#include "services/service_manager/public/interfaces/interface_provider.mojom.h"
 #include "third_party/WebKit/public/platform/WebMessagePortChannel.h"
 #include "third_party/WebKit/public/platform/modules/serviceworker/WebServiceWorkerError.h"
 #include "third_party/WebKit/public/platform/modules/serviceworker/service_worker_event_status.mojom.h"
@@ -59,6 +59,7 @@ class ServiceWorkerProviderContext;
 class ServiceWorkerContextClient;
 class ThreadSafeSender;
 class WebServiceWorkerRegistrationImpl;
+class EmbeddedWorkerInstanceClientImpl;
 
 // This class provides access to/from an ServiceWorker's WorkerGlobalScope.
 // Unless otherwise noted, all methods are called on the worker thread.
@@ -77,11 +78,13 @@ class ServiceWorkerContextClient
   static ServiceWorkerContextClient* ThreadSpecificInstance();
 
   // Called on the main thread.
-  ServiceWorkerContextClient(int embedded_worker_id,
-                             int64_t service_worker_version_id,
-                             const GURL& service_worker_scope,
-                             const GURL& script_url,
-                             int worker_devtools_agent_route_id);
+  ServiceWorkerContextClient(
+      int embedded_worker_id,
+      int64_t service_worker_version_id,
+      const GURL& service_worker_scope,
+      const GURL& script_url,
+      int worker_devtools_agent_route_id,
+      std::unique_ptr<EmbeddedWorkerInstanceClientImpl> embedded_worker_client);
   ~ServiceWorkerContextClient() override;
 
   void OnMessageReceived(int thread_id,
@@ -90,8 +93,8 @@ class ServiceWorkerContextClient
 
   // Called some time after the worker has started.
   void BindInterfaceProviders(
-      shell::mojom::InterfaceProviderRequest request,
-      shell::mojom::InterfaceProviderPtr remote_interfaces);
+      service_manager::mojom::InterfaceProviderRequest request,
+      service_manager::mojom::InterfaceProviderPtr remote_interfaces);
 
   // WebServiceWorkerContextClient overrides.
   blink::WebURL scope() const override;
@@ -143,12 +146,12 @@ class ServiceWorkerContextClient
   void didHandleInstallEvent(int request_id,
                              blink::WebServiceWorkerEventResult result,
                              double event_dispatch_time) override;
-  void respondToFetchEvent(int response_id,
+  void respondToFetchEvent(int fetch_event_id,
                            double event_dispatch_time) override;
-  void respondToFetchEvent(int response_id,
+  void respondToFetchEvent(int fetch_event_id,
                            const blink::WebServiceWorkerResponse& response,
                            double event_dispatch_time) override;
-  void didHandleFetchEvent(int event_finish_id,
+  void didHandleFetchEvent(int fetch_event_id,
                            blink::WebServiceWorkerEventResult result,
                            double dispatch_event_time) override;
   void didHandleNotificationClickEvent(
@@ -215,14 +218,15 @@ class ServiceWorkerContextClient
       int request_id,
       const ServiceWorkerMsg_ExtendableMessageEvent_Params& params);
   void OnInstallEvent(int request_id);
-  void DispatchFetchEvent(int response_id,
+  void DispatchFetchEvent(int fetch_event_id,
                           const ServiceWorkerFetchRequest& request,
                           const FetchCallback& callback);
   void OnNotificationClickEvent(
       int request_id,
       const std::string& notification_id,
       const PlatformNotificationData& notification_data,
-      int action_index);
+      int action_index,
+      const base::NullableString16& reply);
   void OnPushEvent(int request_id, const PushEventPayload& payload);
   void OnNotificationCloseEvent(
       int request_id,
@@ -262,6 +266,9 @@ class ServiceWorkerContextClient
 
   // Not owned; this object is destroyed when proxy_ becomes invalid.
   blink::WebServiceWorkerContextProxy* proxy_;
+
+  // Renderer-side object corresponding to WebEmbeddedWorkerInstance
+  std::unique_ptr<EmbeddedWorkerInstanceClientImpl> embedded_worker_client_;
 
   // Initialized on the worker thread in workerContextStarted and
   // destructed on the worker thread in willDestroyWorkerContext.

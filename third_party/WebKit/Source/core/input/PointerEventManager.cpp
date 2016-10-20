@@ -168,6 +168,13 @@ WebInputEventResult PointerEventManager::dispatchPointerEvent(
       UseCounter::count(m_frame->document(),
                         UseCounter::PointerEventDispatchPointerDown);
 
+    std::unique_ptr<UserGestureIndicator> gestureIndicator;
+    if (eventType == EventTypeNames::pointerup &&
+        pointerEvent->pointerType() == "touch") {
+      gestureIndicator =
+          wrapUnique(new UserGestureIndicator(UserGestureToken::create()));
+    }
+
     DispatchEventResult dispatchResult = target->dispatchEvent(pointerEvent);
     return EventHandlingUtil::toWebInputEventResult(dispatchResult);
   }
@@ -263,9 +270,9 @@ void PointerEventManager::blockTouchPointers() {
 
     processCaptureAndPositionOfPointerEvent(pointerEvent, target);
 
-    // TODO(nzolghadr): This event follows implicit TE capture. The actual target
-    // would depend on PE capturing. Perhaps need to split TE/PE event path upstream?
-    // crbug.com/579553.
+    // TODO(nzolghadr): This event follows implicit TE capture. The actual
+    // target would depend on PE capturing. Perhaps need to split TE/PE event
+    // path upstream?  crbug.com/579553.
     dispatchPointerEvent(
         getEffectiveTargetForPointerEvent(target, pointerEvent->pointerId()),
         pointerEvent);
@@ -312,7 +319,8 @@ WebInputEventResult PointerEventManager::handleTouchEvents(
 void PointerEventManager::dispatchTouchPointerEvents(
     const PlatformTouchEvent& event,
     HeapVector<TouchEventManager::TouchInfo>& touchInfos) {
-  // Iterate through the touch points, sending PointerEvents to the targets as required.
+  // Iterate through the touch points, sending PointerEvents to the targets as
+  // required.
   for (const auto& touchPoint : event.touchPoints()) {
     TouchEventManager::TouchInfo touchInfo;
     touchInfo.point = touchPoint;
@@ -370,8 +378,7 @@ void PointerEventManager::dispatchTouchPointerEvents(
       FloatPoint pagePoint = touchInfo.targetFrame->view()->rootFrameToContents(
           touchInfo.point.pos());
       float scaleFactor = 1.0f / touchInfo.targetFrame->pageZoomFactor();
-      FloatPoint scrollPosition =
-          touchInfo.targetFrame->view()->scrollPosition();
+      FloatPoint scrollPosition(touchInfo.targetFrame->view()->scrollOffset());
       FloatPoint framePoint = pagePoint.scaledBy(scaleFactor);
       framePoint.moveBy(scrollPosition.scaledBy(-scaleFactor));
       PointerEvent* pointerEvent = m_pointerEventFactory.create(
@@ -653,6 +660,24 @@ void PointerEventManager::releasePointerCapture(int pointerId) {
 
 bool PointerEventManager::isActive(const int pointerId) const {
   return m_pointerEventFactory.isActive(pointerId);
+}
+
+// This function checks the type of the pointer event to be touch as touch
+// pointer events are the only ones that are directly dispatched from the main
+// page managers to their target (event if target is in an iframe) and only
+// those managers will keep track of these pointer events.
+bool PointerEventManager::isTouchPointerIdActiveOnFrame(
+    int pointerId,
+    LocalFrame* frame) const {
+  if (m_pointerEventFactory.getPointerType(pointerId) !=
+      WebPointerProperties::PointerType::Touch)
+    return false;
+  Node* lastNodeReceivingEvent =
+      m_nodeUnderPointer.contains(pointerId)
+          ? m_nodeUnderPointer.get(pointerId).target->toNode()
+          : nullptr;
+  return lastNodeReceivingEvent &&
+         lastNodeReceivingEvent->document().frame() == frame;
 }
 
 bool PointerEventManager::isAnyTouchActive() const {

@@ -86,14 +86,7 @@ class CONTENT_EXPORT BlinkPlatformImpl
   size_t maxDecodedImageBytes() override;
   uint32_t getUniqueIdForProcess() override;
   blink::WebString userAgent() override;
-  blink::WebData parseDataURL(const blink::WebURL& url,
-                              blink::WebString& mimetype,
-                              blink::WebString& charset) override;
   blink::WebURLError cancelledError(const blink::WebURL& url) const override;
-  bool parseMultipartHeadersFromBody(const char* bytes,
-                                     size_t size,
-                                     blink::WebURLResponse* response,
-                                     size_t* end) const override;
   blink::WebThread* createThread(const char* name) override;
   blink::WebThread* currentThread() override;
   void recordAction(const blink::UserMetricsAction&) override;

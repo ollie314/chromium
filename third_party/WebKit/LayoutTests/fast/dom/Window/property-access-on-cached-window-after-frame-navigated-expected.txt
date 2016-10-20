@@ -53,6 +53,14 @@ PASS oldChildWindow.navigator.hardwareConcurrency is newChildWindow.navigator.ha
 PASS oldChildWindow.navigator.language is newChildWindow.navigator.language
 PASS oldChildWindow.navigator.maxTouchPoints is newChildWindow.navigator.maxTouchPoints
 PASS oldChildWindow.navigator.mediaDevices.ondevicechange is newChildWindow.navigator.mediaDevices.ondevicechange
+PASS oldChildWindow.navigator.mediaSession.metadata is newChildWindow.navigator.mediaSession.metadata
+PASS oldChildWindow.navigator.mediaSession.onnexttrack is newChildWindow.navigator.mediaSession.onnexttrack
+PASS oldChildWindow.navigator.mediaSession.onpause is newChildWindow.navigator.mediaSession.onpause
+PASS oldChildWindow.navigator.mediaSession.onplay is newChildWindow.navigator.mediaSession.onplay
+PASS oldChildWindow.navigator.mediaSession.onplaypause is newChildWindow.navigator.mediaSession.onplaypause
+PASS oldChildWindow.navigator.mediaSession.onprevioustrack is newChildWindow.navigator.mediaSession.onprevioustrack
+PASS oldChildWindow.navigator.mediaSession.onseekbackward is newChildWindow.navigator.mediaSession.onseekbackward
+PASS oldChildWindow.navigator.mediaSession.onseekforward is newChildWindow.navigator.mediaSession.onseekforward
 PASS oldChildWindow.navigator.onLine is newChildWindow.navigator.onLine
 PASS oldChildWindow.navigator.platform is newChildWindow.navigator.platform
 PASS oldChildWindow.navigator.presentation.defaultRequest is newChildWindow.navigator.presentation.defaultRequest
@@ -172,7 +180,6 @@ PASS oldChildWindow.pageYOffset is newChildWindow.pageYOffset
 PASS oldChildWindow.performance.navigation.redirectCount is newChildWindow.performance.navigation.redirectCount
 PASS oldChildWindow.performance.navigation.type is newChildWindow.performance.navigation.type
 PASS oldChildWindow.performance.onframetimingbufferfull is newChildWindow.performance.onframetimingbufferfull
-PASS oldChildWindow.performance.onlongtasktimingbufferfull is newChildWindow.performance.onlongtasktimingbufferfull
 PASS oldChildWindow.performance.onresourcetimingbufferfull is newChildWindow.performance.onresourcetimingbufferfull
 PASS oldChildWindow.performance.onwebkitresourcetimingbufferfull is newChildWindow.performance.onwebkitresourcetimingbufferfull
 PASS oldChildWindow.performance.timing.connectEnd is newChildWindow.performance.timing.connectEnd

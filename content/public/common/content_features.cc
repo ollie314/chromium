@@ -9,6 +9,11 @@ namespace features {
 
 // All features in alphabetical order.
 
+// Enables asm.js to WebAssembly V8 backend.
+// http://asmjs.org/spec/latest/
+const base::Feature kAsmJsToWebAssembly{"AsmJsToWebAssembly",
+                                        base::FEATURE_DISABLED_BY_DEFAULT};
+
 // Enables brotli "Accept-Encoding" advertising and "Content-Encoding" support.
 // Brotli format specification: http://www.ietf.org/id/draft-alakuijala-brotli
 const base::Feature kBrotliEncoding{"brotli-encoding",
@@ -40,6 +45,11 @@ const base::Feature kDefaultEnableGpuRasterization{
 const base::Feature kDocumentWriteEvaluator{"DocumentWriteEvaluator",
                                             base::FEATURE_DISABLED_BY_DEFAULT};
 
+// Throttle tasks in Blink background timer queues based on CPU budgets
+// for the background tab. Bug: https://crbug.com/639852.
+const base::Feature kExpensiveBackgroundTimerThrottling{
+    "ExpensiveBackgroundTimerThrottling", base::FEATURE_DISABLED_BY_DEFAULT};
+
 // Enables the Feature Policy framework for granting and removing access to
 // other features through HTTP headers.
 const base::Feature kFeaturePolicy{"FeaturePolicy",
@@ -55,11 +65,17 @@ const base::Feature kFontCacheScaling{"FontCacheScaling",
 // same-origin to the top frame, or if a user gesture is being processed.
 const base::Feature kFramebustingNeedsSameOriginOrUserGesture{
     "FramebustingNeedsSameOriginOrUserGesture",
-    base::FEATURE_ENABLED_BY_DEFAULT};
+    base::FEATURE_DISABLED_BY_DEFAULT};
 
 // Enables extended Gamepad API features like motion tracking and haptics.
 const base::Feature kGamepadExtensions{"GamepadExtensions",
                                        base::FEATURE_DISABLED_BY_DEFAULT};
+
+// Enables sensors based on Generic Sensor API:
+// https://w3c.github.io/sensors/
+const base::Feature kGenericSensor{"GenericSensor",
+                                   base::FEATURE_DISABLED_BY_DEFAULT};
+
 
 // FeatureList definition for trials to enable the download button on
 // MediaDocument.
@@ -139,7 +155,11 @@ const base::Feature kRenderingPipelineThrottling{
 
 // Scrolls to compensate for layout movements (bit.ly/scroll-anchoring).
 const base::Feature kScrollAnchoring{"ScrollAnchoring",
-                                     base::FEATURE_DISABLED_BY_DEFAULT};
+                                     base::FEATURE_ENABLED_BY_DEFAULT};
+
+// http://tc39.github.io/ecmascript_sharedmem/shmem.html
+const base::Feature kSharedArrayBuffer{"SharedArrayBuffer",
+                                       base::FEATURE_DISABLED_BY_DEFAULT};
 
 // Speculatively launches Service Workers on mouse/touch events.
 const base::Feature kSpeculativeLaunchServiceWorker{
@@ -163,6 +183,11 @@ const base::Feature kTokenBinding{"token-binding",
 // Enables touchpad and wheel scroll latching.
 const base::Feature kTouchpadAndWheelScrollLatching{
     "TouchpadAndWheelScrollLatching", base::FEATURE_DISABLED_BY_DEFAULT};
+
+// Enable WebAssembly.
+// http://webassembly.org/
+const base::Feature kWebAssembly{"WebAssembly",
+                                 base::FEATURE_DISABLED_BY_DEFAULT};
 
 // If WebGL Image Chromium is allowed, this feature controls whether it is
 // enabled.

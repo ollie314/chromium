@@ -168,7 +168,7 @@ test("components_unittests") {
   } else {  # !iOS
     deps += [
       "//components/autofill/content/browser:unit_tests",
-      "//components/autofill/content/public/cpp:unit_tests",
+      "//components/autofill/content/common:unit_tests",
       "//components/autofill/content/renderer:unit_tests",
       "//components/cast_certificate:unit_tests",
       "//components/certificate_reporting:unit_tests",
@@ -423,7 +423,7 @@ if (!is_ios) {
       "//device/geolocation",
       "//ipc:test_support",
       "//net:test_support",
-      "//services/shell/public/cpp",
+      "//services/service_manager/public/cpp",
       "//testing/gmock",
       "//testing/gtest",
       "//ui/base",

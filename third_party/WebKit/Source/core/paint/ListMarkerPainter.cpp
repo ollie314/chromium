@@ -130,12 +130,14 @@ void ListMarkerPainter::paint(const PaintInfo& paintInfo,
 
   TextRunPaintInfo textRunPaintInfo(textRun);
   textRunPaintInfo.bounds = marker;
+  const SimpleFontData* fontData =
+      m_layoutListMarker.style()->font().primaryFont();
   IntPoint textOrigin = IntPoint(
       marker.x(),
-      marker.y() + m_layoutListMarker.style()->getFontMetrics().ascent());
+      marker.y() + (fontData ? fontData->getFontMetrics().ascent() : 0));
 
-  // Text is not arbitrary. We can judge whether it's RTL from the first character,
-  // and we only need to handle the direction RightToLeft for now.
+  // Text is not arbitrary. We can judge whether it's RTL from the first
+  // character, and we only need to handle the direction RightToLeft for now.
   bool textNeedsReversing =
       WTF::Unicode::direction(m_layoutListMarker.text()[0]) ==
       WTF::Unicode::RightToLeft;

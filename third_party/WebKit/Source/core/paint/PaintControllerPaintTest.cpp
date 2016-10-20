@@ -166,16 +166,15 @@ TEST_F(PaintControllerPaintTestForSlimmingPaintV2, ChunkIdClientCacheFlag) {
   const PaintChunk& backgroundChunk = rootPaintController().paintChunks()[0];
   EXPECT_TRUE(backgroundChunk.properties.scroll->isRoot());
 
-  const EffectPaintPropertyNode* effectNode =
-      div.objectPaintProperties()->effect();
+  const EffectPaintPropertyNode* effectNode = div.paintProperties()->effect();
   EXPECT_EQ(0.5f, effectNode->opacity());
   const PaintChunk& chunk = rootPaintController().paintChunks()[1];
   EXPECT_EQ(*div.layer(), chunk.id->client);
   EXPECT_EQ(effectNode, chunk.properties.effect.get());
 
   EXPECT_FALSE(div.layer()->isJustCreated());
-  // Client used by only paint chunks and non-cachaeable display items but not by any
-  // cacheable display items won't be marked as validly cached.
+  // Client used by only paint chunks and non-cachaeable display items but not
+  // by any cacheable display items won't be marked as validly cached.
   EXPECT_FALSE(rootPaintController().clientCacheIsValid(*div.layer()));
   EXPECT_FALSE(rootPaintController().clientCacheIsValid(div));
   EXPECT_TRUE(rootPaintController().clientCacheIsValid(subDiv));
@@ -200,7 +199,8 @@ TEST_F(PaintControllerPaintTestForSlimmingPaintV2, CompositingFold) {
       TestDisplayItem(*layoutView().layer(), DisplayItem::kSubsequence),
       TestDisplayItem(layoutView(), documentBackgroundType),
       TestDisplayItem(htmlLayer, DisplayItem::kSubsequence),
-      // The begin and end compositing display items have been folded into this one.
+      // The begin and end compositing display items have been folded into this
+      // one.
       TestDisplayItem(subDiv, backgroundType),
       TestDisplayItem(htmlLayer, DisplayItem::kEndSubsequence),
       TestDisplayItem(*layoutView().layer(), DisplayItem::kEndSubsequence),

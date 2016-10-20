@@ -17,8 +17,8 @@
 #include "ipc/ipc_message_utils.h"
 #include "ipc/ipc_sync_message.h"
 #include "ipc/message_filter.h"
-#include "services/shell/public/cpp/interface_provider.h"
-#include "services/shell/public/cpp/interface_registry.h"
+#include "services/service_manager/public/cpp/interface_provider.h"
+#include "services/service_manager/public/cpp/interface_registry.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/WebKit/public/web/WebScriptController.h"
 
@@ -227,22 +227,22 @@ void MockRenderThread::ReleaseCachedFonts() {
 
 #endif  // OS_WIN
 
-MojoShellConnection* MockRenderThread::GetMojoShellConnection() {
+ServiceManagerConnection* MockRenderThread::GetServiceManagerConnection() {
   return nullptr;
 }
 
-shell::InterfaceRegistry* MockRenderThread::GetInterfaceRegistry() {
+service_manager::InterfaceRegistry* MockRenderThread::GetInterfaceRegistry() {
   if (!interface_registry_)
-    interface_registry_.reset(new shell::InterfaceRegistry);
+    interface_registry_.reset(new service_manager::InterfaceRegistry);
   return interface_registry_.get();
 }
 
-shell::InterfaceProvider* MockRenderThread::GetRemoteInterfaces() {
+service_manager::InterfaceProvider* MockRenderThread::GetRemoteInterfaces() {
   if (!remote_interfaces_) {
-    shell::mojom::InterfaceProviderPtr remote_interface_provider;
+    service_manager::mojom::InterfaceProviderPtr remote_interface_provider;
     pending_remote_interface_provider_request_ =
         GetProxy(&remote_interface_provider);
-    remote_interfaces_.reset(new shell::InterfaceProvider);
+    remote_interfaces_.reset(new service_manager::InterfaceProvider);
     remote_interfaces_->Bind(std::move(remote_interface_provider));
   }
   return remote_interfaces_.get();
@@ -269,10 +269,8 @@ void MockRenderThread::OnCreateChildFrame(
 }
 
 bool MockRenderThread::OnControlMessageReceived(const IPC::Message& msg) {
-  base::ObserverListBase<RenderThreadObserver>::Iterator it(&observers_);
-  RenderThreadObserver* observer;
-  while ((observer = it.GetNext()) != NULL) {
-    if (observer->OnControlMessageReceived(msg))
+  for (auto& observer : observers_) {
+    if (observer.OnControlMessageReceived(msg))
       return true;
   }
   return OnMessageReceived(msg);

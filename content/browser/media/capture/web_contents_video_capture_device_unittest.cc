@@ -442,12 +442,17 @@ class StubClient : public media::VideoCaptureDevice::Client {
       return buffer_handle_->mapped_size();
     }
     void* data(int plane) override { return buffer_handle_->data(plane); }
-    ClientBuffer AsClientBuffer(int plane) override { return nullptr; }
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
     base::FileDescriptor AsPlatformFile() override {
       return base::FileDescriptor();
     }
 #endif
+    bool IsBackedByVideoFrame() const override {
+      return buffer_handle_->IsBackedByVideoFrame();
+    }
+    scoped_refptr<media::VideoFrame> GetVideoFrame() override {
+      return buffer_handle_->GetVideoFrame();
+    }
 
    private:
     ~AutoReleaseBuffer() override { pool_->RelinquishProducerReservation(id_); }
@@ -629,10 +634,9 @@ class MAYBE_WebContentsVideoCaptureDeviceTest : public testing::Test {
     web_contents_.reset(
         TestWebContents::Create(browser_context_.get(), site_instance.get()));
     RenderFrameHost* const main_frame = web_contents_->GetMainFrame();
-    device_.reset(WebContentsVideoCaptureDevice::Create(
-        base::StringPrintf("web-contents-media-stream://%d:%d",
-                           main_frame->GetProcess()->GetID(),
-                           main_frame->GetRoutingID())));
+    device_ = WebContentsVideoCaptureDevice::Create(base::StringPrintf(
+        "web-contents-media-stream://%d:%d", main_frame->GetProcess()->GetID(),
+        main_frame->GetRoutingID()));
 
     base::RunLoop().RunUntilIdle();
   }

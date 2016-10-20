@@ -24,13 +24,13 @@
 #include "ash/magnifier/partial_magnification_controller.h"
 #include "ash/root_window_controller.h"
 #include "ash/root_window_settings.h"
-#include "ash/screen_util.h"
 #include "ash/shell.h"
 #include "ash/wm/window_util.h"
 #include "base/command_line.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "grit/ash_strings.h"
 #include "ui/aura/client/capture_client.h"
 #include "ui/aura/client/focus_client.h"
 #include "ui/aura/client/screen_position_client.h"
@@ -40,6 +40,7 @@
 #include "ui/aura/window_tracker.h"
 #include "ui/aura/window_tree_host.h"
 #include "ui/base/ime/input_method_factory.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "ui/compositor/compositor.h"
 #include "ui/display/display.h"
 #include "ui/display/manager/display_layout.h"
@@ -252,7 +253,8 @@ void WindowTreeHostManager::Start() {
 }
 
 void WindowTreeHostManager::Shutdown() {
-  FOR_EACH_OBSERVER(Observer, observers_, OnWindowTreeHostManagerShutdown());
+  for (auto& observer : observers_)
+    observer.OnWindowTreeHostManagerShutdown();
 
   // Unset the display manager's delegate here because
   // DisplayManager outlives WindowTreeHostManager.
@@ -308,7 +310,8 @@ void WindowTreeHostManager::InitHosts() {
     }
   }
 
-  FOR_EACH_OBSERVER(Observer, observers_, OnDisplaysInitialized());
+  for (auto& observer : observers_)
+    observer.OnDisplaysInitialized();
 }
 
 void WindowTreeHostManager::AddObserver(Observer* observer) {
@@ -331,15 +334,13 @@ aura::Window* WindowTreeHostManager::GetPrimaryRootWindow() {
 
 aura::Window* WindowTreeHostManager::GetRootWindowForDisplayId(int64_t id) {
   AshWindowTreeHost* host = GetAshWindowTreeHostForDisplayId(id);
-  CHECK(host);
-  return GetWindow(host);
+  return host ? GetWindow(host) : nullptr;
 }
 
 AshWindowTreeHost* WindowTreeHostManager::GetAshWindowTreeHostForDisplayId(
     int64_t display_id) {
-  CHECK_EQ(1u, window_tree_hosts_.count(display_id)) << "display id = "
-                                                     << display_id;
-  return window_tree_hosts_[display_id];
+  const auto host = window_tree_hosts_.find(display_id);
+  return host == window_tree_hosts_.end() ? nullptr : host->second;
 }
 
 void WindowTreeHostManager::CloseChildWindows() {
@@ -748,7 +749,8 @@ void WindowTreeHostManager::CloseMirroringDisplayIfNotNecessary() {
 }
 
 void WindowTreeHostManager::PreDisplayConfigurationChange(bool clear_focus) {
-  FOR_EACH_OBSERVER(Observer, observers_, OnDisplayConfigurationChanging());
+  for (auto& observer : observers_)
+    observer.OnDisplayConfigurationChanging();
   focus_activation_store_->Store(clear_focus);
   display::Screen* screen = display::Screen::GetScreen();
   gfx::Point point_in_screen = screen->GetCursorScreenPoint();
@@ -793,7 +795,8 @@ void WindowTreeHostManager::PostDisplayConfigurationChange() {
         ->SetOutputIsSecure(output_is_secure);
   }
 
-  FOR_EACH_OBSERVER(Observer, observers_, OnDisplayConfigurationChanged());
+  for (auto& observer : observers_)
+    observer.OnDisplayConfigurationChanged();
   UpdateMouseLocationAfterDisplayChange();
 }
 
@@ -802,6 +805,14 @@ ui::DisplayConfigurator* WindowTreeHostManager::display_configurator() {
   return Shell::GetInstance()->display_configurator();
 }
 #endif
+
+std::string WindowTreeHostManager::GetInternalDisplayNameString() {
+  return l10n_util::GetStringUTF8(IDS_ASH_INTERNAL_DISPLAY_NAME);
+}
+
+std::string WindowTreeHostManager::GetUnknownDisplayNameString() {
+  return l10n_util::GetStringUTF8(IDS_ASH_STATUS_TRAY_UNKNOWN_DISPLAY_NAME);
+}
 
 ui::EventDispatchDetails WindowTreeHostManager::DispatchKeyEventPostIME(
     ui::KeyEvent* event) {

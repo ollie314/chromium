@@ -3,8 +3,8 @@
 // found in the LICENSE file.
 
 #include "ash/common/session/session_state_delegate.h"
-#include "ash/common/shell_window_ids.h"
 #include "ash/common/wm_shell.h"
+#include "ash/public/cpp/shell_window_ids.h"
 #include "ash/shell.h"
 #include "ash/shell/example_factory.h"
 #include "base/strings/utf_string_conversions.h"
@@ -92,7 +92,6 @@ void CreateLockScreen() {
   params.parent = Shell::GetContainer(Shell::GetPrimaryRootWindow(),
                                       kShellWindowId_LockScreenContainer);
   widget->Init(params);
-  widget->SetContentsView(lock_view);
   widget->Show();
   widget->GetNativeView()->SetName("LockView");
   widget->GetNativeView()->Focus();

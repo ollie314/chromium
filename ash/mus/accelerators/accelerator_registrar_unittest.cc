@@ -10,7 +10,7 @@
 #include "base/macros.h"
 #include "base/run_loop.h"
 #include "mojo/public/cpp/bindings/binding.h"
-#include "services/shell/public/cpp/service_test.h"
+#include "services/service_manager/public/cpp/service_test.h"
 #include "services/ui/common/event_matcher_util.h"
 #include "services/ui/public/cpp/window.h"
 #include "services/ui/public/interfaces/accelerator_registrar.mojom.h"
@@ -67,14 +67,15 @@ class TestAcceleratorHandler : public AcceleratorHandler {
   DISALLOW_COPY_AND_ASSIGN(TestAcceleratorHandler);
 };
 
-class AcceleratorRegistrarTest : public shell::test::ServiceTest {
+class AcceleratorRegistrarTest : public service_manager::test::ServiceTest {
  public:
-  AcceleratorRegistrarTest() : shell::test::ServiceTest("exe:mash_unittests") {}
+  AcceleratorRegistrarTest()
+      : service_manager::test::ServiceTest("exe:mash_unittests") {}
   ~AcceleratorRegistrarTest() override {}
 
  protected:
   void ConnectToRegistrar(AcceleratorRegistrarPtr* registrar) {
-    connector()->ConnectToInterface("mojo:ash", registrar);
+    connector()->ConnectToInterface("service:ash", registrar);
   }
 
  private:

@@ -101,6 +101,23 @@ class PLATFORM_EXPORT Font {
                          float deviceScaleFactor,
                          const SkPaint&) const;
 
+  struct TextIntercept {
+    float m_begin, m_end;
+  };
+
+  // Compute the text intercepts along the axis of the advance and write them
+  // into the specified Vector of TextIntercepts. The number of those is zero or
+  // a multiple of two, and is at most the number of glyphs * 2 in the TextRun
+  // part of TextRunPaintInfo. Specify bounds for the upper and lower extend of
+  // a line crossing through the text, parallel to the baseline.
+  // TODO(drott): crbug.com/655154 Fix this for
+  // upright in vertical.
+  void getTextIntercepts(const TextRunPaintInfo&,
+                         float deviceScaleFactor,
+                         const SkPaint&,
+                         const std::tuple<float, float>& bounds,
+                         Vector<TextIntercept>&) const;
+
   // Glyph bounds will be the minimum rect containing all glyph strokes, in
   // coordinates using (<text run x position>, <baseline position>) as the
   // origin.
@@ -123,22 +140,23 @@ class PLATFORM_EXPORT Font {
   Vector<CharacterRange> individualCharacterRanges(const TextRun&) const;
 
   // Metrics that we query the FontFallbackList for.
-  const FontMetrics& getFontMetrics() const {
-    RELEASE_ASSERT(primaryFont());
-    return primaryFont()->getFontMetrics();
-  }
   float spaceWidth() const {
-    return primaryFont()->spaceWidth() + getFontDescription().letterSpacing();
+    DCHECK(primaryFont());
+    return (primaryFont() ? primaryFont()->spaceWidth() : 0) +
+           getFontDescription().letterSpacing();
   }
-  float tabWidth(const SimpleFontData&, const TabSize&, float position) const;
+  float tabWidth(const SimpleFontData*, const TabSize&, float position) const;
   float tabWidth(const TabSize& tabSize, float position) const {
-    return tabWidth(*primaryFont(), tabSize, position);
+    return tabWidth(primaryFont(), tabSize, position);
   }
 
   int emphasisMarkAscent(const AtomicString&) const;
   int emphasisMarkDescent(const AtomicString&) const;
   int emphasisMarkHeight(const AtomicString&) const;
 
+  // This may fail and return a nullptr in case the last resort font cannot be
+  // loaded. This *should* not happen but in reality it does ever now and then
+  // when, for whatever reason, the last resort font cannot be loaded.
   const SimpleFontData* primaryFont() const;
   const FontData* fontDataAt(unsigned) const;
 
@@ -244,10 +262,12 @@ inline FontSelector* Font::getFontSelector() const {
   return m_fontFallbackList ? m_fontFallbackList->getFontSelector() : 0;
 }
 
-inline float Font::tabWidth(const SimpleFontData& fontData,
+inline float Font::tabWidth(const SimpleFontData* fontData,
                             const TabSize& tabSize,
                             float position) const {
-  float baseTabWidth = tabSize.getPixelSize(fontData.spaceWidth());
+  if (!fontData)
+    return getFontDescription().letterSpacing();
+  float baseTabWidth = tabSize.getPixelSize(fontData->spaceWidth());
   if (!baseTabWidth)
     return getFontDescription().letterSpacing();
   float distanceToTabStop = baseTabWidth - fmodf(position, baseTabWidth);
@@ -255,7 +275,7 @@ inline float Font::tabWidth(const SimpleFontData& fontData,
   // Let the minimum width be the half of the space width so that it's always
   // recognizable.  if the distance to the next tab stop is less than that,
   // advance an additional tab stop.
-  if (distanceToTabStop < fontData.spaceWidth() / 2)
+  if (distanceToTabStop < fontData->spaceWidth() / 2)
     distanceToTabStop += baseTabWidth;
 
   return distanceToTabStop;

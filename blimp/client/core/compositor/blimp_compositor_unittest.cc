@@ -25,19 +25,12 @@ class MockBlimpCompositorClient : public BlimpCompositorClient {
   MockBlimpCompositorClient() = default;
   ~MockBlimpCompositorClient() override = default;
 
-  void SendWebGestureEvent(
-      int render_widget_id,
-      const blink::WebGestureEvent& gesture_event) override {
-    MockableSendWebGestureEvent(render_widget_id);
-  }
   void SendCompositorMessage(
-      int render_widget_id,
       const cc::proto::CompositorMessage& message) override {
-    MockableSendCompositorMessage(render_widget_id);
+    MockableSendCompositorMessage();
   }
 
-  MOCK_METHOD1(MockableSendWebGestureEvent, void(int));
-  MOCK_METHOD1(MockableSendCompositorMessage, void(int));
+  MOCK_METHOD0(MockableSendCompositorMessage, void());
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockBlimpCompositorClient);
@@ -46,17 +39,12 @@ class MockBlimpCompositorClient : public BlimpCompositorClient {
 class BlimpCompositorForTesting : public BlimpCompositor {
  public:
   BlimpCompositorForTesting(
-      int render_widget_id,
       BlimpCompositorDependencies* compositor_dependencies,
       BlimpCompositorClient* client)
-      : BlimpCompositor(render_widget_id, compositor_dependencies, client) {}
+      : BlimpCompositor(compositor_dependencies, client) {}
 
   void SendProto(const cc::proto::CompositorMessage& proto) {
     SendCompositorProto(proto);
-  }
-
-  void SendGestureEvent(const blink::WebGestureEvent& gesture_event) {
-    SendWebGestureEvent(gesture_event);
   }
 
   cc::LayerTreeHost* host() const { return host_.get(); }
@@ -64,14 +52,14 @@ class BlimpCompositorForTesting : public BlimpCompositor {
 
 class BlimpCompositorTest : public testing::Test {
  public:
-  BlimpCompositorTest() : render_widget_id_(1), loop_(new base::MessageLoop) {}
+  BlimpCompositorTest() : loop_(new base::MessageLoop) {}
 
   void SetUp() override {
     compositor_dependencies_ = base::MakeUnique<BlimpCompositorDependencies>(
         base::MakeUnique<MockCompositorDependencies>());
 
     compositor_ = base::MakeUnique<BlimpCompositorForTesting>(
-        render_widget_id_, compositor_dependencies_.get(), &compositor_client_);
+        compositor_dependencies_.get(), &compositor_client_);
   }
 
   void TearDown() override {
@@ -81,7 +69,6 @@ class BlimpCompositorTest : public testing::Test {
 
   ~BlimpCompositorTest() override {}
 
-  int render_widget_id_;
   std::unique_ptr<base::MessageLoop> loop_;
   MockBlimpCompositorClient compositor_client_;
   std::unique_ptr<BlimpCompositorDependencies> compositor_dependencies_;
@@ -101,15 +88,9 @@ TEST_F(BlimpCompositorTest, ToggleVisibilityWithHost) {
 }
 
 TEST_F(BlimpCompositorTest, MessagesHaveCorrectId) {
-  EXPECT_CALL(compositor_client_,
-              MockableSendCompositorMessage(render_widget_id_))
-      .Times(1);
-  EXPECT_CALL(compositor_client_,
-              MockableSendWebGestureEvent(render_widget_id_))
-      .Times(1);
+  EXPECT_CALL(compositor_client_, MockableSendCompositorMessage()).Times(1);
 
   compositor_->SendProto(cc::proto::CompositorMessage());
-  compositor_->SendGestureEvent(blink::WebGestureEvent());
 }
 
 }  // namespace client

@@ -255,7 +255,6 @@ RenderViewHostImpl::RenderViewHostImpl(
       delegate_(delegate),
       instance_(static_cast<SiteInstanceImpl*>(instance)),
       enabled_bindings_(0),
-      page_id_(-1),
       is_active_(!swapped_out),
       is_swapped_out_(swapped_out),
       main_frame_routing_id_(main_frame_routing_id),
@@ -272,7 +271,6 @@ RenderViewHostImpl::RenderViewHostImpl(
   GetWidget()->set_owner_delegate(this);
 
   GetProcess()->AddObserver(this);
-  GetProcess()->EnableSendQueue();
 
   if (ResourceDispatcherHostImpl::Get()) {
     BrowserThread::PostTask(
@@ -307,7 +305,6 @@ SiteInstanceImpl* RenderViewHostImpl::GetSiteInstance() const {
 bool RenderViewHostImpl::CreateRenderView(
     int opener_frame_route_id,
     int proxy_route_id,
-    int32_t max_page_id,
     const FrameReplicationState& replicated_frame_state,
     bool window_was_created_with_opener) {
   TRACE_EVENT0("renderer_host,navigation",
@@ -335,12 +332,6 @@ bool RenderViewHostImpl::CreateRenderView(
 
   GetWidget()->set_renderer_initialized(true);
 
-  // Ensure the RenderView starts with a next_page_id larger than any existing
-  // page ID it might be asked to render.
-  int32_t next_page_id = 1;
-  if (max_page_id > -1)
-    next_page_id = max_page_id + 1;
-
   mojom::CreateViewParamsPtr params = mojom::CreateViewParams::New();
   params->renderer_preferences =
       delegate_->GetRendererPrefs(GetProcess()->GetBrowserContext());
@@ -367,7 +358,6 @@ bool RenderViewHostImpl::CreateRenderView(
   params->hidden = GetWidget()->is_hidden();
   params->never_visible = delegate_->IsNeverVisible();
   params->window_was_created_with_opener = window_was_created_with_opener;
-  params->next_page_id = next_page_id;
   params->enable_auto_resize = GetWidget()->auto_resize_enabled();
   params->min_size = GetWidget()->min_size_for_auto_resize();
   params->max_size = GetWidget()->max_size_for_auto_resize();
@@ -377,8 +367,7 @@ bool RenderViewHostImpl::CreateRenderView(
   GetWidget()->GetResizeParams(&params->initial_size);
   GetWidget()->SetInitialRenderSizeParams(params->initial_size);
 
-  RenderProcessHostImpl::GetRendererInterface(GetProcess())->CreateView(
-      std::move(params));
+  GetProcess()->GetRendererInterface()->CreateView(std::move(params));
 
   // If the RWHV has not yet been set, the surface ID namespace will get
   // passed down by the call to SetView().
@@ -475,8 +464,7 @@ WebPreferences RenderViewHostImpl::ComputeWebkitPrefs() {
   prefs.inert_visual_viewport =
       command_line.HasSwitch(switches::kInertVisualViewport);
 
-  prefs.pinch_overlay_scrollbar_thickness = 10;
-  prefs.use_solid_color_scrollbars = ui::IsOverlayScrollbarEnabled();
+  prefs.use_solid_color_scrollbars = false;
 
   prefs.history_entry_requires_user_gesture =
       command_line.HasSwitch(switches::kHistoryEntryRequiresUserGesture);
@@ -494,6 +482,8 @@ WebPreferences RenderViewHostImpl::ComputeWebkitPrefs() {
       base::FeatureList::IsEnabled(features::kAutoplayMutedVideos);
 
   prefs.progress_bar_completion = GetProgressBarCompletionPolicy();
+
+  prefs.use_solid_color_scrollbars = true;
 #endif
 
   // Handle autoplay gesture override experiment.
@@ -583,12 +573,18 @@ void RenderViewHostImpl::ClosePage() {
   is_waiting_for_close_ack_ = true;
   GetWidget()->StartHangMonitorTimeout(
       TimeDelta::FromMilliseconds(kUnloadTimeoutMS),
-      RenderWidgetHostDelegate::RENDERER_UNRESPONSIVE_CLOSE_PAGE);
+      blink::WebInputEvent::Undefined,
+      RendererUnresponsiveType::RENDERER_UNRESPONSIVE_CLOSE_PAGE);
 
-  if (IsRenderViewLive()) {
+  bool is_javascript_dialog_showing = delegate_->IsJavaScriptDialogShowing();
+
+  // If there is a JavaScript dialog up, don't bother sending the renderer the
+  // close event because it is known unresponsive, waiting for the reply from
+  // the dialog.
+  if (IsRenderViewLive() && !is_javascript_dialog_showing) {
     // Since we are sending an IPC message to the renderer, increase the event
     // count to prevent the hang monitor timeout from being stopped by input
-    // event acknowledgements.
+    // event acknowledgments.
     GetWidget()->increment_in_flight_event_count();
 
     // TODO(creis): Should this be moved to Shutdown?  It may not be called for
@@ -600,7 +596,7 @@ void RenderViewHostImpl::ClosePage() {
 
     Send(new ViewMsg_ClosePage(GetRoutingID()));
   } else {
-    // This RenderViewHost doesn't have a live renderer, so just skip the unload
+    // This RenderViewHost doesn't have a live renderer, so just skip the close
     // event and close the page.
     ClosePageIgnoringUnloadEvents();
   }
@@ -937,14 +933,7 @@ void RenderViewHostImpl::OnRenderProcessGone(int status, int exit_code) {
   // decoupled.
 }
 
-void RenderViewHostImpl::OnUpdateState(int32_t page_id,
-                                       const PageState& state) {
-  // If the following DCHECK fails, you have encountered a tricky edge-case that
-  // has evaded reproduction for a very long time. Please report what you were
-  // doing on http://crbug.com/407376, whether or not you can reproduce the
-  // failure.
-  DCHECK_EQ(page_id, page_id_);
-
+void RenderViewHostImpl::OnUpdateState(const PageState& state) {
   // Without this check, the renderer can trick the browser into using
   // filenames it can't access in a future session restore.
   auto* policy = ChildProcessSecurityPolicyImpl::GetInstance();
@@ -955,7 +944,7 @@ void RenderViewHostImpl::OnUpdateState(int32_t page_id,
     return;
   }
 
-  delegate_->UpdateState(this, page_id, state);
+  delegate_->UpdateState(this, state);
 }
 
 void RenderViewHostImpl::OnUpdateTargetURL(const GURL& url) {

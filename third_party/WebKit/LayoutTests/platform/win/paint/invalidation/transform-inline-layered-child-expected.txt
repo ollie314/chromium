@@ -1,7 +1,5 @@
 {
-  "name": "Content Root Layer",
-  "bounds": [800, 600],
-  "children": [
+  "layers": [
     {
       "name": "LayoutView #document",
       "bounds": [800, 600],
@@ -31,11 +29,6 @@
         {
           "object": "LayoutText #text",
           "rect": [300, 301, 80, 160],
-          "reason": "subtree"
-        },
-        {
-          "object": "LayoutText #text",
-          "rect": [147, 85, 1, 1],
           "reason": "subtree"
         }
       ]

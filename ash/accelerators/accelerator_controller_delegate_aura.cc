@@ -12,11 +12,9 @@
 #include "ash/accelerators/accelerator_commands_aura.h"
 #include "ash/common/accelerators/debug_commands.h"
 #include "ash/common/accessibility_types.h"
-#include "ash/common/gpu_support.h"
 #include "ash/common/session/session_state_delegate.h"
 #include "ash/common/shelf/wm_shelf.h"
 #include "ash/common/shell_delegate.h"
-#include "ash/common/shell_window_ids.h"
 #include "ash/common/system/system_notifier.h"
 #include "ash/common/system/tray/system_tray.h"
 #include "ash/common/wm/maximize_mode/maximize_mode_controller.h"
@@ -28,10 +26,10 @@
 #include "ash/display/window_tree_host_manager.h"
 #include "ash/host/ash_window_tree_host.h"
 #include "ash/magnifier/magnification_controller.h"
+#include "ash/public/cpp/shell_window_ids.h"
 #include "ash/root_window_controller.h"
 #include "ash/rotator/screen_rotation_animator.h"
 #include "ash/rotator/window_rotation.h"
-#include "ash/screen_util.h"
 #include "ash/screenshot_delegate.h"
 #include "ash/shell.h"
 #include "ash/touch/touch_hud_debug.h"
@@ -236,8 +234,13 @@ bool CanHandleUnpin() {
 #if defined(OS_CHROMEOS)
 void HandleSwapPrimaryDisplay() {
   base::RecordAction(UserMetricsAction("Accel_Swap_Primary_Display"));
+
+  // TODO(rjkroege): This is not correct behaviour on devices with more than
+  // two screens. Behave the same as mirroring: fail and notify if there are
+  // three or more screens.
   Shell::GetInstance()->display_configuration_controller()->SetPrimaryDisplayId(
-      ScreenUtil::GetSecondaryDisplay().id(), true /* user_action */);
+      Shell::GetInstance()->display_manager()->GetSecondaryDisplay().id(),
+      true /* user_action */);
 }
 
 void HandleToggleMirrorMode() {
@@ -302,7 +305,6 @@ bool AcceleratorControllerDelegateAura::HandlesAction(
 #if defined(OS_CHROMEOS)
     case DEV_ADD_REMOVE_DISPLAY:
     case DEV_TOGGLE_UNIFIED_DESKTOP:
-    case DISABLE_GPU_WATCHDOG:
     case LOCK_PRESSED:
     case LOCK_RELEASED:
     case POWER_PRESSED:
@@ -355,7 +357,6 @@ bool AcceleratorControllerDelegateAura::CanPerformAction(
 #if defined(OS_CHROMEOS)
     case DEV_ADD_REMOVE_DISPLAY:
     case DEV_TOGGLE_UNIFIED_DESKTOP:
-    case TOGGLE_MIRROR_MODE:
       return debug::DeveloperAcceleratorsEnabled();
 
     case SWAP_PRIMARY_DISPLAY:
@@ -365,11 +366,11 @@ bool AcceleratorControllerDelegateAura::CanPerformAction(
       return CanHandleTouchHud();
 
     // Following are always enabled.
-    case DISABLE_GPU_WATCHDOG:
     case LOCK_PRESSED:
     case LOCK_RELEASED:
     case POWER_PRESSED:
     case POWER_RELEASED:
+    case TOGGLE_MIRROR_MODE:
     case TOUCH_HUD_PROJECTION_TOGGLE:
       return true;
 #endif
@@ -443,9 +444,6 @@ void AcceleratorControllerDelegateAura::PerformAction(
     case DEV_TOGGLE_UNIFIED_DESKTOP:
       Shell::GetInstance()->display_manager()->SetUnifiedDesktopEnabled(
           !Shell::GetInstance()->display_manager()->unified_desktop_enabled());
-      break;
-    case DISABLE_GPU_WATCHDOG:
-      Shell::GetInstance()->gpu_support()->DisableGpuWatchdog();
       break;
     case LOCK_PRESSED:
     case LOCK_RELEASED:

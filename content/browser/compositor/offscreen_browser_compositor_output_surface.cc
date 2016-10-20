@@ -8,9 +8,8 @@
 
 #include "base/logging.h"
 #include "build/build_config.h"
-#include "cc/output/compositor_frame.h"
-#include "cc/output/gl_frame_data.h"
 #include "cc/output/output_surface_client.h"
+#include "cc/output/output_surface_frame.h"
 #include "cc/resources/resource_provider.h"
 #include "components/display_compositor/compositor_overlay_candidate_validator.h"
 #include "content/browser/compositor/reflector_impl.h"
@@ -22,9 +21,6 @@
 #include "third_party/khronos/GLES2/gl2.h"
 #include "third_party/khronos/GLES2/gl2ext.h"
 
-using cc::CompositorFrame;
-using cc::GLFrameData;
-using cc::ResourceProvider;
 using gpu::gles2::GLES2Interface;
 
 namespace content {
@@ -61,8 +57,8 @@ void OffscreenBrowserCompositorOutputSurface::EnsureBackbuffer() {
 
     const int max_texture_size =
         context_provider_->ContextCapabilities().max_texture_size;
-    int texture_width = std::min(max_texture_size, surface_size_.width());
-    int texture_height = std::min(max_texture_size, surface_size_.height());
+    int texture_width = std::min(max_texture_size, reshape_size_.width());
+    int texture_height = std::min(max_texture_size, reshape_size_.height());
 
     gl->BindTexture(GL_TEXTURE_2D, reflector_texture_->texture_id());
     gl->TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -111,11 +107,7 @@ void OffscreenBrowserCompositorOutputSurface::Reshape(
     float scale_factor,
     const gfx::ColorSpace& color_space,
     bool alpha) {
-  if (size == surface_size_)
-    return;
-
-  surface_size_ = size;
-  device_scale_factor_ = scale_factor;
+  reshape_size_ = size;
   DiscardBackbuffer();
   EnsureBackbuffer();
 }
@@ -134,13 +126,16 @@ void OffscreenBrowserCompositorOutputSurface::BindFramebuffer() {
 }
 
 void OffscreenBrowserCompositorOutputSurface::SwapBuffers(
-    cc::CompositorFrame frame) {
+    cc::OutputSurfaceFrame frame) {
+  gfx::Size surface_size = frame.size;
+  DCHECK(surface_size == reshape_size_);
+  gfx::Rect swap_rect = frame.sub_buffer_rect;
+
   if (reflector_) {
-    if (frame.gl_frame_data->sub_buffer_rect ==
-        gfx::Rect(frame.gl_frame_data->size))
-      reflector_->OnSourceSwapBuffers();
+    if (swap_rect == gfx::Rect(surface_size))
+      reflector_->OnSourceSwapBuffers(surface_size);
     else
-      reflector_->OnSourcePostSubBuffer(frame.gl_frame_data->sub_buffer_rect);
+      reflector_->OnSourcePostSubBuffer(swap_rect, surface_size);
   }
 
   // TODO(oshima): sync with the reflector's SwapBuffersComplete
@@ -186,7 +181,7 @@ void OffscreenBrowserCompositorOutputSurface::OnReflectorChanged() {
 }
 
 void OffscreenBrowserCompositorOutputSurface::OnSwapBuffersComplete() {
-  client_->DidSwapBuffersComplete();
+  client_->DidReceiveSwapBuffersAck();
 }
 
 }  // namespace content

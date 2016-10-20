@@ -33,6 +33,8 @@
 #include "core/editing/FrameSelection.h"
 #include "core/editing/PlainTextRange.h"
 #include "platform/heap/Handle.h"
+#include "public/platform/WebTextInputInfo.h"
+#include "public/platform/WebTextInputType.h"
 #include "wtf/Vector.h"
 
 namespace blink {
@@ -94,6 +96,9 @@ class CORE_EXPORT InputMethodController final
   PlainTextRange createRangeForSelection(int start,
                                          int end,
                                          size_t textLength) const;
+  void deleteSurroundingText(int before, int after);
+  WebTextInputInfo textInputInfo() const;
+  WebTextInputType textInputType() const;
 
  private:
   Member<LocalFrame> m_frame;
@@ -127,6 +132,17 @@ class CORE_EXPORT InputMethodController final
 
   // Returns true if moved caret successfully.
   bool moveCaret(int newCaretPosition);
+
+  PlainTextRange createSelectionRangeForSetComposition(int selectionStart,
+                                                       int selectionEnd,
+                                                       size_t textLength) const;
+  void setCompositionWithIncrementalText(const String&,
+                                         const Vector<CompositionUnderline>&,
+                                         int selectionStart,
+                                         int selectionEnd);
+  int textInputFlags() const;
+  // TODO(dtapuska): Change this from a String to a WebTextInputMode.
+  String inputModeOfFocusedElement() const;
 };
 
 }  // namespace blink

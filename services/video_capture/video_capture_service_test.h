@@ -5,7 +5,7 @@
 #ifndef SERVICES_VIDEO_CAPTURE_VIDEO_CAPTURE_SERVICE_TEST_H_
 #define SERVICES_VIDEO_CAPTURE_VIDEO_CAPTURE_SERVICE_TEST_H_
 
-#include "services/shell/public/cpp/service_test.h"
+#include "services/service_manager/public/cpp/service_test.h"
 #include "services/video_capture/mock_device_descriptor_receiver.h"
 #include "services/video_capture/public/interfaces/video_capture_service.mojom.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -13,7 +13,7 @@
 namespace video_capture {
 
 // Basic test fixture that sets up a connection to the fake device factory.
-class VideoCaptureServiceTest : public shell::test::ServiceTest {
+class VideoCaptureServiceTest : public service_manager::test::ServiceTest {
  public:
   VideoCaptureServiceTest();
   ~VideoCaptureServiceTest() override;

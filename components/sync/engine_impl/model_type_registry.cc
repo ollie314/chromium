@@ -13,9 +13,9 @@
 #include "base/observer_list.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "components/sync/base/cryptographer.h"
-#include "components/sync/core/activation_context.h"
-#include "components/sync/core/model_type_processor.h"
+#include "components/sync/engine/activation_context.h"
 #include "components/sync/engine/commit_queue.h"
+#include "components/sync/engine/model_type_processor.h"
 #include "components/sync/engine_impl/cycle/directory_type_debug_info_emitter.h"
 #include "components/sync/engine_impl/directory_commit_contributor.h"
 #include "components/sync/engine_impl/directory_update_handler.h"
@@ -100,7 +100,7 @@ void ModelTypeRegistry::SetEnabledDirectoryTypes(
     scoped_refptr<ModelSafeWorker> worker = worker_it->second;
 
     // DebugInfoEmitters are never deleted.  Use existing one if we have it.
-    DirectoryTypeDebugInfoEmitter* emitter = NULL;
+    DirectoryTypeDebugInfoEmitter* emitter = nullptr;
     DirectoryTypeDebugInfoEmitterMap::iterator it =
         directory_type_debug_info_emitter_map_.find(type);
     if (it != directory_type_debug_info_emitter_map_.end()) {
@@ -146,7 +146,7 @@ void ModelTypeRegistry::ConnectType(
 
   std::unique_ptr<Cryptographer> cryptographer_copy;
   if (encrypted_types_.Has(type))
-    cryptographer_copy.reset(new Cryptographer(*cryptographer_));
+    cryptographer_copy = base::MakeUnique<Cryptographer>(*cryptographer_);
 
   std::unique_ptr<ModelTypeWorker> worker(new ModelTypeWorker(
       type, activation_context->model_type_state, std::move(cryptographer_copy),
@@ -276,7 +276,7 @@ void ModelTypeRegistry::OnEncryptionComplete() {}
 
 void ModelTypeRegistry::OnCryptographerStateChanged(
     Cryptographer* cryptographer) {
-  cryptographer_.reset(new Cryptographer(*cryptographer));
+  cryptographer_ = base::MakeUnique<Cryptographer>(*cryptographer);
   OnEncryptionStateChanged();
 }
 

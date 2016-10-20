@@ -14,7 +14,6 @@
 #include "base/macros.h"
 #include "build/build_config.h"
 #include "cc/surfaces/frame_sink_id.h"
-#include "cc/surfaces/surface_id_allocator.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_view_base.h"
 #include "content/public/common/web_preferences.h"
@@ -49,7 +48,6 @@ struct TextInputState;
 // Utility function to initialize FrameHostMsg_DidCommitProvisionalLoad_Params
 // with given parameters.
 void InitNavigateParams(FrameHostMsg_DidCommitProvisionalLoad_Params* params,
-                        int page_id,
                         int nav_entry_id,
                         bool did_create_new_entry,
                         const GURL& url,
@@ -133,7 +131,6 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase {
   cc::FrameSinkId frame_sink_id_;
 
  private:
-  std::unique_ptr<cc::SurfaceIdAllocator> surface_id_allocator_;
   bool is_showing_;
   bool is_occluded_;
   bool did_swap_compositor_frame_;
@@ -199,8 +196,7 @@ class TestRenderViewHost
   void SimulateWasShown() override;
   WebPreferences TestComputeWebkitPrefs() override;
 
-  void TestOnUpdateStateWithFile(
-      int page_id, const base::FilePath& file_path);
+  void TestOnUpdateStateWithFile(const base::FilePath& file_path);
 
   void TestOnStartDragging(const DropData& drop_data);
 
@@ -218,22 +214,19 @@ class TestRenderViewHost
   bool CreateTestRenderView(const base::string16& frame_name,
                             int opener_frame_route_id,
                             int proxy_route_id,
-                            int32_t max_page_id,
                             bool window_was_created_with_opener) override;
 
   // RenderViewHost overrides --------------------------------------------------
 
   bool CreateRenderView(int opener_frame_route_id,
                         int proxy_route_id,
-                        int32_t max_page_id,
                         const FrameReplicationState& replicated_frame_state,
                         bool window_was_created_with_opener) override;
 
  private:
   FRIEND_TEST_ALL_PREFIXES(RenderViewHostTest, FilterNavigate);
 
-  void SendNavigateWithTransitionAndResponseCode(int page_id,
-                                                 const GURL& url,
+  void SendNavigateWithTransitionAndResponseCode(const GURL& url,
                                                  ui::PageTransition transition,
                                                  int response_code);
 
@@ -241,7 +234,6 @@ class TestRenderViewHost
   // Sets the rest of the parameters in the message to the "typical" values.
   // This is a helper function for simulating the most common types of loads.
   void SendNavigateWithParameters(
-      int page_id,
       const GURL& url,
       ui::PageTransition transition,
       const GURL& original_request_url,

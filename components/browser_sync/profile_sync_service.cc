@@ -37,17 +37,13 @@
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/signin/core/browser/signin_metrics.h"
 #include "components/strings/grit/components_strings.h"
-#include "components/sync/api/model_type_store.h"
-#include "components/sync/api/sync_error.h"
+#include "components/sync/base/bind_to_task_runner.h"
 #include "components/sync/base/cryptographer.h"
 #include "components/sync/base/passphrase_type.h"
+#include "components/sync/base/pref_names.h"
+#include "components/sync/base/report_unrecoverable_error.h"
 #include "components/sync/base/stop_source.h"
-#include "components/sync/base/sync_db_util.h"
-#include "components/sync/core/configure_reason.h"
-#include "components/sync/core/http_bridge_network_resources.h"
-#include "components/sync/core/network_resources.h"
-#include "components/sync/core/shared_model_type_processor.h"
-#include "components/sync/core/sync_encryption_handler.h"
+#include "components/sync/base/system_encryptor.h"
 #include "components/sync/device_info/device_info.h"
 #include "components/sync/device_info/device_info_service.h"
 #include "components/sync/device_info/device_info_sync_service.h"
@@ -55,23 +51,28 @@
 #include "components/sync/driver/backend_migrator.h"
 #include "components/sync/driver/change_processor.h"
 #include "components/sync/driver/directory_data_type_controller.h"
-#include "components/sync/driver/glue/chrome_report_unrecoverable_error.h"
 #include "components/sync/driver/glue/sync_backend_host_impl.h"
-#include "components/sync/driver/pref_names.h"
 #include "components/sync/driver/signin_manager_wrapper.h"
 #include "components/sync/driver/sync_api_component_factory.h"
 #include "components/sync/driver/sync_driver_switches.h"
 #include "components/sync/driver/sync_error_controller.h"
 #include "components/sync/driver/sync_type_preference_provider.h"
 #include "components/sync/driver/sync_util.h"
-#include "components/sync/driver/system_encryptor.h"
 #include "components/sync/driver/user_selectable_sync_type.h"
+#include "components/sync/engine/configure_reason.h"
 #include "components/sync/engine/cycle/model_neutral_state.h"
 #include "components/sync/engine/cycle/type_debug_info_observer.h"
+#include "components/sync/engine/net/http_bridge_network_resources.h"
+#include "components/sync/engine/net/network_resources.h"
+#include "components/sync/engine/sync_encryption_handler.h"
 #include "components/sync/engine/sync_string_conversions.h"
 #include "components/sync/js/js_event_details.h"
+#include "components/sync/model/model_type_change_processor.h"
+#include "components/sync/model/model_type_store.h"
+#include "components/sync/model/sync_error.h"
 #include "components/sync/protocol/sync.pb.h"
 #include "components/sync/syncable/directory.h"
+#include "components/sync/syncable/sync_db_util.h"
 #include "components/sync/syncable/syncable_read_transaction.h"
 #include "components/sync_sessions/favicon_cache.h"
 #include "components/sync_sessions/session_data_type_controller.h"
@@ -85,7 +86,7 @@
 #include "ui/base/l10n/time_format.h"
 
 #if defined(OS_ANDROID)
-#include "components/sync/core/read_transaction.h"
+#include "components/sync/syncable/read_transaction.h"
 #endif
 
 using sync_sessions::SessionsSyncManager;
@@ -102,10 +103,10 @@ using syncer::JsEventDetails;
 using syncer::JsEventHandler;
 using syncer::ModelSafeRoutingInfo;
 using syncer::ModelType;
+using syncer::ModelTypeChangeProcessor;
 using syncer::ModelTypeSet;
 using syncer::ModelTypeStore;
 using syncer::ProtocolEventObserver;
-using syncer::SharedModelTypeProcessor;
 using syncer::SyncBackendHost;
 using syncer::SyncCredentials;
 using syncer::SyncProtocolError;
@@ -262,26 +263,26 @@ void ProfileSyncService::Initialize() {
 
   // We don't pass StartupController an Unretained reference to future-proof
   // against the controller impl changing to post tasks.
-  startup_controller_.reset(new syncer::StartupController(
+  startup_controller_ = base::MakeUnique<syncer::StartupController>(
       &sync_prefs_,
       base::Bind(&ProfileSyncService::CanBackendStart, base::Unretained(this)),
       base::Bind(&ProfileSyncService::StartUpSlowBackendComponents,
-                 weak_factory_.GetWeakPtr())));
+                 weak_factory_.GetWeakPtr()));
   std::unique_ptr<sync_sessions::LocalSessionEventRouter> router(
       sync_client_->GetSyncSessionsClient()->GetLocalSessionEventRouter());
   local_device_ = sync_client_->GetSyncApiComponentFactory()
                       ->CreateLocalDeviceInfoProvider();
-  sync_stopped_reporter_.reset(new syncer::SyncStoppedReporter(
+  sync_stopped_reporter_ = base::MakeUnique<syncer::SyncStoppedReporter>(
       sync_service_url_, local_device_->GetSyncUserAgent(),
-      url_request_context_, syncer::SyncStoppedReporter::ResultCallback()));
-  sessions_sync_manager_.reset(new SessionsSyncManager(
+      url_request_context_, syncer::SyncStoppedReporter::ResultCallback());
+  sessions_sync_manager_ = base::MakeUnique<SessionsSyncManager>(
       sync_client_->GetSyncSessionsClient(), &sync_prefs_, local_device_.get(),
       std::move(router),
       base::Bind(&ProfileSyncService::NotifyForeignSessionUpdated,
                  sync_enabled_weak_factory_.GetWeakPtr()),
       base::Bind(&ProfileSyncService::TriggerRefresh,
                  sync_enabled_weak_factory_.GetWeakPtr(),
-                 syncer::ModelTypeSet(syncer::SESSIONS))));
+                 syncer::ModelTypeSet(syncer::SESSIONS)));
 
   if (base::FeatureList::IsEnabled(switches::kSyncUSSDeviceInfo)) {
     scoped_refptr<base::SequencedTaskRunner> blocking_task_runner(
@@ -291,16 +292,16 @@ void ProfileSyncService::Initialize() {
     // TODO(skym): Stop creating leveldb files when signed out.
     // TODO(skym): Verify using AsUTF8Unsafe is okay here. Should work as long
     // as the Local State file is guaranteed to be UTF-8.
-    device_info_service_.reset(new DeviceInfoService(
+    device_info_service_ = base::MakeUnique<DeviceInfoService>(
         local_device_.get(),
         base::Bind(&ModelTypeStore::CreateStore, syncer::DEVICE_INFO,
                    directory_path_.Append(base::FilePath(kLevelDBFolderName))
                        .AsUTF8Unsafe(),
                    blocking_task_runner),
-        base::Bind(&SharedModelTypeProcessor::CreateAsChangeProcessor)));
+        base::Bind(&ModelTypeChangeProcessor::Create));
   } else {
-    device_info_sync_service_.reset(
-        new DeviceInfoSyncService(local_device_.get()));
+    device_info_sync_service_ =
+        base::MakeUnique<DeviceInfoSyncService>(local_device_.get());
   }
 
   syncer::SyncApiComponentFactory::RegisterDataTypesMethod
@@ -365,13 +366,13 @@ void ProfileSyncService::Initialize() {
 #if !defined(OS_ANDROID)
   DCHECK(sync_error_controller_ == NULL)
       << "Initialize() called more than once.";
-  sync_error_controller_.reset(new syncer::SyncErrorController(this));
+  sync_error_controller_ = base::MakeUnique<syncer::SyncErrorController>(this);
   AddObserver(sync_error_controller_.get());
 #endif
 
-  memory_pressure_listener_.reset(new base::MemoryPressureListener(
+  memory_pressure_listener_ = base::MakeUnique<base::MemoryPressureListener>(
       base::Bind(&ProfileSyncService::OnMemoryPressure,
-                 sync_enabled_weak_factory_.GetWeakPtr())));
+                 sync_enabled_weak_factory_.GetWeakPtr()));
   startup_controller_->Reset(GetRegisteredDataTypes());
 
   // Auto-start means means the first time the profile starts up, sync should
@@ -514,7 +515,7 @@ void ProfileSyncService::InitializeBackend(bool delete_stale_data) {
       std::unique_ptr<syncer::SyncManagerFactory>(
           new syncer::SyncManagerFactory()),
       MakeWeakHandle(sync_enabled_weak_factory_.GetWeakPtr()),
-      base::Bind(syncer::ChromeReportUnrecoverableError, channel_),
+      base::Bind(syncer::ReportUnrecoverableError, channel_),
       http_post_provider_factory_getter, std::move(saved_nigori_state_));
 }
 
@@ -528,29 +529,29 @@ bool ProfileSyncService::IsEncryptedDatatypeEnabled() const {
 }
 
 void ProfileSyncService::OnProtocolEvent(const syncer::ProtocolEvent& event) {
-  FOR_EACH_OBSERVER(ProtocolEventObserver, protocol_event_observers_,
-                    OnProtocolEvent(event));
+  for (auto& observer : protocol_event_observers_)
+    observer.OnProtocolEvent(event);
 }
 
 void ProfileSyncService::OnDirectoryTypeCommitCounterUpdated(
     syncer::ModelType type,
     const syncer::CommitCounters& counters) {
-  FOR_EACH_OBSERVER(syncer::TypeDebugInfoObserver, type_debug_info_observers_,
-                    OnCommitCountersUpdated(type, counters));
+  for (auto& observer : type_debug_info_observers_)
+    observer.OnCommitCountersUpdated(type, counters);
 }
 
 void ProfileSyncService::OnDirectoryTypeUpdateCounterUpdated(
     syncer::ModelType type,
     const syncer::UpdateCounters& counters) {
-  FOR_EACH_OBSERVER(syncer::TypeDebugInfoObserver, type_debug_info_observers_,
-                    OnUpdateCountersUpdated(type, counters));
+  for (auto& observer : type_debug_info_observers_)
+    observer.OnUpdateCountersUpdated(type, counters);
 }
 
-void ProfileSyncService::OnDirectoryTypeStatusCounterUpdated(
+void ProfileSyncService::OnDatatypeStatusCounterUpdated(
     syncer::ModelType type,
     const syncer::StatusCounters& counters) {
-  FOR_EACH_OBSERVER(syncer::TypeDebugInfoObserver, type_debug_info_observers_,
-                    OnStatusCountersUpdated(type, counters));
+  for (auto& observer : type_debug_info_observers_)
+    observer.OnStatusCountersUpdated(type, counters);
 }
 
 void ProfileSyncService::OnDataTypeRequestsSyncStartup(syncer::ModelType type) {
@@ -830,17 +831,18 @@ void ProfileSyncService::UpdateLastSyncedTime() {
 }
 
 void ProfileSyncService::NotifyObservers() {
-  FOR_EACH_OBSERVER(syncer::SyncServiceObserver, observers_, OnStateChanged());
+  for (auto& observer : observers_)
+    observer.OnStateChanged();
 }
 
 void ProfileSyncService::NotifySyncCycleCompleted() {
-  FOR_EACH_OBSERVER(syncer::SyncServiceObserver, observers_,
-                    OnSyncCycleCompleted());
+  for (auto& observer : observers_)
+    observer.OnSyncCycleCompleted();
 }
 
 void ProfileSyncService::NotifyForeignSessionUpdated() {
-  FOR_EACH_OBSERVER(syncer::SyncServiceObserver, observers_,
-                    OnForeignSessionUpdated());
+  for (auto& observer : observers_)
+    observer.OnForeignSessionUpdated();
 }
 
 void ProfileSyncService::ClearStaleErrors() {
@@ -1265,8 +1267,8 @@ void ProfileSyncService::OnLocalSetPassphraseEncryption(
   // At this point the user has set a custom passphrase and we have received the
   // updated nigori state. Time to cache the nigori state, and catch up the
   // active data types.
-  sync_prefs_.SetSavedNigoriStateForPassphraseEncryptionTransition(
-      nigori_state);
+  sync_prefs_.SetNigoriSpecificsForPassphraseTransition(
+      nigori_state.nigori_specifics);
   sync_prefs_.SetPassphraseEncryptionTransitionInProgress(true);
   BeginConfigureCatchUpBeforeClear();
 }
@@ -1275,7 +1277,9 @@ void ProfileSyncService::BeginConfigureCatchUpBeforeClear() {
   DCHECK(data_type_manager_);
   DCHECK(!saved_nigori_state_);
   saved_nigori_state_ =
-      sync_prefs_.GetSavedNigoriStateForPassphraseEncryptionTransition();
+      base::MakeUnique<syncer::SyncEncryptionHandler::NigoriState>();
+  sync_prefs_.GetNigoriSpecificsForPassphraseTransition(
+      &saved_nigori_state_->nigori_specifics);
   const syncer::ModelTypeSet types = GetActiveDataTypes();
   catch_up_configure_in_progress_ = true;
   data_type_manager_->Configure(types, syncer::CONFIGURE_REASON_CATCH_UP);
@@ -1326,8 +1330,8 @@ void ProfileSyncService::OnConfigureDone(
   }
 
   // Notify listeners that configuration is done.
-  FOR_EACH_OBSERVER(syncer::SyncServiceObserver, observers_,
-                    OnSyncConfigurationCompleted());
+  for (auto& observer : observers_)
+    observer.OnSyncConfigurationCompleted();
 
   DVLOG(1) << "PSS OnConfigureDone called with status: " << configure_status_;
   // The possible status values:
@@ -1750,10 +1754,10 @@ void ProfileSyncService::ConfigureDataTypeManager() {
             this));
 
     // We create the migrator at the same time.
-    migrator_.reset(new BackendMigrator(
+    migrator_ = base::MakeUnique<BackendMigrator>(
         debug_identifier_, GetUserShare(), this, data_type_manager_.get(),
         base::Bind(&ProfileSyncService::StartSyncingWithServer,
-                   base::Unretained(this))));
+                   base::Unretained(this)));
   }
 
   syncer::ModelTypeSet types;
@@ -1809,7 +1813,7 @@ void ProfileSyncService::GetModelSafeRoutingInfo(
   }
 }
 
-base::Value* ProfileSyncService::GetTypeStatusMap() const {
+base::Value* ProfileSyncService::GetTypeStatusMap() {
   std::unique_ptr<base::ListValue> result(new base::ListValue());
 
   if (!backend_.get() || !backend_initialized_) {
@@ -1848,7 +1852,7 @@ base::Value* ProfileSyncService::GetTypeStatusMap() const {
   for (ModelTypeSet::Iterator it = registered.First(); it.Good(); it.Inc()) {
     ModelType type = it.Get();
 
-    type_status.reset(new base::DictionaryValue());
+    type_status = base::MakeUnique<base::DictionaryValue>();
     type_status->SetString("name", ModelTypeToString(type));
 
     if (error_map.find(type) != error_map.end()) {
@@ -1892,11 +1896,15 @@ base::Value* ProfileSyncService::GetTypeStatusMap() const {
       type_status->SetString("value", "Disabled by User");
     }
 
-    int live_count = detailed_status.num_entries_by_type[type] -
-                     detailed_status.num_to_delete_entries_by_type[type];
-    type_status->SetInteger("num_entries",
-                            detailed_status.num_entries_by_type[type]);
-    type_status->SetInteger("num_live", live_count);
+    const auto& dtc_iter = data_type_controllers_.find(type);
+    if (dtc_iter != data_type_controllers_.end()) {
+      // OnDatatypeStatusCounterUpdated that posts back to the UI thread so that
+      // real results can't get overwritten by the empty counters set at the end
+      // of this method.
+      dtc_iter->second->GetStatusCounters(BindToCurrentThread(
+          base::Bind(&ProfileSyncService::OnDatatypeStatusCounterUpdated,
+                     base::Unretained(this))));
+    }
 
     result->Append(std::move(type_status));
   }

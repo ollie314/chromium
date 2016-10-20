@@ -47,7 +47,7 @@ struct GpuPreferences;
 struct SyncToken;
 }
 
-namespace shell {
+namespace service_manager {
 class InterfaceProvider;
 }
 
@@ -113,7 +113,7 @@ class GpuProcessHost : public BrowserChildProcessHostDelegate,
   CONTENT_EXPORT static void RegisterGpuMainThreadFactory(
       GpuMainThreadFactoryFunction create);
 
-  shell::InterfaceProvider* GetRemoteInterfaces();
+  service_manager::InterfaceProvider* GetRemoteInterfaces();
 
   // Get the GPU process host for the GPU process with the given ID. Returns
   // null if the process no longer exists.
@@ -291,6 +291,12 @@ class GpuProcessHost : public BrowserChildProcessHostDelegate,
   ClientIdToShaderCacheMap client_id_to_shader_cache_;
 
   std::string shader_prefix_key_;
+
+  // Anonymous shared memory segment to share with subprocess containing list of
+  // field trials (represented as a string).
+  // TODO(crbug.com/653874): Eventually remove this and use single shared memory
+  // object across processes.
+  std::unique_ptr<base::SharedMemory> field_trial_state_;
 
   DISALLOW_COPY_AND_ASSIGN(GpuProcessHost);
 };

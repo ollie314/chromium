@@ -45,7 +45,7 @@
 #include "core/inspector/InspectorTraceEvents.h"
 #include "platform/Histogram.h"
 #include "platform/RuntimeEnabledFeatures.h"
-#include "platform/TraceEvent.h"
+#include "platform/tracing/TraceEvent.h"
 #include "public/platform/BlameContext.h"
 #include "public/platform/Platform.h"
 #include "wtf/Vector.h"
@@ -442,13 +442,17 @@ void V8GCController::gcEpilogue(v8::Isolate* isolate,
                        InspectorUpdateCountersEvent::data());
 }
 
-void V8GCController::collectGarbage(v8::Isolate* isolate) {
+void V8GCController::collectGarbage(v8::Isolate* isolate, bool onlyMinorGC) {
   v8::HandleScope handleScope(isolate);
   RefPtr<ScriptState> scriptState = ScriptState::create(
       v8::Context::New(isolate), DOMWrapperWorld::create(isolate));
   ScriptState::Scope scope(scriptState.get());
+  StringBuilder builder;
+  builder.append("if (gc) gc(");
+  builder.append(onlyMinorGC ? "true" : "false");
+  builder.append(")");
   V8ScriptRunner::compileAndRunInternalScript(
-      v8String(isolate, "if (gc) gc();"), isolate);
+      v8String(isolate, builder.toString()), isolate);
   scriptState->disposePerContextData();
 }
 

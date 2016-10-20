@@ -96,7 +96,7 @@ void HTMLFrameElementBase::openURL(bool replaceCurrentItem) {
     return;
   toLocalFrame(contentFrame())
       ->script()
-      .executeScriptIfJavaScriptURL(scriptURL);
+      .executeScriptIfJavaScriptURL(scriptURL, this);
 }
 
 void HTMLFrameElementBase::frameOwnerPropertiesChanged() {
@@ -120,12 +120,14 @@ void HTMLFrameElementBase::parseAttribute(const QualifiedName& name,
   } else if (name == srcAttr && !fastHasAttribute(srcdocAttr)) {
     setLocation(stripLeadingAndTrailingHTMLSpaces(value));
   } else if (name == idAttr) {
-    // Important to call through to base for the id attribute so the hasID bit gets set.
+    // Important to call through to base for the id attribute so the hasID bit
+    // gets set.
     HTMLFrameOwnerElement::parseAttribute(name, oldValue, value);
     m_frameName = value;
   } else if (name == nameAttr) {
     m_frameName = value;
-    // FIXME: If we are already attached, this doesn't actually change the frame's name.
+    // FIXME: If we are already attached, this doesn't actually change the
+    // frame's name.
     // FIXME: If we are already attached, this doesn't check for frame name
     // conflicts and generate a unique frame name.
   } else if (name == marginwidthAttr) {
@@ -135,7 +137,8 @@ void HTMLFrameElementBase::parseAttribute(const QualifiedName& name,
     setMarginHeight(value.toInt());
     // FIXME: If we are already attached, this has no effect.
   } else if (name == scrollingAttr) {
-    // Auto and yes both simply mean "allow scrolling." No means "don't allow scrolling."
+    // Auto and yes both simply mean "allow scrolling." No means "don't allow
+    // scrolling."
     if (equalIgnoringCase(value, "auto") || equalIgnoringCase(value, "yes"))
       setScrollingMode(ScrollbarAuto);
     else if (equalIgnoringCase(value, "no"))
@@ -196,15 +199,15 @@ bool HTMLFrameElementBase::supportsFocus() const {
   return true;
 }
 
-void HTMLFrameElementBase::setFocus(bool received) {
-  HTMLFrameOwnerElement::setFocus(received);
+void HTMLFrameElementBase::setFocused(bool received) {
+  HTMLFrameOwnerElement::setFocused(received);
   if (Page* page = document().page()) {
-    if (received)
+    if (received) {
       page->focusController().setFocusedFrame(contentFrame());
-    else if (
-        page->focusController().focusedFrame() ==
-        contentFrame())  // Focus may have already been given to another frame, don't take it away.
+    } else if (page->focusController().focusedFrame() == contentFrame()) {
+      // Focus may have already been given to another frame, don't take it away.
       page->focusController().setFocusedFrame(nullptr);
+    }
   }
 }
 

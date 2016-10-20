@@ -107,8 +107,7 @@ class RTCPeerConnection final : public EventTargetWithInlineData,
 
   String signalingState() const;
 
-  void updateIce(ExecutionContext*,
-                 const Dictionary& rtcConfiguration,
+  void updateIce(const Dictionary& rtcConfiguration,
                  const Dictionary& mediaConstraints,
                  ExceptionState&);
 
@@ -148,7 +147,8 @@ class RTCPeerConnection final : public EventTargetWithInlineData,
                          MediaStreamTrack* selector = nullptr);
   ScriptPromise getStats(ScriptState*, MediaStreamTrack* selector = nullptr);
 
-  RTCDataChannel* createDataChannel(String label,
+  RTCDataChannel* createDataChannel(ExecutionContext*,
+                                    String label,
                                     const Dictionary& dataChannelDict,
                                     ExceptionState&);
 
@@ -187,7 +187,7 @@ class RTCPeerConnection final : public EventTargetWithInlineData,
   // ActiveDOMObject
   void suspend() override;
   void resume() override;
-  void stop() override;
+  void contextDestroyed() override;
 
   // ScriptWrappable
   // We keep the this object alive until either stopped or closed.

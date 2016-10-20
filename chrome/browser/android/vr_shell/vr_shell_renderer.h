@@ -6,12 +6,9 @@
 #define CHROME_BROWSER_ANDROID_VR_SHELL_VR_SHELL_RENDERER_H_
 
 #include <memory>
-#include <string>
-#include <vector>
 
 #include "base/macros.h"
 #include "chrome/browser/android/vr_shell/vr_math.h"
-#include "third_party/gvr-android-sdk/src/ndk/include/vr/gvr/capi/include/gvr.h"
 #include "third_party/gvr-android-sdk/src/ndk/include/vr/gvr/capi/include/gvr_types.h"
 #include "ui/gl/gl_bindings.h"
 
@@ -99,7 +96,6 @@ class ReticleRenderer : public BaseRenderer {
 
  private:
   GLuint combined_matrix_handle_;
-
   GLuint color_handle_;
   GLuint ring_diameter_handle_;
   GLuint inner_hole_handle_;
@@ -120,7 +116,6 @@ class LaserRenderer : public BaseRenderer {
 
  private:
   GLuint combined_matrix_handle_;
-
   GLuint texture_unit_handle_;
   GLuint texture_data_handle_;
   GLuint color_handle_;

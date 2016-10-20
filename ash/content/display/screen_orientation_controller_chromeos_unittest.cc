@@ -8,18 +8,19 @@
 #include <vector>
 
 #include "ash/common/ash_switches.h"
+#include "ash/common/test/test_system_tray_delegate.h"
 #include "ash/common/wm/maximize_mode/maximize_mode_controller.h"
 #include "ash/common/wm_shell.h"
 #include "ash/content/shell_content_state.h"
 #include "ash/display/display_manager.h"
 #include "ash/shell.h"
+#include "ash/system/chromeos/screen_layout_observer.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/test/ash_test_environment_content.h"
 #include "ash/test/ash_test_helper.h"
 #include "ash/test/content/test_shell_content_state.h"
 #include "ash/test/display_manager_test_api.h"
 #include "ash/test/test_shell_delegate.h"
-#include "ash/test/test_system_tray_delegate.h"
 #include "base/command_line.h"
 #include "chromeos/accelerometer/accelerometer_reader.h"
 #include "chromeos/accelerometer/accelerometer_types.h"
@@ -420,9 +421,11 @@ TEST_F(ScreenOrientationControllerTest, RotationLockPreventsRotation) {
 // triggered by the accelerometer.
 TEST_F(ScreenOrientationControllerTest, BlockRotationNotifications) {
   EnableMaximizeMode(true);
-  test::TestSystemTrayDelegate* tray_delegate = GetSystemTrayDelegate();
-  tray_delegate->set_should_show_display_notification(true);
-  test::DisplayManagerTestApi().SetFirstDisplayAsInternalDisplay();
+  Shell::GetInstance()
+      ->screen_layout_observer()
+      ->set_show_notifications_for_testing(true);
+  test::DisplayManagerTestApi(display_manager())
+      .SetFirstDisplayAsInternalDisplay();
 
   message_center::MessageCenter* message_center =
       message_center::MessageCenter::Get();
@@ -474,7 +477,8 @@ TEST_F(ScreenOrientationControllerTest, BlockRotationNotifications) {
 // Tests that if a user has set a display rotation that it is restored upon
 // exiting maximize mode.
 TEST_F(ScreenOrientationControllerTest, ResetUserRotationUponExit) {
-  test::DisplayManagerTestApi().SetFirstDisplayAsInternalDisplay();
+  test::DisplayManagerTestApi(display_manager())
+      .SetFirstDisplayAsInternalDisplay();
 
   SetInternalDisplayRotation(display::Display::ROTATE_90);
   EnableMaximizeMode(true);
@@ -600,7 +604,8 @@ TEST_F(ScreenOrientationControllerTest, UserRotationLockDisallowsRotation) {
 // ready, that ScreenOrientationController still begins listening to events,
 // which require an internal display to be acted upon.
 TEST_F(ScreenOrientationControllerTest, InternalDisplayNotAvailableAtStartup) {
-  test::DisplayManagerTestApi().SetFirstDisplayAsInternalDisplay();
+  test::DisplayManagerTestApi(display_manager())
+      .SetFirstDisplayAsInternalDisplay();
 
   int64_t internal_display_id = display::Display::InternalDisplayId();
   display::Display::SetInternalDisplayId(display::Display::kInvalidDisplayID);
@@ -643,22 +648,22 @@ TEST_F(ScreenOrientationControllerTest, RotateInactiveDisplay) {
   // The display::ManagedDisplayInfo list with two active displays needs to be
   // added first so that the DisplayManager can track the
   // |internal_display_info| as inactive instead of non-existent.
-  DisplayManager* display_manager = Shell::GetInstance()->display_manager();
-  display_manager->UpdateDisplaysWith(display_info_list_two_active);
-  display_manager->UpdateDisplaysWith(display_info_list_one_active);
+  display_manager()->UpdateDisplaysWith(display_info_list_two_active);
+  display_manager()->UpdateDisplaysWith(display_info_list_one_active);
 
-  test::ScopedSetInternalDisplayId set_internal(kInternalDisplayId);
+  test::ScopedSetInternalDisplayId set_internal(display_manager(),
+                                                kInternalDisplayId);
 
-  ASSERT_NE(
-      kNewRotation,
-      display_manager->GetDisplayInfo(kInternalDisplayId).GetActiveRotation());
+  ASSERT_NE(kNewRotation, display_manager()
+                              ->GetDisplayInfo(kInternalDisplayId)
+                              .GetActiveRotation());
 
   Shell::GetInstance()->screen_orientation_controller()->SetDisplayRotation(
       kNewRotation, display::Display::ROTATION_SOURCE_ACTIVE);
 
-  EXPECT_EQ(
-      kNewRotation,
-      display_manager->GetDisplayInfo(kInternalDisplayId).GetActiveRotation());
+  EXPECT_EQ(kNewRotation, display_manager()
+                              ->GetDisplayInfo(kInternalDisplayId)
+                              .GetActiveRotation());
 }
 
 }  // namespace ash

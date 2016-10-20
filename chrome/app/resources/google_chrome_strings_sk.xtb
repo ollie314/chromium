@@ -135,6 +135,7 @@ Ak chcete profilu <ph name="NEW_PROFILE_NAME" /> zabrániť pristupovať do vá�
 <translation id="4771048833395599659">Tento súbor môže byť nebezpečný, a preto ho Chrome zablokoval.</translation>
 <translation id="4794050651896644714">Uložiť podrobnosti v prehliadači Chrome</translation>
 <translation id="4891791193823137474">Povoliť prehliadaču Google Chrome spustenie na pozadí</translation>
+<translation id="4901390485477164536">Google Chrome je vaším predvoleným prehliadačom. Skvelé!</translation>
 <translation id="4921569541910214635">Zdieľať počítač? Teraz si môžete prehliadač Chrome nastaviť podľa vlastných predstáv.</translation>
 <translation id="4925019873400497719">Chrome overil, že certifikát tohto webu bol vydaný vydavateľom <ph name="ISSUER" />. Server poskytol informácie o transparentnosti certifikátu, boli však neplatné.</translation>
 <translation id="4953650215774548573">Nastaviť Google Chrome ako predvolený prehliadač</translation>
@@ -217,13 +218,11 @@ Prehliadač Google Chrome nedokáže obnoviť vaše nastavenia.</translation>
 <translation id="7164397146364144019">Automatickým nahlasovaním podrobností o možných bezpečnostných problémoch môžete prispieť k zvýšeniu zabezpečenia prehliadača Chrome a k zjednodušeniu jeho používania.</translation>
 <translation id="7177347454226092725">Táto akcia natrvalo odstráni vaše dáta prehliadania z tohto zariadenia. Ak budete chcieť tieto dáta neskôr opäť načítať, prihláste sa do Chromu ako $2.</translation>
 <translation id="7185038942300673794">Rozšírenie <ph name="EXTENSION_NAME" /> bolo pridané do prehliadača Chrome.</translation>
-<translation id="7191567847629796517">OS Google Chrome nepodporuje spúšťanie externých aplikácií na spracovanie odkazov <ph name="SCHEME" />. Požadovaný odkaz: <ph name="PROTOLINK" />.</translation>
 <translation id="7193750696137290001">Google Chrome sa zobrazuje v tomto jazyku.</translation>
 <translation id="7196020411877309443">Prečo sa zobrazila táto výzva?</translation>
 <translation id="7242029209006116544">Prihlasujete sa pomocou spravovaného účtu a jeho správcovi dávate kontrolu nad vaším profilom prehliadača Chrome. Vaše údaje prehliadača Chrome, ako sú aplikácie, záložky, história, heslá a iné nastavenia, sa natrvalo priradia k účtu <ph name="USER_NAME" />. Tieto údaje budete môcť odstrániť len pomocou panela Dashboard v Účtoch Google, ale nebudete ich môcť priradiť k inému účtu. Ak chcete, aby boli existujúce údaje prehliadača Chrome oddelené, môžete vytvoriť nový profil. <ph name="LEARN_MORE" /></translation>
 <translation id="729375352412857283">Tento počítač čoskoro prestane dostávať aktualizácie prehliadača Google Chrome, pretože systémy Windows XP a Windows Vista už nebudú ďalej podporované.</translation>
 <translation id="7339898014177206373">Nové okno</translation>
-<translation id="7393806081343982361">Hurá, Google Chrome je vaším predvoleným prehliadačom!</translation>
 <translation id="7398801000654795464">Do prehliadača Chrome ste boli prihlásený/-á ako <ph name="USER_EMAIL_ADDRESS" />. Ak sa chcete prihlásiť znova, použite rovnaký účet.</translation>
 <translation id="7400722733683201933">Informácie o prehliadači Google Chrome</translation>
 <translation id="7408085963519505752">Zmluvné podmienky systému OS Chrome</translation>
@@ -258,12 +257,12 @@ Prehliadač Google Chrome nedokáže obnoviť vaše nastavenia.</translation>
 <translation id="8129812357326543296">Informácie o prehliadači &amp;Google Chrome</translation>
 <translation id="8183957050892517584">Chrome vaše osobné údaje bezpečne uloží, aby ste ich už nemuseli znova zadávať.</translation>
 <translation id="8211929904040702368">Táto akcia natrvalo odstráni niekoľko položiek (najmenej <ph name="TOTAL_COUNT" />) z tohto zariadenia. Ak budete chcieť tieto dáta neskôr opäť načítať, prihláste sa do Chromu ako $2.</translation>
-<translation id="8227755444512189073">Prehľadávač Google Chrome potrebuje spustiť externú aplikáciu na spracovanie odkazov <ph name="SCHEME" />. Požadovaný odkaz je <ph name="PROTOLINK" />.</translation>
 <translation id="8255190535488645436">Google Chrome používa vašu kameru a mikrofón.</translation>
 <translation id="8286862437124483331">Prehliadač Google Chrome sa pokúša zobraziť heslá. Ak to chcete povoliť, zadajte svoje heslo systému Windows.</translation>
 <translation id="8290100596633877290">Google Chrome zlyhal. Chcete ho spustiť znova?</translation>
 <translation id="8342675569599923794">Tento súbor je nebezpečný, a preto ho Chrome zablokoval.</translation>
 <translation id="8406086379114794905">Pomôžte nám prehliadač Chrome zlepšiť</translation>
+<translation id="8410645163819739900">Google Chrome OS nedokáže túto stránku otvoriť.</translation>
 <translation id="8455999171311319804">Voliteľné: Pomáhať s vylepšením systému Chrome OS automatickým odosielaním diagnostík a údajov o využívaní Googlu.</translation>
 <translation id="853189717709780425">Prihlasujete sa pomocou spravovaného účtu a jeho správcovi dávate kontrolu nad vaším profilom prehliadača Chrome. Vaše údaje prehliadača Chrome, ako sú aplikácie, záložky, história, heslá a iné nastavenia, sa natrvalo priradia k účtu <ph name="USER_NAME" />. Tieto údaje budete môcť odstrániť len pomocou služby Dashboard v Účtoch Google, ale nebudete ich môcť priradiť k inému účtu.</translation>
 <translation id="8540666473246803645">Google Chrome</translation>

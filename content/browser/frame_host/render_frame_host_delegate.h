@@ -33,6 +33,7 @@ class Message;
 
 namespace device {
 class GeolocationServiceContext;
+class WakeLockServiceContext;
 }
 
 namespace content {
@@ -40,7 +41,6 @@ class FrameTreeNode;
 class InterstitialPage;
 class PageState;
 class RenderFrameHost;
-class WakeLockServiceContext;
 class WebContents;
 struct AXEventNotificationDetails;
 struct AXLocationChangeNotificationDetails;
@@ -118,7 +118,6 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
   // The page's title was changed and should be updated. Only called for the
   // top-level frame.
   virtual void UpdateTitle(RenderFrameHost* render_frame_host,
-                           int32_t page_id,
                            const base::string16& title,
                            base::i18n::TextDirection title_direction) {}
 
@@ -168,7 +167,7 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
   virtual device::GeolocationServiceContext* GetGeolocationServiceContext();
 
   // Gets the WakeLockServiceContext associated with this delegate.
-  virtual WakeLockServiceContext* GetWakeLockServiceContext();
+  virtual device::WakeLockServiceContext* GetWakeLockServiceContext();
 
   // Notification that the frame wants to go into fullscreen mode.
   // |origin| represents the origin of the frame that requests fullscreen.

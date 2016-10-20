@@ -26,8 +26,7 @@ public class TouchInputHandler {
     private static final float EPSILON = 0.001f;
 
     private final List<Pair<Object, Event<?>>> mAttachedEvents = new ArrayList<>();
-    private final DesktopView mViewer;
-    private final Context mContext;
+    private final Desktop mDesktop;
     private final RenderData mRenderData;
     private final DesktopCanvas mDesktopCanvas;
     private final RenderStub mRenderStub;
@@ -194,8 +193,7 @@ public class TouchInputHandler {
         Preconditions.notNull(renderStub);
         Preconditions.notNull(injector);
 
-        mViewer = viewer;
-        mContext = desktop;
+        mDesktop = desktop;
         mRenderStub = renderStub;
         mRenderData = new RenderData();
         mDesktopCanvas = new DesktopCanvas(renderStub, mRenderData);
@@ -233,7 +231,7 @@ public class TouchInputHandler {
             }
         };
 
-        attachEvent(mViewer.onTouch(), new Event.ParameterRunnable<TouchEventParameter>() {
+        attachEvent(viewer.onTouch(), new Event.ParameterRunnable<TouchEventParameter>() {
             @Override
             public void run(TouchEventParameter parameter) {
                 parameter.handled = handleTouchEvent(parameter.event);
@@ -252,7 +250,7 @@ public class TouchInputHandler {
                 new Event.ParameterRunnable<SystemUiVisibilityChangedEventParameter>() {
                     @Override
                     public void run(SystemUiVisibilityChangedEventParameter parameter) {
-                        handleSystemUiVisibilityChanged(parameter);
+                        mDesktopCanvas.onSystemUiVisibilityChanged(parameter);
                     }
                 });
 
@@ -327,15 +325,17 @@ public class TouchInputHandler {
         switch (inputMode) {
             case TRACKPAD:
                 setInputStrategy(new TrackpadInputStrategy(mRenderData, injector));
+                mDesktopCanvas.adjustViewportForSystemUi(true);
                 moveCursorToScreenCenter();
                 break;
 
             case TOUCH:
+                mDesktopCanvas.adjustViewportForSystemUi(false);
                 if (hostTouchCapability.isSupported()) {
                     setInputStrategy(new TouchInputStrategy(mRenderData, injector));
                 } else {
                     setInputStrategy(
-                            new SimulatedTouchInputStrategy(mRenderData, injector, mContext));
+                            new SimulatedTouchInputStrategy(mRenderData, injector, mDesktop));
                 }
                 break;
 
@@ -346,17 +346,6 @@ public class TouchInputHandler {
 
         // Ensure the cursor state is updated appropriately.
         mRenderStub.setCursorVisibility(mRenderData.drawCursor);
-    }
-
-    private void handleSystemUiVisibilityChanged(
-            SystemUiVisibilityChangedEventParameter parameter) {
-        if (parameter.systemUiVisible) {
-            mDesktopCanvas.setSystemUiOffsetValues(parameter.left, parameter.top,
-                    mRenderData.screenWidth - parameter.right,
-                    mRenderData.screenHeight - parameter.bottom);
-        } else {
-            mDesktopCanvas.clearSystemUiOffsets();
-        }
     }
 
     private boolean handleTouchEvent(MotionEvent event) {
@@ -477,10 +466,10 @@ public class TouchInputHandler {
     private boolean onSwipe() {
         if (mTotalMotionY > mSwipeThreshold) {
             // Swipe down occurred.
-            mViewer.showActionBar();
+            mDesktop.showSystemUi();
         } else if (mTotalMotionY < -mSwipeThreshold) {
             // Swipe up occurred.
-            mViewer.showKeyboard();
+            mDesktop.showKeyboard();
         } else {
             return false;
         }

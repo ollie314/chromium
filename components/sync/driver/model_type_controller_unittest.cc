@@ -18,15 +18,14 @@
 #include "base/test/test_simple_task_runner.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "components/sync/api/fake_model_type_change_processor.h"
-#include "components/sync/api/stub_model_type_service.h"
-#include "components/sync/core/activation_context.h"
-#include "components/sync/core/model_type_processor_proxy.h"
-#include "components/sync/core/shared_model_type_processor.h"
-#include "components/sync/core/test/fake_model_type_processor.h"
 #include "components/sync/driver/backend_data_type_configurer.h"
 #include "components/sync/driver/fake_sync_client.h"
+#include "components/sync/engine/activation_context.h"
 #include "components/sync/engine/commit_queue.h"
+#include "components/sync/engine/fake_model_type_processor.h"
+#include "components/sync/engine/model_type_processor_proxy.h"
+#include "components/sync/model/fake_model_type_change_processor.h"
+#include "components/sync/model/stub_model_type_service.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace syncer {
@@ -126,8 +125,8 @@ class ModelTypeControllerTest : public testing::Test, public FakeSyncClient {
   void SetUp() override {
     model_thread_.Start();
     InitializeModelTypeService();
-    controller_.reset(new ModelTypeController(
-        kTestModelType, base::Closure(), this, model_thread_.task_runner()));
+    controller_ = base::MakeUnique<ModelTypeController>(
+        kTestModelType, base::Closure(), this, model_thread_.task_runner());
   }
 
   void TearDown() override {
@@ -187,19 +186,6 @@ class ModelTypeControllerTest : public testing::Test, public FakeSyncClient {
     }
   }
 
-  void ExpectHasChangeProcessor(bool has_processor) {
-    if (model_thread_.task_runner()->BelongsToCurrentThread()) {
-      DCHECK(service_);
-      EXPECT_EQ(has_processor, !!service_->change_processor());
-    } else {
-      model_thread_.task_runner()->PostTask(
-          FROM_HERE,
-          base::Bind(&ModelTypeControllerTest::ExpectHasChangeProcessor,
-                     base::Unretained(this), has_processor));
-      PumpModelThread();
-    }
-  }
-
   SyncPrefs* sync_prefs() { return &sync_prefs_; }
   DataTypeController* controller() { return controller_.get(); }
   int load_models_done_count() { return load_models_done_count_; }
@@ -234,8 +220,8 @@ class ModelTypeControllerTest : public testing::Test, public FakeSyncClient {
 
   void InitializeModelTypeService() {
     if (model_thread_.task_runner()->BelongsToCurrentThread()) {
-      service_.reset(new StubModelTypeService(base::Bind(
-          &ModelTypeControllerTest::CreateProcessor, base::Unretained(this))));
+      service_ = base::MakeUnique<StubModelTypeService>(base::Bind(
+          &ModelTypeControllerTest::CreateProcessor, base::Unretained(this)));
     } else {
       model_thread_.task_runner()->PostTask(
           FROM_HERE,
@@ -331,10 +317,8 @@ TEST_F(ModelTypeControllerTest, StopWhenDatatypeEnabled) {
   controller()->Stop();
   RunAllTasks();
   EXPECT_EQ(DataTypeController::NOT_RUNNING, controller()->state());
-  // Ensure that DisableSync is not called and service still has valid change
-  // processor.
+  // Ensure that DisableSync is not called.
   EXPECT_EQ(0, disable_sync_call_count());
-  ExpectHasChangeProcessor(true);
   ExpectProcessorConnected(false);
 }
 
@@ -355,10 +339,9 @@ TEST_F(ModelTypeControllerTest, StopWhenDatatypeDisabled) {
 
   controller()->Stop();
   EXPECT_EQ(DataTypeController::NOT_RUNNING, controller()->state());
-  // Ensure that DisableSync is called and change processor is reset.
+  // Ensure that DisableSync is called.
   PumpModelThread();
   EXPECT_EQ(1, disable_sync_call_count());
-  ExpectHasChangeProcessor(false);
 }
 
 // Test emulates disabling sync by signing out. DisableSync should be called.
@@ -374,10 +357,9 @@ TEST_F(ModelTypeControllerTest, StopWithInitialSyncPrefs) {
   sync_prefs()->ClearPreferences();
   controller()->Stop();
   EXPECT_EQ(DataTypeController::NOT_RUNNING, controller()->state());
-  // Ensure that DisableSync is called and change processor is reset.
+  // Ensure that DisableSync is called.
   PumpModelThread();
   EXPECT_EQ(1, disable_sync_call_count());
-  ExpectHasChangeProcessor(false);
 }
 
 // Test emulates disabling sync when datatype is not loaded yet. DisableSync
@@ -394,8 +376,6 @@ TEST_F(ModelTypeControllerTest, StopBeforeLoadModels) {
   EXPECT_EQ(DataTypeController::NOT_RUNNING, controller()->state());
   // Ensure that DisableSync is not called.
   EXPECT_EQ(0, disable_sync_call_count());
-  // A change processor was never created.
-  ExpectHasChangeProcessor(false);
 }
 
 }  // namespace syncer

@@ -12,6 +12,14 @@ class PixelExpectations(GpuTestExpectations):
     # self.Fail('Pixel_Canvas2DRedBox',
     #     ['mac', 'amd', ('nvidia', 0x1234)], bug=123)
 
+    # Software compositing is not supported on Android; so we skip these tests
+    # that disables gpu compositing on Android platforms.
+    self.Skip('Pixel_OffscreenCanvasUnaccelerated2D', ['android'])
+    self.Skip('Pixel_OffscreenCanvasUnaccelerated2DWorker', ['android'])
+    self.Skip('Pixel_OffscreenCanvasWebGLSoftwareCompositing', ['android'])
+    self.Skip('Pixel_OffscreenCanvasWebGLSoftwareCompositingWorker',
+              ['android'])
+
     self.Fail('Pixel_ScissorTestWithPreserveDrawingBuffer',
         ['android'], bug=521588)
 
@@ -31,11 +39,16 @@ class PixelExpectations(GpuTestExpectations):
     self.Fail('Pixel_CSSFilterEffects', ['mac'], bug=581526)
     self.Fail('Pixel_CSSFilterEffects_NoOverlays', ['mac'], bug=581526)
 
-    # TODO(xlai) check / generate reference images.
-    self.Fail('Pixel_OffscreenCanvasUnaccelerated2D', bug=563852)
-    self.Fail('Pixel_OffscreenCanvasUnaccelerated2DWorker', bug=563858)
-    self.Fail('Pixel_OffscreenCanvasUnaccelerated2DGPUCompositing', bug=563852)
-    self.Fail('Pixel_OffscreenCanvasUnaccelerated2DGPUCompositingWorker', bug=563858)
+    self.Fail('Pixel_OffscreenCanvasUnaccelerated2DGPUCompositingWorker',
+              ['mac', ('nvidia', 0xfe9)], bug=652931)
 
     # TODO(kbr): flakily timing out on this configuration.
     self.Flaky('*', ['linux', 'intel', 'debug'], bug=648369)
+
+    # TODO(xlai): check / generate reference images.
+    self.Fail('Pixel_OffscreenCanvasAccelerated2D', bug=655311)
+    self.Fail('Pixel_OffscreenCanvasAccelerated2DWorker', bug=655311)
+    self.Fail('Pixel_OffscreenCanvasUnaccelerated2D', bug=655311)
+    self.Fail('Pixel_OffscreenCanvasUnaccelerated2DWorker', bug=655311)
+    self.Fail('Pixel_OffscreenCanvasUnaccelerated2DGPUCompositing', bug=655311)
+    self.Fail('Pixel_OffscreenCanvasUnaccelerated2DGPUCompositingWorker', bug=655311)

@@ -34,6 +34,12 @@ namespace blink {
 
 namespace {
 
+bool isTargetAttributeCSSProperty(SVGElement& targetElement,
+                                  const QualifiedName& attributeName) {
+  return SVGElement::isAnimatableCSSProperty(attributeName) ||
+         targetElement.isPresentationAttribute(attributeName);
+}
+
 String computeCSSPropertyValue(SVGElement* element, CSSPropertyID id) {
   DCHECK(element);
   // TODO(fs): StyleEngine doesn't support document without a frame.
@@ -65,7 +71,9 @@ SVGAnimateElement::SVGAnimateElement(const QualifiedName& tagName,
     : SVGAnimationElement(tagName, document),
       m_animator(this),
       m_fromPropertyValueType(RegularPropertyValue),
-      m_toPropertyValueType(RegularPropertyValue) {}
+      m_toPropertyValueType(RegularPropertyValue),
+      m_attributeType(AttributeTypeAuto),
+      m_hasInvalidCSSAttributeType(false) {}
 
 SVGAnimateElement* SVGAnimateElement::create(Document& document) {
   return new SVGAnimateElement(SVGNames::animateTag, document);
@@ -95,6 +103,24 @@ bool SVGAnimateElement::isSVGAnimationAttributeSettingJavaScriptURL(
   return SVGSMILElement::isSVGAnimationAttributeSettingJavaScriptURL(attribute);
 }
 
+void SVGAnimateElement::parseAttribute(const QualifiedName& name,
+                                       const AtomicString& oldValue,
+                                       const AtomicString& value) {
+  if (name == SVGNames::attributeTypeAttr) {
+    setAttributeType(value);
+    return;
+  }
+  SVGAnimationElement::parseAttribute(name, oldValue, value);
+}
+
+void SVGAnimateElement::svgAttributeChanged(const QualifiedName& attrName) {
+  if (attrName == SVGNames::attributeTypeAttr) {
+    animationAttributeChanged();
+    return;
+  }
+  SVGAnimationElement::svgAttributeChanged(attrName);
+}
+
 AnimatedPropertyType SVGAnimateElement::animatedPropertyType() {
   if (!targetElement())
     return AnimatedUnknown;
@@ -103,11 +129,18 @@ AnimatedPropertyType SVGAnimateElement::animatedPropertyType() {
   return m_animator.type();
 }
 
-bool SVGAnimateElement::hasValidAttributeType() {
-  SVGElement* targetElement = this->targetElement();
-  if (!targetElement)
-    return false;
+bool SVGAnimateElement::hasValidTarget() {
+  return SVGAnimationElement::hasValidTarget() && hasValidAttributeName() &&
+         hasValidAttributeType();
+}
 
+bool SVGAnimateElement::hasValidAttributeName() const {
+  return attributeName() != anyQName();
+}
+
+bool SVGAnimateElement::hasValidAttributeType() {
+  if (!targetElement())
+    return false;
   return animatedPropertyType() != AnimatedUnknown &&
          !hasInvalidCSSAttributeType();
 }
@@ -115,14 +148,12 @@ bool SVGAnimateElement::hasValidAttributeType() {
 SVGAnimateElement::ShouldApplyAnimationType
 SVGAnimateElement::shouldApplyAnimation(SVGElement* targetElement,
                                         const QualifiedName& attributeName) {
-  if (!hasValidAttributeType() || attributeName == anyQName() ||
-      !targetElement || !targetElement->inActiveDocument() ||
-      !targetElement->parentNode())
+  if (!hasValidTarget() || !targetElement->parentNode())
     return DontApplyAnimation;
 
   // Always animate CSS properties using the ApplyCSSAnimation code path,
   // regardless of the attributeType value.
-  if (isTargetAttributeCSSProperty(targetElement, attributeName)) {
+  if (isTargetAttributeCSSProperty(*targetElement, attributeName)) {
     if (targetElement->isPresentationAttributeWithSVGDOM(attributeName))
       return ApplyXMLandCSSAnimation;
 
@@ -267,7 +298,7 @@ void SVGAnimateElement::resetAnimatedType() {
   DCHECK_EQ(shouldApply, ApplyCSSAnimation);
 
   // CSS properties animation code-path.
-  DCHECK(isTargetAttributeCSSProperty(targetElement, attributeName));
+  DCHECK(isTargetAttributeCSSProperty(*targetElement, attributeName));
   String baseValue = computeCSSPropertyValue(
       targetElement, cssPropertyID(attributeName.localName()));
   m_animatedProperty = m_animator.createPropertyForAnimation(baseValue);
@@ -390,12 +421,45 @@ float SVGAnimateElement::calculateDistance(const String& fromString,
 
 void SVGAnimateElement::setTargetElement(SVGElement* target) {
   SVGAnimationElement::setTargetElement(target);
+  checkInvalidCSSAttributeType();
   resetAnimatedPropertyType();
 }
 
 void SVGAnimateElement::setAttributeName(const QualifiedName& attributeName) {
   SVGAnimationElement::setAttributeName(attributeName);
+  checkInvalidCSSAttributeType();
   resetAnimatedPropertyType();
+}
+
+void SVGAnimateElement::setAttributeType(const AtomicString& attributeType) {
+  if (attributeType == "CSS")
+    m_attributeType = AttributeTypeCSS;
+  else if (attributeType == "XML")
+    m_attributeType = AttributeTypeXML;
+  else
+    m_attributeType = AttributeTypeAuto;
+  checkInvalidCSSAttributeType();
+}
+
+void SVGAnimateElement::checkInvalidCSSAttributeType() {
+  bool hasInvalidCSSAttributeType =
+      targetElement() && hasValidAttributeName() &&
+      getAttributeType() == AttributeTypeCSS &&
+      !isTargetAttributeCSSProperty(*targetElement(), attributeName());
+
+  if (hasInvalidCSSAttributeType != m_hasInvalidCSSAttributeType) {
+    if (hasInvalidCSSAttributeType)
+      unscheduleIfScheduled();
+
+    m_hasInvalidCSSAttributeType = hasInvalidCSSAttributeType;
+
+    if (!hasInvalidCSSAttributeType)
+      schedule();
+  }
+
+  // Clear values that may depend on the previous target.
+  if (targetElement())
+    clearAnimatedType();
 }
 
 void SVGAnimateElement::resetAnimatedPropertyType() {

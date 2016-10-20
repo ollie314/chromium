@@ -58,7 +58,9 @@ class SessionStateDelegateStub : public SessionStateDelegate {
     screen_locked_ = false;
   }
   bool IsUserSessionBlocked() const override { return false; }
-  SessionState GetSessionState() const override { return SESSION_STATE_ACTIVE; }
+  session_manager::SessionState GetSessionState() const override {
+    return session_manager::SessionState::ACTIVE;
+  }
   const user_manager::UserInfo* GetUserInfo(UserIndex index) const override {
     return user_info_.get();
   }
@@ -108,14 +110,14 @@ class MediaDelegateStub : public MediaDelegate {
 
 }  // namespace
 
-ShellDelegateMus::ShellDelegateMus(shell::Connector* connector)
+ShellDelegateMus::ShellDelegateMus(service_manager::Connector* connector)
     : connector_(connector), app_list_presenter_(connector) {
   // |connector_| may be null in tests.
 }
 
 ShellDelegateMus::~ShellDelegateMus() {}
 
-::shell::Connector* ShellDelegateMus::GetShellConnector() const {
+service_manager::Connector* ShellDelegateMus::GetShellConnector() const {
   return connector_;
 }
 
@@ -175,7 +177,7 @@ app_list::AppListPresenter* ShellDelegateMus::GetAppListPresenter() {
 }
 
 ShelfDelegate* ShellDelegateMus::CreateShelfDelegate(ShelfModel* model) {
-  return new ShelfDelegateMus(WmShell::Get()->shelf_model());
+  return new ShelfDelegateMus();
 }
 
 SystemTrayDelegate* ShellDelegateMus::CreateSystemTrayDelegate() {
@@ -189,7 +191,7 @@ SystemTrayDelegate* ShellDelegateMus::CreateSystemTrayDelegate() {
 }
 
 std::unique_ptr<WallpaperDelegate> ShellDelegateMus::CreateWallpaperDelegate() {
-  return base::MakeUnique<WallpaperDelegateMus>(connector_);
+  return base::MakeUnique<WallpaperDelegateMus>();
 }
 
 SessionStateDelegate* ShellDelegateMus::CreateSessionStateDelegate() {

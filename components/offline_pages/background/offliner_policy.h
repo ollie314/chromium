@@ -8,8 +8,9 @@
 namespace {
 const int kMaxStartedTries = 4;
 const int kMaxCompletedTries = 1;
-const int kBackgroundProcessingTimeBudgetSeconds = 170;
-const int kSinglePageTimeLimitSeconds = 120;
+const int kDefaultBackgroundProcessingTimeBudgetSeconds = 170;
+const int kSinglePageTimeLimitWhenBackgroundScheduledSeconds = 120;
+const int kSinglePageTimeLimitForImmediateLoadSeconds = 300;
 const int kRequestExpirationTimeInSeconds = 60 * 60 * 24 * 7;
 }  // namespace
 
@@ -24,19 +25,23 @@ class OfflinerPolicy {
         prefer_earlier_requests_(true),
         retry_count_is_more_important_than_recency_(false),
         max_started_tries_(kMaxStartedTries),
-        max_completed_tries_(kMaxCompletedTries) {}
+        max_completed_tries_(kMaxCompletedTries),
+        background_processing_time_budget_(
+            kDefaultBackgroundProcessingTimeBudgetSeconds) {}
 
   // Constructor for unit tests.
   OfflinerPolicy(bool prefer_untried,
                  bool prefer_earlier,
                  bool prefer_retry_count,
                  int max_started_tries,
-                 int max_completed_tries)
+                 int max_completed_tries,
+                 int background_processing_time_budget)
       : prefer_untried_requests_(prefer_untried),
         prefer_earlier_requests_(prefer_earlier),
         retry_count_is_more_important_than_recency_(prefer_retry_count),
         max_started_tries_(max_started_tries),
-        max_completed_tries_(max_completed_tries) {}
+        max_completed_tries_(max_completed_tries),
+        background_processing_time_budget_(background_processing_time_budget) {}
 
   // TODO(petewil): Numbers here are chosen arbitrarily, do the proper studies
   // to get good policy numbers. Eventually this should get data from a finch
@@ -83,12 +88,19 @@ class OfflinerPolicy {
   // How many seconds to keep trying new pages for, before we give up,  and
   // return to the scheduler.
   int GetBackgroundProcessingTimeBudgetSeconds() const {
-    return kBackgroundProcessingTimeBudgetSeconds;
+    return background_processing_time_budget_;
   }
 
-  // How long do we allow a page to load before giving up on it
-  int GetSinglePageTimeLimitInSeconds() const {
-    return kSinglePageTimeLimitSeconds;
+  // How long do we allow a page to load before giving up on it when
+  // background loading was scheduled.
+  int GetSinglePageTimeLimitWhenBackgroundScheduledInSeconds() const {
+    return kSinglePageTimeLimitWhenBackgroundScheduledSeconds;
+  }
+
+  // How long do we allow a page to load before giving up on it when
+  // immediately background loading.
+  int GetSinglePageTimeLimitForImmediateLoadInSeconds() const {
+    return kSinglePageTimeLimitForImmediateLoadSeconds;
   }
 
   // How long we allow requests to remain in the system before giving up.
@@ -102,7 +114,9 @@ class OfflinerPolicy {
   bool retry_count_is_more_important_than_recency_;
   int max_started_tries_;
   int max_completed_tries_;
+  int background_processing_time_budget_;
 };
-}
+}  // namespace offline_pages
+
 
 #endif  // COMPONENTS_OFFLINE_PAGES_BACKGROUND_OFFLINER_POLICY_H_

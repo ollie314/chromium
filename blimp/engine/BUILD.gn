@@ -85,6 +85,8 @@ source_set("app") {
     ":common",
     ":crash",
     ":feature",
+    ":font_data_fetcher",
+    ":font_fetcher_mojo_impl",
     ":renderer",
     ":resources",
     ":session",
@@ -217,8 +219,20 @@ source_set("app_ui") {
     "//ui/events",
     "//ui/gfx",
     "//ui/platform_window",
-    "//ui/platform_window",
     "//ui/platform_window/stub/",
+  ]
+}
+
+source_set("font_data_fetcher") {
+  sources = [
+    "browser/font_data_fetcher.h",
+    "browser/font_data_fetcher_impl.cc",
+    "browser/font_data_fetcher_impl.h",
+  ]
+
+  deps = [
+    "//base",
+    "//skia",
   ]
 }
 
@@ -294,6 +308,7 @@ source_set("feature") {
     "//blimp/common/proto",
     "//blimp/engine:app_settings",
     "//blimp/engine:common",
+    "//blimp/helium",
     "//blimp/net",
     "//content/public/browser",
     "//content/public/common",
@@ -328,7 +343,7 @@ source_set("renderer") {
     "//components/web_cache/renderer",
     "//content/public/common",
     "//content/public/renderer",
-    "//services/shell/public/cpp",
+    "//services/service_manager/public/cpp",
     "//skia",
     "//third_party/libwebp",
     "//ui/gfx/geometry",
@@ -360,6 +375,7 @@ source_set("session") {
     "//blimp/common/proto",
     "//blimp/net",
     "//content/public/browser",
+    "//content/public/common",
     "//device/geolocation",
     "//net",
     "//ui/aura",
@@ -386,6 +402,44 @@ source_set("blob_channel_service") {
 mojom("blob_channel_mojo") {
   sources = [
     "mojo/blob_channel.mojom",
+  ]
+}
+
+# Implements the browser portion of the FontAccess.
+source_set("font_fetcher_mojo_impl") {
+  sources = [
+    "mojo/font_fetcher_mojo_impl.cc",
+    "mojo/font_fetcher_mojo_impl.h",
+  ]
+  public_deps = [
+    ":font_fetcher_mojo",
+    "//skia",
+  ]
+  deps = [
+    ":font_data_fetcher",
+  ]
+}
+
+mojom("font_fetcher_mojo") {
+  sources = [
+    "mojo/font_fetcher.mojom",
+  ]
+}
+
+source_set("mojo_unit_tests") {
+  testonly = true
+
+  sources = [
+    "mojo/font_fetcher_mojo_impl_unittest.cc",
+  ]
+
+  deps = [
+    ":font_data_fetcher",
+    ":font_fetcher_mojo",
+    ":font_fetcher_mojo_impl",
+    "//skia",
+    "//testing/gmock",
+    "//testing/gtest:gtest",
   ]
 }
 
@@ -495,6 +549,24 @@ source_set("feature_unit_tests") {
   ]
 }
 
+source_set("font_data_fetcher_unit_tests") {
+  testonly = true
+
+  sources = [
+    "browser/font_data_fetcher_impl_unittest.cc",
+  ]
+
+  deps = [
+    ":font_data_fetcher",
+    "//base",
+    "//base/test:test_support",
+    "//net:test_support",
+    "//skia",
+    "//testing/gmock",
+    "//testing/gtest",
+  ]
+}
+
 source_set("renderer_unit_tests") {
   testonly = true
 
@@ -526,6 +598,8 @@ source_set("unit_tests") {
     ":app_unit_tests",
     ":common_unit_tests",
     ":feature_unit_tests",
+    ":font_data_fetcher_unit_tests",
+    ":mojo_unit_tests",
     ":renderer_unit_tests",
   ]
 }
@@ -701,8 +775,8 @@ source_set("browser_tests") {
 
   deps = [
     "//base",
-    "//blimp/client:session",
-    "//blimp/client:test_support",
+    "//blimp/client/app:session",
+    "//blimp/client/app:test_support",
     "//blimp/client/core/contents:test_support",
     "//blimp/client/core/context",
     "//blimp/client/core/render_widget:test_support",

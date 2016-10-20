@@ -105,7 +105,6 @@ class CONTENT_EXPORT RenderViewHostDelegate {
 
   // The state for the page changed and should be updated.
   virtual void UpdateState(RenderViewHost* render_view_host,
-                           int32_t page_id,
                            const PageState& state) {}
 
   // The destination URL has changed should be updated.
@@ -239,6 +238,8 @@ class CONTENT_EXPORT RenderViewHostDelegate {
   // Whether the user agent is overridden using the Chrome for Android "Request
   // Desktop Site" feature.
   virtual bool IsOverridingUserAgent();
+
+  virtual bool IsJavaScriptDialogShowing() const;
 
  protected:
   virtual ~RenderViewHostDelegate() {}

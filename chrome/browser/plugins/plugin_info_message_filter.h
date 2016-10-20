@@ -18,6 +18,7 @@
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/prefs/pref_member.h"
 #include "content/public/browser/browser_message_filter.h"
+#include "ppapi/features/features.h"
 
 struct ChromeViewHostMsg_GetPluginInfo_Output;
 enum class ChromeViewHostMsg_GetPluginInfo_Status;
@@ -44,6 +45,10 @@ namespace component_updater {
 struct ComponentInfo;
 }
 
+namespace url {
+class Origin;
+}
+
 // This class filters out incoming IPC messages requesting plugin information.
 class PluginInfoMessageFilter : public content::BrowserMessageFilter {
  public:
@@ -64,7 +69,7 @@ class PluginInfoMessageFilter : public content::BrowserMessageFilter {
     bool FindEnabledPlugin(
         int render_frame_id,
         const GURL& url,
-        const GURL& top_origin_url,
+        const url::Origin& main_frame_origin,
         const std::string& mime_type,
         ChromeViewHostMsg_GetPluginInfo_Status* status,
         content::WebPluginInfo* plugin,
@@ -102,7 +107,7 @@ class PluginInfoMessageFilter : public content::BrowserMessageFilter {
 
   void OnGetPluginInfo(int render_frame_id,
                        const GURL& url,
-                       const GURL& top_origin_url,
+                       const url::Origin& main_frame_origin,
                        const std::string& mime_type,
                        IPC::Message* reply_msg);
 
@@ -125,7 +130,7 @@ class PluginInfoMessageFilter : public content::BrowserMessageFilter {
       std::unique_ptr<PluginMetadata> plugin_metadata,
       IPC::Message* reply_msg);
 
-#if defined(ENABLE_PEPPER_CDMS)
+#if BUILDFLAG(ENABLE_PEPPER_CDMS)
   // Returns whether any internal plugin supporting |mime_type| is registered
   // and enabled. Does not determine whether the plugin can actually be
   // instantiated (e.g. whether it has all its dependencies).

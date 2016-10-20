@@ -288,9 +288,6 @@ const char kDisableQuic[] = "disable-quic";
 // This only has an effect if QUIC protocol is enabled.
 const char kDisableQuicPortSelection[] = "disable-quic-port-selection";
 
-// Disables using bubbles for session restore request.
-const char kDisableSessionCrashedBubble[] = "disable-session-crashed-bubble";
-
 // Disable settings in a separate browser window per profile
 // (see SettingsWindowEnabled() below).
 const char kDisableSettingsWindow[]          = "disable-settings-window";
@@ -333,9 +330,6 @@ const char kEasyUnlockAppPath[]             = "easy-unlock-app-path";
 // Enables the display of a banner allowing the user to add a web
 // app to their shelf (or platform-specific equivalent)
 const char kEnableAddToShelf[] = "enable-add-to-shelf";
-
-// Enables all bookmarks view in bookmark manager.
-const char kEnableAllBookmarksView[] = "enable-all-bookmarks-view";
 
 // Enable OS integration for Chrome app file associations.
 const char kEnableAppsFileAssociations[]    = "enable-apps-file-associations";
@@ -397,10 +391,6 @@ const char kEnableMaterialDesignPolicyPage[]  = "enable-md-policy-page";
 // (internally adds lEnableGpuPlugin to the command line).
 const char kEnableNaCl[]                    = "enable-nacl";
 
-// Enables the use of native notifications instead of using the Chrome based
-// ones.
-const char kEnableNativeNotifications[] = "enable-native-notifications";
-
 // Enables tracing for each navigation. It will attempt to trace each navigation
 // for 10s, until the buffer is full, or until the next navigation.
 // It only works if a URL was provided by --trace-upload-url.
@@ -457,8 +447,8 @@ const char kEnableQuic[] = "enable-quic";
 // This only has an effect if the QUIC protocol is enabled.
 const char kEnableQuicPortSelection[] = "enable-quic-port-selection";
 
-// Enables using bubbles for session restore request instead of infobars.
-const char kEnableSessionCrashedBubble[] = "enable-session-crashed-bubble";
+// Switches 'Save as...' context and app menu labels to 'Download...'.
+const char kEnableSaveAsMenuLabelExperiment[] = "saveas-menu-label";
 
 // Enable settings in a separate browser window per profile
 // (see SettingsWindowEnabled() below).
@@ -479,6 +469,10 @@ const char kEnableSiteEngagementEvictionPolicy[] =
 // Enable the Site Engagement service, which records interaction with sites and
 // allocates certain resources accordingly.
 const char kEnableSiteEngagementService[]   = "enable-site-engagement-service";
+
+// Enables the site settings all sites list and site details pages in the Chrome
+// settings UI.
+const char kEnableSiteSettings[] = "enable-site-settings";
 
 // Enables the supervised user managed bookmarks folder.
 const char kEnableSupervisedUserManagedBookmarksFolder[] =
@@ -630,15 +624,15 @@ const char kLoadExtension[]                 = "load-extension";
 // Makes Chrome default browser
 const char kMakeDefaultBrowser[]            = "make-default-browser";
 
-// Changes security chip behavior.
-const char kMaterialSecurityVerbose[] = "material-security-verbose";
-const char kMaterialSecurityVerboseShowAllAnimated[] = "show-all-animated";
-const char kMaterialSecurityVerboseShowAllNonAnimated[] =
-    "show-all-nonanimated";
-const char kMaterialSecurityVerboseShowNonSecureAnimated[] =
-    "show-nonsecure-animated";
-const char kMaterialSecurityVerboseShowNonSecureNonAnimated[] =
-    "show-nonsecure-nonanimated";
+extern const char kSecurityChip[] = "security-chip";
+extern const char kSecurityChipShowNonSecureOnly[] = "show-nonsecure-only";
+extern const char kSecurityChipShowAll[] = "show-all";
+
+extern const char kSecurityChipAnimation[] = "security-chip-animation";
+extern const char kSecurityChipAnimationNone[] = "none";
+extern const char kSecurityChipAnimationNonSecureOnly[] =
+    "animate-nonsecure-only";
+extern const char kSecurityChipAnimationAll[] = "animate-all";
 
 // Forces the maximum disk space to be used by the media cache, in bytes.
 const char kMediaCacheSize[]                = "media-cache-size";
@@ -928,6 +922,9 @@ const char kSSLKeyLogFile[]               = "ssl-key-log-file";
 
 // Starts the browser maximized, regardless of any previous settings.
 const char kStartMaximized[]                = "start-maximized";
+
+// Starts the stack sampling profiler in the child process.
+const char kStartStackProfiler[]            = "start-stack-profiler";
 
 // Sets the supervised user ID for any loaded or newly created profile to the
 // given value. Pass an empty string to mark the profile as non-supervised.

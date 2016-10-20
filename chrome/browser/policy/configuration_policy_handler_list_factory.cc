@@ -16,6 +16,7 @@
 #include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/net/disk_cache_dir_policy_handler.h"
+#include "chrome/browser/net/safe_search_util.h"
 #include "chrome/browser/policy/file_selection_dialogs_policy_handler.h"
 #include "chrome/browser/policy/javascript_policy_handler.h"
 #include "chrome/browser/policy/managed_bookmarks_policy_handler.h"
@@ -78,6 +79,10 @@
 #include "extensions/common/manifest.h"
 #endif
 
+#if defined(ENABLE_PLUGINS)
+#include "chrome/browser/plugins/plugin_policy_handler.h"
+#endif
+
 #if defined(ENABLE_SPELLCHECK)
 #include "components/spellcheck/browser/pref_names.h"
 #endif
@@ -119,9 +124,9 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kForceGoogleSafeSearch,
     prefs::kForceGoogleSafeSearch,
     base::Value::TYPE_BOOLEAN },
-  { key::kForceYouTubeSafetyMode,
-    prefs::kForceYouTubeSafetyMode,
-    base::Value::TYPE_BOOLEAN },
+  { key::kForceYouTubeRestrict,
+    prefs::kForceYouTubeRestrict,
+    base::Value::TYPE_INTEGER},
   { key::kPasswordManagerEnabled,
     password_manager::prefs::kPasswordManagerSavingEnabled,
     base::Value::TYPE_BOOLEAN },
@@ -137,15 +142,9 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kApplicationLocaleValue,
     prefs::kApplicationLocale,
     base::Value::TYPE_STRING },
-  { key::kDisabledPlugins,
-    prefs::kPluginsDisabledPlugins,
-    base::Value::TYPE_LIST },
-  { key::kDisabledPluginsExceptions,
-    prefs::kPluginsDisabledPluginsExceptions,
-    base::Value::TYPE_LIST },
-  { key::kEnabledPlugins,
-    prefs::kPluginsEnabledPlugins,
-    base::Value::TYPE_LIST },
+  { key::kAlwaysOpenPdfExternally,
+    prefs::kPluginsAlwaysOpenPdfExternally,
+    base::Value::TYPE_BOOLEAN },
   { key::kShowHomeButton,
     prefs::kShowHomeButton,
     base::Value::TYPE_BOOLEAN },
@@ -535,6 +534,9 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kArcBackupRestoreEnabled,
     prefs::kArcBackupRestoreEnabled,
     base::Value::TYPE_BOOLEAN },
+  { key::kReportArcStatusEnabled,
+    prefs::kReportArcStatusEnabled,
+    base::Value::TYPE_BOOLEAN },
 #endif  // defined(OS_CHROMEOS)
 
 // Metrics reporting is controlled by a platform specific policy for ChromeOS
@@ -615,22 +617,65 @@ class ForceSafeSearchPolicyHandler : public TypeCheckingPolicyHandler {
   // ConfigurationPolicyHandler implementation:
   void ApplyPolicySettings(const PolicyMap& policies,
                            PrefValueMap* prefs) override {
-    // If either of the new GoogleSafeSearch or YouTubeSafetyMode policies is
-    // defined, then this one should be ignored. crbug.com/476908
-    // Note: Those policies are declared in kSimplePolicyMap above.
+    // If either of the new ForceGoogleSafeSearch, ForceYouTubeSafetyMode or
+    // ForceYouTubeRestrict policies are defined, then this one should be
+    // ignored. crbug.com/476908, crbug.com/590478
+    // Note: Those policies are declared in kSimplePolicyMap above, except
+    // ForceYouTubeSafetyMode, which has been replaced by ForceYouTubeRestrict.
     if (policies.GetValue(key::kForceGoogleSafeSearch) ||
-        policies.GetValue(key::kForceYouTubeSafetyMode)) {
+        policies.GetValue(key::kForceYouTubeSafetyMode) ||
+        policies.GetValue(key::kForceYouTubeRestrict)) {
       return;
     }
     const base::Value* value = policies.GetValue(policy_name());
     if (value) {
+      bool enabled;
       prefs->SetValue(prefs::kForceGoogleSafeSearch, value->CreateDeepCopy());
-      prefs->SetValue(prefs::kForceYouTubeSafetyMode, value->CreateDeepCopy());
+
+      // Note that ForceYouTubeRestrict is an int policy, we cannot simply deep
+      // copy value, which is a boolean.
+      if (value->GetAsBoolean(&enabled)) {
+        prefs->SetValue(
+            prefs::kForceYouTubeRestrict,
+            base::MakeUnique<base::FundamentalValue>(
+                enabled ? safe_search_util::YOUTUBE_RESTRICT_MODERATE
+                        : safe_search_util::YOUTUBE_RESTRICT_OFF));
+      }
     }
   }
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ForceSafeSearchPolicyHandler);
+};
+
+class ForceYouTubeSafetyModePolicyHandler : public TypeCheckingPolicyHandler {
+ public:
+  ForceYouTubeSafetyModePolicyHandler()
+      : TypeCheckingPolicyHandler(key::kForceYouTubeSafetyMode,
+                                  base::Value::TYPE_BOOLEAN) {}
+  ~ForceYouTubeSafetyModePolicyHandler() override {}
+
+  // ConfigurationPolicyHandler implementation:
+  void ApplyPolicySettings(const PolicyMap& policies,
+                           PrefValueMap* prefs) override {
+    // If only the deprecated ForceYouTubeSafetyMode policy is set,
+    // but not ForceYouTubeRestrict, set ForceYouTubeRestrict to Moderate.
+    if (policies.GetValue(key::kForceYouTubeRestrict))
+      return;
+
+    const base::Value* value = policies.GetValue(policy_name());
+    bool enabled;
+    if (value && value->GetAsBoolean(&enabled)) {
+      prefs->SetValue(
+          prefs::kForceYouTubeRestrict,
+          base::MakeUnique<base::FundamentalValue>(
+              enabled ? safe_search_util::YOUTUBE_RESTRICT_MODERATE
+                      : safe_search_util::YOUTUBE_RESTRICT_OFF));
+    }
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(ForceYouTubeSafetyModePolicyHandler);
 };
 
 #if defined(ENABLE_EXTENSIONS)
@@ -683,6 +728,7 @@ std::unique_ptr<ConfigurationPolicyHandlerList> BuildHandlerList(
   handlers->AddHandler(base::MakeUnique<AutofillPolicyHandler>());
   handlers->AddHandler(base::MakeUnique<DefaultSearchPolicyHandler>());
   handlers->AddHandler(base::MakeUnique<ForceSafeSearchPolicyHandler>());
+  handlers->AddHandler(base::MakeUnique<ForceYouTubeSafetyModePolicyHandler>());
   handlers->AddHandler(base::MakeUnique<IncognitoModePolicyHandler>());
   handlers->AddHandler(
       base::MakeUnique<ManagedBookmarksPolicyHandler>(chrome_schema));
@@ -883,6 +929,10 @@ std::unique_ptr<ConfigurationPolicyHandlerList> BuildHandlerList(
       base::MakeUnique<chromeos::KeyPermissionsPolicyHandler>(chrome_schema));
   handlers->AddHandler(base::WrapUnique(new DefaultGeolocationPolicyHandler()));
 #endif  // defined(OS_CHROMEOS)
+
+#if defined(ENABLE_PLUGINS)
+  handlers->AddHandler(base::MakeUnique<PluginPolicyHandler>());
+#endif  // defined(ENABLE_PLUGINS)
 
   return handlers;
 }

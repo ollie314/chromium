@@ -9,6 +9,7 @@ import("//build/config/features.gni")
 import("//build/config/linux/pkg_config.gni")
 import("//build/config/ui.gni")
 import("//media/media_options.gni")
+import("//ppapi/features/features.gni")
 import("//testing/libfuzzer/fuzzer_test.gni")
 import("//testing/test.gni")
 import("//third_party/ffmpeg/ffmpeg_options.gni")
@@ -20,6 +21,7 @@ buildflag_header("media_features") {
     "ENABLE_AC3_EAC3_AUDIO_DEMUXING=$enable_ac3_eac3_audio_demuxing",
     "ENABLE_HEVC_DEMUXING=$enable_hevc_demuxing",
     "ENABLE_MSE_MPEG2TS_STREAM_PARSER=$enable_mse_mpeg2ts_stream_parser",
+    "ENABLE_MEDIA_REMOTING=$enable_media_remoting",
   ]
 }
 
@@ -601,12 +603,13 @@ test("media_unittests") {
     "//media/base:test_support",
     "//media/base:unittests",
     "//media/test:pipeline_integration_tests",
+    "//ppapi/features",
     "//skia",  # Direct dependency required to inherit config.
     "//testing/gmock",
     "//testing/gtest",
     "//third_party/libwebm",
     "//third_party/libyuv",
-    "//third_party/widevine/cdm:version_h",
+    "//third_party/widevine/cdm:headers",
     "//ui/gfx:test_support",
     "//url",
   ]
@@ -729,7 +732,7 @@ test("media_perftests") {
     "//testing/gmock",
     "//testing/gtest",
     "//testing/perf",
-    "//third_party/widevine/cdm:version_h",
+    "//third_party/widevine/cdm:headers",
     "//ui/gfx:test_support",
   ]
   if (media_use_ffmpeg) {
@@ -907,4 +910,16 @@ fuzzer_test("media_webm_muxer_fuzzer") {
     "//base",
     "//third_party/libwebm",
   ]
+}
+
+if (proprietary_codecs) {
+  fuzzer_test("media_mp4_avcc_parser_fuzzer") {
+    sources = [
+      "formats/mp4/mp4_avcc_parser_fuzzer.cc",
+    ]
+    deps = [
+      ":media",
+      "//base",
+    ]
+  }
 }

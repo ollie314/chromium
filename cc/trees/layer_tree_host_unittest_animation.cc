@@ -742,8 +742,7 @@ class LayerTreeHostAnimationTestScrollOffsetChangesArePropagated
         std::unique_ptr<Animation> animation(Animation::Create(
             std::move(curve), 1, 0, TargetProperty::SCROLL_OFFSET));
         animation->set_needs_synchronized_start_time(true);
-        bool impl_scrolling_supported =
-            layer_tree_host()->proxy()->SupportsImplScrolling();
+        bool impl_scrolling_supported = proxy()->SupportsImplScrolling();
         if (impl_scrolling_supported)
           player_child_->AddAnimation(std::move(animation));
         else
@@ -859,10 +858,7 @@ class LayerTreeHostAnimationTestScrollOffsetAnimationAdjusted
             layer->element_id());
     DCHECK(element_animations);
     DCHECK(element_animations->players_list().might_have_observers());
-
-    ElementAnimations::PlayersList::Iterator it(
-        &element_animations->players_list());
-    AnimationPlayer* player = it.GetNext();
+    AnimationPlayer* player = &*element_animations->players_list().begin();
     DCHECK(player);
     return *player;
   }
@@ -1658,8 +1654,9 @@ class LayerTreeHostAnimationTestNotifyAnimationFinished
                               TargetProperty::Type target_property,
                               int group) override {
     called_animation_started_ = true;
-    layer_tree_host()->AnimateLayers(base::TimeTicks::FromInternalValue(
-        std::numeric_limits<int64_t>::max()));
+    layer_tree_host_in_process()->AnimateLayers(
+        base::TimeTicks::FromInternalValue(
+            std::numeric_limits<int64_t>::max()));
     PostSetNeedsCommitToMainThread();
   }
 

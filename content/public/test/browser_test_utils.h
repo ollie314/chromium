@@ -22,6 +22,7 @@
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/render_process_host_observer.h"
+#include "content/public/browser/web_contents_delegate.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/common/page_type.h"
 #include "ipc/message_filter.h"
@@ -612,11 +613,11 @@ class TestNavigationManager : public WebContentsObserver {
 
   // Waits until the navigation request is ready to be sent to the network
   // stack. Returns false if the request was aborted before starting.
-  WARN_UNUSED_RESULT bool WaitForWillStartRequest();
+  WARN_UNUSED_RESULT bool WaitForRequestStart();
 
   // Waits until the navigation response has been sent received. Returns false
   // if the request was aborted before getting a response.
-  WARN_UNUSED_RESULT bool WaitForWillProcessResponse();
+  WARN_UNUSED_RESULT bool WaitForResponse();
 
   // Waits until the navigation has been finished. Will automatically resume
   // navigations paused before this point.
@@ -628,6 +629,13 @@ class TestNavigationManager : public WebContentsObserver {
   virtual bool ShouldMonitorNavigation(NavigationHandle* handle);
 
  private:
+  enum class NavigationState {
+    INITIAL = 0,
+    STARTED = 1,
+    RESPONSE = 2,
+    FINISHED = 3,
+  };
+
   // WebContentsObserver:
   void DidStartNavigation(NavigationHandle* handle) override;
   void DidFinishNavigation(NavigationHandle* handle) override;
@@ -640,21 +648,56 @@ class TestNavigationManager : public WebContentsObserver {
   // WillProcessResponse.
   void OnWillProcessResponse();
 
-  // Resumes the navigation.
-  void ResumeNavigation();
+  // Waits for the desired state. Returns false if the desired state cannot be
+  // reached (eg the navigation finishes before reaching this state).
+  bool WaitForDesiredState();
+
+  // Called when the state of the navigation has changed. This will either stop
+  // the message loop if the state specified by the user has been reached, or
+  // resume the navigation if it hasn't been reached yet.
+  void OnNavigationStateChanged();
 
   const GURL url_;
-  bool navigation_paused_in_will_start_;
-  bool navigation_paused_in_will_process_response_;
   NavigationHandle* handle_;
-  bool handled_navigation_;
-  scoped_refptr<MessageLoopRunner> will_start_loop_runner_;
-  scoped_refptr<MessageLoopRunner> will_process_response_loop_runner_;
-  scoped_refptr<MessageLoopRunner> did_finish_loop_runner_;
+  bool navigation_paused_;
+  NavigationState current_state_;
+  NavigationState desired_state_;
+  scoped_refptr<MessageLoopRunner> loop_runner_;
 
   base::WeakPtrFactory<TestNavigationManager> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(TestNavigationManager);
+};
+
+// A WebContentsDelegate that catches messages sent to the console.
+class ConsoleObserverDelegate : public WebContentsDelegate {
+ public:
+  ConsoleObserverDelegate(WebContents* web_contents, const std::string& filter);
+  ~ConsoleObserverDelegate() override;
+
+  // WebContentsDelegate method:
+  bool AddMessageToConsole(WebContents* source,
+                           int32_t level,
+                           const base::string16& message,
+                           int32_t line_no,
+                           const base::string16& source_id) override;
+
+  // Returns the most recent message sent to the console.
+  std::string message() { return message_; }
+
+  // Waits for the next message captured by the filter to be sent to the
+  // console.
+  void Wait();
+
+ private:
+  WebContents* web_contents_;
+  std::string filter_;
+  std::string message_;
+
+  // The MessageLoopRunner used to spin the message loop.
+  scoped_refptr<MessageLoopRunner> message_loop_runner_;
+
+  DISALLOW_COPY_AND_ASSIGN(ConsoleObserverDelegate);
 };
 
 }  // namespace content

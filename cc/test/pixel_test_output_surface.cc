@@ -6,8 +6,10 @@
 
 #include <utility>
 
-#include "cc/output/compositor_frame.h"
+#include "base/bind.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "cc/output/output_surface_client.h"
+#include "cc/output/output_surface_frame.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
 #include "third_party/khronos/GLES2/gl2.h"
 #include "ui/gfx/transform.h"
@@ -17,15 +19,13 @@ namespace cc {
 PixelTestOutputSurface::PixelTestOutputSurface(
     scoped_refptr<ContextProvider> context_provider,
     bool flipped_output_surface)
-    : OutputSurface(std::move(context_provider)),
-      external_stencil_test_(false) {
+    : OutputSurface(std::move(context_provider)), weak_ptr_factory_(this) {
   capabilities_.flipped_output_surface = flipped_output_surface;
 }
 
 PixelTestOutputSurface::PixelTestOutputSurface(
     std::unique_ptr<SoftwareOutputDevice> software_device)
-    : OutputSurface(std::move(software_device)),
-      external_stencil_test_(false) {}
+    : OutputSurface(std::move(software_device)), weak_ptr_factory_(this) {}
 
 PixelTestOutputSurface::~PixelTestOutputSurface() = default;
 
@@ -38,12 +38,15 @@ void PixelTestOutputSurface::BindFramebuffer() {
 }
 
 void PixelTestOutputSurface::Reshape(const gfx::Size& size,
-                                     float scale_factor,
+                                     float device_scale_factor,
                                      const gfx::ColorSpace& color_space,
                                      bool has_alpha) {
-  gfx::Size expanded_size(size.width() + surface_expansion_size_.width(),
-                          size.height() + surface_expansion_size_.height());
-  OutputSurface::Reshape(expanded_size, scale_factor, color_space, has_alpha);
+  if (context_provider()) {
+    context_provider()->ContextGL()->ResizeCHROMIUM(
+        size.width(), size.height(), device_scale_factor, has_alpha);
+  } else {
+    software_device()->Resize(size, device_scale_factor);
+  }
 }
 
 bool PixelTestOutputSurface::HasExternalStencilTest() const {
@@ -52,8 +55,14 @@ bool PixelTestOutputSurface::HasExternalStencilTest() const {
 
 void PixelTestOutputSurface::ApplyExternalStencil() {}
 
-void PixelTestOutputSurface::SwapBuffers(CompositorFrame frame) {
-  PostSwapBuffersComplete();
+void PixelTestOutputSurface::SwapBuffers(OutputSurfaceFrame frame) {
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::Bind(&PixelTestOutputSurface::SwapBuffersCallback,
+                            weak_ptr_factory_.GetWeakPtr()));
+}
+
+void PixelTestOutputSurface::SwapBuffersCallback() {
+  client_->DidReceiveSwapBuffersAck();
 }
 
 OverlayCandidateValidator*

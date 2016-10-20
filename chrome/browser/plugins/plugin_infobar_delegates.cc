@@ -17,6 +17,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/shell_integration.h"
 #include "chrome/browser/ui/browser_commands.h"
+#include "chrome/common/features.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
@@ -30,8 +31,9 @@
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/gfx/vector_icons_public.h"
 
-#if defined(ENABLE_PLUGIN_INSTALLATION)
+#if BUILDFLAG(ENABLE_PLUGIN_INSTALLATION)
 #include "chrome/browser/plugins/plugin_installer.h"
 #endif
 
@@ -42,7 +44,7 @@
 
 using base::UserMetricsAction;
 
-#if defined(ENABLE_PLUGIN_INSTALLATION)
+#if BUILDFLAG(ENABLE_PLUGIN_INSTALLATION)
 
 // OutdatedPluginInfoBarDelegate ----------------------------------------------
 
@@ -108,8 +110,8 @@ void OutdatedPluginInfoBarDelegate::InfoBarDismissed() {
   content::RecordAction(UserMetricsAction("OutdatedPluginInfobar.Dismissed"));
 }
 
-int OutdatedPluginInfoBarDelegate::GetIconId() const {
-  return IDR_INFOBAR_PLUGIN_INSTALL;
+gfx::VectorIconId OutdatedPluginInfoBarDelegate::GetVectorIconId() const {
+  return gfx::VectorIconId::EXTENSION;
 }
 
 base::string16 OutdatedPluginInfoBarDelegate::GetMessageText() const {
@@ -210,4 +212,4 @@ void OutdatedPluginInfoBarDelegate::Replace(
                            installer, std::move(plugin_metadata), message))));
 }
 
-#endif  // defined(ENABLE_PLUGIN_INSTALLATION)
+#endif  // BUILDFLAG(ENABLE_PLUGIN_INSTALLATION)

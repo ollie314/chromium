@@ -5,6 +5,8 @@
 #ifndef SensorProxy_h
 #define SensorProxy_h
 
+#include "core/dom/ExceptionCode.h"
+#include "device/generic_sensor/public/cpp/sensor_reading.h"
 #include "device/generic_sensor/public/interfaces/sensor.mojom-blink.h"
 #include "device/generic_sensor/public/interfaces/sensor_provider.mojom-blink.h"
 #include "mojo/public/cpp/bindings/binding.h"
@@ -31,7 +33,9 @@ class SensorProxy final : public GarbageCollectedFinalized<SensorProxy>,
     // Platfrom sensort reading has changed (for 'ONCHANGE' reporting mode).
     virtual void onSensorReadingChanged() {}
     // An error has occurred.
-    virtual void onSensorError() {}
+    virtual void onSensorError(ExceptionCode,
+                               const String& sanitizedMessage,
+                               const String& unsanitizedMessage) {}
   };
 
   ~SensorProxy();
@@ -57,13 +61,7 @@ class SensorProxy final : public GarbageCollectedFinalized<SensorProxy>,
   device::mojom::blink::SensorType type() const { return m_type; }
   device::mojom::blink::ReportingMode reportingMode() const { return m_mode; }
 
-  struct Reading {
-    double timestamp;
-    double reading[3];
-  };
-  static_assert(sizeof(Reading) ==
-                    device::mojom::blink::SensorInitParams::kReadBufferSize,
-                "Check reading size");
+  using Reading = device::SensorReading;
 
   const Reading& reading() const { return m_reading; }
 
@@ -83,10 +81,14 @@ class SensorProxy final : public GarbageCollectedFinalized<SensorProxy>,
   void SensorReadingChanged() override;
 
   // Generic handler for a fatal error.
-  void handleSensorError();
+  void handleSensorError(ExceptionCode = UnknownError,
+                         const String& sanitizedMessage = String(),
+                         const String& unsanitizedMessage = String());
 
   void onSensorCreated(device::mojom::blink::SensorInitParamsPtr,
                        device::mojom::blink::SensorClientRequest);
+
+  bool tryReadFromBuffer();
 
   device::mojom::blink::SensorType m_type;
   device::mojom::blink::ReportingMode m_mode;
@@ -104,6 +106,11 @@ class SensorProxy final : public GarbageCollectedFinalized<SensorProxy>,
   mojo::ScopedSharedBufferMapping m_sharedBuffer;
   Reading m_reading;
   bool m_suspended;
+  using ReadingBuffer = device::SensorReadingSharedBuffer;
+  static_assert(
+      sizeof(ReadingBuffer) ==
+          device::mojom::blink::SensorInitParams::kReadBufferSizeForTests,
+      "Check reading buffer size for tests");
 };
 
 }  // namespace blink

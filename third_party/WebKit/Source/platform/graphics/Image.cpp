@@ -31,13 +31,13 @@
 #include "platform/PlatformInstrumentation.h"
 #include "platform/RuntimeEnabledFeatures.h"
 #include "platform/SharedBuffer.h"
-#include "platform/TraceEvent.h"
 #include "platform/geometry/FloatPoint.h"
 #include "platform/geometry/FloatRect.h"
 #include "platform/geometry/FloatSize.h"
 #include "platform/graphics/BitmapImage.h"
 #include "platform/graphics/DeferredImageDecoder.h"
 #include "platform/graphics/GraphicsContext.h"
+#include "platform/tracing/TraceEvent.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebData.h"
 #include "third_party/skia/include/core/SkCanvas.h"
@@ -105,7 +105,8 @@ void Image::drawTiled(GraphicsContext& ctxt,
   const FloatRect oneTileRect = computeTileContaining(
       destRect.location(), scaledTileSize, srcPoint, repeatSpacing);
 
-  // Check and see if a single draw of the image can cover the entire area we are supposed to tile.
+  // Check and see if a single draw of the image can cover the entire area we
+  // are supposed to tile.
   if (oneTileRect.contains(destRect)) {
     const FloatRect visibleSrcRect =
         computeSubsetForTile(oneTileRect, destRect, intrinsicTileSize);
@@ -121,7 +122,8 @@ void Image::drawTiled(GraphicsContext& ctxt,
   startAnimation();
 }
 
-// FIXME: Merge with the other drawTiled eventually, since we need a combination of both for some things.
+// FIXME: Merge with the other drawTiled() function eventually, since we need a
+// combination of both for some things.
 void Image::drawTiled(GraphicsContext& ctxt,
                       const FloatRect& dstRect,
                       const FloatRect& srcRect,
@@ -155,14 +157,15 @@ void Image::drawTiled(GraphicsContext& ctxt,
                               (srcRect.height() * vRepetitions));
   }
   if (hRule == RoundTile || vRule == RoundTile) {
-    // High interpolation quality rounds the scaled tile to an integer size (see Image::drawPattern).
-    // To avoid causing a visual problem, linear interpolation must be used instead.
+    // High quality interpolation rounds the scaled tile to an integer size (see
+    // Image::drawPattern). To avoid causing a visual problem, linear
+    // interpolation must be used instead.
     // FIXME: Allow using high-quality interpolation in this case, too.
     useLowInterpolationQuality = true;
   }
 
-  // We want to construct the phase such that the pattern is centered (when stretch is not
-  // set for a particular rule).
+  // We want to construct the phase such that the pattern is centered (when
+  // stretch is not set for a particular rule).
   float hPhase = tileScaleFactor.width() * srcRect.x();
   float vPhase = tileScaleFactor.height() * srcRect.y();
   float scaledTileWidth = tileScaleFactor.width() * srcRect.width();
@@ -196,8 +199,8 @@ sk_sp<SkShader> createPatternShader(const SkImage* image,
     return image->makeShader(SkShader::kRepeat_TileMode,
                              SkShader::kRepeat_TileMode, &shaderMatrix);
 
-  // Arbitrary tiling is currently only supported for SkPictureShader - so we use it instead
-  // of a plain bitmap shader to implement spacing.
+  // Arbitrary tiling is currently only supported for SkPictureShader, so we use
+  // that instead of a plain bitmap shader to implement spacing.
   const SkRect tileRect = SkRect::MakeWH(image->width() + spacing.width(),
                                          image->height() + spacing.height());
 
@@ -255,7 +258,7 @@ void Image::drawPattern(GraphicsContext& context,
   {
     SkPaint paint = context.fillPaint();
     paint.setColor(SK_ColorBLACK);
-    paint.setXfermodeMode(compositeOp);
+    paint.setBlendMode(static_cast<SkBlendMode>(compositeOp));
     paint.setFilterQuality(
         context.computeFilterQuality(this, destRect, normSrcRect));
     paint.setAntiAlias(context.shouldAntialias());
@@ -282,7 +285,8 @@ bool Image::isTextureBacked() {
 }
 
 bool Image::applyShader(SkPaint& paint, const SkMatrix& localMatrix) {
-  // Default shader impl: attempt to build a shader based on the current frame SkImage.
+  // Default shader impl: attempt to build a shader based on the current frame
+  // SkImage.
   sk_sp<SkImage> image = imageForCurrentFrame();
   if (!image)
     return false;
@@ -290,7 +294,8 @@ bool Image::applyShader(SkPaint& paint, const SkMatrix& localMatrix) {
   paint.setShader(image->makeShader(SkShader::kRepeat_TileMode,
                                     SkShader::kRepeat_TileMode, &localMatrix));
 
-  // Animation is normally refreshed in draw() impls, which we don't call when painting via shaders.
+  // Animation is normally refreshed in draw() impls, which we don't call when
+  // painting via shaders.
   startAnimation();
 
   return true;

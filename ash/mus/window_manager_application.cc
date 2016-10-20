@@ -11,13 +11,11 @@
 #include "ash/common/wm_shell.h"
 #include "ash/mus/accelerators/accelerator_registrar_impl.h"
 #include "ash/mus/native_widget_factory_mus.h"
-#include "ash/mus/shelf_delegate_mus.h"
-#include "ash/mus/wallpaper_delegate_mus.h"
 #include "ash/mus/window_manager.h"
 #include "base/bind.h"
 #include "base/memory/ptr_util.h"
-#include "services/shell/public/cpp/connection.h"
-#include "services/shell/public/cpp/connector.h"
+#include "services/service_manager/public/cpp/connection.h"
+#include "services/service_manager/public/cpp/connector.h"
 #include "services/tracing/public/cpp/provider.h"
 #include "services/ui/common/event_matcher_util.h"
 #include "services/ui/public/cpp/gpu_service.h"
@@ -31,6 +29,7 @@
 
 #if defined(OS_CHROMEOS)
 #include "ash/common/system/chromeos/power/power_status.h"
+#include "ash/mus/network_connect_delegate_mus.h"
 #include "chromeos/audio/cras_audio_handler.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/network/network_handler.h"
@@ -41,28 +40,6 @@
 
 namespace ash {
 namespace mus {
-
-#if defined(OS_CHROMEOS)
-// TODO(mash): Replace ui::NetworkConnect::Delegate with a mojo interface on a
-// NetworkConfig service. http://crbug.com/644355
-class WindowManagerApplication::StubNetworkConnectDelegate
-    : public ui::NetworkConnect::Delegate {
- public:
-  StubNetworkConnectDelegate() {}
-  ~StubNetworkConnectDelegate() override {}
-
-  void ShowNetworkConfigure(const std::string& network_id) override {}
-  void ShowNetworkSettingsForGuid(const std::string& network_id) override {}
-  bool ShowEnrollNetwork(const std::string& network_id) override {
-    return false;
-  }
-  void ShowMobileSimDialog() override {}
-  void ShowMobileSetupDialog(const std::string& service_path) override {}
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(StubNetworkConnectDelegate);
-};
-#endif  // OS_CHROMEOS
 
 WindowManagerApplication::WindowManagerApplication()
     : screenlock_state_listener_binding_(this) {}
@@ -131,7 +108,7 @@ void WindowManagerApplication::InitializeComponents() {
       chromeos::DBusThreadManager::Get()->GetSystemBus(),
       chromeos::DBusThreadManager::Get()->IsUsingFakes());
   chromeos::NetworkHandler::Initialize();
-  network_connect_delegate_.reset(new StubNetworkConnectDelegate());
+  network_connect_delegate_.reset(new NetworkConnectDelegateMus());
   ui::NetworkConnect::Initialize(network_connect_delegate_.get());
   // TODO(jamescook): Initialize real audio handler.
   chromeos::CrasAudioHandler::InitializeForTesting();
@@ -152,7 +129,8 @@ void WindowManagerApplication::ShutdownComponents() {
   message_center::MessageCenter::Shutdown();
 }
 
-void WindowManagerApplication::OnStart(const shell::Identity& identity) {
+void WindowManagerApplication::OnStart(
+    const service_manager::Identity& identity) {
   aura_init_.reset(new views::AuraInit(connector(), "ash_mus_resources.pak",
                                        "ash_mus_resources_200.pak"));
   gpu_service_ = ui::GpuService::Create(connector());
@@ -178,16 +156,15 @@ void WindowManagerApplication::OnStart(const shell::Identity& identity) {
   InitWindowManager(std::move(window_tree_client), blocking_pool_);
 }
 
-bool WindowManagerApplication::OnConnect(const shell::Identity& remote_identity,
-                                         shell::InterfaceRegistry* registry) {
+bool WindowManagerApplication::OnConnect(
+    const service_manager::Identity& remote_identity,
+    service_manager::InterfaceRegistry* registry) {
   // Register services used in both classic ash and mash.
   mojo_interface_factory::RegisterInterfaces(
       registry, base::ThreadTaskRunnerHandle::Get());
 
-  registry->AddInterface<mojom::ShelfController>(this);
-  registry->AddInterface<mojom::WallpaperController>(this);
   registry->AddInterface<ui::mojom::AcceleratorRegistrar>(this);
-  if (remote_identity.name() == "mojo:mash_session") {
+  if (remote_identity.name() == "service:mash_session") {
     connector()->ConnectToInterface(remote_identity, &session_);
     session_->AddScreenlockStateListener(
         screenlock_state_listener_binding_.CreateInterfacePtrAndBind());
@@ -195,26 +172,8 @@ bool WindowManagerApplication::OnConnect(const shell::Identity& remote_identity,
   return true;
 }
 
-void WindowManagerApplication::Create(const shell::Identity& remote_identity,
-                                      mojom::ShelfControllerRequest request) {
-  mojom::ShelfController* shelf_controller =
-      static_cast<ShelfDelegateMus*>(WmShell::Get()->shelf_delegate());
-  DCHECK(shelf_controller);
-  shelf_controller_bindings_.AddBinding(shelf_controller, std::move(request));
-}
-
 void WindowManagerApplication::Create(
-    const ::shell::Identity& remote_identity,
-    mojom::WallpaperControllerRequest request) {
-  mojom::WallpaperController* wallpaper_controller =
-      static_cast<WallpaperDelegateMus*>(WmShell::Get()->wallpaper_delegate());
-  DCHECK(wallpaper_controller);
-  wallpaper_controller_bindings_.AddBinding(wallpaper_controller,
-                                            std::move(request));
-}
-
-void WindowManagerApplication::Create(
-    const shell::Identity& remote_identity,
+    const service_manager::Identity& remote_identity,
     ui::mojom::AcceleratorRegistrarRequest request) {
   if (!window_manager_->window_manager_client())
     return;  // Can happen during shutdown.

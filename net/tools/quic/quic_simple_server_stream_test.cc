@@ -4,8 +4,11 @@
 
 #include "net/tools/quic/quic_simple_server_stream.h"
 
+#include <list>
+#include <memory>
 #include <utility>
 
+#include "base/memory/ptr_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
 #include "net/quic/core/quic_connection.h"
@@ -210,7 +213,7 @@ class QuicSimpleServerStreamTest
     stream_ = new QuicSimpleServerStreamPeer(::net::test::kClientDataStreamId1,
                                              &session_);
     // Register stream_ in dynamic_stream_map_ and pass ownership to session_.
-    session_.ActivateStream(stream_);
+    session_.ActivateStream(base::WrapUnique(stream_));
 
     QuicInMemoryCachePeer::ResetForTests();
   }
@@ -223,8 +226,8 @@ class QuicSimpleServerStreamTest
     return QuicSimpleServerStreamPeer::body(stream_);
   }
 
-  StringPiece StreamHeadersValue(const string& key) {
-    return (*stream_->mutable_headers())[key];
+  string StreamHeadersValue(const string& key) {
+    return (*stream_->mutable_headers())[key].as_string();
   }
 
   SpdyHeaderBlock response_headers_;
@@ -377,7 +380,7 @@ TEST_P(QuicSimpleServerStreamTest, SendPushResponseWith404Response) {
   // Create a new promised stream with even id().
   QuicSimpleServerStreamPeer* promised_stream =
       new QuicSimpleServerStreamPeer(2, &session_);
-  session_.ActivateStream(promised_stream);
+  session_.ActivateStream(base::WrapUnique(promised_stream));
 
   // Send a push response with response status 404, which will be regarded as
   // invalid server push response.
@@ -481,7 +484,7 @@ TEST_P(QuicSimpleServerStreamTest, PushResponseOnServerInitiatedStream) {
   // Create a server initiated stream and pass it to session_.
   QuicSimpleServerStreamPeer* server_initiated_stream =
       new QuicSimpleServerStreamPeer(kServerInitiatedStreamId, &session_);
-  session_.ActivateStream(server_initiated_stream);
+  session_.ActivateStream(base::WrapUnique(server_initiated_stream));
 
   const string kHost = "www.foo.com";
   const string kPath = "/bar";

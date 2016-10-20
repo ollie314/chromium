@@ -89,7 +89,7 @@
 #include "components/crx_file/id_util.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/scoped_user_pref_update.h"
-#include "components/sync/api/string_ordinal.h"
+#include "components/sync/model/string_ordinal.h"
 #include "components/syncable_prefs/pref_service_syncable.h"
 #include "components/syncable_prefs/testing_pref_service_syncable.h"
 #include "content/public/browser/dom_storage_context.h"
@@ -1233,6 +1233,17 @@ TEST_F(ExtensionServiceTest, UninstallingExternalExtensions) {
       Manifest::EXTERNAL_PREF_DOWNLOAD,
       Extension::NO_FLAGS,
       false));
+
+  // Installation of the same extension through the policy should be successful.
+  ASSERT_TRUE(service()->pending_extension_manager()->AddFromExternalUpdateUrl(
+      good_crx,
+      std::string(),
+      GURL("http:://fake.update/url"),
+      Manifest::EXTERNAL_POLICY_DOWNLOAD,
+      Extension::NO_FLAGS,
+      false));
+  EXPECT_TRUE(service()->pending_extension_manager()->IsIdPending(good_crx));
+  EXPECT_TRUE(service()->pending_extension_manager()->Remove(good_crx));
 
   ASSERT_FALSE(service()->pending_extension_manager()->IsIdPending(good_crx));
 }

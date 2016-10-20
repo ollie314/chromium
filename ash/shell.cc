@@ -25,8 +25,6 @@
 #include "ash/common/shelf/shelf_model.h"
 #include "ash/common/shelf/wm_shelf.h"
 #include "ash/common/shell_delegate.h"
-#include "ash/common/shell_window_ids.h"
-#include "ash/common/system/locale/locale_notification_controller.h"
 #include "ash/common/system/status_area_widget.h"
 #include "ash/common/system/tray/system_tray_delegate.h"
 #include "ash/common/wallpaper/wallpaper_delegate.h"
@@ -56,6 +54,7 @@
 #include "ash/laser/laser_pointer_controller.h"
 #include "ash/magnifier/magnification_controller.h"
 #include "ash/magnifier/partial_magnification_controller.h"
+#include "ash/public/cpp/shell_window_ids.h"
 #include "ash/root_window_controller.h"
 #include "ash/shell_init_params.h"
 #include "ash/system/chromeos/screen_layout_observer.h"
@@ -270,30 +269,23 @@ void Shell::SetDisplayWorkAreaInsets(Window* contains,
 }
 
 void Shell::OnLoginStateChanged(LoginStatus status) {
-  FOR_EACH_OBSERVER(ShellObserver, *wm_shell_->shell_observers(),
-                    OnLoginStateChanged(status));
+  for (auto& observer : *wm_shell_->shell_observers())
+    observer.OnLoginStateChanged(status);
 }
 
 void Shell::OnLoginUserProfilePrepared() {
-  CreateShelf();
+  wm_shell_->CreateShelf();
   CreateKeyboard();
 }
 
-void Shell::UpdateAfterLoginStatusChange(LoginStatus status) {
-  RootWindowControllerList controllers = GetAllRootWindowControllers();
-  for (RootWindowControllerList::iterator iter = controllers.begin();
-       iter != controllers.end(); ++iter)
-    (*iter)->UpdateAfterLoginStatusChange(status);
-}
-
 void Shell::OnAppTerminating() {
-  FOR_EACH_OBSERVER(ShellObserver, *wm_shell_->shell_observers(),
-                    OnAppTerminating());
+  for (auto& observer : *wm_shell_->shell_observers())
+    observer.OnAppTerminating();
 }
 
 void Shell::OnLockStateChanged(bool locked) {
-  FOR_EACH_OBSERVER(ShellObserver, *wm_shell_->shell_observers(),
-                    OnLockStateChanged(locked));
+  for (auto& observer : *wm_shell_->shell_observers())
+    observer.OnLockStateChanged(locked);
 #ifndef NDEBUG
   // Make sure that there is no system modal in Lock layer when unlocked.
   if (!locked) {
@@ -308,26 +300,14 @@ void Shell::OnLockStateChanged(bool locked) {
 
 void Shell::OnCastingSessionStartedOrStopped(bool started) {
 #if defined(OS_CHROMEOS)
-  FOR_EACH_OBSERVER(ShellObserver, *wm_shell_->shell_observers(),
-                    OnCastingSessionStartedOrStopped(started));
+  for (auto& observer : *wm_shell_->shell_observers())
+    observer.OnCastingSessionStartedOrStopped(started);
 #endif
 }
 
 void Shell::OnRootWindowAdded(WmWindow* root_window) {
-  FOR_EACH_OBSERVER(ShellObserver, *wm_shell_->shell_observers(),
-                    OnRootWindowAdded(root_window));
-}
-
-void Shell::CreateShelf() {
-  // Must occur after SessionStateDelegate creation and user login.
-  DCHECK(session_state_delegate_);
-  DCHECK_GT(session_state_delegate_->NumberOfLoggedInUsers(), 0);
-  wm_shell_->CreateShelfDelegate();
-
-  RootWindowControllerList controllers = GetAllRootWindowControllers();
-  for (RootWindowControllerList::iterator iter = controllers.begin();
-       iter != controllers.end(); ++iter)
-    (*iter)->CreateShelf();
+  for (auto& observer : *wm_shell_->shell_observers())
+    observer.OnRootWindowAdded(root_window);
 }
 
 void Shell::CreateKeyboard() {
@@ -349,13 +329,6 @@ void Shell::DeactivateKeyboard() {
     }
   }
   keyboard::KeyboardController::ResetInstance(nullptr);
-}
-
-void Shell::ShowShelf() {
-  RootWindowControllerList controllers = GetAllRootWindowControllers();
-  for (RootWindowControllerList::iterator iter = controllers.begin();
-       iter != controllers.end(); ++iter)
-    (*iter)->ShowShelf();
 }
 
 #if defined(OS_CHROMEOS)
@@ -390,8 +363,8 @@ void Shell::SetTouchHudProjectionEnabled(bool enabled) {
     return;
 
   is_touch_hud_projection_enabled_ = enabled;
-  FOR_EACH_OBSERVER(ShellObserver, *wm_shell_->shell_observers(),
-                    OnTouchHudProjectionToggled(enabled));
+  for (auto& observer : *wm_shell_->shell_observers())
+    observer.OnTouchHudProjectionToggled(enabled);
 }
 
 #if defined(OS_CHROMEOS)
@@ -500,8 +473,6 @@ Shell::~Shell() {
   for (WmWindow* root : wm_shell_->GetAllRootWindows())
     root->GetRootWindowController()->GetShelf()->ShutdownShelfWidget();
   wm_shell_->DeleteSystemTrayDelegate();
-
-  locale_notification_controller_.reset();
 
   // Drag-and-drop must be canceled prior to close all windows.
   drag_drop_controller_.reset();
@@ -804,8 +775,6 @@ void Shell::Init(const ShellInitParams& init_params) {
   wm_shell_->SetSystemTrayDelegate(
       base::WrapUnique(wm_shell_->delegate()->CreateSystemTrayDelegate()));
 
-  locale_notification_controller_.reset(new LocaleNotificationController);
-
 #if defined(OS_CHROMEOS)
   // Create TouchTransformerController before
   // WindowTreeHostManager::InitDisplays()
@@ -854,8 +823,8 @@ void Shell::Init(const ShellInitParams& init_params) {
   // is started.
   display_manager_->CreateMirrorWindowAsyncIfAny();
 
-  FOR_EACH_OBSERVER(ShellObserver, *wm_shell_->shell_observers(),
-                    OnShellInitialized());
+  for (auto& observer : *wm_shell_->shell_observers())
+    observer.OnShellInitialized();
 
   user_metrics_recorder_->OnShellInitialized();
 }

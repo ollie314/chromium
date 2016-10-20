@@ -28,14 +28,16 @@
 
 #include "core/CoreExport.h"
 #include "platform/Length.h"
+#include "platform/geometry/FloatRect.h"
 #include "platform/graphics/BoxReflection.h"
 #include "platform/graphics/Color.h"
-#include "platform/graphics/filters/Filter.h"
 #include "platform/heap/Handle.h"
 #include "wtf/Noncopyable.h"
 #include "wtf/text/WTFString.h"
 
 namespace blink {
+
+class Filter;
 
 // CSS Filters
 
@@ -99,7 +101,8 @@ class CORE_EXPORT FilterOperation
 
   // True if the alpha channel of any pixel can change under this operation.
   virtual bool affectsOpacity() const { return false; }
-  // True if the the value of one pixel can affect the value of another pixel under this operation, such as blur.
+  // True if the the value of one pixel can affect the value of another pixel
+  // under this operation, such as blur.
   virtual bool movesPixels() const { return false; }
 
   // Maps "forward" to determine which pixels in a destination rect are
@@ -166,8 +169,8 @@ class CORE_EXPORT ReferenceFilterOperation : public FilterOperation {
 
 DEFINE_FILTER_OPERATION_TYPE_CASTS(ReferenceFilterOperation, REFERENCE);
 
-// GRAYSCALE, SEPIA, SATURATE and HUE_ROTATE are variations on a basic color matrix effect.
-// For HUE_ROTATE, the angle of rotation is stored in m_amount.
+// GRAYSCALE, SEPIA, SATURATE and HUE_ROTATE are variations on a basic color
+// matrix effect.  For HUE_ROTATE, the angle of rotation is stored in m_amount.
 class CORE_EXPORT BasicColorMatrixFilterOperation : public FilterOperation {
  public:
   static BasicColorMatrixFilterOperation* create(double amount,
@@ -208,7 +211,8 @@ DEFINE_TYPE_CASTS(BasicColorMatrixFilterOperation,
                   isBasicColorMatrixFilterOperation(*op),
                   isBasicColorMatrixFilterOperation(op));
 
-// INVERT, BRIGHTNESS, CONTRAST and OPACITY are variations on a basic component transfer effect.
+// INVERT, BRIGHTNESS, CONTRAST and OPACITY are variations on a basic component
+// transfer effect.
 class CORE_EXPORT BasicComponentTransferFilterOperation
     : public FilterOperation {
  public:

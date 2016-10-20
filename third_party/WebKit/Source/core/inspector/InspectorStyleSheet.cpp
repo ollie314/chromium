@@ -157,9 +157,7 @@ class StyleSheetHandler final : public CSSParserObserver {
       : m_parsedText(parsedText),
         m_document(document),
         m_result(result),
-        m_currentRuleData(nullptr),
-        m_currentMediaQueryData(nullptr),
-        m_mediaQueryExpValueRangeStart(UINT_MAX) {
+        m_currentRuleData(nullptr) {
     ASSERT(m_result);
   }
 
@@ -174,10 +172,6 @@ class StyleSheetHandler final : public CSSParserObserver {
                        bool isImportant,
                        bool isParsed) override;
   void observeComment(unsigned startOffset, unsigned endOffset) override;
-  void startMediaQueryExp(unsigned offset) override;
-  void endMediaQueryExp(unsigned offset) override;
-  void startMediaQuery() override;
-  void endMediaQuery() override;
 
   void addNewRuleToSourceTree(PassRefPtr<CSSRuleSourceData>);
   PassRefPtr<CSSRuleSourceData> popRuleData();
@@ -190,8 +184,6 @@ class StyleSheetHandler final : public CSSParserObserver {
   RuleSourceDataList* m_result;
   RuleSourceDataList m_currentRuleDataStack;
   CSSRuleSourceData* m_currentRuleData;
-  CSSMediaQuerySourceData* m_currentMediaQueryData;
-  unsigned m_mediaQueryExpValueRangeStart;
 };
 
 void StyleSheetHandler::startRuleHeader(StyleRule::RuleType type,
@@ -374,7 +366,8 @@ void StyleSheetHandler::observeComment(unsigned startOffset,
       !m_currentRuleDataStack.last()->styleSourceData)
     return;
 
-  // The lexer is not inside a property AND it is scanning a declaration-aware rule body.
+  // The lexer is not inside a property AND it is scanning a declaration-aware
+  // rule body.
   String commentText =
       m_parsedText.substring(startOffset, endOffset - startOffset);
 
@@ -411,39 +404,6 @@ void StyleSheetHandler::observeComment(unsigned startOffset,
   m_currentRuleDataStack.last()->styleSourceData->propertyData.append(
       CSSPropertySourceData(propertyData.name, propertyData.value, false, true,
                             true, SourceRange(startOffset, endOffset)));
-}
-
-void StyleSheetHandler::startMediaQueryExp(unsigned offset) {
-  ASSERT(m_currentMediaQueryData);
-  m_mediaQueryExpValueRangeStart = offset;
-}
-
-void StyleSheetHandler::endMediaQueryExp(unsigned offset) {
-  ASSERT(m_currentMediaQueryData);
-  ASSERT(offset >= m_mediaQueryExpValueRangeStart);
-  ASSERT(offset <= m_parsedText.length());
-  while (offset > m_mediaQueryExpValueRangeStart &&
-         isSpaceOrNewline(m_parsedText[offset - 1]))
-    --offset;
-  while (offset > m_mediaQueryExpValueRangeStart &&
-         isSpaceOrNewline(m_parsedText[m_mediaQueryExpValueRangeStart]))
-    ++m_mediaQueryExpValueRangeStart;
-  m_currentMediaQueryData->expData.append(CSSMediaQueryExpSourceData(
-      SourceRange(m_mediaQueryExpValueRangeStart, offset)));
-}
-
-void StyleSheetHandler::startMediaQuery() {
-  ASSERT(m_currentRuleDataStack.size() &&
-         m_currentRuleDataStack.last()->mediaSourceData);
-  std::unique_ptr<CSSMediaQuerySourceData> data =
-      CSSMediaQuerySourceData::create();
-  m_currentMediaQueryData = data.get();
-  m_currentRuleDataStack.last()->mediaSourceData->queryData.append(
-      std::move(data));
-}
-
-void StyleSheetHandler::endMediaQuery() {
-  m_currentMediaQueryData = nullptr;
 }
 
 bool verifyRuleText(Document* document, const String& ruleText) {
@@ -580,7 +540,8 @@ void flattenSourceData(const RuleSourceDataList& dataList,
   for (size_t i = 0; i < dataList.size(); ++i) {
     const RefPtr<CSSRuleSourceData>& data = dataList.at(i);
 
-    // The result->append()'ed types should be exactly the same as in collectFlatRules().
+    // The result->append()'ed types should be exactly the same as in
+    // collectFlatRules().
     switch (data->type) {
       case StyleRule::Style:
       case StyleRule::Import:
@@ -626,7 +587,8 @@ void collectFlatRules(RuleList ruleList, CSSRuleVector* result) {
   for (unsigned i = 0, size = ruleList->length(); i < size; ++i) {
     CSSRule* rule = ruleList->item(i);
 
-    // The result->append()'ed types should be exactly the same as in flattenSourceData().
+    // The result->append()'ed types should be exactly the same as in
+    // flattenSourceData().
     switch (rule->type()) {
       case CSSRule::kStyleRule:
       case CSSRule::kImportRule:
@@ -1570,7 +1532,8 @@ InspectorStyleSheet::selectorsFromSource(CSSRuleSourceData* sourceData,
     const SourceRange& range = ranges.at(i);
     String selector = sheetText.substring(range.start, range.length());
 
-    // We don't want to see any comments in the selector components, only the meaningful parts.
+    // We don't want to see any comments in the selector components, only the
+    // meaningful parts.
     int matchLength;
     int offset = 0;
     while ((offset = comment.match(selector, offset, &matchLength)) >= 0)
@@ -1591,7 +1554,8 @@ InspectorStyleSheet::buildObjectForSelectorList(CSSStyleRule* rule) {
   CSSRuleSourceData* sourceData = sourceDataForRule(rule);
   std::unique_ptr<protocol::Array<protocol::CSS::Value>> selectors;
 
-  // This intentionally does not rely on the source data to avoid catching the trailing comments (before the declaration starting '{').
+  // This intentionally does not rely on the source data to avoid catching the
+  // trailing comments (before the declaration starting '{').
   String selectorText = rule->selectorText();
 
   if (sourceData) {
@@ -1725,7 +1689,8 @@ String InspectorStyleSheet::sourceURL() {
 }
 
 String InspectorStyleSheet::url() {
-  // "sourceURL" is present only for regular rules, otherwise "origin" should be used in the frontend.
+  // "sourceURL" is present only for regular rules, otherwise "origin" should be
+  // used in the frontend.
   if (m_origin != protocol::CSS::StyleSheetOriginEnum::Regular)
     return String();
 

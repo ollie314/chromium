@@ -11,8 +11,8 @@
 
 #include "base/files/file_path.h"
 #include "services/catalog/public/interfaces/catalog.mojom.h"
-#include "services/shell/public/cpp/capabilities.h"
-#include "services/shell/public/interfaces/resolver.mojom.h"
+#include "services/service_manager/public/cpp/interface_provider_spec.h"
+#include "services/service_manager/public/interfaces/resolver.mojom.h"
 
 namespace base {
 class DictionaryValue;
@@ -49,9 +49,12 @@ class Entry {
   void set_display_name(const std::string& display_name) {
     display_name_ = display_name;
   }
-  const shell::CapabilitySpec& capabilities() const { return capabilities_; }
-  void set_capabilities(const shell::CapabilitySpec& capabilities) {
-    capabilities_ = capabilities;
+  const service_manager::InterfaceProviderSpec& connection_spec() const {
+    return connection_spec_;
+  }
+  void set_connection_spec(
+      const service_manager::InterfaceProviderSpec& connection_spec) {
+    connection_spec_ = connection_spec;
   }
   const Entry* package() const { return package_; }
   void set_package(Entry* package) { package_ = package; }
@@ -65,7 +68,7 @@ class Entry {
   base::FilePath path_;
   std::string qualifier_;
   std::string display_name_;
-  shell::CapabilitySpec capabilities_;
+  service_manager::InterfaceProviderSpec connection_spec_;
   Entry* package_ = nullptr;
   std::vector<std::unique_ptr<Entry>> children_;
 };
@@ -74,8 +77,9 @@ class Entry {
 
 namespace mojo {
 template <>
-struct TypeConverter<shell::mojom::ResolveResultPtr, catalog::Entry> {
-  static shell::mojom::ResolveResultPtr Convert(const catalog::Entry& input);
+struct TypeConverter<service_manager::mojom::ResolveResultPtr, catalog::Entry> {
+  static service_manager::mojom::ResolveResultPtr Convert(
+      const catalog::Entry& input);
 };
 
 template<>

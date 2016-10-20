@@ -54,8 +54,8 @@
 #include "components/password_manager/sync/browser/password_model_worker.h"
 #include "components/search_engines/search_engine_data_type_controller.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
+#include "components/sync/base/report_unrecoverable_error.h"
 #include "components/sync/driver/glue/browser_thread_model_worker.h"
-#include "components/sync/driver/glue/chrome_report_unrecoverable_error.h"
 #include "components/sync/driver/glue/ui_model_worker.h"
 #include "components/sync/driver/sync_api_component_factory.h"
 #include "components/sync/driver/sync_util.h"
@@ -66,7 +66,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "ui/base/device_form_factor.h"
 
-#if defined(ENABLE_APP_LIST)
+#if BUILDFLAG(ENABLE_APP_LIST)
 #include "chrome/browser/ui/app_list/app_list_syncable_service.h"
 #include "chrome/browser/ui/app_list/app_list_syncable_service_factory.h"
 #include "ui/app_list/app_list_switches.h"
@@ -151,7 +151,7 @@ class SyncSessionsClientImpl : public sync_sessions::SyncSessionsClient {
         profile_, ServiceAccessType::EXPLICIT_ACCESS);
   }
   bool ShouldSyncURL(const GURL& url) const override {
-    if (url == GURL(chrome::kChromeUIHistoryURL)) {
+    if (url == chrome::kChromeUIHistoryURL) {
       // The history page is treated specially as we want it to trigger syncable
       // events for UI purposes.
       return true;
@@ -206,7 +206,7 @@ void ChromeSyncClient::Initialize() {
     net::URLRequestContextGetter* url_request_context_getter =
         profile_->GetRequestContext();
 
-    component_factory_.reset(new ProfileSyncComponentsFactoryImpl(
+    component_factory_ = base::MakeUnique<ProfileSyncComponentsFactoryImpl>(
         this, chrome::GetChannel(), chrome::GetVersionString(),
         ui::GetDeviceFormFactor() == ui::DEVICE_FORM_FACTOR_TABLET,
         *base::CommandLine::ForCurrentProcess(),
@@ -216,7 +216,7 @@ void ChromeSyncClient::Initialize() {
         content::BrowserThread::GetTaskRunnerForThread(
             content::BrowserThread::DB),
         token_service, url_request_context_getter, web_data_service_,
-        password_store_));
+        password_store_);
   }
 }
 
@@ -338,7 +338,7 @@ ChromeSyncClient::GetSyncableServiceForType(syncer::ModelType type) {
       return extensions::settings_sync_util::GetSyncableService(profile_, type)
           ->AsWeakPtr();
 #endif
-#if defined(ENABLE_APP_LIST)
+#if BUILDFLAG(ENABLE_APP_LIST)
     case syncer::APP_LIST:
       return app_list::AppListSyncableServiceFactory::GetForProfile(profile_)->
           AsWeakPtr();
@@ -513,7 +513,7 @@ void ChromeSyncClient::RegisterDesktopDataTypes(
     syncer::ModelTypeSet disabled_types,
     syncer::ModelTypeSet enabled_types) {
   base::Closure error_callback =
-      base::Bind(&syncer::ChromeReportUnrecoverableError, chrome::GetChannel());
+      base::Bind(&syncer::ReportUnrecoverableError, chrome::GetChannel());
 
 #if defined(ENABLE_EXTENSIONS)
   // App sync is enabled by default.  Register unless explicitly
@@ -569,7 +569,7 @@ void ChromeSyncClient::RegisterDesktopDataTypes(
   }
 #endif
 
-#if defined(ENABLE_APP_LIST)
+#if BUILDFLAG(ENABLE_APP_LIST)
   if (app_list::switches::IsAppListSyncEnabled()) {
     sync_service->RegisterDataTypeController(
         base::MakeUnique<UIDataTypeController>(syncer::APP_LIST, error_callback,
@@ -622,7 +622,7 @@ void ChromeSyncClient::RegisterAndroidDataTypes(
     syncer::ModelTypeSet disabled_types,
     syncer::ModelTypeSet enabled_types) {
   base::Closure error_callback =
-      base::Bind(&syncer::ChromeReportUnrecoverableError, chrome::GetChannel());
+      base::Bind(&syncer::ReportUnrecoverableError, chrome::GetChannel());
 #if defined(ENABLE_SUPERVISED_USERS)
   sync_service->RegisterDataTypeController(
       base::MakeUnique<SupervisedUserSyncDataTypeController>(

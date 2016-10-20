@@ -15,6 +15,7 @@ source_set("cpp") {
     "property_type_converters.h",
     "raster_thread_helper.h",
     "scoped_window_ptr.h",
+    "surface_id_handler.h",
     "window.h",
     "window_manager_delegate.h",
     "window_observer.h",
@@ -38,7 +39,7 @@ source_set("cpp") {
     "//gpu/command_buffer/common",
     "//mojo/public/cpp/bindings",
     "//mojo/public/cpp/system",
-    "//services/shell/public/interfaces",
+    "//services/service_manager/public/interfaces",
     "//services/ui/common:mus_common",
     "//services/ui/public/interfaces",
   ]
@@ -49,7 +50,7 @@ source_set("cpp") {
     "//gpu/command_buffer/client:gles2_cmd_helper",
     "//gpu/command_buffer/client:gles2_interface",
     "//gpu/ipc/client",
-    "//services/shell/public/cpp",
+    "//services/service_manager/public/cpp",
     "//services/ui/public/interfaces",
     "//ui/display",
     "//ui/events",
@@ -73,6 +74,7 @@ source_set("internal_or_test") {
   visibility = [
     "./*",
     "//services/ui/ws:mus_ws_unittests",
+    "//ui/views/mus:views_mus_unittests",
   ]
 
   sources = [
@@ -136,10 +138,9 @@ source_set("internal") {
     "//gpu/ipc/client",
     "//mojo/public/cpp/bindings",
     "//mojo/public/cpp/system",
-    "//services/shell/public/cpp",
-    "//services/shell/public/interfaces",
+    "//services/service_manager/public/cpp",
+    "//services/service_manager/public/interfaces",
     "//services/ui/common:mus_common",
-    "//services/ui/public/interfaces",
     "//services/ui/public/interfaces",
     "//ui/display",
     "//ui/events",

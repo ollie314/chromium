@@ -20,7 +20,7 @@
 #include "chrome/common/channel_info.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/testing_profile.h"
-#include "components/autofill/content/public/interfaces/autofill_agent.mojom.h"
+#include "components/autofill/content/common/autofill_agent.mojom.h"
 #include "components/password_manager/content/browser/password_manager_internals_service_factory.h"
 #include "components/password_manager/core/browser/credentials_filter.h"
 #include "components/password_manager/core/browser/log_manager.h"
@@ -39,8 +39,9 @@
 #include "components/version_info/version_info.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/test/web_contents_tester.h"
 #include "mojo/public/cpp/bindings/binding.h"
-#include "services/shell/public/cpp/interface_provider.h"
+#include "services/service_manager/public/cpp/interface_provider.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -197,9 +198,9 @@ class ChromePasswordManagerClientTest : public ChromeRenderViewHostTestHarness {
 void ChromePasswordManagerClientTest::SetUp() {
   ChromeRenderViewHostTestHarness::SetUp();
 
-  shell::InterfaceProvider* remote_interfaces =
+  service_manager::InterfaceProvider* remote_interfaces =
       web_contents()->GetMainFrame()->GetRemoteInterfaces();
-  shell::InterfaceProvider::TestApi test_api(remote_interfaces);
+  service_manager::InterfaceProvider::TestApi test_api(remote_interfaces);
   test_api.SetBinderForName(autofill::mojom::PasswordAutofillAgent::Name_,
                             base::Bind(&FakePasswordAutofillAgent::BindRequest,
                                        base::Unretained(&fake_agent_)));
@@ -372,8 +373,11 @@ TEST_F(ChromePasswordManagerClientTest,
 }
 
 TEST_F(ChromePasswordManagerClientTest, SavingAndFillingEnabledConditionsTest) {
+  std::unique_ptr<WebContents> test_web_contents(
+      content::WebContentsTester::CreateTestWebContents(
+          web_contents()->GetBrowserContext(), nullptr));
   std::unique_ptr<MockChromePasswordManagerClient> client(
-      new MockChromePasswordManagerClient(web_contents()));
+      new MockChromePasswordManagerClient(test_web_contents.get()));
   // Functionality disabled if there is SSL errors.
   EXPECT_CALL(*client, DidLastPageLoadEncounterSSLErrors())
       .WillRepeatedly(Return(true));

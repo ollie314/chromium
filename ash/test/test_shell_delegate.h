@@ -10,7 +10,7 @@
 
 #include "ash/common/media_delegate.h"
 #include "ash/common/shell_delegate.h"
-#include "ash/test/test_session_state_delegate.h"
+#include "ash/common/test/test_session_state_delegate.h"
 #include "base/macros.h"
 
 namespace app_list {
@@ -35,7 +35,7 @@ class TestShellDelegate : public ShellDelegate {
   }
 
   // Overridden from ShellDelegate:
-  ::shell::Connector* GetShellConnector() const override;
+  ::service_manager::Connector* GetShellConnector() const override;
   bool IsFirstRunAfterBoot() const override;
   bool IsIncognitoAllowed() const override;
   bool IsMultiProfilesEnabled() const override;

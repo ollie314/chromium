@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/command_line.h"
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
 #include "content/browser/service_worker/embedded_worker_status.h"
@@ -207,7 +208,7 @@ void ServiceWorkerFetchDispatcher::DispatchFetchEvent() {
   prepare_callback.Run();
 
   net_log_.BeginEvent(net::NetLogEventType::SERVICE_WORKER_FETCH_EVENT);
-  int response_id = version_->StartRequest(
+  int fetch_event_id = version_->StartRequest(
       GetEventType(),
       base::Bind(&ServiceWorkerFetchDispatcher::DidFailToDispatch,
                  weak_factory_.GetWeakPtr()));
@@ -218,7 +219,7 @@ void ServiceWorkerFetchDispatcher::DispatchFetchEvent() {
   ResponseCallback* response_callback =
       new ResponseCallback(weak_factory_.GetWeakPtr(), version_.get());
   version_->RegisterRequestCallback<ServiceWorkerHostMsg_FetchEventResponse>(
-      response_id,
+      fetch_event_id,
       base::Bind(&ServiceWorkerFetchDispatcher::ResponseCallback::Run,
                  base::Owned(response_callback)));
 
@@ -228,7 +229,7 @@ void ServiceWorkerFetchDispatcher::DispatchFetchEvent() {
   // |dispatcher| is owned by |version_|. So it is safe to pass the unretained
   // raw pointer of |version_| to OnFetchEventFinished callback.
   dispatcher->DispatchFetchEvent(
-      response_id, *request_,
+      fetch_event_id, *request_, std::move(preload_handle_),
       base::Bind(&OnFetchEventFinished, base::Unretained(version_.get()),
                  event_finish_id));
 }
@@ -268,6 +269,19 @@ void ServiceWorkerFetchDispatcher::Complete(
   FetchCallback fetch_callback = fetch_callback_;
   scoped_refptr<ServiceWorkerVersion> version = version_;
   fetch_callback.Run(status, fetch_result, response, version);
+}
+
+void ServiceWorkerFetchDispatcher::MaybeStartNavigationPreload(
+    net::URLRequest* original_request) {
+  if (resource_type_ != RESOURCE_TYPE_MAIN_FRAME &&
+      resource_type_ != RESOURCE_TYPE_SUB_FRAME) {
+    return;
+  }
+  if (!version_->navigation_preload_enabled())
+    return;
+  // TODO(horo): Implement this to start the preload request for the navigation
+  // request and set |preload_handle_|.
+  NOTIMPLEMENTED();
 }
 
 ServiceWorkerMetrics::EventType ServiceWorkerFetchDispatcher::GetEventType()

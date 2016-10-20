@@ -20,20 +20,20 @@
 #include "content/app/mojo/mojo_init.h"
 #include "content/child/child_gpu_memory_buffer_manager.h"
 #include "content/common/in_process_child_thread_params.h"
-#include "content/common/mojo/mojo_child_connection.h"
 #include "content/common/resource_messages.h"
+#include "content/common/service_manager/child_connection.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_switches.h"
-#include "content/public/common/mojo_shell_connection.h"
+#include "content/public/common/service_manager_connection.h"
 #include "content/public/common/service_names.h"
 #include "content/public/renderer/content_renderer_client.h"
 #include "content/public/test/content_browser_test.h"
 #include "content/public/test/content_browser_test_utils.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "content/public/test/test_content_client_initializer.h"
-#include "content/public/test/test_mojo_shell_context.h"
+#include "content/public/test/test_service_manager_context.h"
 #include "content/renderer/render_process_impl.h"
 #include "content/test/mock_render_process.h"
 #include "gpu/GLES2/gl2extchromium.h"
@@ -177,10 +177,11 @@ class RenderThreadImplBrowserTest : public testing::Test {
 
     InitializeMojo();
     ipc_support_.reset(new mojo::edk::test::ScopedIPCSupport(io_task_runner));
-    shell_context_.reset(new TestMojoShellContext);
-    child_connection_.reset(new MojoChildConnection(
-        kRendererMojoApplicationName, "test", mojo::edk::GenerateRandomToken(),
-        MojoShellConnection::GetForProcess()->GetConnector(), io_task_runner));
+    shell_context_.reset(new TestServiceManagerContext);
+    child_connection_.reset(new ChildConnection(
+        kRendererServiceName, "test", mojo::edk::GenerateRandomToken(),
+        ServiceManagerConnection::GetForProcess()->GetConnector(),
+        io_task_runner));
 
     mojo::MessagePipe pipe;
     IPC::mojom::ChannelBootstrapPtr channel_bootstrap;
@@ -210,7 +211,7 @@ class RenderThreadImplBrowserTest : public testing::Test {
     scoped_refptr<base::SingleThreadTaskRunner> test_task_counter(
         test_task_counter_.get());
     thread_ = new RenderThreadImplForTest(
-        InProcessChildThreadParams("", io_task_runner,
+        InProcessChildThreadParams(io_task_runner,
                                    child_connection_->service_token()),
         std::move(renderer_scheduler), test_task_counter);
     cmd->InitFromArgv(old_argv);
@@ -228,8 +229,8 @@ class RenderThreadImplBrowserTest : public testing::Test {
 
   std::unique_ptr<TestBrowserThreadBundle> browser_threads_;
   std::unique_ptr<mojo::edk::test::ScopedIPCSupport> ipc_support_;
-  std::unique_ptr<TestMojoShellContext> shell_context_;
-  std::unique_ptr<MojoChildConnection> child_connection_;
+  std::unique_ptr<TestServiceManagerContext> shell_context_;
+  std::unique_ptr<ChildConnection> child_connection_;
   std::unique_ptr<DummyListener> dummy_listener_;
   std::unique_ptr<IPC::ChannelProxy> channel_;
 

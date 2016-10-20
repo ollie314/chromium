@@ -21,6 +21,8 @@
 
 namespace subresource_filter {
 
+class FirstPartyOrigin;
+
 // The integer type used to represent N-grams.
 using NGram = uint64_t;
 // The hasher used for hashing N-grams.
@@ -28,7 +30,7 @@ using NGramHasher = Uint64Hasher;
 // The hash table probe sequence used both by the ruleset builder and matcher.
 using NGramHashTableProber = DefaultProber<NGram, NGramHasher>;
 
-constexpr size_t kNGramSize = 6;
+constexpr size_t kNGramSize = 5;
 static_assert(kNGramSize <= sizeof(NGram), "NGram type is too narrow.");
 
 // The class used to construct flat data structures representing the set of URL
@@ -127,7 +129,7 @@ class IndexedRulesetMatcher {
   // |document_origin| is not allowed to proceed. Always returns false if the
   // |url| is not valid or |element_type| == ELEMENT_TYPE_UNSPECIFIED.
   bool ShouldDisallowResourceLoad(const GURL& url,
-                                  const url::Origin& document_origin,
+                                  const FirstPartyOrigin& first_party,
                                   proto::ElementType element_type) const;
 
  private:

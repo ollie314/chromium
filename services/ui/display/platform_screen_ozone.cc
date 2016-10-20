@@ -11,7 +11,7 @@
 #include "base/memory/ptr_util.h"
 #include "base/sys_info.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "services/shell/public/cpp/interface_registry.h"
+#include "services/service_manager/public/cpp/interface_registry.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/display/types/display_constants.h"
 #include "ui/display/types/display_snapshot.h"
@@ -62,8 +62,10 @@ PlatformScreenOzone::~PlatformScreenOzone() {
   display_configurator_.RemoveObserver(this);
 }
 
-void PlatformScreenOzone::AddInterfaces(shell::InterfaceRegistry* registry) {
+void PlatformScreenOzone::AddInterfaces(
+    service_manager::InterfaceRegistry* registry) {
   registry->AddInterface<mojom::DisplayController>(this);
+  registry->AddInterface<mojom::TestDisplayController>(this);
 }
 
 void PlatformScreenOzone::Init(PlatformScreenDelegate* delegate) {
@@ -73,6 +75,8 @@ void PlatformScreenOzone::Init(PlatformScreenDelegate* delegate) {
   std::unique_ptr<ui::NativeDisplayDelegate> native_display_delegate =
       ui::OzonePlatform::GetInstance()->CreateNativeDisplayDelegate();
 
+  // The FakeDisplayController gives us a way to make the NativeDisplayDelegate
+  // pretend something display related has happened.
   if (!base::SysInfo::IsRunningOnChromeOS()) {
     fake_display_controller_ =
         native_display_delegate->GetFakeDisplayController();
@@ -103,7 +107,7 @@ int64_t PlatformScreenOzone::GetPrimaryDisplayId() const {
   return primary_display_id_;
 }
 
-void PlatformScreenOzone::ToggleVirtualDisplay() {
+void PlatformScreenOzone::ToggleAddRemoveDisplay() {
   if (!fake_display_controller_ || wait_for_display_config_update_)
     return;
 
@@ -117,6 +121,45 @@ void PlatformScreenOzone::ToggleVirtualDisplay() {
         fake_display_controller_->RemoveDisplay(cached_displays_.back().id);
   } else {
     NOTREACHED();
+  }
+}
+
+void PlatformScreenOzone::SwapPrimaryDisplay() {
+  const size_t num_displays = cached_displays_.size();
+  if (num_displays <= 1)
+    return;
+
+  // Find index of current primary display.
+  size_t primary_display_index = 0;
+  for (size_t i = 0; i < num_displays; i++) {
+    if (cached_displays_[i].id == primary_display_id_) {
+      primary_display_index = i;
+      break;
+    }
+  }
+
+  // Set next display index as primary, or loop back to first display if last.
+  if (primary_display_index + 1 == num_displays) {
+    primary_display_id_ = cached_displays_[0].id;
+  } else {
+    primary_display_id_ = cached_displays_[primary_display_index + 1].id;
+  }
+
+  // TODO(kylechar): Update ws::DisplayManager.
+}
+
+void PlatformScreenOzone::SetDisplayWorkArea(int64_t display_id,
+                                             const gfx::Size& size,
+                                             const gfx::Insets& insets) {
+  CachedDisplayIterator iter = GetCachedDisplayIterator(display_id);
+  if (iter == cached_displays_.end()) {
+    NOTREACHED() << display_id;
+    return;
+  }
+
+  DisplayInfo& display_info = *iter;
+  if (display_info.bounds.size() == size) {
+    // TODO(kylechar): Change workarea and update ws::DisplayManager.
   }
 }
 
@@ -262,9 +305,16 @@ void PlatformScreenOzone::OnDisplayModeChangeFailed(
   wait_for_display_config_update_ = false;
 }
 
-void PlatformScreenOzone::Create(const shell::Identity& remote_identity,
-                                 mojom::DisplayControllerRequest request) {
-  bindings_.AddBinding(this, std::move(request));
+void PlatformScreenOzone::Create(
+    const service_manager::Identity& remote_identity,
+    mojom::DisplayControllerRequest request) {
+  controller_bindings_.AddBinding(this, std::move(request));
+}
+
+void PlatformScreenOzone::Create(
+    const service_manager::Identity& remote_identity,
+    mojom::TestDisplayControllerRequest request) {
+  test_bindings_.AddBinding(this, std::move(request));
 }
 
 }  // namespace display

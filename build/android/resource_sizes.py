@@ -184,7 +184,7 @@ def PrintApkAnalysis(apk_filename, chartjson=None):
   NO = lambda _: False
   FILE_GROUPS = (
       FileGroup('Native code', r'\.so$', lambda f: 'crazy' not in f),
-      FileGroup('Java code', r'^classes.*\.dex$', YES),
+      FileGroup('Java code', r'\.dex$', YES),
       FileGroup('Native resources (no l10n)',
                 r'^assets/.*(resources|percent)\.pak$', NO),
       # For locale paks, assume only english paks are extracted.

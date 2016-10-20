@@ -71,8 +71,16 @@ class CORE_EXPORT SVGAnimateElement : public SVGAnimationElement {
                           const String& toString) final;
   bool isAdditive() final;
 
+  void parseAttribute(const QualifiedName&,
+                      const AtomicString&,
+                      const AtomicString&) override;
+  void svgAttributeChanged(const QualifiedName&) override;
+
   void setTargetElement(SVGElement*) final;
   void setAttributeName(const QualifiedName&) final;
+
+  enum AttributeType { AttributeTypeCSS, AttributeTypeXML, AttributeTypeAuto };
+  AttributeType getAttributeType() const { return m_attributeType; }
 
   FRIEND_TEST_ALL_PREFIXES(UnsafeSVGAttributeSanitizationTest,
                            stringsShouldNotSupportAddition);
@@ -91,7 +99,15 @@ class CORE_EXPORT SVGAnimateElement : public SVGAnimationElement {
       SVGElement* targetElement,
       const QualifiedName& attributeName);
 
-  bool hasValidAttributeType() override;
+  void setAttributeType(const AtomicString&);
+
+  void checkInvalidCSSAttributeType();
+  bool hasInvalidCSSAttributeType() const {
+    return m_hasInvalidCSSAttributeType;
+  }
+  bool hasValidTarget() final;
+  bool hasValidAttributeName() const;
+  virtual bool hasValidAttributeType();
 
   SVGPropertyBase* adjustForInheritance(SVGPropertyBase*,
                                         AnimatedPropertyValueType) const;
@@ -105,6 +121,8 @@ class CORE_EXPORT SVGAnimateElement : public SVGAnimationElement {
 
   AnimatedPropertyValueType m_fromPropertyValueType;
   AnimatedPropertyValueType m_toPropertyValueType;
+  AttributeType m_attributeType;
+  bool m_hasInvalidCSSAttributeType;
 };
 
 inline bool isSVGAnimateElement(const SVGElement& element) {

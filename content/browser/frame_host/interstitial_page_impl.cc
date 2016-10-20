@@ -381,7 +381,6 @@ void InterstitialPageImpl::RenderFrameCreated(
 
 void InterstitialPageImpl::UpdateTitle(
     RenderFrameHost* render_frame_host,
-    int32_t page_id,
     const base::string16& title,
     base::i18n::TextDirection title_direction) {
   if (!enabled())
@@ -591,11 +590,8 @@ WebContentsView* InterstitialPageImpl::CreateWebContentsView() {
   RenderWidgetHostImpl::From(render_view_host_->GetWidget())->SetView(view);
   render_view_host_->AllowBindings(BINDINGS_POLICY_DOM_AUTOMATION);
 
-  int32_t max_page_id = web_contents()->GetMaxPageIDForSiteInstance(
-      render_view_host_->GetSiteInstance());
   render_view_host_->CreateRenderView(MSG_ROUTING_NONE,
                                       MSG_ROUTING_NONE,
-                                      max_page_id,
                                       FrameReplicationState(),
                                       false);
   controller_->delegate()->RenderFrameForInterstitialPageCreated(

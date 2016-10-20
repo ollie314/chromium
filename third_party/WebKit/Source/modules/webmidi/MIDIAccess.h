@@ -91,7 +91,7 @@ class MIDIAccess final : public EventTargetWithInlineData,
   bool hasPendingActivity() const final;
 
   // ActiveDOMObject
-  void stop() override;
+  void contextDestroyed() override;
 
   // MIDIAccessorClient
   void didAddInputPort(const String& id,
@@ -108,9 +108,7 @@ class MIDIAccess final : public EventTargetWithInlineData,
                             MIDIAccessor::MIDIPortState) override;
   void didSetOutputPortState(unsigned portIndex,
                              MIDIAccessor::MIDIPortState) override;
-  void didStartSession(bool success,
-                       const String& error,
-                       const String& message) override {
+  void didStartSession(midi::mojom::Result) override {
     // This method is for MIDIAccess initialization: MIDIAccessInitializer
     // has the implementation.
     NOTREACHED();

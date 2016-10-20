@@ -17,8 +17,8 @@
 #import "ios/web/web_state/ui/crw_web_controller.h"
 #import "ios/web/web_state/web_state_impl.h"
 #include "mojo/public/cpp/bindings/binding_set.h"
-#include "services/shell/public/cpp/identity.h"
-#include "services/shell/public/cpp/interface_registry.h"
+#include "services/service_manager/public/cpp/identity.h"
+#include "services/service_manager/public/cpp/interface_registry.h"
 #include "url/gurl.h"
 #include "url/scheme_host_port.h"
 
@@ -37,8 +37,9 @@ const char kTestWebUIURLHost[] = "testwebui";
 // Once "fin" is received |IsFinReceived()| call will return true, indicating
 // that communication was successful. See test WebUI page code here:
 // ios/web/test/data/mojo_test.js
-class TestUIHandler : public TestUIHandlerMojo,
-                      public shell::InterfaceFactory<TestUIHandlerMojo> {
+class TestUIHandler
+    : public TestUIHandlerMojo,
+      public service_manager::InterfaceFactory<TestUIHandlerMojo> {
  public:
   TestUIHandler() {}
   ~TestUIHandler() override {}
@@ -68,8 +69,8 @@ class TestUIHandler : public TestUIHandlerMojo,
   }
 
  private:
-  // shell::InterfaceFactory overrides.
-  void Create(const shell::Identity& remote_identity,
+  // service_manager::InterfaceFactory overrides.
+  void Create(const service_manager::Identity& remote_identity,
               mojo::InterfaceRequest<TestUIHandlerMojo> request) override {
     bindings_.AddBinding(this, std::move(request));
   }

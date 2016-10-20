@@ -6,14 +6,16 @@
 
 #include "base/macros.h"
 #include "base/run_loop.h"
-#include "components/autofill/content/public/interfaces/autofill_agent.mojom.h"
+#include "components/autofill/content/common/autofill_agent.mojom.h"
 #include "components/autofill/core/browser/test_autofill_client.h"
 #include "components/password_manager/core/browser/stub_log_manager.h"
 #include "components/password_manager/core/browser/stub_password_manager_client.h"
+#include "content/public/browser/navigation_entry.h"
+#include "content/public/browser/ssl_status.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/test_renderer_host.h"
 #include "mojo/public/cpp/bindings/binding.h"
-#include "services/shell/public/cpp/interface_provider.h"
+#include "services/service_manager/public/cpp/interface_provider.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -99,9 +101,9 @@ class ContentPasswordManagerDriverTest
     ON_CALL(password_manager_client_, GetLogManager())
         .WillByDefault(Return(&log_manager_));
 
-    shell::InterfaceProvider* remote_interfaces =
+    service_manager::InterfaceProvider* remote_interfaces =
         web_contents()->GetMainFrame()->GetRemoteInterfaces();
-    shell::InterfaceProvider::TestApi test_api(remote_interfaces);
+    service_manager::InterfaceProvider::TestApi test_api(remote_interfaces);
     test_api.SetBinderForName(
         autofill::mojom::PasswordAutofillAgent::Name_,
         base::Bind(&FakePasswordAutofillAgent::BindRequest,
@@ -165,6 +167,35 @@ TEST_P(ContentPasswordManagerDriverTest, AnswerToIPCPingsAboutLoggingState) {
   bool logging_activated = false;
   EXPECT_TRUE(WasLoggingActivationMessageSent(&logging_activated));
   EXPECT_EQ(should_allow_logging, logging_activated);
+}
+
+// Tests that password visibility notifications are forwarded to the
+// WebContents.
+TEST_P(ContentPasswordManagerDriverTest, PasswordVisibility) {
+  std::unique_ptr<ContentPasswordManagerDriver> driver(
+      new ContentPasswordManagerDriver(main_rfh(), &password_manager_client_,
+                                       &autofill_client_));
+
+  // Do a mock navigation so that there is a navigation entry on which
+  // password visibility gets recorded.
+  GURL url("http://example.test");
+  NavigateAndCommit(url);
+  content::NavigationEntry* entry =
+      web_contents()->GetController().GetVisibleEntry();
+  ASSERT_TRUE(entry);
+  EXPECT_EQ(url, entry->GetURL());
+  EXPECT_FALSE(!!(entry->GetSSL().content_status &
+                  content::SSLStatus::DISPLAYED_PASSWORD_FIELD_ON_HTTP));
+
+  driver->PasswordFieldVisibleInInsecureContext();
+
+  // Check that the password visibility notification was passed on to
+  // the WebContents (and from there to the SSLStatus).
+  entry = web_contents()->GetController().GetVisibleEntry();
+  ASSERT_TRUE(entry);
+  EXPECT_EQ(url, entry->GetURL());
+  EXPECT_TRUE(!!(entry->GetSSL().content_status &
+                 content::SSLStatus::DISPLAYED_PASSWORD_FIELD_ON_HTTP));
 }
 
 INSTANTIATE_TEST_CASE_P(,

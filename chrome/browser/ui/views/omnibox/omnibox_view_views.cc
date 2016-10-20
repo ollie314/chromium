@@ -129,7 +129,6 @@ OmniboxViewViews::OmniboxViewViews(OmniboxEditController* controller,
       select_all_on_mouse_release_(false),
       select_all_on_gesture_tap_(false),
       weak_ptr_factory_(this) {
-  SetBorder(views::Border::NullBorder());
   set_id(VIEW_ID_OMNIBOX);
   SetFontList(font_list);
 }
@@ -453,8 +452,7 @@ void OmniboxViewViews::UpdatePopup() {
 
   // Prevent inline autocomplete when the caret isn't at the end of the text.
   const gfx::Range sel = GetSelectedRange();
-  model()->StartAutocomplete(!sel.is_empty(), sel.GetMax() < text().length(),
-                             false);
+  model()->StartAutocomplete(!sel.is_empty(), sel.GetMax() < text().length());
 }
 
 void OmniboxViewViews::ApplyCaretVisibility() {

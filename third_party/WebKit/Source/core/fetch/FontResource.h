@@ -26,6 +26,7 @@
 #ifndef FontResource_h
 #define FontResource_h
 
+#include "core/CoreExport.h"
 #include "core/fetch/Resource.h"
 #include "core/fetch/ResourceClient.h"
 #include "platform/Timer.h"
@@ -41,7 +42,7 @@ class FontPlatformData;
 class FontCustomPlatformData;
 class FontResourceClient;
 
-class FontResource final : public Resource {
+class CORE_EXPORT FontResource final : public Resource {
  public:
   using ClientType = FontResourceClient;
 
@@ -53,7 +54,7 @@ class FontResource final : public Resource {
   void setRevalidatingRequest(const ResourceRequest&) override;
 
   void allClientsAndObserversRemoved() override;
-  void startLoadLimitTimersIfNeeded();
+  void startLoadLimitTimers();
 
   void setCORSFailed() override { m_corsFailed = true; }
   bool isCORSFailed() const { return m_corsFailed; }
@@ -83,7 +84,12 @@ class FontResource final : public Resource {
   void fontLoadShortLimitCallback(TimerBase*);
   void fontLoadLongLimitCallback(TimerBase*);
 
-  enum LoadLimitState { UnderLimit, ShortLimitExceeded, LongLimitExceeded };
+  enum LoadLimitState {
+    LoadNotStarted,
+    UnderLimit,
+    ShortLimitExceeded,
+    LongLimitExceeded
+  };
 
   std::unique_ptr<FontCustomPlatformData> m_fontData;
   String m_otsParsingMessage;

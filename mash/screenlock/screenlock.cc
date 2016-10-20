@@ -4,12 +4,12 @@
 
 #include "mash/screenlock/screenlock.h"
 
-#include "ash/public/interfaces/container.mojom.h"
+#include "ash/public/cpp/shell_window_ids.h"
 #include "base/macros.h"
 #include "base/strings/utf_string_conversions.h"
 #include "mash/session/public/interfaces/session.mojom.h"
 #include "mojo/public/cpp/bindings/binding.h"
-#include "services/shell/public/cpp/connector.h"
+#include "services/service_manager/public/cpp/connector.h"
 #include "services/ui/public/cpp/property_type_converters.h"
 #include "ui/views/background.h"
 #include "ui/views/controls/button/md_text_button.h"
@@ -25,7 +25,7 @@ namespace {
 class ScreenlockView : public views::WidgetDelegateView,
                        public views::ButtonListener {
  public:
-  explicit ScreenlockView(shell::Connector* connector)
+  explicit ScreenlockView(service_manager::Connector* connector)
       : connector_(connector),
         unlock_button_(
             views::MdTextButton::Create(this, base::ASCIIToUTF16("Unlock"))) {
@@ -36,7 +36,6 @@ class ScreenlockView : public views::WidgetDelegateView,
 
  private:
   // Overridden from views::WidgetDelegate:
-  views::View* GetContentsView() override { return this; }
   base::string16 GetWindowTitle() const override {
     // TODO(beng): use resources.
     return base::ASCIIToUTF16("Screenlock");
@@ -59,11 +58,11 @@ class ScreenlockView : public views::WidgetDelegateView,
   void ButtonPressed(views::Button* sender, const ui::Event& event) override {
     DCHECK_EQ(sender, unlock_button_);
     mash::session::mojom::SessionPtr session;
-    connector_->ConnectToInterface("mojo:mash_session", &session);
+    connector_->ConnectToInterface("service:mash_session", &session);
     session->UnlockScreen();
   }
 
-  shell::Connector* connector_;
+  service_manager::Connector* connector_;
   views::MdTextButton* unlock_button_;
 
   DISALLOW_COPY_AND_ASSIGN(ScreenlockView);
@@ -74,11 +73,11 @@ class ScreenlockView : public views::WidgetDelegateView,
 Screenlock::Screenlock() {}
 Screenlock::~Screenlock() {}
 
-void Screenlock::OnStart(const shell::Identity& identity) {
+void Screenlock::OnStart(const service_manager::Identity& identity) {
   tracing_.Initialize(connector(), identity.name());
 
   mash::session::mojom::SessionPtr session;
-  connector()->ConnectToInterface("mojo:mash_session", &session);
+  connector()->ConnectToInterface("service:mash_session", &session);
   session->AddScreenlockStateListener(
       bindings_.CreateInterfacePtrAndBind(this));
 
@@ -93,11 +92,11 @@ void Screenlock::OnStart(const shell::Identity& identity) {
   params.delegate = new ScreenlockView(connector());
 
   std::map<std::string, std::vector<uint8_t>> properties;
-  properties[ash::mojom::kWindowContainer_Property] =
+  properties[ui::mojom::WindowManager::kInitialContainerId_Property] =
       mojo::ConvertTo<std::vector<uint8_t>>(
-          static_cast<int32_t>(ash::mojom::Container::LOGIN_WINDOWS));
+          ash::kShellWindowId_LockScreenContainer);
   ui::Window* window =
-      views::WindowManagerConnection::Get()->NewWindow(properties);
+      views::WindowManagerConnection::Get()->NewTopLevelWindow(properties);
   params.native_widget = new views::NativeWidgetMus(
       widget, window, ui::mojom::SurfaceType::DEFAULT);
   widget->Init(params);

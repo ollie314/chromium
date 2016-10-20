@@ -6,6 +6,7 @@
 
 #include <utility>
 
+#include "base/debug/dump_without_crashing.h"
 #include "base/logging.h"
 #include "content/browser/browsing_data/clear_site_data_throttle.h"
 #include "content/browser/child_process_security_policy_impl.h"
@@ -90,6 +91,10 @@ NavigationHandleImpl::NavigationHandleImpl(
       weak_factory_(this) {
   DCHECK(!navigation_start.is_null());
   redirect_chain_.push_back(url);
+
+  starting_site_instance_ =
+      frame_tree_node_->current_frame_host()->GetSiteInstance();
+
   GetDelegate()->DidStartNavigation(this);
 
   if (IsInMainFrame()) {
@@ -125,6 +130,10 @@ RequestContextType NavigationHandleImpl::GetRequestContextType() const {
 
 const GURL& NavigationHandleImpl::GetURL() {
   return url_;
+}
+
+SiteInstance* NavigationHandleImpl::GetStartingSiteInstance() {
+  return starting_site_instance_.get();
 }
 
 bool NavigationHandleImpl::IsInMainFrame() {
@@ -221,7 +230,6 @@ bool NavigationHandleImpl::IsSamePage() {
 }
 
 const net::HttpResponseHeaders* NavigationHandleImpl::GetResponseHeaders() {
-  DCHECK_GE(state_, WILL_REDIRECT_REQUEST);
   return response_headers_.get();
 }
 
@@ -341,7 +349,6 @@ NavigationHandleImpl::CallWillProcessResponseForTesting(
 void NavigationHandleImpl::CallDidCommitNavigationForTesting(const GURL& url) {
   FrameHostMsg_DidCommitProvisionalLoad_Params params;
 
-  params.page_id = 1;
   params.nav_entry_id = 1;
   params.url = url;
   params.referrer = content::Referrer();
@@ -647,7 +654,15 @@ bool NavigationHandleImpl::MaybeTransferAndProceedInternal() {
 
   // A navigation from a RenderFrame that is no longer active should not attempt
   // to transfer.
-  CHECK(render_frame_host_->is_active());
+  if (!render_frame_host_->is_active()) {
+    // This will cause the deletion of this NavigationHandle and the
+    // cancellation of the navigation.
+    // TODO(clamy): Remove the logging code once we understand better how we can
+    // get there.
+    base::debug::DumpWithoutCrashing();
+    render_frame_host_->SetNavigationHandle(nullptr);
+    return false;
+  }
 
   // Subframes shouldn't swap processes unless out-of-process iframes are
   // possible.

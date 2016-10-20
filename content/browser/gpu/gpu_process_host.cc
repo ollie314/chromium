@@ -32,13 +32,13 @@
 #include "content/browser/gpu/gpu_data_manager_impl.h"
 #include "content/browser/gpu/gpu_process_host_ui_shim.h"
 #include "content/browser/gpu/shader_disk_cache.h"
-#include "content/browser/mojo/mojo_shell_context.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
+#include "content/browser/service_manager/service_manager_context.h"
 #include "content/common/child_process_host_impl.h"
 #include "content/common/establish_channel_params.h"
 #include "content/common/gpu_host_messages.h"
 #include "content/common/in_process_child_thread_params.h"
-#include "content/common/mojo/mojo_child_connection.h"
+#include "content/common/service_manager/child_connection.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
@@ -50,22 +50,21 @@
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/mojo_channel_switches.h"
-#include "content/public/common/mojo_shell_connection.h"
 #include "content/public/common/result_codes.h"
 #include "content/public/common/sandbox_type.h"
 #include "content/public/common/sandboxed_process_launcher_delegate.h"
+#include "content/public/common/service_manager_connection.h"
 #include "content/public/common/service_names.h"
 #include "gpu/command_buffer/service/gpu_preferences.h"
 #include "gpu/command_buffer/service/gpu_switches.h"
 #include "gpu/ipc/service/switches.h"
 #include "ipc/ipc_channel_handle.h"
-#include "ipc/ipc_switches.h"
 #include "ipc/message_filter.h"
 #include "media/base/media_switches.h"
 #include "mojo/edk/embedder/embedder.h"
-#include "services/shell/public/cpp/connection.h"
-#include "services/shell/public/cpp/interface_provider.h"
-#include "services/shell/runner/common/client_util.h"
+#include "services/service_manager/public/cpp/connection.h"
+#include "services/service_manager/public/cpp/interface_provider.h"
+#include "services/service_manager/runner/common/client_util.h"
 #include "ui/base/ui_base_switches.h"
 #include "ui/events/latency_info.h"
 #include "ui/gl/gl_switches.h"
@@ -91,7 +90,7 @@
 #endif
 
 #if defined(OS_MACOSX) || defined(OS_ANDROID)
-#include "content/browser/gpu/gpu_surface_tracker.h"
+#include "gpu/ipc/common/gpu_surface_tracker.h"
 #endif
 
 namespace content {
@@ -300,10 +299,10 @@ class GpuProcessHost::ConnectionFilterImpl : public ConnectionFilter {
 
  private:
   // ConnectionFilter:
-  bool OnConnect(const shell::Identity& remote_identity,
-                 shell::InterfaceRegistry* registry,
-                 shell::Connector* connector) override {
-    if (remote_identity.name() != kGpuMojoApplicationName)
+  bool OnConnect(const service_manager::Identity& remote_identity,
+                 service_manager::InterfaceRegistry* registry,
+                 service_manager::Connector* connector) override {
+    if (remote_identity.name() != kGpuServiceName)
       return false;
 
     GetContentClient()->browser()->ExposeInterfacesToGpuProcess(registry,
@@ -336,7 +335,7 @@ bool GpuProcessHost::ValidateHost(GpuProcessHost* host) {
 
 // static
 GpuProcessHost* GpuProcessHost::Get(GpuProcessKind kind, bool force_create) {
-  DCHECK(!shell::ShellIsRemote());
+  DCHECK(!service_manager::ServiceManagerIsRemote());
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
   // Don't grant further access to GPU if it is not allowed.
@@ -416,7 +415,7 @@ void GpuProcessHost::RegisterGpuMainThreadFactory(
   g_gpu_main_thread_factory = create;
 }
 
-shell::InterfaceProvider* GpuProcessHost::GetRemoteInterfaces() {
+service_manager::InterfaceProvider* GpuProcessHost::GetRemoteInterfaces() {
   return process_->child_connection()->GetRemoteInterfaces();
 }
 
@@ -465,7 +464,7 @@ GpuProcessHost::GpuProcessHost(int host_id, GpuProcessKind kind)
       base::Bind(base::IgnoreResult(&GpuProcessHostUIShim::Create), host_id));
 
   process_.reset(new BrowserChildProcessHostImpl(
-      PROCESS_TYPE_GPU, this, kGpuMojoApplicationName));
+      PROCESS_TYPE_GPU, this, kGpuServiceName));
 }
 
 GpuProcessHost::~GpuProcessHost() {
@@ -486,7 +485,7 @@ GpuProcessHost::~GpuProcessHost() {
 
 #if defined(OS_MACOSX) || defined(OS_ANDROID)
   UMA_HISTOGRAM_COUNTS_100("GPU.AtExitSurfaceCount",
-                           GpuSurfaceTracker::Get()->GetSurfaceCount());
+                           gpu::GpuSurfaceTracker::Get()->GetSurfaceCount());
 #endif
 
   std::string message;
@@ -561,8 +560,8 @@ bool GpuProcessHost::Init() {
   TRACE_EVENT_INSTANT0("gpu", "LaunchGpuProcess", TRACE_EVENT_SCOPE_THREAD);
 
   // May be null during test execution.
-  if (MojoShellConnection::GetForProcess()) {
-    MojoShellConnection::GetForProcess()->AddConnectionFilter(
+  if (ServiceManagerConnection::GetForProcess()) {
+    ServiceManagerConnection::GetForProcess()->AddConnectionFilter(
         base::MakeUnique<ConnectionFilterImpl>(this));
   }
 
@@ -574,7 +573,7 @@ bool GpuProcessHost::Init() {
     DCHECK(g_gpu_main_thread_factory);
     in_process_gpu_thread_.reset(g_gpu_main_thread_factory(
         InProcessChildThreadParams(
-            std::string(), base::ThreadTaskRunnerHandle::Get(),
+            base::ThreadTaskRunnerHandle::Get(),
             process_->child_connection()->service_token()),
         gpu_preferences));
     base::Thread::Options options;
@@ -971,8 +970,11 @@ bool GpuProcessHost::LaunchGpuProcess(gpu::GpuPreferences* gpu_preferences) {
 
   base::CommandLine* cmd_line = new base::CommandLine(exe_path);
 #endif
+
   cmd_line->AppendSwitchASCII(switches::kProcessType, switches::kGpuProcess);
-  BrowserChildProcessHostImpl::CopyFeatureAndFieldTrialFlags(cmd_line);
+
+  field_trial_state_ =
+      BrowserChildProcessHostImpl::CopyFeatureAndFieldTrialFlags(cmd_line);
 
 #if defined(OS_WIN)
   cmd_line->AppendArg(switches::kPrefetchArgumentGpu);
@@ -1016,10 +1018,8 @@ bool GpuProcessHost::LaunchGpuProcess(gpu::GpuPreferences* gpu_preferences) {
     cmd_line->PrependWrapper(gpu_launcher);
 
   process_->Launch(
-      new GpuSandboxedProcessLauncherDelegate(cmd_line,
-                                              process_->GetHost()),
-      cmd_line,
-      true);
+      new GpuSandboxedProcessLauncherDelegate(cmd_line, process_->GetHost()),
+      cmd_line, field_trial_state_.get(), true);
   process_launched_ = true;
 
   UMA_HISTOGRAM_ENUMERATION("GPU.GPUProcessLifetimeEvents",

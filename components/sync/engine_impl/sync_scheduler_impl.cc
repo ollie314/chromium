@@ -12,6 +12,7 @@
 #include "base/bind_helpers.h"
 #include "base/location.h"
 #include "base/logging.h"
+#include "base/memory/ptr_util.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/platform_thread.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -281,8 +282,8 @@ void SyncSchedulerImpl::SendInitialSnapshot() {
   std::unique_ptr<SyncCycle> dummy(SyncCycle::Build(cycle_context_, this));
   SyncCycleEvent event(SyncCycleEvent::STATUS_CHANGED);
   event.snapshot = dummy->TakeSnapshot();
-  FOR_EACH_OBSERVER(SyncEngineEventListener, *cycle_context_->listeners(),
-                    OnSyncCycleEvent(event));
+  for (auto& observer : *cycle_context_->listeners())
+    observer.OnSyncCycleEvent(event);
 }
 
 namespace {
@@ -324,7 +325,7 @@ void SyncSchedulerImpl::ScheduleConfiguration(
 
   // Only reconfigure if we have types to download.
   if (!params.types_to_download.Empty()) {
-    pending_configure_params_.reset(new ConfigurationParams(params));
+    pending_configure_params_ = base::MakeUnique<ConfigurationParams>(params);
     TrySyncCycleJob();
   } else {
     SDVLOG(2) << "No change in routing info, calling ready task directly.";
@@ -338,7 +339,7 @@ void SyncSchedulerImpl::ScheduleClearServerData(const ClearParams& params) {
   DCHECK(!pending_configure_params_);
   DCHECK(!params.report_success_task.is_null());
   CHECK(started_) << "Scheduler must be running to clear.";
-  pending_clear_params_.reset(new ClearParams(params));
+  pending_clear_params_ = base::MakeUnique<ClearParams>(params);
   TrySyncCycleJob();
 }
 
@@ -517,7 +518,7 @@ void SyncSchedulerImpl::DoNudgeSyncCycleJob(JobPriority priority) {
 void SyncSchedulerImpl::DoConfigurationSyncCycleJob(JobPriority priority) {
   DCHECK(CalledOnValidThread());
   DCHECK_EQ(mode_, CONFIGURATION_MODE);
-  DCHECK(pending_configure_params_ != NULL);
+  DCHECK(pending_configure_params_ != nullptr);
 
   if (!CanRunJobNow(priority)) {
     SDVLOG(2) << "Unable to run configure job right now.";
@@ -583,15 +584,15 @@ void SyncSchedulerImpl::HandleFailure(
     // Setup our backoff if this is our first such failure.
     TimeDelta length = delay_provider_->GetDelay(
         delay_provider_->GetInitialDelay(model_neutral_state));
-    wait_interval_.reset(
-        new WaitInterval(WaitInterval::EXPONENTIAL_BACKOFF, length));
+    wait_interval_ = base::MakeUnique<WaitInterval>(
+        WaitInterval::EXPONENTIAL_BACKOFF, length);
     SDVLOG(2) << "Sync cycle failed.  Will back off for "
               << wait_interval_->length.InMilliseconds() << "ms.";
   } else {
     // Increase our backoff interval and schedule another retry.
     TimeDelta length = delay_provider_->GetDelay(wait_interval_->length);
-    wait_interval_.reset(
-        new WaitInterval(WaitInterval::EXPONENTIAL_BACKOFF, length));
+    wait_interval_ = base::MakeUnique<WaitInterval>(
+        WaitInterval::EXPONENTIAL_BACKOFF, length);
     SDVLOG(2) << "Sync cycle failed.  Will back off for "
               << wait_interval_->length.InMilliseconds() << "ms.";
   }
@@ -769,8 +770,8 @@ void SyncSchedulerImpl::TrySyncCycleJobImpl() {
     // been cleared, then we should increase our backoff interval and schedule
     // another retry.
     TimeDelta length = delay_provider_->GetDelay(wait_interval_->length);
-    wait_interval_.reset(
-        new WaitInterval(WaitInterval::EXPONENTIAL_BACKOFF, length));
+    wait_interval_ = base::MakeUnique<WaitInterval>(
+        WaitInterval::EXPONENTIAL_BACKOFF, length);
     SDVLOG(2) << "Sync cycle failed.  Will back off for "
               << wait_interval_->length.InMilliseconds() << "ms.";
     RestartWaiting();
@@ -843,13 +844,13 @@ void SyncSchedulerImpl::ExponentialBackoffRetry() {
 }
 
 void SyncSchedulerImpl::NotifyRetryTime(base::Time retry_time) {
-  FOR_EACH_OBSERVER(SyncEngineEventListener, *cycle_context_->listeners(),
-                    OnRetryTimeChanged(retry_time));
+  for (auto& observer : *cycle_context_->listeners())
+    observer.OnRetryTimeChanged(retry_time);
 }
 
 void SyncSchedulerImpl::NotifyThrottledTypesChanged(ModelTypeSet types) {
-  FOR_EACH_OBSERVER(SyncEngineEventListener, *cycle_context_->listeners(),
-                    OnThrottledTypesChanged(types));
+  for (auto& observer : *cycle_context_->listeners())
+    observer.OnThrottledTypesChanged(types);
 }
 
 bool SyncSchedulerImpl::IsBackingOff() const {
@@ -860,8 +861,8 @@ bool SyncSchedulerImpl::IsBackingOff() const {
 
 void SyncSchedulerImpl::OnThrottled(const base::TimeDelta& throttle_duration) {
   DCHECK(CalledOnValidThread());
-  wait_interval_.reset(
-      new WaitInterval(WaitInterval::THROTTLED, throttle_duration));
+  wait_interval_ = base::MakeUnique<WaitInterval>(WaitInterval::THROTTLED,
+                                                  throttle_duration);
   NotifyRetryTime(base::Time::Now() + wait_interval_->length);
   NotifyThrottledTypesChanged(ModelTypeSet::All());
 }
@@ -934,8 +935,8 @@ void SyncSchedulerImpl::OnSyncProtocolError(
   }
   if (IsActionableError(sync_protocol_error)) {
     SDVLOG(2) << "OnActionableError";
-    FOR_EACH_OBSERVER(SyncEngineEventListener, *cycle_context_->listeners(),
-                      OnActionableError(sync_protocol_error));
+    for (auto& observer : *cycle_context_->listeners())
+      observer.OnActionableError(sync_protocol_error);
   }
 }
 
@@ -946,8 +947,8 @@ void SyncSchedulerImpl::OnReceivedGuRetryDelay(const base::TimeDelta& delay) {
 }
 
 void SyncSchedulerImpl::OnReceivedMigrationRequest(ModelTypeSet types) {
-  FOR_EACH_OBSERVER(SyncEngineEventListener, *cycle_context_->listeners(),
-                    OnMigrationRequested(types));
+  for (auto& observer : *cycle_context_->listeners())
+    observer.OnMigrationRequested(types);
 }
 
 void SyncSchedulerImpl::SetNotificationsEnabled(bool notifications_enabled) {

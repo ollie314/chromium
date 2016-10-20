@@ -273,7 +273,7 @@ WebInspector.NavigatorView.prototype = {
         if (uiSourceCode.project().type() === WebInspector.projectTypes.FileSystem)
             path = WebInspector.FileSystemWorkspaceBinding.relativePath(uiSourceCode).slice(0, -1);
         else
-            path = WebInspector.ParsedURL.splitURLIntoPathComponents(uiSourceCode.url()).slice(1, -1);
+            path = WebInspector.ParsedURL.extractPath(uiSourceCode.url()).split("/").slice(1, -1);
 
         var project = uiSourceCode.project();
         var target = WebInspector.NetworkProject.targetForUISourceCode(uiSourceCode);
@@ -1003,9 +1003,7 @@ WebInspector.NavigatorSourceTreeElement.prototype = {
         if (!this._uiSourceCode.canRename())
             return false;
         var isSelected = this === this.treeOutline.selectedTreeElement;
-        var document = this.treeOutline.element.ownerDocument;
-        var isFocused = this.treeOutline.element.isSelfOrAncestor(document.activeElement);
-        return isSelected && isFocused && !WebInspector.isBeingEdited(this.treeOutline.element);
+        return isSelected && this.treeOutline.element.hasFocus() && !WebInspector.isBeingEdited(this.treeOutline.element);
     },
 
     selectOnMouseDown: function(event)

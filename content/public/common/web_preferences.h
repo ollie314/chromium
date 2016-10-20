@@ -115,7 +115,6 @@ struct CONTENT_EXPORT WebPreferences {
   bool databases_enabled;
   bool application_cache_enabled;
   bool tabs_to_links;
-  bool caret_browsing_enabled;
   bool history_entry_requires_user_gesture;
   bool hyperlink_auditing_enabled;
   bool allow_universal_access_from_file_urls;
@@ -185,7 +184,6 @@ struct CONTENT_EXPORT WebPreferences {
   bool initialize_at_minimum_page_scale;
   bool smart_insert_delete_enabled;
   bool spatial_navigation_enabled;
-  int pinch_overlay_scrollbar_thickness;
   bool use_solid_color_scrollbars;
   bool navigate_on_drag_drop;
   V8CacheOptions v8_cache_options;
@@ -238,6 +236,9 @@ struct CONTENT_EXPORT WebPreferences {
   bool resue_global_for_unowned_main_frame;
   bool autoplay_muted_videos_enabled;
   ProgressBarCompletion progress_bar_completion;
+  // Specifies default setting for spellcheck when the spellcheck attribute is
+  // not explicitly specified.
+  bool spellcheck_enabled_by_default;
 #endif
 
   // String that describes how media element autoplay behavior should be

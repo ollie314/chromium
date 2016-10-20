@@ -32,8 +32,10 @@
 #include "media/base/cdm_context.h"
 #include "media/base/limits.h"
 #include "media/base/media_content_type.h"
+#include "media/base/media_keys.h"
 #include "media/base/media_log.h"
 #include "media/base/media_switches.h"
+#include "media/base/media_url_demuxer.h"
 #include "media/base/text_renderer.h"
 #include "media/base/timestamp_constants.h"
 #include "media/base/video_frame.h"
@@ -215,7 +217,6 @@ WebMediaPlayerImpl::WebMediaPlayerImpl(
                                   ? params.compositor_task_runner()
                                   : base::ThreadTaskRunnerHandle::Get()),
       compositor_(new VideoFrameCompositor(compositor_task_runner_)),
-      is_cdm_attached_(false),
 #if defined(OS_ANDROID)  // WMPI_CAST
       cast_impl_(this, client_, params.context_3d_cb()),
 #endif
@@ -226,8 +227,10 @@ WebMediaPlayerImpl::WebMediaPlayerImpl(
       overlay_surface_id_(SurfaceManager::kNoSurfaceID),
       suppress_destruction_errors_(false),
       can_suspend_state_(CanSuspendState::UNKNOWN),
+      use_fallback_path_(false),
       is_encrypted_(false),
-      underflow_count_(0) {
+      underflow_count_(0),
+      observer_(params.media_observer()) {
   DCHECK(!adjust_allocated_memory_cb_.is_null());
   DCHECK(renderer_factory_);
   DCHECK(client_);
@@ -244,18 +247,18 @@ WebMediaPlayerImpl::WebMediaPlayerImpl(
   media_log_->AddEvent(
       media_log_->CreateEvent(MediaLogEvent::WEBMEDIAPLAYER_CREATED));
 
-  if (params.initial_cdm()) {
-    SetCdm(base::Bind(&IgnoreCdmAttached),
-           ToWebContentDecryptionModuleImpl(params.initial_cdm())
-               ->GetCdmContext());
-  }
+  if (params.initial_cdm())
+    SetCdm(params.initial_cdm());
 
   // TODO(xhwang): When we use an external Renderer, many methods won't work,
   // e.g. GetCurrentFrameFromCompositor(). See http://crbug.com/434861
 
-  // Use the null sink if no sink was provided.
+  // Use the null sink if no valid sink was provided.
   audio_source_provider_ = new WebAudioSourceProviderImpl(
-      params.audio_renderer_sink().get()
+      params.audio_renderer_sink().get() &&
+              params.audio_renderer_sink()
+                      ->GetOutputDeviceInfo()
+                      .device_status() == OUTPUT_DEVICE_STATUS_OK
           ? params.audio_renderer_sink()
           : new NullAudioSink(media_task_runner_));
 }
@@ -337,11 +340,15 @@ void WebMediaPlayerImpl::DisableOverlay() {
 void WebMediaPlayerImpl::enteredFullscreen() {
   if (!force_video_overlays_ && !disable_fullscreen_video_overlays_)
     EnableOverlay();
+  if (observer_)
+    observer_->OnEnteredFullscreen();
 }
 
 void WebMediaPlayerImpl::exitedFullscreen() {
   if (!force_video_overlays_ && !disable_fullscreen_video_overlays_)
     DisableOverlay();
+  if (observer_)
+    observer_->OnExitedFullscreen();
 }
 
 void WebMediaPlayerImpl::DoLoad(LoadType load_type,
@@ -355,6 +362,9 @@ void WebMediaPlayerImpl::DoLoad(LoadType load_type,
 
   // Set subresource URL for crash reporting.
   base::debug::SetCrashKeyValue("subresource_url", gurl.spec());
+
+  if (use_fallback_path_)
+    fallback_url_ = gurl;
 
   load_type_ = load_type;
 
@@ -780,7 +790,10 @@ void WebMediaPlayerImpl::paint(blink::WebCanvas* canvas,
   DCHECK(main_task_runner_->BelongsToCurrentThread());
   TRACE_EVENT0("media", "WebMediaPlayerImpl:paint");
 
-  if (is_cdm_attached_)
+  // TODO(sandersd): Move this check into GetCurrentFrameFromCompositor() when
+  // we have other ways to check if decoder owns video frame.
+  // See http://crbug.com/595716 and http://crbug.com/602708
+  if (cdm_)
     return;
 
   scoped_refptr<VideoFrame> video_frame = GetCurrentFrameFromCompositor();
@@ -851,10 +864,16 @@ bool WebMediaPlayerImpl::copyVideoTextureToPlatformTexture(
     unsigned int type,
     bool premultiply_alpha,
     bool flip_y) {
+  DCHECK(main_task_runner_->BelongsToCurrentThread());
   TRACE_EVENT0("media", "WebMediaPlayerImpl:copyVideoTextureToPlatformTexture");
 
-  scoped_refptr<VideoFrame> video_frame = GetCurrentFrameFromCompositor();
+  // TODO(sandersd): Move this check into GetCurrentFrameFromCompositor() when
+  // we have other ways to check if decoder owns video frame.
+  // See http://crbug.com/595716 and http://crbug.com/602708
+  if (cdm_)
+    return false;
 
+  scoped_refptr<VideoFrame> video_frame = GetCurrentFrameFromCompositor();
   if (!video_frame.get() || !video_frame->HasTextures()) {
     return false;
   }
@@ -895,8 +914,7 @@ void WebMediaPlayerImpl::setContentDecryptionModule(
   if (!was_encrypted && watch_time_reporter_)
     CreateWatchTimeReporter();
 
-  SetCdm(BIND_TO_RENDER_LOOP(&WebMediaPlayerImpl::OnCdmAttached),
-         ToWebContentDecryptionModuleImpl(cdm)->GetCdmContext());
+  SetCdm(cdm);
 }
 
 void WebMediaPlayerImpl::OnEncryptedMediaInitData(
@@ -946,29 +964,57 @@ void WebMediaPlayerImpl::OnFFmpegMediaTracksUpdated(
   }
 }
 
-void WebMediaPlayerImpl::SetCdm(const CdmAttachedCB& cdm_attached_cb,
-                                CdmContext* cdm_context) {
-  if (!cdm_context) {
-    cdm_attached_cb.Run(false);
+void WebMediaPlayerImpl::SetCdm(blink::WebContentDecryptionModule* cdm) {
+  DCHECK(main_task_runner_->BelongsToCurrentThread());
+  DCHECK(cdm);
+  scoped_refptr<MediaKeys> cdm_reference =
+      ToWebContentDecryptionModuleImpl(cdm)->GetCdm();
+  if (!cdm_reference) {
+    NOTREACHED();
+    OnCdmAttached(false);
     return;
   }
 
-  // If CDM initialization succeeded, tell the pipeline about it.
-  pipeline_.SetCdm(cdm_context, cdm_attached_cb);
+  CdmContext* cdm_context = cdm_reference->GetCdmContext();
+  if (!cdm_context) {
+    OnCdmAttached(false);
+    return;
+  }
+
+  if (observer_)
+    observer_->OnSetCdm(cdm_context);
+
+  // Keep the reference to the CDM, as it shouldn't be destroyed until
+  // after the pipeline is done with the |cdm_context|.
+  pending_cdm_ = std::move(cdm_reference);
+  pipeline_.SetCdm(cdm_context,
+                   base::Bind(&WebMediaPlayerImpl::OnCdmAttached, AsWeakPtr()));
 }
 
 void WebMediaPlayerImpl::OnCdmAttached(bool success) {
+  DCHECK(main_task_runner_->BelongsToCurrentThread());
+  DCHECK(pending_cdm_);
+
+  // If the CDM is set from the constructor there is no promise
+  // (|set_cdm_result_|) to fulfill.
   if (success) {
-    set_cdm_result_->complete();
-    set_cdm_result_.reset();
-    is_cdm_attached_ = true;
+    // This will release the previously attached CDM (if any).
+    cdm_ = std::move(pending_cdm_);
+    if (set_cdm_result_) {
+      set_cdm_result_->complete();
+      set_cdm_result_.reset();
+    }
+
     return;
   }
 
-  set_cdm_result_->completeWithError(
-      blink::WebContentDecryptionModuleExceptionNotSupportedError, 0,
-      "Unable to set MediaKeys object");
-  set_cdm_result_.reset();
+  pending_cdm_ = nullptr;
+  if (set_cdm_result_) {
+    set_cdm_result_->completeWithError(
+        blink::WebContentDecryptionModuleExceptionNotSupportedError, 0,
+        "Unable to set MediaKeys object");
+    set_cdm_result_.reset();
+  }
 }
 
 void WebMediaPlayerImpl::OnPipelineSeeked(bool time_updated) {
@@ -1090,6 +1136,9 @@ void WebMediaPlayerImpl::OnMetadata(PipelineMetadata metadata) {
     video_weblayer_->SetContentsOpaqueIsFixed(true);
     client_->setWebLayer(video_weblayer_.get());
   }
+
+  if (observer_)
+    observer_->OnMetadataChanged(metadata);
 
   CreateWatchTimeReporter();
   UpdatePlayState();
@@ -1352,6 +1401,10 @@ void WebMediaPlayerImpl::SetDeviceScaleFactor(float scale_factor) {
 void WebMediaPlayerImpl::setPoster(const blink::WebURL& poster) {
   cast_impl_.setPoster(poster);
 }
+
+void WebMediaPlayerImpl::SetUseFallbackPath(bool use_fallback_path) {
+  use_fallback_path_ = use_fallback_path;
+}
 #endif  // defined(OS_ANDROID)  // WMPI_CAST
 
 void WebMediaPlayerImpl::DataSourceInitialized(bool success) {
@@ -1365,9 +1418,9 @@ void WebMediaPlayerImpl::DataSourceInitialized(bool success) {
   //
   // TODO(tguilbert): Remove this code path once we have the ability to host a
   // MediaPlayer within a Mojo media renderer.  http://crbug.com/580626
-  if (data_source_) {
+  if (data_source_ && !use_fallback_path_) {
     const GURL url_after_redirects = data_source_->GetUrlAfterRedirects();
-    if (MediaCodecUtil::IsHLSPath(url_after_redirects)) {
+    if (MediaCodecUtil::IsHLSURL(url_after_redirects)) {
       client_->requestReload(url_after_redirects);
       // |this| may be destructed, do nothing after this.
       return;
@@ -1414,6 +1467,7 @@ void WebMediaPlayerImpl::OnSurfaceRequested(
     const SurfaceCreatedCB& surface_created_cb) {
   DCHECK(main_task_runner_->BelongsToCurrentThread());
   DCHECK(surface_manager_);
+  DCHECK(!use_fallback_path_);
 
   // A null callback indicates that the decoder is going away.
   if (surface_created_cb.is_null()) {
@@ -1460,6 +1514,12 @@ void WebMediaPlayerImpl::StartPipeline() {
 
   Demuxer::EncryptedMediaInitDataCB encrypted_media_init_data_cb =
       BIND_TO_RENDER_LOOP(&WebMediaPlayerImpl::OnEncryptedMediaInitData);
+
+  if (use_fallback_path_) {
+    demuxer_.reset(new MediaUrlDemuxer(media_task_runner_, fallback_url_));
+    pipeline_controller_.Start(demuxer_.get(), this, false, false);
+    return;
+  }
 
   // Figure out which demuxer to use.
   if (load_type_ != LoadTypeMediaSource) {
@@ -1549,7 +1609,11 @@ static void GetCurrentFrameAndSignal(
 
 scoped_refptr<VideoFrame>
 WebMediaPlayerImpl::GetCurrentFrameFromCompositor() {
+  DCHECK(main_task_runner_->BelongsToCurrentThread());
   TRACE_EVENT0("media", "WebMediaPlayerImpl::GetCurrentFrameFromCompositor");
+
+  // Needed when the |main_task_runner_| and |compositor_task_runner_| are the
+  // same to avoid deadlock in the Wait() below.
   if (compositor_task_runner_->BelongsToCurrentThread())
     return compositor_->GetCurrentFrameAndUpdateIfStale();
 
@@ -1568,11 +1632,14 @@ WebMediaPlayerImpl::GetCurrentFrameFromCompositor() {
 }
 
 void WebMediaPlayerImpl::UpdatePlayState() {
+  DCHECK(main_task_runner_->BelongsToCurrentThread());
+
 #if defined(OS_ANDROID)  // WMPI_CAST
   bool is_remote = isRemote();
 #else
   bool is_remote = false;
 #endif
+
   bool is_suspended = pipeline_controller_.IsSuspended();
   bool is_backgrounded =
       IsBackgroundedSuspendEnabled() && delegate_ && delegate_->IsHidden();
@@ -1625,6 +1692,8 @@ void WebMediaPlayerImpl::SetMemoryReportingState(
 }
 
 void WebMediaPlayerImpl::SetSuspendState(bool is_suspended) {
+  DCHECK(main_task_runner_->BelongsToCurrentThread());
+
   // Do not change the state after an error has occurred.
   // TODO(sandersd): Update PipelineController to remove the need for this.
   if (IsNetworkStateError(network_state_))

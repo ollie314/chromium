@@ -150,15 +150,14 @@ void ServiceWorkerGlobalScopeProxy::dispatchExtendableMessageEvent(
 }
 
 void ServiceWorkerGlobalScopeProxy::dispatchFetchEvent(
-    int responseID,
-    int eventFinishID,
+    int fetchEventID,
     const WebServiceWorkerRequest& webRequest) {
   ScriptState::Scope scope(
       workerGlobalScope()->scriptController()->getScriptState());
   WaitUntilObserver* waitUntilObserver = WaitUntilObserver::create(
-      workerGlobalScope(), WaitUntilObserver::Fetch, eventFinishID);
+      workerGlobalScope(), WaitUntilObserver::Fetch, fetchEventID);
   RespondWithObserver* respondWithObserver = RespondWithObserver::create(
-      workerGlobalScope(), responseID, webRequest.url(), webRequest.mode(),
+      workerGlobalScope(), fetchEventID, webRequest.url(), webRequest.mode(),
       webRequest.frameType(), webRequest.requestContext(), waitUntilObserver);
   Request* request = Request::create(
       workerGlobalScope()->scriptController()->getScriptState(), webRequest);
@@ -183,8 +182,7 @@ void ServiceWorkerGlobalScopeProxy::dispatchFetchEvent(
 }
 
 void ServiceWorkerGlobalScopeProxy::dispatchForeignFetchEvent(
-    int responseID,
-    int eventFinishID,
+    int fetchEventID,
     const WebServiceWorkerRequest& webRequest) {
   if (!OriginTrials::foreignFetchEnabled(workerGlobalScope())) {
     // If origin trial tokens have expired, or are otherwise no longer valid
@@ -192,9 +190,9 @@ void ServiceWorkerGlobalScopeProxy::dispatchForeignFetchEvent(
     // TODO(mek): Ideally the browser wouldn't even start the service worker
     // if its tokens have expired.
     ServiceWorkerGlobalScopeClient::from(workerGlobalScope())
-        ->respondToFetchEvent(responseID, WTF::currentTime());
+        ->respondToFetchEvent(fetchEventID, WTF::currentTime());
     ServiceWorkerGlobalScopeClient::from(workerGlobalScope())
-        ->didHandleFetchEvent(eventFinishID,
+        ->didHandleFetchEvent(fetchEventID,
                               WebServiceWorkerEventResultCompleted,
                               WTF::currentTime());
     return;
@@ -205,12 +203,12 @@ void ServiceWorkerGlobalScopeProxy::dispatchForeignFetchEvent(
   RefPtr<SecurityOrigin> origin =
       SecurityOrigin::create(webRequest.referrerUrl());
   WaitUntilObserver* waitUntilObserver = WaitUntilObserver::create(
-      workerGlobalScope(), WaitUntilObserver::Fetch, eventFinishID);
+      workerGlobalScope(), WaitUntilObserver::Fetch, fetchEventID);
   ForeignFetchRespondWithObserver* respondWithObserver =
       ForeignFetchRespondWithObserver::create(
-          workerGlobalScope(), responseID, webRequest.url(), webRequest.mode(),
-          webRequest.frameType(), webRequest.requestContext(), origin,
-          waitUntilObserver);
+          workerGlobalScope(), fetchEventID, webRequest.url(),
+          webRequest.mode(), webRequest.frameType(),
+          webRequest.requestContext(), origin, waitUntilObserver);
   Request* request = Request::create(
       workerGlobalScope()->scriptController()->getScriptState(), webRequest);
   request->getHeaders()->setGuard(Headers::ImmutableGuard);
@@ -244,7 +242,8 @@ void ServiceWorkerGlobalScopeProxy::dispatchNotificationClickEvent(
     int eventID,
     const WebString& notificationID,
     const WebNotificationData& data,
-    int actionIndex) {
+    int actionIndex,
+    const WebString& reply) {
   WaitUntilObserver* observer = WaitUntilObserver::create(
       workerGlobalScope(), WaitUntilObserver::NotificationClick, eventID);
   NotificationEventInit eventInit;
@@ -252,6 +251,7 @@ void ServiceWorkerGlobalScopeProxy::dispatchNotificationClickEvent(
       workerGlobalScope(), notificationID, data, true /* showing */));
   if (0 <= actionIndex && actionIndex < static_cast<int>(data.actions.size()))
     eventInit.setAction(data.actions[actionIndex].action);
+  eventInit.setReply(reply);
   Event* event = NotificationEvent::create(EventTypeNames::notificationclick,
                                            eventInit, observer);
   workerGlobalScope()->dispatchExtendableEvent(event, observer);

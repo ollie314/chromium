@@ -29,6 +29,9 @@ import org.chromium.chrome.browser.ntp.snippets.SectionHeaderViewHolder;
 import org.chromium.chrome.browser.ntp.snippets.SnippetArticle;
 import org.chromium.chrome.browser.util.ViewUtils;
 
+import java.util.HashMap;
+import java.util.Map;
+
 /**
  * Simple wrapper on top of a RecyclerView that will acquire focus when tapped.  Ensures the
  * New Tab page receives focus when clicked.
@@ -48,6 +51,13 @@ public class NewTabPageRecyclerView extends RecyclerView {
      * for their removal animation and avoid moving the scroll position.
      */
     private int mCompensationHeight;
+
+    /**
+     * Height compensation value for each item being dismissed. Since dismissals sometimes include
+     * sibling elements, and these don't get the standard treatment, we track the total height
+     * associated with the element the user interacted with.
+     */
+    private final Map<ViewHolder, Integer> mCompensationHeightMap = new HashMap<>();
 
     /** View used to calculate the position of the cards' snap point. */
     private View mAboveTheFoldView;
@@ -80,6 +90,8 @@ public class NewTabPageRecyclerView extends RecyclerView {
         mToolbarHeight = res.getDimensionPixelSize(R.dimen.toolbar_height_no_shadow)
                 + res.getDimensionPixelSize(R.dimen.toolbar_progress_bar_height);
         mMaxHeaderHeight = res.getDimensionPixelSize(R.dimen.snippets_article_header_height);
+
+        setHasFixedSize(true);
     }
 
     public boolean isFirstItemVisible() {
@@ -162,7 +174,7 @@ public class NewTabPageRecyclerView extends RecyclerView {
         // It might not be in the layout yet if it's not visible or ready to be displayed.
         if (bottomSpacingViewHolder == null) return;
 
-        assert bottomSpacingViewHolder.getItemViewType() == NewTabPageItem.VIEW_TYPE_SPACING;
+        assert bottomSpacingViewHolder.getItemViewType() == ItemViewType.SPACING;
         bottomSpacingViewHolder.itemView.requestLayout();
     }
 
@@ -171,23 +183,23 @@ public class NewTabPageRecyclerView extends RecyclerView {
      * below the fold to push the header up to to the top of the screen.
      */
     int calculateBottomSpacing() {
-        int firstHeaderPos = getNewTabPageAdapter().getFirstHeaderPosition();
+        int aboveTheFoldPosition = getNewTabPageAdapter().getAboveTheFoldPosition();
         int firstVisiblePos = mLayoutManager.findFirstVisibleItemPosition();
-        if (firstHeaderPos == RecyclerView.NO_POSITION
+        if (aboveTheFoldPosition == RecyclerView.NO_POSITION
                 || firstVisiblePos == RecyclerView.NO_POSITION) {
             return 0;
         }
 
-        // We have enough items to fill the view, since the snap point item is not even visible.
-        if (firstVisiblePos > firstHeaderPos) {
+        // We have enough items to fill the view, since the above-the-fold item is not even visible.
+        if (firstVisiblePos > aboveTheFoldPosition) {
             return 0;
         }
 
         ViewHolder lastContentItem = findLastContentItem();
-        ViewHolder firstHeader = findFirstHeader();
+        ViewHolder aboveTheFold = findViewHolderForAdapterPosition(aboveTheFoldPosition);
 
         int bottomSpacing = getHeight() - mToolbarHeight;
-        if (lastContentItem == null || firstHeader == null) {
+        if (lastContentItem == null || aboveTheFold == null) {
             // This can happen in several cases, where some elements are not visible and the
             // RecyclerView didn't already attach them. We handle it by just adding space to make
             // sure that we never run out and force the UI to jump around and get stuck in a
@@ -195,17 +207,17 @@ public class NewTabPageRecyclerView extends RecyclerView {
             // next pass. Known cases that make it necessary:
             //  - The card list is refreshed while the NTP is not shown, for example when changing
             //    the sync settings.
-            //  - Dismissing a snippet and having the status card coming to take its place.
+            //  - Dismissing a suggestion and having the status card coming to take its place.
             //  - Refresh while being below the fold, for example by tapping the status card.
 
-            if (firstHeader != null) bottomSpacing -= firstHeader.itemView.getTop();
+            if (aboveTheFold != null) bottomSpacing -= aboveTheFold.itemView.getBottom();
 
             Log.w(TAG, "The RecyclerView items are not attached, can't determine the content "
-                            + "height: snap=%s, last=%s. Using full height: %d ",
-                    firstHeader, lastContentItem, bottomSpacing);
+                            + "height: snap=%s, spacer=%s. Using full height: %d ",
+                    aboveTheFold, lastContentItem, bottomSpacing);
         } else {
             int contentHeight =
-                    lastContentItem.itemView.getBottom() - firstHeader.itemView.getTop();
+                    lastContentItem.itemView.getBottom() - aboveTheFold.itemView.getBottom();
             bottomSpacing -= contentHeight - mCompensationHeight;
         }
 
@@ -278,10 +290,10 @@ public class NewTabPageRecyclerView extends RecyclerView {
      * @return The {@code ViewHolder} of the header, or null if it is not present.
      */
     private SectionHeaderViewHolder findFirstHeader() {
-        int firstHeaderPosition = getNewTabPageAdapter().getFirstHeaderPosition();
-        if (firstHeaderPosition == RecyclerView.NO_POSITION) return null;
+        int position = getNewTabPageAdapter().getFirstHeaderPosition();
+        if (position == RecyclerView.NO_POSITION) return null;
 
-        ViewHolder viewHolder = findViewHolderForAdapterPosition(firstHeaderPosition);
+        ViewHolder viewHolder = findViewHolderForAdapterPosition(position);
         if (!(viewHolder instanceof SectionHeaderViewHolder)) return null;
 
         return (SectionHeaderViewHolder) viewHolder;
@@ -292,27 +304,13 @@ public class NewTabPageRecyclerView extends RecyclerView {
      * @return The {@code ViewHolder} for the first card, or null if it is not present.
      */
     private CardViewHolder findFirstCard() {
-        int firstCardPosition = getNewTabPageAdapter().getFirstCardPosition();
-        if (firstCardPosition == RecyclerView.NO_POSITION) return null;
+        int position = getNewTabPageAdapter().getFirstCardPosition();
+        if (position == RecyclerView.NO_POSITION) return null;
 
-        ViewHolder viewHolder = findViewHolderForAdapterPosition(firstCardPosition);
+        ViewHolder viewHolder = findViewHolderForAdapterPosition(position);
         if (!(viewHolder instanceof CardViewHolder)) return null;
 
         return (CardViewHolder) viewHolder;
-    }
-
-    /**
-     * Finds the view holder for the last content item: the footer.
-     * @return The {@code ViewHolder} of the last content item, or null if it is not present.
-     */
-    private ViewHolder findLastContentItem() {
-        int lastContentItemPosition = getNewTabPageAdapter().getLastContentItemPosition();
-        if (lastContentItemPosition == RecyclerView.NO_POSITION) return null;
-
-        ViewHolder viewHolder = findViewHolderForAdapterPosition(lastContentItemPosition);
-        if (viewHolder instanceof Footer.ViewHolder) return viewHolder;
-
-        return null;
     }
 
     /**
@@ -320,21 +318,28 @@ public class NewTabPageRecyclerView extends RecyclerView {
      * @return The {@code ViewHolder} of the bottom spacer, or null if it is not present.
      */
     private ViewHolder findBottomSpacer() {
-        int bottomSpacerPosition = getNewTabPageAdapter().getBottomSpacerPosition();
-        if (bottomSpacerPosition == RecyclerView.NO_POSITION) return null;
+        int position = getNewTabPageAdapter().getBottomSpacerPosition();
+        if (position == RecyclerView.NO_POSITION) return null;
 
-        return findViewHolderForAdapterPosition(bottomSpacerPosition);
+        return findViewHolderForAdapterPosition(position);
+    }
+
+    private ViewHolder findLastContentItem() {
+        int position = getNewTabPageAdapter().getLastContentItemPosition();
+        if (position == RecyclerView.NO_POSITION) return null;
+
+        return findViewHolderForAdapterPosition(position);
     }
 
     /**
      * Finds the above the fold view.
-     * @return The View for above the fold or null, if it is not present.
+     * @return The view for above the fold or null, if it is not present.
      */
     public NewTabPageLayout findAboveTheFoldView() {
-        int aboveTheFoldPosition = getNewTabPageAdapter().getAboveTheFoldPosition();
-        if (aboveTheFoldPosition == RecyclerView.NO_POSITION) return null;
+        int position = getNewTabPageAdapter().getAboveTheFoldPosition();
+        if (position == RecyclerView.NO_POSITION) return null;
 
-        ViewHolder viewHolder = findViewHolderForAdapterPosition(aboveTheFoldPosition);
+        ViewHolder viewHolder = findViewHolderForAdapterPosition(position);
         if (viewHolder == null) return null;
 
         View view = viewHolder.itemView;
@@ -344,15 +349,28 @@ public class NewTabPageRecyclerView extends RecyclerView {
     }
 
     /** Called when an item is in the process of being removed from the view. */
-    public void onItemDismissStarted(View itemView) {
-        mCompensationHeight += itemView.getHeight();
+    public void onItemDismissStarted(ViewHolder viewHolder) {
+        assert !mCompensationHeightMap.containsKey(viewHolder);
+
+        int dismissedHeight = viewHolder.itemView.getHeight();
+
+        ViewHolder siblingViewHolder = getNewTabPageAdapter().getDismissSibling(viewHolder);
+        if (siblingViewHolder != null) {
+            dismissedHeight += siblingViewHolder.itemView.getHeight();
+        }
+
+        mCompensationHeightMap.put(viewHolder, dismissedHeight);
+        mCompensationHeight += dismissedHeight;
         refreshBottomSpacing();
     }
 
     /** Called when an item has finished being removed from the view. */
-    public void onItemDismissFinished(View itemView) {
-        mCompensationHeight -= itemView.getHeight();
+    public void onItemDismissFinished(ViewHolder viewHolder) {
+        assert mCompensationHeightMap.containsKey(viewHolder);
+        mCompensationHeight -= mCompensationHeightMap.remove(viewHolder);
+
         assert mCompensationHeight >= 0;
+        refreshBottomSpacing();
     }
 
     /**
@@ -401,8 +419,13 @@ public class NewTabPageRecyclerView extends RecyclerView {
         if (peekingCardViewHolder != null && isFirstItemVisible()) {
             if (!mHasSpaceForPeekingCard) return;
 
+            ViewHolder firstHeaderViewHolder = findFirstHeader();
+            // It is possible to have a card but no header, for example the sign in promo.
+            // That one does not peek.
+            if (firstHeaderViewHolder == null) return;
+
             View peekingCardView = peekingCardViewHolder.itemView;
-            View headerView = findFirstHeader().itemView;
+            View headerView = firstHeaderViewHolder.itemView;
             final int peekingHeight = getResources().getDimensionPixelSize(
                     R.dimen.snippets_padding_and_peeking_card_height);
 
@@ -472,13 +495,13 @@ public class NewTabPageRecyclerView extends RecyclerView {
         animation.addListener(new AnimatorListenerAdapter() {
             @Override
             public void onAnimationStart(Animator animation) {
-                NewTabPageRecyclerView.this.onItemDismissStarted(itemView);
+                NewTabPageRecyclerView.this.onItemDismissStarted(viewHolder);
             }
 
             @Override
             public void onAnimationEnd(Animator animation) {
                 getNewTabPageAdapter().dismissItem(position);
-                NewTabPageRecyclerView.this.onItemDismissFinished(itemView);
+                NewTabPageRecyclerView.this.onItemDismissFinished(viewHolder);
             }
         });
         animation.start();

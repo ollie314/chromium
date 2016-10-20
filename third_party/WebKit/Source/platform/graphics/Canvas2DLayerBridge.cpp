@@ -32,12 +32,12 @@
 #include "gpu/command_buffer/client/gpu_memory_buffer_manager.h"
 #include "platform/Histogram.h"
 #include "platform/RuntimeEnabledFeatures.h"
-#include "platform/TraceEvent.h"
 #include "platform/graphics/CanvasMetrics.h"
 #include "platform/graphics/ExpensiveCanvasHeuristicParameters.h"
 #include "platform/graphics/GraphicsLayer.h"
 #include "platform/graphics/ImageBuffer.h"
 #include "platform/graphics/gpu/SharedContextRateLimiter.h"
+#include "platform/tracing/TraceEvent.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebCompositorSupport.h"
 #include "public/platform/WebGraphicsContext3DProvider.h"
@@ -55,8 +55,8 @@
 namespace {
 enum {
   InvalidMailboxIndex = -1,
-  MaxCanvasAnimationBacklog =
-      2,  // Make sure the the GPU is never more than two animation frames behind.
+  MaxCanvasAnimationBacklog = 2,  // Make sure the the GPU is never more than
+                                  // two animation frames behind.
 };
 }  // namespace
 
@@ -167,9 +167,14 @@ Canvas2DLayerBridge::~Canvas2DLayerBridge() {
 void Canvas2DLayerBridge::startRecording() {
   DCHECK(m_isDeferralEnabled);
   m_recorder = wrapUnique(new SkPictureRecorder);
-  m_recorder->beginRecording(m_size.width(), m_size.height(), nullptr);
+  SkCanvas* canvas =
+      m_recorder->beginRecording(m_size.width(), m_size.height(), nullptr);
+  // Always save an initial frame, to support resetting the top level matrix
+  // and clip.
+  canvas->save();
+
   if (m_imageBuffer) {
-    m_imageBuffer->resetCanvas(m_recorder->getRecordingCanvas());
+    m_imageBuffer->resetCanvas(canvas);
   }
   m_recordingPixelCount = 0;
 }
@@ -205,14 +210,18 @@ bool Canvas2DLayerBridge::isAccelerated() const {
     return false;
   if (m_softwareRenderingWhileHidden)
     return false;
-  if (m_layer)  // We don't check m_surface, so this returns true if context was lost (m_surface is null) with restoration pending.
+  if (m_layer) {
+    // We don't check |m_surface|, so this returns true if context was lost
+    // (|m_surface| is null) with restoration pending.
     return true;
+  }
   if (m_surface)  // && !m_layer is implied
     return false;
 
-  // Whether or not to accelerate is not yet resolved, determine whether immediate presentation
-  // of the canvas would result in the canvas being accelerated. Presentation is assumed to be
-  // a 'PreferAcceleration' operation.
+  // Whether or not to accelerate is not yet resolved. Determine whether
+  // immediate presentation of the canvas would result in the canvas being
+  // accelerated. Presentation is assumed to be a 'PreferAcceleration'
+  // operation.
   return shouldAccelerate(PreferAcceleration);
 }
 
@@ -224,7 +233,8 @@ GLenum Canvas2DLayerBridge::getGLFilter() {
 bool Canvas2DLayerBridge::prepareIOSurfaceMailboxFromImage(
     SkImage* image,
     cc::TextureMailbox* outMailbox) {
-  // Need to flush skia's internal queue because texture is about to be accessed directly
+  // Need to flush skia's internal queue, because the texture is about to be
+  // accessed directly.
   GrContext* grContext = m_contextProvider->grContext();
   grContext->flush();
 
@@ -362,7 +372,8 @@ bool Canvas2DLayerBridge::prepareMailboxFromImage(
   GrContext* grContext = m_contextProvider->grContext();
   if (!grContext) {
     mailboxInfo.m_image = std::move(image);
-    return true;  // for testing: skip gl stuff when using a mock graphics context.
+    // For testing, skip GL stuff when using a mock graphics context.
+    return true;
   }
 
 #if USE_IOSURFACE_FOR_2D_CANVAS
@@ -379,7 +390,8 @@ bool Canvas2DLayerBridge::prepareMailboxFromImage(
   if (RuntimeEnabledFeatures::forceDisable2dCanvasCopyOnWriteEnabled())
     m_surface->notifyContentWillChange(SkSurface::kRetain_ContentChangeMode);
 
-  // Need to flush skia's internal queue because texture is about to be accessed directly
+  // Need to flush skia's internal queue, because the texture is about to be
+  // accessed directly.
   grContext->flush();
 
   // Because of texture sharing with the compositor, we must invalidate
@@ -497,7 +509,7 @@ void Canvas2DLayerBridge::hibernate() {
   // 'this' does not already have a surface.
   DCHECK(!m_haveRecordedDrawCommands);
   SkPaint copyPaint;
-  copyPaint.setXfermodeMode(SkXfermode::kSrc_Mode);
+  copyPaint.setBlendMode(SkBlendMode::kSrc);
   m_surface->draw(tempHibernationSurface->getCanvas(), 0, 0,
                   &copyPaint);  // GPU readback
   m_hibernationImage = tempHibernationSurface->makeImageSnapshot();
@@ -541,13 +553,18 @@ SkSurface* Canvas2DLayerBridge::getOrCreateSurface(AccelerationHint hint) {
       wantAcceleration ? m_contextProvider->grContext() : nullptr, m_size,
       m_msaaSampleCount, m_opacityMode, m_colorSpace, &surfaceIsAccelerated);
 
-  if (!m_surface)
+  if (m_surface) {
+    // Always save an initial frame, to support resetting the top level matrix
+    // and clip.
+    m_surface->getCanvas()->save();
+  } else {
     reportSurfaceCreationFailure();
+  }
 
   if (m_surface && surfaceIsAccelerated && !m_layer) {
-    m_layer = wrapUnique(
+    m_layer =
         Platform::current()->compositorSupport()->createExternalTextureLayer(
-            this));
+            this);
     m_layer->setOpaque(m_opacityMode == Opaque);
     m_layer->setBlendBackgroundColor(m_opacityMode != Opaque);
     GraphicsLayer::registerContentsLayer(m_layer->layer());
@@ -566,7 +583,7 @@ SkSurface* Canvas2DLayerBridge::getOrCreateSurface(AccelerationHint hint) {
     }
 
     SkPaint copyPaint;
-    copyPaint.setXfermodeMode(SkXfermode::kSrc_Mode);
+    copyPaint.setBlendMode(SkBlendMode::kSrc);
     m_surface->getCanvas()->drawImage(m_hibernationImage.get(), 0, 0,
                                       &copyPaint);
     m_hibernationImage.reset();
@@ -693,7 +710,7 @@ void Canvas2DLayerBridge::setIsHidden(bool hidden) {
   if (!isHidden() && m_softwareRenderingWhileHidden) {
     flushRecordingOnly();
     SkPaint copyPaint;
-    copyPaint.setXfermodeMode(SkXfermode::kSrc_Mode);
+    copyPaint.setBlendMode(SkBlendMode::kSrc);
 
     sk_sp<SkSurface> oldSurface = std::move(m_surface);
     m_surface.reset();
@@ -783,7 +800,8 @@ gpu::gles2::GLES2Interface* Canvas2DLayerBridge::contextGL() {
   // the destruction of m_layer
   if (m_layer && m_accelerationMode != DisableAcceleration &&
       !m_destructionInProgress) {
-    // Call checkSurfaceValid to ensure rate limiter is disabled if context is lost.
+    // Call checkSurfaceValid to ensure the rate limiter is disabled if the
+    // context is lost.
     if (!checkSurfaceValid())
       return nullptr;
   }
@@ -839,8 +857,9 @@ bool Canvas2DLayerBridge::restoreSurface() {
     if (!m_surface)
       reportSurfaceCreationFailure();
 
-    // Current paradigm does support switching from accelerated to non-accelerated, which would be tricky
-    // due to changes to the layer tree, which can only happen at specific times during the document lifecycle.
+    // The current paradigm does not support switching from accelerated to
+    // non-accelerated, which would be tricky due to changes to the layer tree,
+    // which can only happen at specific times during the document lifecycle.
     // Therefore, we can only accept the restored surface if it is accelerated.
     if (surface && surfaceIsAccelerated) {
       m_surface = std::move(surface);
@@ -953,7 +972,8 @@ void Canvas2DLayerBridge::mailboxReleased(const gpu::Mailbox& mailbox,
   }
 
   if (!contextLost) {
-    // Invalidate texture state in case the compositor altered it since the copy-on-write.
+    // Invalidate texture state in case the compositor altered it since the
+    // copy-on-write.
     if (releasedMailboxInfo->m_image) {
 #if USE_IOSURFACE_FOR_2D_CANVAS
       DCHECK(!releasedMailboxInfo->m_imageInfo);
@@ -967,7 +987,8 @@ void Canvas2DLayerBridge::mailboxReleased(const gpu::Mailbox& mailbox,
           texture->abandon();
         } else {
           texture->textureParamsModified();
-          // Break the mailbox association to avoid leaking mailboxes every time skia recycles a texture.
+          // Break the mailbox association to avoid leaking mailboxes every time
+          // skia recycles a texture.
           gpu::gles2::GLES2Interface* gl = contextGL();
           if (gl)
             gl->ProduceTextureDirectCHROMIUM(

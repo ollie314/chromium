@@ -78,8 +78,9 @@ void RemoteFrame::navigate(Document& originDocument,
 void RemoteFrame::navigate(const FrameLoadRequest& passedRequest) {
   FrameLoadRequest frameRequest(passedRequest);
 
-  // The process where this frame actually lives won't have sufficient information to determine
-  // correct referrer, since it won't have access to the originDocument. Set it now.
+  // The process where this frame actually lives won't have sufficient
+  // information to determine correct referrer, since it won't have access to
+  // the originDocument. Set it now.
   FrameLoader::setReferrerForFrameRequest(frameRequest);
 
   frameRequest.resourceRequest().setHasUserGesture(
@@ -94,6 +95,8 @@ void RemoteFrame::reload(FrameLoadType frameLoadType,
 }
 
 void RemoteFrame::detach(FrameDetachType type) {
+  m_isDetaching = true;
+
   PluginScriptForbiddenScope forbidPluginDestructorScripting;
   detachChildren();
   if (!client())

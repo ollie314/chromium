@@ -33,7 +33,6 @@
 #include "core/origin_trials/OriginTrialContext.h"
 #include "core/workers/WorkerGlobalScope.h"
 #include "platform/HTTPNames.h"
-#include "platform/RuntimeEnabledFeatures.h"
 #include "platform/network/ContentSecurityPolicyResponseHeaders.h"
 #include "platform/network/NetworkUtils.h"
 #include "platform/network/ResourceResponse.h"
@@ -49,10 +48,6 @@ namespace blink {
 WorkerScriptLoader::WorkerScriptLoader()
     : m_responseCallback(nullptr),
       m_finishedCallback(nullptr),
-      m_failed(false),
-      m_needToCancel(false),
-      m_identifier(0),
-      m_appCacheID(0),
       m_requestContext(WebURLRequest::RequestContextWorker),
       m_responseAddressSpace(WebAddressSpacePublic) {}
 
@@ -149,8 +144,7 @@ void WorkerScriptLoader::didReceiveResponse(
   m_responseEncoding = response.textEncodingName();
   m_appCacheID = response.appCacheID();
 
-  if (RuntimeEnabledFeatures::referrerPolicyHeaderEnabled())
-    m_referrerPolicy = response.httpHeaderField(HTTPNames::Referrer_Policy);
+  m_referrerPolicy = response.httpHeaderField(HTTPNames::Referrer_Policy);
   processContentSecurityPolicy(response);
   m_originTrialTokens = OriginTrialContext::parseHeaderValue(
       response.httpHeaderField(HTTPNames::Origin_Trial));
@@ -197,8 +191,9 @@ void WorkerScriptLoader::didFinishLoading(unsigned long identifier, double) {
   notifyFinished();
 }
 
-void WorkerScriptLoader::didFail(const ResourceError&) {
+void WorkerScriptLoader::didFail(const ResourceError& error) {
   m_needToCancel = false;
+  m_canceled = error.isCancellation();
   notifyError();
 }
 

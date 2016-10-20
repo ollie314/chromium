@@ -3,10 +3,12 @@
 # found in the LICENSE file.
 
 import("//build/config/features.gni")
+import("//chrome/common/features.gni")
 import("//tools/grit/grit_rule.gni")
 
 grit("resources") {
   source = "resources/renderer_resources.grd"
+  defines = chrome_grit_defines
   use_qualified_include = true
   output_dir = "$root_gen_dir/chrome"
   output_name = "renderer_resources"
@@ -94,7 +96,6 @@ static_library("renderer") {
     "//chrome/common/net",
     "//components/autofill/content/renderer",
     "//components/cdm/renderer",
-    "//components/content_settings/content/common",
     "//components/contextual_search:renderer",
     "//components/data_reduction_proxy/core/common",
     "//components/dom_distiller/content/renderer",
@@ -105,6 +106,7 @@ static_library("renderer") {
     "//components/password_manager/content/renderer",
     "//components/plugins/renderer",
     "//components/printing/renderer",
+    "//components/rappor/public/interfaces",
     "//components/resources:components_resources",
     "//components/startup_metric_utils/common:interfaces",
     "//components/subresource_filter/content/renderer",
@@ -119,6 +121,7 @@ static_library("renderer") {
     "//content/public/renderer",
     "//media",
     "//net",
+    "//ppapi/features",
     "//skia",
     "//storage/common",
     "//third_party/WebKit/public:blink",
@@ -126,7 +129,7 @@ static_library("renderer") {
     "//third_party/WebKit/public:resources",
     "//third_party/icu",
     "//third_party/re2",
-    "//third_party/widevine/cdm:version_h",
+    "//third_party/widevine/cdm:headers",
     "//ui/surface",
     "//v8:v8",
   ]

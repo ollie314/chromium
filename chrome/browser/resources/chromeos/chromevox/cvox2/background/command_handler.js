@@ -191,8 +191,10 @@ CommandHandler.onCommand = function(command) {
   if (!ChromeVoxState.instance.currentRange_)
     return true;
 
-  // Next/compat commands hereafter.
-  if (ChromeVoxState.instance.mode == ChromeVoxMode.CLASSIC) return true;
+  // Next/classic compat commands hereafter.
+  if (ChromeVoxState.instance.mode == ChromeVoxMode.CLASSIC ||
+      ChromeVoxState.instance.mode == ChromeVoxMode.NEXT_COMPAT)
+    return true;
 
   var current = ChromeVoxState.instance.currentRange_;
   var dir = Dir.FORWARD;
@@ -472,27 +474,21 @@ CommandHandler.onCommand = function(command) {
       }
       break;
     case 'toggleKeyboardHelp':
-      ChromeVoxState.instance.startExcursion();
       (new PanelCommand(PanelCommandType.OPEN_MENUS)).send();
       return false;
     case 'showHeadingsList':
-      ChromeVoxState.instance.startExcursion();
       (new PanelCommand(PanelCommandType.OPEN_MENUS, 'role_heading')).send();
       return false;
     case 'showFormsList':
-      ChromeVoxState.instance.startExcursion();
       (new PanelCommand(PanelCommandType.OPEN_MENUS, 'role_form')).send();
       return false;
     case 'showLandmarksList':
-      ChromeVoxState.instance.startExcursion();
       (new PanelCommand(PanelCommandType.OPEN_MENUS, 'role_landmark')).send();
       return false;
     case 'showLinksList':
-      ChromeVoxState.instance.startExcursion();
       (new PanelCommand(PanelCommandType.OPEN_MENUS, 'role_link')).send();
       return false;
     case 'showTablesList':
-      ChromeVoxState.instance.startExcursion();
       (new PanelCommand(PanelCommandType.OPEN_MENUS, 'table_strategy')).send();
       return false;
     case 'toggleSearchWidget':
@@ -520,15 +516,17 @@ CommandHandler.onCommand = function(command) {
       output.withString(target.docUrl || '').go();
       return false;
     case 'copy':
-      var textarea = document.createElement('textarea');
-      document.body.appendChild(textarea);
-      textarea.focus();
-      document.execCommand('paste');
-      var clipboardContent = textarea.value;
-      textarea.remove();
-      cvox.ChromeVox.tts.speak(
-          Msgs.getMsg('copy', [clipboardContent]), cvox.QueueMode.FLUSH);
-      ChromeVoxState.instance.pageSel_ = null;
+      window.setTimeout(function() {
+        var textarea = document.createElement('textarea');
+        document.body.appendChild(textarea);
+        textarea.focus();
+        document.execCommand('paste');
+        var clipboardContent = textarea.value;
+        textarea.remove();
+        cvox.ChromeVox.tts.speak(
+            Msgs.getMsg('copy', [clipboardContent]), cvox.QueueMode.FLUSH);
+        ChromeVoxState.instance.pageSel_ = null;
+      }, 20);
       return true;
     case 'toggleSelection':
       if (!ChromeVoxState.instance.pageSel_) {

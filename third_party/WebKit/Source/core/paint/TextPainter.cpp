@@ -44,15 +44,17 @@ TextPainter::~TextPainter() {}
 void TextPainter::setEmphasisMark(const AtomicString& emphasisMark,
                                   TextEmphasisPosition position) {
   m_emphasisMark = emphasisMark;
+  const SimpleFontData* fontData = m_font.primaryFont();
+  DCHECK(fontData);
 
-  if (emphasisMark.isNull()) {
+  if (!fontData || emphasisMark.isNull()) {
     m_emphasisMarkOffset = 0;
   } else if (position == TextEmphasisPositionOver) {
-    m_emphasisMarkOffset = -m_font.getFontMetrics().ascent() -
+    m_emphasisMarkOffset = -fontData->getFontMetrics().ascent() -
                            m_font.emphasisMarkDescent(emphasisMark);
   } else {
     ASSERT(position == TextEmphasisPositionUnder);
-    m_emphasisMarkOffset = m_font.getFontMetrics().descent() +
+    m_emphasisMarkOffset = fontData->getFontMetrics().descent() +
                            m_font.emphasisMarkAscent(emphasisMark);
   }
 }
@@ -134,7 +136,8 @@ TextPainter::Style TextPainter::textPaintingStyle(LineLayoutItem lineLayoutItem,
   bool isPrinting = paintInfo.isPrinting();
 
   if (paintInfo.phase == PaintPhaseTextClip) {
-    // When we use the text as a clip, we only care about the alpha, thus we make all the colors black.
+    // When we use the text as a clip, we only care about the alpha, thus we
+    // make all the colors black.
     textStyle.currentColor = Color::black;
     textStyle.fillColor = Color::black;
     textStyle.strokeColor = Color::black;
@@ -252,11 +255,16 @@ void TextPainter::paintInternal(unsigned startOffset,
 }
 
 void TextPainter::paintEmphasisMarkForCombinedText() {
-  ASSERT(m_combinedText);
+  const SimpleFontData* fontData = m_font.primaryFont();
+  DCHECK(fontData);
+  if (!fontData)
+    return;
+
+  DCHECK(m_combinedText);
   TextRun placeholderTextRun(&ideographicFullStopCharacter, 1);
   FloatPoint emphasisMarkTextOrigin(m_textBounds.x().toFloat(),
                                     m_textBounds.y().toFloat() +
-                                        m_font.getFontMetrics().ascent() +
+                                        fontData->getFontMetrics().ascent() +
                                         m_emphasisMarkOffset);
   TextRunPaintInfo textRunPaintInfo(placeholderTextRun);
   textRunPaintInfo.bounds = FloatRect(m_textBounds);

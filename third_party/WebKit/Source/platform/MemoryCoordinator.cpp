@@ -4,9 +4,9 @@
 
 #include "platform/MemoryCoordinator.h"
 
-#include "platform/TraceEvent.h"
 #include "platform/fonts/FontCache.h"
 #include "platform/graphics/ImageDecodingStore.h"
+#include "platform/tracing/TraceEvent.h"
 #include "wtf/allocator/Partitions.h"
 
 namespace blink {
@@ -42,14 +42,25 @@ void MemoryCoordinator::onMemoryPressure(WebMemoryPressureLevel level) {
   TRACE_EVENT0("blink", "MemoryCoordinator::onMemoryPressure");
   for (auto& client : m_clients)
     client->onMemoryPressure(level);
-  if (level == WebMemoryPressureLevelCritical) {
-    // Clear the image cache.
-    // TODO(tasak|bashi): Make ImageDecodingStore and FontCache be
-    // MemoryCoordinatorClients rather than clearing caches here.
-    ImageDecodingStore::instance().clear();
-    FontCache::fontCache()->invalidate();
-  }
+  if (level == WebMemoryPressureLevelCritical)
+    clearMemory();
   WTF::Partitions::decommitFreeableMemory();
+}
+
+void MemoryCoordinator::onMemoryStateChange(MemoryState state) {
+  for (auto& client : m_clients)
+    client->onMemoryStateChange(state);
+  if (state == MemoryState::SUSPENDED)
+    clearMemory();
+  WTF::Partitions::decommitFreeableMemory();
+}
+
+void MemoryCoordinator::clearMemory() {
+  // Clear the image cache.
+  // TODO(tasak|bashi): Make ImageDecodingStore and FontCache be
+  // MemoryCoordinatorClients rather than clearing caches here.
+  ImageDecodingStore::instance().clear();
+  FontCache::fontCache()->invalidate();
 }
 
 DEFINE_TRACE(MemoryCoordinator) {

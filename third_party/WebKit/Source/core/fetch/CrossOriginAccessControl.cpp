@@ -63,6 +63,37 @@ void updateRequestForAccessControl(ResourceRequest& request,
     request.setHTTPOrigin(securityOrigin);
 }
 
+// Fetch API Spec: https://fetch.spec.whatwg.org/#cors-preflight-fetch-0
+static AtomicString createAccessControlRequestHeadersHeader(
+    const HTTPHeaderMap& headers) {
+  Vector<String> filteredHeaders;
+  for (const auto& header : headers) {
+    if (FetchUtils::isSimpleHeader(header.key, header.value)) {
+      // Exclude simple headers.
+      continue;
+    }
+    if (equalIgnoringCase(header.key, "referer")) {
+      // When the request is from a Worker, referrer header was added by
+      // WorkerThreadableLoader. But it should not be added to
+      // Access-Control-Request-Headers header.
+      continue;
+    }
+    filteredHeaders.append(header.key.lower());
+  }
+
+  // Sort header names lexicographically.
+  std::sort(filteredHeaders.begin(), filteredHeaders.end(),
+            WTF::codePointCompareLessThan);
+  StringBuilder headerBuffer;
+  for (const String& header : filteredHeaders) {
+    if (!headerBuffer.isEmpty())
+      headerBuffer.append(", ");
+    headerBuffer.append(header);
+  }
+
+  return AtomicString(headerBuffer.toString());
+}
+
 ResourceRequest createAccessControlPreflightRequest(
     const ResourceRequest& request,
     const SecurityOrigin* securityOrigin) {
@@ -76,39 +107,15 @@ ResourceRequest createAccessControlPreflightRequest(
   preflightRequest.setRequestContext(request.requestContext());
   preflightRequest.setSkipServiceWorker(WebURLRequest::SkipServiceWorker::All);
 
-  if (request.isExternalRequest())
+  if (request.isExternalRequest()) {
     preflightRequest.setHTTPHeaderField(
         HTTPNames::Access_Control_Request_External, "true");
+  }
 
-  const HTTPHeaderMap& requestHeaderFields = request.httpHeaderFields();
-
-  if (requestHeaderFields.size() > 0) {
-    // Fetch API Spec: https://fetch.spec.whatwg.org/#cors-preflight-fetch-0
-    Vector<String> headers;
-    for (const auto& header : requestHeaderFields) {
-      if (FetchUtils::isSimpleHeader(header.key, header.value)) {
-        // Exclude simple headers.
-        continue;
-      }
-      if (equalIgnoringCase(header.key, "referer")) {
-        // When the request is from a Worker, referrer header was added by
-        // WorkerThreadableLoader. But it should not be added to
-        // Access-Control-Request-Headers header.
-        continue;
-      }
-      headers.append(header.key.lower());
-    }
-    // Sort header names lexicographically.
-    std::sort(headers.begin(), headers.end(), WTF::codePointCompareLessThan);
-    StringBuilder headerBuffer;
-    for (const String& header : headers) {
-      if (!headerBuffer.isEmpty())
-        headerBuffer.append(", ");
-      headerBuffer.append(header);
-    }
+  if (request.httpHeaderFields().size() > 0) {
     preflightRequest.setHTTPHeaderField(
         HTTPNames::Access_Control_Request_Headers,
-        AtomicString(headerBuffer.toString()));
+        createAccessControlRequestHeadersHeader(request.httpHeaderFields()));
   }
 
   return preflightRequest;
@@ -188,10 +195,11 @@ bool passesAccessControlCheck(const ResourceResponse& response,
           "header when the credentials flag is true.",
           securityOrigin);
 
-      if (context == WebURLRequest::RequestContextXMLHttpRequest)
+      if (context == WebURLRequest::RequestContextXMLHttpRequest) {
         errorDescription.append(
             " The credentials mode of an XMLHttpRequest is controlled by the "
             "withCredentials attribute.");
+      }
 
       return false;
     }
@@ -208,10 +216,11 @@ bool passesAccessControlCheck(const ResourceResponse& response,
         errorDescription.append('.');
       }
 
-      if (context == WebURLRequest::RequestContextFetch)
+      if (context == WebURLRequest::RequestContextFetch) {
         errorDescription.append(
             " If an opaque response serves your needs, set the request's mode "
             "to 'no-cors' to fetch the resource with CORS disabled.");
+      }
 
       return false;
     }
@@ -225,22 +234,24 @@ bool passesAccessControlCheck(const ResourceResponse& response,
           allowOriginHeaderValue + "', but only one is allowed.";
     } else {
       KURL headerOrigin(KURL(), allowOriginHeaderValue);
-      if (!headerOrigin.isValid())
+      if (!headerOrigin.isValid()) {
         detail =
             "The 'Access-Control-Allow-Origin' header contains the invalid "
             "value '" +
             allowOriginHeaderValue + "'.";
-      else
+      } else {
         detail = "The 'Access-Control-Allow-Origin' header has a value '" +
                  allowOriginHeaderValue +
                  "' that is not equal to the supplied origin.";
+      }
     }
     errorDescription = buildAccessControlFailureMessage(detail, securityOrigin);
-    if (context == WebURLRequest::RequestContextFetch)
+    if (context == WebURLRequest::RequestContextFetch) {
       errorDescription.append(
           " Have the server send the header with a valid value, or, if an "
           "opaque response serves your needs, set the request's mode to "
           "'no-cors' to fetch the resource with CORS disabled.");
+    }
     return false;
   }
 

@@ -28,13 +28,11 @@ import android.widget.TextView;
 
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.Callback;
-import org.chromium.base.annotations.SuppressFBWarnings;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.favicon.FaviconHelper.FaviconImageCallback;
 import org.chromium.chrome.browser.favicon.FaviconHelper.IconAvailabilityCallback;
 import org.chromium.chrome.browser.ntp.DisplayStyleObserver;
-import org.chromium.chrome.browser.ntp.NewTabPageUma;
 import org.chromium.chrome.browser.ntp.NewTabPageView.NewTabPageManager;
 import org.chromium.chrome.browser.ntp.UiConfig;
 import org.chromium.chrome.browser.ntp.cards.CardViewHolder;
@@ -79,9 +77,6 @@ public class SnippetArticleViewHolder extends CardViewHolder implements Impressi
     private final boolean mUseFaviconService;
     private final UiConfig mUiConfig;
 
-    @SuppressFBWarnings("URF_UNREAD_FIELD")
-    private ImpressionTracker mImpressionTracker;
-
     /**
      * Listener for when the context menu is created.
      */
@@ -113,30 +108,20 @@ public class SnippetArticleViewHolder extends CardViewHolder implements Impressi
             // TODO(peconn): Instead, close the context menu when a snippet is clicked.
             if (!ViewCompat.isAttachedToWindow(mRecyclerView)) return true;
 
-            // The UMA is used to compare how the user views the article linked from a snippet.
             switch (item.getItemId()) {
                 case ID_OPEN_IN_NEW_WINDOW:
-                    NewTabPageUma.recordOpenSnippetMethod(
-                            NewTabPageUma.OPEN_SNIPPET_METHODS_NEW_WINDOW);
                     mManager.openSnippet(WindowOpenDisposition.NEW_WINDOW, mArticle);
                     return true;
                 case ID_OPEN_IN_NEW_TAB:
-                    NewTabPageUma.recordOpenSnippetMethod(
-                            NewTabPageUma.OPEN_SNIPPET_METHODS_NEW_TAB);
                     mManager.openSnippet(WindowOpenDisposition.NEW_FOREGROUND_TAB, mArticle);
                     return true;
                 case ID_OPEN_IN_INCOGNITO_TAB:
-                    NewTabPageUma.recordOpenSnippetMethod(
-                            NewTabPageUma.OPEN_SNIPPET_METHODS_INCOGNITO);
                     mManager.openSnippet(WindowOpenDisposition.OFF_THE_RECORD, mArticle);
                     return true;
                 case ID_SAVE_FOR_OFFLINE:
-                    NewTabPageUma.recordOpenSnippetMethod(
-                            NewTabPageUma.OPEN_SNIPPET_METHODS_SAVE_FOR_OFFLINE);
                     mManager.openSnippet(WindowOpenDisposition.SAVE_TO_DISK, mArticle);
                     return true;
                 case ID_REMOVE:
-                    // UMA is recorded during dismissal.
                     mRecyclerView.dismissItemWithAnimation(mArticle);
                     return true;
                 default:
@@ -146,11 +131,10 @@ public class SnippetArticleViewHolder extends CardViewHolder implements Impressi
     }
 
     /**
-     * Constructs a SnippetCardItemView item used to display snippets
+     * Constructs a {@link SnippetArticleViewHolder} item used to display snippets.
      *
-     * @param parent The ViewGroup that is going to contain the newly created view.
-     * @param manager The NTPManager object used to open an article
-     * @param suggestionsSource The source used to retrieve the thumbnails.
+     * @param parent The NewTabPageRecyclerView that is going to contain the newly created view.
+     * @param manager The NewTabPageManager object used to open an article.
      * @param uiConfig The NTP UI configuration object used to adjust the article UI.
      */
     public SnippetArticleViewHolder(NewTabPageRecyclerView parent, NewTabPageManager manager,
@@ -163,7 +147,7 @@ public class SnippetArticleViewHolder extends CardViewHolder implements Impressi
         mPublisherTextView = (TextView) itemView.findViewById(R.id.article_publisher);
         mArticleSnippetTextView = (TextView) itemView.findViewById(R.id.article_snippet);
 
-        mImpressionTracker = new ImpressionTracker(itemView, this);
+        new ImpressionTracker(itemView, this);
 
         mUiConfig = uiConfig;
         new DisplayStyleObserverAdapter(itemView, uiConfig, new DisplayStyleObserver() {
@@ -186,15 +170,10 @@ public class SnippetArticleViewHolder extends CardViewHolder implements Impressi
     @Override
     public void onCardTapped() {
         mNewTabPageManager.openSnippet(WindowOpenDisposition.CURRENT_TAB, mArticle);
-        mArticle.trackClick();
     }
 
     @Override
     protected void createContextMenu(ContextMenu menu) {
-        RecordHistogram.recordSparseSlowlyHistogram(
-                "NewTabPage.Snippets.CardLongPressed", mArticle.mPosition);
-        mArticle.recordAgeAndScore("NewTabPage.Snippets.CardLongPressed");
-
         OnMenuItemClickListener listener =
                 new ContextMenuItemClickListener(mArticle, mNewTabPageManager, getRecyclerView());
 

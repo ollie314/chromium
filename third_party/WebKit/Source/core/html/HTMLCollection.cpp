@@ -169,7 +169,12 @@ HTMLCollection::HTMLCollection(ContainerNode& ownerNode,
                        type),
       m_overridesItemAfter(itemAfterOverrideType == OverridesItemAfter),
       m_shouldOnlyIncludeDirectChildren(
-          shouldTypeOnlyIncludeDirectChildren(type)) {}
+          shouldTypeOnlyIncludeDirectChildren(type)) {
+  // Keep this in the child class because |registerNodeList| requires wrapper
+  // tracing and potentially calls virtual methods which is not allowed in a
+  // base class constructor.
+  document().registerNodeList(this);
+}
 
 HTMLCollection* HTMLCollection::create(ContainerNode& base,
                                        CollectionType type) {
@@ -424,12 +429,16 @@ bool HTMLCollection::namedPropertyQuery(const AtomicString& name,
 
 void HTMLCollection::supportedPropertyNames(Vector<String>& names) {
   // As per the specification (https://dom.spec.whatwg.org/#htmlcollection):
-  // The supported property names are the values from the list returned by these steps:
+  // The supported property names are the values from the list returned by these
+  // steps:
   // 1. Let result be an empty list.
-  // 2. For each element represented by the collection, in tree order, run these substeps:
-  //   1. If element has an ID which is neither the empty string nor is in result, append element's ID to result.
-  //   2. If element is in the HTML namespace and has a name attribute whose value is neither the empty string
-  //      nor is in result, append element's name attribute value to result.
+  // 2. For each element represented by the collection, in tree order, run these
+  //    substeps:
+  //   1. If element has an ID which is neither the empty string nor is in
+  //      result, append element's ID to result.
+  //   2. If element is in the HTML namespace and has a name attribute whose
+  //      value is neither the empty string nor is in result, append element's
+  //      name attribute value to result.
   // 3. Return result.
   HashSet<AtomicString> existingNames;
   unsigned length = this->length();
@@ -480,7 +489,8 @@ void HTMLCollection::updateIdNameCache() const {
          nameShouldBeVisibleInDocumentAll(toHTMLElement(*element))))
       cache->addElementWithName(nameAttrVal, element);
   }
-  // Set the named item cache last as traversing the tree may cause cache invalidation.
+  // Set the named item cache last as traversing the tree may cause cache
+  // invalidation.
   setNamedItemCache(cache);
 }
 

@@ -34,7 +34,6 @@
 #include "platform/Histogram.h"
 #include "platform/RuntimeEnabledFeatures.h"
 #include "platform/ScriptForbiddenScope.h"
-#include "platform/TraceEvent.h"
 #include "platform/heap/BlinkGCMemoryDumpProvider.h"
 #include "platform/heap/CallbackStack.h"
 #include "platform/heap/Handle.h"
@@ -42,8 +41,9 @@
 #include "platform/heap/PagePool.h"
 #include "platform/heap/SafePoint.h"
 #include "platform/heap/Visitor.h"
-#include "platform/web_memory_allocator_dump.h"
-#include "platform/web_process_memory_dump.h"
+#include "platform/tracing/TraceEvent.h"
+#include "platform/tracing/web_memory_allocator_dump.h"
+#include "platform/tracing/web_process_memory_dump.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebScheduler.h"
 #include "public/platform/WebThread.h"
@@ -108,9 +108,6 @@ class ParkThreadsScope final {
 
   bool parkThreads() {
     TRACE_EVENT0("blink_gc", "ThreadHeap::ParkThreadsScope");
-    const char* samplingState = TRACE_EVENT_GET_SAMPLING_STATE();
-    if (m_state->isMainThread())
-      TRACE_EVENT_SET_SAMPLING_STATE("blink_gc", "BlinkGCWaiting");
 
     // TODO(haraken): In an unlikely coincidence that two threads decide
     // to collect garbage at the same time, avoid doing two GCs in
@@ -126,8 +123,6 @@ class ParkThreadsScope final {
                                  50));
     timeToStopThreadsHistogram.count(timeForStoppingThreads);
 
-    if (m_state->isMainThread())
-      TRACE_EVENT_SET_NONCONST_SAMPLING_STATE(samplingState);
     return m_shouldResumeThreads;
   }
 
@@ -145,12 +140,10 @@ class ParkThreadsScope final {
 
 ThreadState::ThreadState(BlinkGC::ThreadHeapMode threadHeapMode)
     : m_thread(currentThread()),
-      m_persistentRegion(wrapUnique(new PersistentRegion()))
+      m_persistentRegion(wrapUnique(new PersistentRegion())),
 #if OS(WIN) && COMPILER(MSVC)
-      ,
-      m_threadStackSize(0)
+      m_threadStackSize(0),
 #endif
-      ,
       m_startOfStack(
           reinterpret_cast<intptr_t*>(StackFrameDepth::getStackStart())),
       m_endOfStack(
@@ -172,16 +165,13 @@ ThreadState::ThreadState(BlinkGC::ThreadHeapMode threadHeapMode)
       m_threadLocalWeakCallbackStack(CallbackStack::create()),
       m_isolate(nullptr),
       m_traceDOMWrappers(nullptr),
-      m_invalidateDeadObjectsInWrappersMarkingDeque(nullptr)
+      m_invalidateDeadObjectsInWrappersMarkingDeque(nullptr),
 #if defined(ADDRESS_SANITIZER)
-      ,
-      m_asanFakeStack(__asan_get_current_fake_stack())
+      m_asanFakeStack(__asan_get_current_fake_stack()),
 #endif
 #if defined(LEAK_SANITIZER)
-      ,
-      m_disabledStaticPersistentsRegistration(0)
+      m_disabledStaticPersistentsRegistration(0),
 #endif
-      ,
       m_allocatedObjectSize(0),
       m_markedObjectSize(0),
       m_reportedMemoryToV8(0) {
@@ -246,7 +236,7 @@ size_t ThreadState::threadStackSize() {
   memset(&stackInfo, 0, sizeof(MEMORY_BASIC_INFORMATION));
   size_t resultSize =
       VirtualQuery(&stackInfo, &stackInfo, sizeof(MEMORY_BASIC_INFORMATION));
-  ASSERT_UNUSED(resultSize, resultSize >= sizeof(MEMORY_BASIC_INFORMATION));
+  DCHECK_GE(resultSize, sizeof(MEMORY_BASIC_INFORMATION));
   Address stackEnd = reinterpret_cast<Address>(stackInfo.AllocationBase);
 
   Address stackStart =
@@ -1056,7 +1046,8 @@ void ThreadState::makeConsistentForMutator() {
 }
 
 void ThreadState::preGC() {
-  if (RuntimeEnabledFeatures::traceWrappablesEnabled() && m_performCleanup)
+  if (RuntimeEnabledFeatures::traceWrappablesEnabled() && m_isolate &&
+      m_performCleanup)
     m_performCleanup(m_isolate);
 
   ASSERT(!isInGC());
@@ -1148,10 +1139,18 @@ void ThreadState::poisonAllHeaps() {
   // Poisoning all unmarked objects in the other arenas.
   for (int i = 1; i < BlinkGC::NumberOfArenas; i++)
     m_arenas[i]->poisonArena();
+  // CrossThreadPersistents in unmarked objects may be accessed from other
+  // threads (e.g. in CrossThreadPersistentRegion::shouldTracePersistent) and
+  // that would be fine.
+  ProcessHeap::crossThreadPersistentRegion().unpoisonCrossThreadPersistents();
 }
 
 void ThreadState::poisonEagerArena() {
   m_arenas[BlinkGC::EagerSweepArenaIndex]->poisonArena();
+  // CrossThreadPersistents in unmarked objects may be accessed from other
+  // threads (e.g. in CrossThreadPersistentRegion::shouldTracePersistent) and
+  // that would be fine.
+  ProcessHeap::crossThreadPersistentRegion().unpoisonCrossThreadPersistents();
 }
 #endif
 
@@ -1686,7 +1685,6 @@ void ThreadState::collectGarbage(BlinkGC::StackState stackState,
   TRACE_EVENT2("blink_gc,devtools.timeline", "BlinkGCMarking", "lazySweeping",
                gcType == BlinkGC::GCWithoutSweep, "gcReason",
                gcReasonString(reason));
-  TRACE_EVENT_SCOPED_SAMPLING_STATE("blink_gc", "BlinkGC");
   double startTime = WTF::currentTimeMS();
 
   if (gcType == BlinkGC::TakeSnapshot)

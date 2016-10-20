@@ -479,7 +479,33 @@ void GaiaCookieManagerService::OnCookieChanged(
   // are pending, will be lost.  However, trying to process these changes could
   // cause an endless loop (see crbug.com/516070).
   if (requests_.empty()) {
-    requests_.push_back(GaiaCookieRequest::CreateListAccountsRequest(source_));
+    // Build gaia "source" based on cause to help track down channel id issues.
+    std::string source(source_);
+    switch (cause) {
+      case net::CookieStore::ChangeCause::INSERTED:
+        source += "INSERTED";
+        break;
+      case net::CookieStore::ChangeCause::EXPLICIT:
+        source += "EXPLICIT";
+        break;
+      case net::CookieStore::ChangeCause::UNKNOWN_DELETION:
+        source += "UNKNOWN_DELETION";
+        break;
+      case net::CookieStore::ChangeCause::OVERWRITE:
+        source += "OVERWRITE";
+        break;
+      case net::CookieStore::ChangeCause::EXPIRED:
+        source += "EXPIRED";
+        break;
+      case net::CookieStore::ChangeCause::EVICTED:
+        source += "EVICTED";
+        break;
+      case net::CookieStore::ChangeCause::EXPIRED_OVERWRITE:
+        source += "EXPIRED_OVERWRITE";
+        break;
+    }
+
+    requests_.push_back(GaiaCookieRequest::CreateListAccountsRequest(source));
     fetcher_retries_ = 0;
     signin_client_->DelayNetworkCall(
         base::Bind(&GaiaCookieManagerService::StartFetchingListAccounts,
@@ -493,8 +519,8 @@ void GaiaCookieManagerService::SignalComplete(
   // Its possible for the observer to delete |this| object.  Don't access
   // access any members after this calling the observer.  This method should
   // be the last call in any other method.
-  FOR_EACH_OBSERVER(Observer, observer_list_,
-                    OnAddAccountToCookieCompleted(account_id, error));
+  for (auto& observer : observer_list_)
+    observer.OnAddAccountToCookieCompleted(account_id, error);
 }
 
 void GaiaCookieManagerService::OnUbertokenSuccess(
@@ -533,6 +559,9 @@ void GaiaCookieManagerService::OnMergeSessionSuccess(const std::string& data) {
           << requests_.front().account_id();
   DCHECK(requests_.front().request_type() ==
          GaiaCookieRequestType::ADD_ACCOUNT);
+
+  list_accounts_stale_ = true;
+
   const std::string account_id = requests_.front().account_id();
   HandleNextRequest();
   SignalComplete(account_id, GoogleServiceAuthError::AuthErrorNone());
@@ -598,11 +627,11 @@ void GaiaCookieManagerService::OnListAccountsSuccess(const std::string& data) {
   // services, in response to OnGaiaAccountsInCookieUpdated, may try in return
   // to call ListAccounts, which would immediately return false if the
   // ListAccounts request is still sitting in queue.
-  FOR_EACH_OBSERVER(Observer, observer_list_,
-      OnGaiaAccountsInCookieUpdated(
-          listed_accounts_,
-          signed_out_accounts_,
-          GoogleServiceAuthError(GoogleServiceAuthError::NONE)));
+  for (auto& observer : observer_list_) {
+    observer.OnGaiaAccountsInCookieUpdated(
+        listed_accounts_, signed_out_accounts_,
+        GoogleServiceAuthError(GoogleServiceAuthError::NONE));
+  }
 }
 
 void GaiaCookieManagerService::OnListAccountsFailure(
@@ -626,9 +655,10 @@ void GaiaCookieManagerService::OnListAccountsFailure(
 
   UMA_HISTOGRAM_ENUMERATION("Signin.ListAccountsFailure",
       error.state(), GoogleServiceAuthError::NUM_STATES);
-  FOR_EACH_OBSERVER(Observer, observer_list_,
-      OnGaiaAccountsInCookieUpdated(
-            listed_accounts_, signed_out_accounts_, error));
+  for (auto& observer : observer_list_) {
+    observer.OnGaiaAccountsInCookieUpdated(listed_accounts_,
+                                           signed_out_accounts_, error);
+  }
   HandleNextRequest();
 }
 
@@ -636,7 +666,12 @@ void GaiaCookieManagerService::OnLogOutSuccess() {
   DCHECK(requests_.front().request_type() == GaiaCookieRequestType::LOG_OUT);
   VLOG(1) << "GaiaCookieManagerService::OnLogOutSuccess";
 
+  list_accounts_stale_ = true;
   fetcher_backoff_.InformOfRequest(true);
+  for (auto& observer : observer_list_) {
+    observer.OnLogOutAccountsFromCookieCompleted(
+        GoogleServiceAuthError(GoogleServiceAuthError::NONE));
+  }
   HandleNextRequest();
 }
 
@@ -656,6 +691,8 @@ void GaiaCookieManagerService::OnLogOutFailure(
     return;
   }
 
+  for (auto& observer : observer_list_)
+    observer.OnLogOutAccountsFromCookieCompleted(error);
   HandleNextRequest();
 }
 

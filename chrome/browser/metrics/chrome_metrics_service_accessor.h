@@ -41,8 +41,8 @@ class DomainReliabilityServiceFactory;
 
 namespace extensions {
 class ChromeExtensionWebContentsObserver;
+class ChromeMetricsPrivateDelegate;
 class FileManagerPrivateIsUMAEnabledFunction;
-class MetricsPrivateGetIsCrashReportingEnabledFunction;
 }
 
 namespace options {
@@ -56,6 +56,7 @@ bool IsOmniboxEnabled(Profile* profile);
 namespace safe_browsing {
 class DownloadSBClient;
 class IncidentReportingService;
+class ReporterRunner;
 class SafeBrowsingService;
 class SafeBrowsingUIManager;
 class SRTFetcher;
@@ -100,21 +101,22 @@ class ChromeMetricsServiceAccessor : public metrics::MetricsServiceAccessor {
   friend class DataReductionProxyChromeSettings;
   friend class domain_reliability::DomainReliabilityServiceFactory;
   friend class extensions::ChromeExtensionWebContentsObserver;
+  friend class extensions::ChromeMetricsPrivateDelegate;
   friend class extensions::FileManagerPrivateIsUMAEnabledFunction;
-  friend class extensions::MetricsPrivateGetIsCrashReportingEnabledFunction;
   friend void ChangeMetricsReportingStateWithReply(
       bool,
       const OnMetricsReportingCallbackType&);
   friend class options::BrowserOptionsHandler;
   friend bool prerender::IsOmniboxEnabled(Profile* profile);
-  friend class safe_browsing::IncidentReportingService;
   friend class settings::MetricsReportingHandler;
   friend class speech::ChromeSpeechRecognitionManagerDelegate;
   friend class system_logs::ChromeInternalLogSource;
   friend class UmaSessionStats;
+  friend class safe_browsing::DownloadSBClient;
+  friend class safe_browsing::IncidentReportingService;
+  friend class safe_browsing::ReporterRunner;
   friend class safe_browsing::SRTFetcher;
   friend class safe_browsing::SRTGlobalError;
-  friend class safe_browsing::DownloadSBClient;
   friend class safe_browsing::SafeBrowsingService;
   friend class safe_browsing::SafeBrowsingUIManager;
   friend void SyzyASANRegisterExperiment(const char*, const char*);

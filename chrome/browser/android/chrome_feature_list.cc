@@ -36,22 +36,21 @@ const base::Feature* kFeaturesExposedToJava[] = {
     &features::kCredentialManagementAPI,
     &features::kSimplifiedFullscreenUI,
     &features::kWebPayments,
-    &kAllBookmarksFeature,
     &kAndroidPayIntegrationV1,
+    &kChromeHomeFeature,
     &kDownloadsUiFeature,
     &kImportantSitesInCBD,
     &ntp_snippets::kContentSuggestionsFeature,
     &ntp_snippets::kSaveToOfflineFeature,
     &kNTPFakeOmniboxTextFeature,
-    &kNTPMaterialDesign,
     &kNTPOfflinePagesFeature,
     &kPhysicalWebFeature,
     &kPhysicalWebIgnoreOtherClientsFeature,
-    &kReadItLaterInMenu,
     &kScanCardsInWebPayments,
     &kSpecialLocaleFeature,
     &kSpecialLocaleWrapper,
     &kTabReparenting,
+    &kCCTExternalLinkHandling,
     &offline_pages::kOfflinePagesBackgroundLoadingFeature,
     &offline_pages::kBackgroundLoaderForDownloadsFeature,
     &offline_pages::kOfflinePagesCTFeature,  // See crbug.com/620421.
@@ -61,20 +60,17 @@ const base::Feature* kFeaturesExposedToJava[] = {
 
 }  // namespace
 
-const base::Feature kAllBookmarksFeature{"AllBookmarks",
-                                         base::FEATURE_ENABLED_BY_DEFAULT};
-
 const base::Feature kAndroidPayIntegrationV1{"AndroidPayIntegrationV1",
                                              base::FEATURE_ENABLED_BY_DEFAULT};
+
+const base::Feature kChromeHomeFeature{"ChromeHome",
+                                       base::FEATURE_DISABLED_BY_DEFAULT};
 
 const base::Feature kDownloadsUiFeature{"DownloadsUi",
                                          base::FEATURE_DISABLED_BY_DEFAULT};
 
 const base::Feature kImportantSitesInCBD{"ImportantSitesInCBD",
                                          base::FEATURE_DISABLED_BY_DEFAULT};
-
-const base::Feature kNTPMaterialDesign{"NTPMaterialDesign",
-                                       base::FEATURE_ENABLED_BY_DEFAULT};
 
 const base::Feature kNTPOfflinePagesFeature{"NTPOfflinePages",
                                             base::FEATURE_DISABLED_BY_DEFAULT};
@@ -88,9 +84,6 @@ const base::Feature kPhysicalWebFeature{"PhysicalWeb",
 const base::Feature kPhysicalWebIgnoreOtherClientsFeature{
     "PhysicalWebIgnoreOtherClients", base::FEATURE_DISABLED_BY_DEFAULT};
 
-const base::Feature kReadItLaterInMenu{"ReadItLaterInMenu",
-                                       base::FEATURE_DISABLED_BY_DEFAULT};
-
 const base::Feature kScanCardsInWebPayments{"ScanCardsInWebPayments",
                                             base::FEATURE_DISABLED_BY_DEFAULT};
 
@@ -101,6 +94,9 @@ const base::Feature kSpecialLocaleWrapper{"SpecialLocaleWrapper",
                                           base::FEATURE_ENABLED_BY_DEFAULT};
 
 const base::Feature kTabReparenting{"TabReparenting",
+                                    base::FEATURE_ENABLED_BY_DEFAULT};
+
+const base::Feature kCCTExternalLinkHandling{"CCTExternalLinkHandling",
                                     base::FEATURE_ENABLED_BY_DEFAULT};
 
 const base::Feature kUserMediaScreenCapturing{

@@ -28,6 +28,7 @@
 
 #include "bindings/core/v8/ExceptionStatePlaceholder.h"
 #include "bindings/core/v8/NodeOrString.h"
+#include "bindings/core/v8/TraceWrapperMember.h"
 #include "core/CoreExport.h"
 #include "core/dom/MutationObserver.h"
 #include "core/dom/SimulatedClickOptions.h"
@@ -208,6 +209,7 @@ class CORE_EXPORT Node : public EventTarget {
   Node* firstChild() const;
   Node* lastChild() const;
   Node* getRootNode(const GetRootNodeOptions&) const;
+  Text* nextTextSibling() const;
   Node& treeRoot() const;
   Node& shadowIncludingRoot() const;
   // closed-shadow-hidden is defined at
@@ -366,7 +368,7 @@ class CORE_EXPORT Node : public EventTarget {
   };
   virtual void notifyLoadedSheetAndAllCriticalSubresources(
       LoadedSheetErrorStatus) {}
-  virtual void startLoadingDynamicSheet() { ASSERT_NOT_REACHED(); }
+  virtual void startLoadingDynamicSheet() { NOTREACHED(); }
 
   bool hasName() const {
     DCHECK(!isTextNode());
@@ -378,9 +380,7 @@ class CORE_EXPORT Node : public EventTarget {
     setFlag(flag, IsUserActionElementFlag);
   }
 
-  // TODO(yosin): We should rename |active()| to |isActive()| as
-  // |UserActionElementSet|.
-  bool active() const {
+  bool isActive() const {
     return isUserActionElement() && isUserActionElementActive();
   }
   bool inActiveChain() const {
@@ -389,17 +389,15 @@ class CORE_EXPORT Node : public EventTarget {
   bool isDragged() const {
     return isUserActionElement() && isUserActionElementDragged();
   }
-  // TODO(yosin): We should rename |hovered()| to |isHovered()| as
-  // |UserActionElementSet|.
-  bool hovered() const {
+  bool isHovered() const {
     return isUserActionElement() && isUserActionElementHovered();
   }
   // Note: As a shadow host whose root with delegatesFocus=false may become
   // focused state when an inner element gets focused, in that case more than
-  // one elements in a document can return true for |focused()|.  Use
+  // one elements in a document can return true for |isFocused()|.  Use
   // Element::isFocusedElementInDocument() or Document::focusedElement() to
   // check which element is exactly focused.
-  bool focused() const {
+  bool isFocused() const {
     return isUserActionElement() && isUserActionElementFocused();
   }
 
@@ -430,6 +428,23 @@ class CORE_EXPORT Node : public EventTarget {
 
   void setNeedsStyleRecalc(StyleChangeType, const StyleChangeReasonForTracing&);
   void clearNeedsStyleRecalc();
+
+  bool needsReattachLayoutTree() { return getFlag(NeedsReattachLayoutTree); }
+  bool childNeedsReattachLayoutTree() {
+    return getFlag(ChildNeedsReattachLayoutTree);
+  }
+
+  void setNeedsReattachLayoutTree();
+  void setChildNeedsReattachLayoutTree() {
+    setFlag(ChildNeedsReattachLayoutTree);
+  }
+
+  void clearNeedsReattachLayoutTree() { clearFlag(NeedsReattachLayoutTree); }
+  void clearChildNeedsReattachLayoutTree() {
+    clearFlag(ChildNeedsReattachLayoutTree);
+  }
+
+  void markAncestorsWithChildNeedsReattachLayoutTree();
 
   bool needsDistributionRecalc() const;
 
@@ -489,7 +504,7 @@ class CORE_EXPORT Node : public EventTarget {
     setFlag(false, V8CollectableDuringMinorGCFlag);
   }
 
-  virtual void setFocus(bool flag);
+  virtual void setFocused(bool flag);
   virtual void setActive(bool flag = true);
   virtual void setDragged(bool flag);
   virtual void setHovered(bool flag = true);
@@ -769,11 +784,6 @@ class CORE_EXPORT Node : public EventTarget {
   HTMLSlotElement* assignedSlot() const;
   HTMLSlotElement* assignedSlotForBinding();
 
-  void setAlreadySpellChecked(bool flag) {
-    setFlag(flag, AlreadySpellCheckedFlag);
-  }
-  bool isAlreadySpellChecked() { return getFlag(AlreadySpellCheckedFlag); }
-
   bool isFinishedParsingChildren() const {
     return getFlag(IsFinishedParsingChildrenFlag);
   }
@@ -839,18 +849,17 @@ class CORE_EXPORT Node : public EventTarget {
     HasWeakReferencesFlag = 1 << 24,
     V8CollectableDuringMinorGCFlag = 1 << 25,
     HasEventTargetDataFlag = 1 << 26,
-    AlreadySpellCheckedFlag = 1 << 27,
 
-    V0CustomElementFlag = 1 << 28,
-    V0CustomElementUpgradedFlag = 1 << 29,
+    V0CustomElementFlag = 1 << 27,
+    V0CustomElementUpgradedFlag = 1 << 28,
 
-    NeedsReattachLayoutTree = 1 << 30,
-    ChildNeedsReattachLayoutTree = 1 << 31,
+    NeedsReattachLayoutTree = 1 << 29,
+    ChildNeedsReattachLayoutTree = 1 << 30,
 
     DefaultNodeFlags = IsFinishedParsingChildrenFlag | NeedsReattachStyleChange
   };
 
-  // 0 bits remaining.
+  // 1 bit remaining.
 
   bool getFlag(NodeFlags mask) const { return m_nodeFlags & mask; }
   void setFlag(bool f, NodeFlags mask) {
@@ -939,7 +948,8 @@ class CORE_EXPORT Node : public EventTarget {
 
   void trackForDebugging();
 
-  HeapVector<Member<MutationObserverRegistration>>* mutationObserverRegistry();
+  HeapVector<TraceWrapperMember<MutationObserverRegistration>>*
+  mutationObserverRegistry();
   HeapHashSet<Member<MutationObserverRegistration>>*
   transientMutationObserverRegistry();
 

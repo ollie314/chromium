@@ -44,17 +44,36 @@ void PrePaintTreeWalk::walk(FrameView& frameView,
   m_propertyTreeBuilder.buildTreeNodes(frameView,
                                        localContext.treeBuilderContext);
 
-  if (RuntimeEnabledFeatures::slimmingPaintInvalidationEnabled())
+  if (RuntimeEnabledFeatures::slimmingPaintInvalidationEnabled()) {
     m_paintInvalidator.invalidatePaintIfNeeded(
         frameView, localContext.paintInvalidatorContext);
+  }
 
   if (LayoutView* layoutView = frameView.layoutView())
     walk(*layoutView, localContext);
+
+#if DCHECK_IS_ON()
+  if (RuntimeEnabledFeatures::slimmingPaintInvalidationEnabled())
+    frameView.layoutView()->assertSubtreeClearedPaintInvalidationFlags();
+#endif
 }
 
 void PrePaintTreeWalk::walk(const LayoutObject& object,
                             const PrePaintTreeWalkContext& context) {
   PrePaintTreeWalkContext localContext(context);
+
+  if (object.isLayoutMultiColumnSpannerPlaceholder()) {
+    // Walk multi-column spanner as if it replaces the placeholder.
+    // Set the flag so that the tree builder can specially handle out-of-flow
+    // positioned descendants if their containers are between the multi-column
+    // container and the spanner. See PaintPropertyTreeBuilder for details.
+    localContext.treeBuilderContext.isUnderMultiColumnSpanner = true;
+    object.getMutableForPainting().clearPaintInvalidationFlags();
+    walk(*toLayoutMultiColumnSpannerPlaceholder(object)
+              .layoutObjectInFlowThread(),
+         localContext);
+    return;
+  }
 
   m_propertyTreeBuilder.buildTreeNodesForSelf(object,
                                               localContext.treeBuilderContext);
@@ -66,16 +85,11 @@ void PrePaintTreeWalk::walk(const LayoutObject& object,
 
   for (const LayoutObject* child = object.slowFirstChild(); child;
        child = child->nextSibling()) {
-    // Column spanners are walked through their placeholders. See below.
+    // Column spanners are walked through their placeholders. See above.
     if (child->isColumnSpanAll())
       continue;
     walk(*child, localContext);
   }
-
-  if (object.isLayoutMultiColumnSpannerPlaceholder())
-    walk(*toLayoutMultiColumnSpannerPlaceholder(object)
-              .layoutObjectInFlowThread(),
-         localContext);
 
   if (object.isLayoutPart()) {
     const LayoutPart& layoutPart = toLayoutPart(object);

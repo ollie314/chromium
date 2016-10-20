@@ -14,13 +14,13 @@
 #include "ash/common/new_window_delegate.h"
 #include "ash/common/palette_delegate.h"
 #include "ash/common/session/session_state_delegate.h"
-#include "ash/common/shell_window_ids.h"
+#include "ash/common/test/test_session_state_delegate.h"
+#include "ash/common/test/test_system_tray_delegate.h"
 #include "ash/common/wm/window_state.h"
 #include "ash/common/wm_shell.h"
+#include "ash/public/cpp/shell_window_ids.h"
 #include "ash/test/test_keyboard_ui.h"
-#include "ash/test/test_session_state_delegate.h"
 #include "ash/test/test_shelf_delegate.h"
-#include "ash/test/test_system_tray_delegate.h"
 #include "ash/test/test_wallpaper_delegate.h"
 #include "ash/wm/window_util.h"
 #include "base/logging.h"
@@ -112,7 +112,7 @@ TestShellDelegate::TestShellDelegate()
 
 TestShellDelegate::~TestShellDelegate() {}
 
-::shell::Connector* TestShellDelegate::GetShellConnector() const {
+::service_manager::Connector* TestShellDelegate::GetShellConnector() const {
   return nullptr;
 }
 

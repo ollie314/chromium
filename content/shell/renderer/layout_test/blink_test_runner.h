@@ -98,13 +98,20 @@ class BlinkTestRunner : public RenderViewObserver,
   std::string EvaluateInWebInspectorOverlay(const std::string& script) override;
   void ClearAllDatabases() override;
   void SetDatabaseQuota(int quota) override;
-  void SimulateWebNotificationClick(const std::string& title,
-                                    int action_index) override;
+  void SimulateWebNotificationClick(
+      const std::string& title,
+      int action_index,
+      const base::NullableString16& reply) override;
   void SimulateWebNotificationClose(const std::string& title,
                                     bool by_user) override;
   void SetDeviceScaleFactor(float factor) override;
   void SetDeviceColorProfile(const std::string& name) override;
   float GetWindowToViewportScale() override;
+  std::unique_ptr<blink::WebInputEvent> TransformScreenToWidgetCoordinates(
+      test_runner::WebWidgetTestProxyBase* web_widget_test_proxy_base,
+      const blink::WebInputEvent& event) override;
+  test_runner::WebWidgetTestProxyBase* GetWebWidgetTestProxyBase(
+      blink::WebLocalFrame* frame) override;
   void EnableUseZoomForDSF() override;
   bool IsUseZoomForDSFEnabled() override;
   void SetBluetoothFakeAdapter(const std::string& adapter_name,

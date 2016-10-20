@@ -8,9 +8,10 @@
 
 #include "ui/views/mus/screen_mus.h"
 
-#include "services/shell/public/cpp/connection.h"
-#include "services/shell/public/cpp/connector.h"
+#include "services/service_manager/public/cpp/connection.h"
+#include "services/service_manager/public/cpp/connector.h"
 #include "ui/aura/window.h"
+#include "ui/views/mus/native_widget_mus.h"
 #include "ui/views/mus/screen_mus_delegate.h"
 #include "ui/views/mus/window_manager_frame_values.h"
 
@@ -40,8 +41,8 @@ ScreenMus::ScreenMus(ScreenMusDelegate* delegate)
 
 ScreenMus::~ScreenMus() {}
 
-void ScreenMus::Init(shell::Connector* connector) {
-  connector->ConnectToInterface("mojo:ui", &display_manager_);
+void ScreenMus::Init(service_manager::Connector* connector) {
+  connector->ConnectToInterface("service:ui", &display_manager_);
 
   display_manager_->AddObserver(
       display_manager_observer_binding_.CreateInterfacePtrAndBind());
@@ -79,6 +80,19 @@ gfx::Point ScreenMus::GetCursorScreenPoint() {
 bool ScreenMus::IsWindowUnderCursor(gfx::NativeWindow window) {
   return window && window->IsVisible() &&
          window->GetBoundsInScreen().Contains(GetCursorScreenPoint());
+}
+
+gfx::NativeWindow ScreenMus::GetWindowAtScreenPoint(const gfx::Point& point) {
+  aura::Window* aura_window = nullptr;
+  ui::Window* ui_window = delegate_->GetWindowAtScreenPoint(point);
+  if (ui_window) {
+    NativeWidgetMus* nw_mus = NativeWidgetMus::GetForWindow(ui_window);
+    if (nw_mus) {
+      aura_window =
+          static_cast<internal::NativeWidgetPrivate*>(nw_mus)->GetNativeView();
+    }
+  }
+  return aura_window;
 }
 
 void ScreenMus::OnDisplays(mojo::Array<ui::mojom::WsDisplayPtr> ws_displays) {

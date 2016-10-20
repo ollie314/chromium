@@ -4,16 +4,12 @@
 
 package org.chromium.chrome.browser.ntp.cards;
 
-import static org.chromium.base.test.util.Matchers.greaterThanOrEqualTo;
-import static org.chromium.chrome.browser.ntp.cards.ContentSuggestionsTestUtils
-        .createDummySuggestions;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertThat;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
-import static org.mockito.Mockito.any;
-import static org.mockito.Mockito.anyString;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
@@ -22,9 +18,22 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import android.support.annotation.Nullable;
+import android.support.v7.widget.RecyclerView.AdapterDataObserver;
 import android.view.ContextMenu;
 import android.view.Menu;
 import android.view.MenuItem.OnMenuItemClickListener;
+
+import org.junit.After;
+import org.junit.Before;
+import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.robolectric.RuntimeEnvironment;
+import org.robolectric.annotation.Config;
+
+import static org.chromium.base.test.util.Matchers.greaterThanOrEqualTo;
+import static org.chromium.chrome.browser.ntp.cards.ContentSuggestionsTestUtils
+        .createDummySuggestions;
+import static org.chromium.chrome.browser.ntp.cards.ContentSuggestionsTestUtils.createInfo;
 
 import org.chromium.base.Callback;
 import org.chromium.base.metrics.RecordHistogram;
@@ -48,14 +57,7 @@ import org.chromium.chrome.browser.profiles.MostVisitedSites.MostVisitedURLsObse
 import org.chromium.chrome.browser.signin.SigninManager;
 import org.chromium.chrome.browser.signin.SigninManager.SignInStateObserver;
 import org.chromium.testing.local.LocalRobolectricTestRunner;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.robolectric.RuntimeEnvironment;
-import org.robolectric.annotation.Config;
 
-import java.nio.channels.UnsupportedAddressTypeException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -105,29 +107,27 @@ public class NewTabPageAdapterTest {
             mCurrentIndex = startingIndex;
         }
 
-        public void expect(@NewTabPageItem.ViewType int expectedItemType) {
+        public void expect(@ItemViewType int expectedItemType) {
             if (mCurrentIndex >= mAdapter.getItemCount()) {
                 fail("Expected item of type " + expectedItemType + " but encountered end of list");
             }
-            @NewTabPageItem.ViewType int itemType = mAdapter.getItemViewType(mCurrentIndex);
+            @ItemViewType int itemType = mAdapter.getItemViewType(mCurrentIndex);
             assertEquals("Type mismatch at position " + mCurrentIndex, expectedItemType, itemType);
             mCurrentIndex++;
         }
 
         public void expect(SectionDescriptor descriptor) {
-            expect(NewTabPageItem.VIEW_TYPE_HEADER);
+            expect(ItemViewType.HEADER);
             if (descriptor.mStatusCard) {
-                expect(NewTabPageItem.VIEW_TYPE_STATUS);
-                if (descriptor.mMoreButton) {
-                    expect(NewTabPageItem.VIEW_TYPE_ACTION);
-                }
-                expect(NewTabPageItem.VIEW_TYPE_PROGRESS);
+                expect(ItemViewType.STATUS);
+                expect(ItemViewType.ACTION);
+                expect(ItemViewType.PROGRESS);
             } else {
                 for (int i = 1; i <= descriptor.mNumSuggestions; i++) {
-                    expect(NewTabPageItem.VIEW_TYPE_SNIPPET);
+                    expect(ItemViewType.SNIPPET);
                 }
                 if (descriptor.mMoreButton) {
-                    expect(NewTabPageItem.VIEW_TYPE_ACTION);
+                    expect(ItemViewType.ACTION);
                 }
             }
         }
@@ -138,16 +138,16 @@ public class NewTabPageAdapterTest {
     }
 
     /**
-     * Asserts that the given itemGroup is a {@link SuggestionsSection} that matches the given
-     * {@link SectionDescriptor}.
+     * Asserts that the given {@link TreeNode} is a {@link SuggestionsSection} that matches the
+     * given {@link SectionDescriptor}.
      * @param descriptor The section descriptor to match against.
-     * @param itemGroup The items from the adapter.
+     * @param node The node from the adapter.
      */
-    private void assertMatches(SectionDescriptor descriptor, ItemGroup itemGroup) {
-        int offset = mAdapter.getGroupPositionOffset(itemGroup);
+    private void assertMatches(SectionDescriptor descriptor, TreeNode node) {
+        int offset = mAdapter.getChildPositionOffset(node);
         ItemsMatcher matcher = new ItemsMatcher(mAdapter, offset);
         matcher.expect(descriptor);
-        matcher.expectPosition(offset + itemGroup.getItems().size());
+        matcher.expectPosition(offset + node.getItemCount());
     }
 
     /**
@@ -158,12 +158,14 @@ public class NewTabPageAdapterTest {
      */
     private void assertItemsFor(SectionDescriptor... descriptors) {
         ItemsMatcher matcher = new ItemsMatcher(mAdapter, 0);
-        matcher.expect(NewTabPageItem.VIEW_TYPE_ABOVE_THE_FOLD);
+        matcher.expect(ItemViewType.ABOVE_THE_FOLD);
         for (SectionDescriptor descriptor : descriptors) matcher.expect(descriptor);
-        if (descriptors.length > 0) {
-            matcher.expect(NewTabPageItem.VIEW_TYPE_FOOTER);
-            matcher.expect(NewTabPageItem.VIEW_TYPE_SPACING);
+        if (descriptors.length == 0) {
+            matcher.expect(ItemViewType.ALL_DISMISSED);
+        } else {
+            matcher.expect(ItemViewType.FOOTER);
         }
+        matcher.expect(ItemViewType.SPACING);
         matcher.expectPosition(mAdapter.getItemCount());
     }
 
@@ -223,12 +225,12 @@ public class NewTabPageAdapterTest {
         RecordHistogram.disableForTests();
         RecordUserAction.disableForTests();
 
+        @CategoryInt
+        final int category = KnownCategories.ARTICLES;
         mSource = new FakeSuggestionsSource();
-        mSource.setStatusForCategory(KnownCategories.ARTICLES, CategoryStatus.INITIALIZING);
-        mSource.setInfoForCategory(KnownCategories.ARTICLES,
-                new SuggestionsCategoryInfo("Articles for you",
-                                           ContentSuggestionsCardLayout.FULL_CARD, false, true));
-        mAdapter = NewTabPageAdapter.create(new MockNewTabPageManager(mSource), null, null);
+        mSource.setStatusForCategory(category, CategoryStatus.INITIALIZING);
+        mSource.setInfoForCategory(category, createInfo(category, false, true));
+        mAdapter = new NewTabPageAdapter(new MockNewTabPageManager(mSource), null, null);
     }
 
     @After
@@ -246,36 +248,20 @@ public class NewTabPageAdapterTest {
     @Feature({"Ntp"})
     public void testSuggestionLoading() {
         assertItemsFor(sectionWithStatusCard());
-        assertEquals(NewTabPageItem.VIEW_TYPE_ABOVE_THE_FOLD, mAdapter.getItemViewType(0));
-        assertEquals(NewTabPageItem.VIEW_TYPE_HEADER, mAdapter.getItemViewType(1));
-        assertEquals(NewTabPageItem.VIEW_TYPE_STATUS, mAdapter.getItemViewType(2));
-        assertEquals(NewTabPageItem.VIEW_TYPE_PROGRESS, mAdapter.getItemViewType(3));
-        assertEquals(NewTabPageItem.VIEW_TYPE_FOOTER, mAdapter.getItemViewType(4));
-        assertEquals(NewTabPageItem.VIEW_TYPE_SPACING, mAdapter.getItemViewType(5));
 
-        List<SnippetArticle> suggestions = createDummySuggestions(3);
+        final int numSuggestions = 3;
+        List<SnippetArticle> suggestions = createDummySuggestions(numSuggestions);
         mSource.setStatusForCategory(KnownCategories.ARTICLES, CategoryStatus.AVAILABLE);
         mSource.setSuggestionsForCategory(KnownCategories.ARTICLES, suggestions);
 
-        int numItems = mAdapter.getItemCount();
-
-        // From the loaded items, cut out aboveTheFold and header from the front,
-        // and footer and bottom spacer from the back.
-        assertEquals(NewTabPageItem.VIEW_TYPE_ABOVE_THE_FOLD, mAdapter.getItemViewType(0));
-        assertEquals(NewTabPageItem.VIEW_TYPE_HEADER, mAdapter.getItemViewType(1));
-        assertArticlesEqual(suggestions, 2, numItems - 2);
-        assertEquals(NewTabPageItem.VIEW_TYPE_FOOTER, mAdapter.getItemViewType(numItems - 2));
-        assertEquals(NewTabPageItem.VIEW_TYPE_SPACING, mAdapter.getItemViewType(numItems - 1));
+        assertItemsFor(section(numSuggestions));
 
         // The adapter should ignore any new incoming data.
         mSource.setSuggestionsForCategory(KnownCategories.ARTICLES,
                 Arrays.asList(new SnippetArticle[] {new SnippetArticle(0, "foo", "title1", "pub1",
                         "txt1", "foo", "bar", 0, 0, 0, ContentSuggestionsCardLayout.FULL_CARD)}));
-        assertEquals(NewTabPageItem.VIEW_TYPE_ABOVE_THE_FOLD, mAdapter.getItemViewType(0));
-        assertEquals(NewTabPageItem.VIEW_TYPE_HEADER, mAdapter.getItemViewType(1));
-        assertArticlesEqual(suggestions, 2, numItems - 2);
-        assertEquals(NewTabPageItem.VIEW_TYPE_FOOTER, mAdapter.getItemViewType(numItems - 2));
-        assertEquals(NewTabPageItem.VIEW_TYPE_SPACING, mAdapter.getItemViewType(numItems - 1));
+
+        assertItemsFor(section(numSuggestions));
     }
 
     /**
@@ -289,37 +275,20 @@ public class NewTabPageAdapterTest {
         mSource.setSuggestionsForCategory(
                 KnownCategories.ARTICLES, new ArrayList<SnippetArticle>());
         assertItemsFor(sectionWithStatusCard());
-        assertEquals(NewTabPageItem.VIEW_TYPE_ABOVE_THE_FOLD, mAdapter.getItemViewType(0));
-        assertEquals(NewTabPageItem.VIEW_TYPE_HEADER, mAdapter.getItemViewType(1));
-        assertEquals(NewTabPageItem.VIEW_TYPE_STATUS, mAdapter.getItemViewType(2));
-        assertEquals(NewTabPageItem.VIEW_TYPE_PROGRESS, mAdapter.getItemViewType(3));
-        assertEquals(NewTabPageItem.VIEW_TYPE_FOOTER, mAdapter.getItemViewType(4));
-        assertEquals(NewTabPageItem.VIEW_TYPE_SPACING, mAdapter.getItemViewType(5));
 
         // We should load new suggestions when we get notified about them.
-        List<SnippetArticle> suggestions = createDummySuggestions(5);
+        final int numSuggestions = 5;
+        List<SnippetArticle> suggestions = createDummySuggestions(numSuggestions);
         mSource.setStatusForCategory(KnownCategories.ARTICLES, CategoryStatus.AVAILABLE);
         mSource.setSuggestionsForCategory(KnownCategories.ARTICLES, suggestions);
 
-        int numItems = mAdapter.getItemCount();
-
-        // From the loaded items, cut out aboveTheFold and header from the front,
-        // and footer and bottom spacer from the back.
-        assertEquals(NewTabPageItem.VIEW_TYPE_ABOVE_THE_FOLD, mAdapter.getItemViewType(0));
-        assertEquals(NewTabPageItem.VIEW_TYPE_HEADER, mAdapter.getItemViewType(1));
-        assertArticlesEqual(suggestions, 2, numItems - 2);
-        assertEquals(NewTabPageItem.VIEW_TYPE_FOOTER, mAdapter.getItemViewType(numItems - 2));
-        assertEquals(NewTabPageItem.VIEW_TYPE_SPACING, mAdapter.getItemViewType(numItems - 1));
+        assertItemsFor(section(numSuggestions));
 
         // The adapter should ignore any new incoming data.
         mSource.setSuggestionsForCategory(KnownCategories.ARTICLES,
                 Arrays.asList(new SnippetArticle[] {new SnippetArticle(0, "foo", "title1", "pub1",
                         "txt1", "foo", "bar", 0, 0, 0, ContentSuggestionsCardLayout.FULL_CARD)}));
-        assertEquals(NewTabPageItem.VIEW_TYPE_ABOVE_THE_FOLD, mAdapter.getItemViewType(0));
-        assertEquals(NewTabPageItem.VIEW_TYPE_HEADER, mAdapter.getItemViewType(1));
-        assertArticlesEqual(suggestions, 2, numItems - 2);
-        assertEquals(NewTabPageItem.VIEW_TYPE_FOOTER, mAdapter.getItemViewType(numItems - 2));
-        assertEquals(NewTabPageItem.VIEW_TYPE_SPACING, mAdapter.getItemViewType(numItems - 1));
+        assertItemsFor(section(numSuggestions));
     }
 
     /**
@@ -393,10 +362,9 @@ public class NewTabPageAdapterTest {
     @Test
     @Feature({"Ntp"})
     public void testProgressIndicatorDisplay() {
-        int progressPos = mAdapter.getLastContentItemPosition() - 1;
-        SuggestionsSection section = (SuggestionsSection) mAdapter.getGroup(progressPos);
-        List<NewTabPageItem> items = section.getItems();
-        ProgressItem progress = (ProgressItem) items.get(items.size() - 1);
+        int progressPos = mAdapter.getFooterPosition() - 1;
+        SuggestionsSection section = mAdapter.getSuggestionsSection(progressPos);
+        ProgressItem progress = section.getProgressItemForTesting();
 
         mSource.setStatusForCategory(KnownCategories.ARTICLES, CategoryStatus.INITIALIZING);
         assertTrue(progress.isVisible());
@@ -428,20 +396,20 @@ public class NewTabPageAdapterTest {
         assertItemsFor();
 
         // Same when loading a new NTP.
-        mAdapter = NewTabPageAdapter.create(new MockNewTabPageManager(mSource), null, null);
+        mAdapter = new NewTabPageAdapter(new MockNewTabPageManager(mSource), null, null);
         assertItemsFor();
 
         // Same for CATEGORY_EXPLICITLY_DISABLED.
         mSource.setStatusForCategory(KnownCategories.ARTICLES, CategoryStatus.AVAILABLE);
         mSource.setSuggestionsForCategory(KnownCategories.ARTICLES, snippets);
-        mAdapter = NewTabPageAdapter.create(new MockNewTabPageManager(mSource), null, null);
+        mAdapter = new NewTabPageAdapter(new MockNewTabPageManager(mSource), null, null);
         assertItemsFor(section(5));
         mSource.setStatusForCategory(
                 KnownCategories.ARTICLES, CategoryStatus.CATEGORY_EXPLICITLY_DISABLED);
         assertItemsFor();
 
         // Same when loading a new NTP.
-        mAdapter = NewTabPageAdapter.create(new MockNewTabPageManager(mSource), null, null);
+        mAdapter = new NewTabPageAdapter(new MockNewTabPageManager(mSource), null, null);
         assertItemsFor();
     }
 
@@ -462,7 +430,7 @@ public class NewTabPageAdapterTest {
         assertItemsFor(section(4));
 
         // But it disappears when loading a new NTP.
-        mAdapter = NewTabPageAdapter.create(new MockNewTabPageManager(mSource), null, null);
+        mAdapter = new NewTabPageAdapter(new MockNewTabPageManager(mSource), null, null);
         assertItemsFor();
     }
 
@@ -470,6 +438,7 @@ public class NewTabPageAdapterTest {
     @Test
     @Feature({"Ntp"})
     public void testSectionVisibleIfEmpty() {
+        @CategoryInt
         final int category = 42;
         final int sectionIdx = 1; // section 0 is the above-the-fold item, we test the one after.
         final List<SnippetArticle> articles =
@@ -479,13 +448,10 @@ public class NewTabPageAdapterTest {
         // Part 1: VisibleIfEmpty = true
         suggestionsSource = new FakeSuggestionsSource();
         suggestionsSource.setStatusForCategory(category, CategoryStatus.INITIALIZING);
-        suggestionsSource.setInfoForCategory(
-                category, new SuggestionsCategoryInfo(
-                                  "", ContentSuggestionsCardLayout.MINIMAL_CARD, false, true));
+        suggestionsSource.setInfoForCategory(category, createInfo(category, false, true));
 
         // 1.1 - Initial state
-        mAdapter =
-                NewTabPageAdapter.create(new MockNewTabPageManager(suggestionsSource), null, null);
+        mAdapter = new NewTabPageAdapter(new MockNewTabPageManager(suggestionsSource), null, null);
         assertItemsFor(sectionWithStatusCard());
 
         // 1.2 - With suggestions
@@ -494,8 +460,8 @@ public class NewTabPageAdapterTest {
         assertItemsFor(section(3));
 
         // 1.3 - When all suggestions are dismissed
-        assertEquals(SuggestionsSection.class, mAdapter.getGroups().get(sectionIdx).getClass());
-        SuggestionsSection section42 = (SuggestionsSection) mAdapter.getGroups().get(sectionIdx);
+        assertEquals(SuggestionsSection.class, mAdapter.getChildren().get(sectionIdx).getClass());
+        SuggestionsSection section42 = (SuggestionsSection) mAdapter.getChildren().get(sectionIdx);
         assertMatches(section(3), section42);
         section42.removeSuggestion(articles.get(0));
         section42.removeSuggestion(articles.get(1));
@@ -505,13 +471,10 @@ public class NewTabPageAdapterTest {
         // Part 2: VisibleIfEmpty = false
         suggestionsSource = new FakeSuggestionsSource();
         suggestionsSource.setStatusForCategory(category, CategoryStatus.INITIALIZING);
-        suggestionsSource.setInfoForCategory(
-                category, new SuggestionsCategoryInfo(
-                                  "", ContentSuggestionsCardLayout.MINIMAL_CARD, false, false));
+        suggestionsSource.setInfoForCategory(category, createInfo(category, false, false));
 
         // 2.1 - Initial state
-        mAdapter =
-                NewTabPageAdapter.create(new MockNewTabPageManager(suggestionsSource), null, null);
+        mAdapter = new NewTabPageAdapter(new MockNewTabPageManager(suggestionsSource), null, null);
         assertItemsFor();
 
         // 2.2 - With suggestions
@@ -528,6 +491,7 @@ public class NewTabPageAdapterTest {
     @Test
     @Feature({"Ntp"})
     public void testMoreButton() {
+        @CategoryInt
         final int category = 42;
         final int sectionIdx = 1; // section 0 is the above the fold, we test the one after.
         final List<SnippetArticle> articles =
@@ -538,13 +502,10 @@ public class NewTabPageAdapterTest {
         // Part 1: ShowMoreButton = true
         suggestionsSource = new FakeSuggestionsSource();
         suggestionsSource.setStatusForCategory(category, CategoryStatus.INITIALIZING);
-        suggestionsSource.setInfoForCategory(
-                category, new SuggestionsCategoryInfo(
-                                  "", ContentSuggestionsCardLayout.MINIMAL_CARD, true, true));
+        suggestionsSource.setInfoForCategory(category, createInfo(category, true, true));
 
         // 1.1 - Initial state.
-        mAdapter =
-                NewTabPageAdapter.create(new MockNewTabPageManager(suggestionsSource), null, null);
+        mAdapter = new NewTabPageAdapter(new MockNewTabPageManager(suggestionsSource), null, null);
         assertItemsFor(sectionWithStatusCardAndMoreButton());
 
         // 1.2 - With suggestions.
@@ -553,8 +514,8 @@ public class NewTabPageAdapterTest {
         assertItemsFor(sectionWithMoreButton(3));
 
         // 1.3 - When all suggestions are dismissed.
-        assertEquals(SuggestionsSection.class, mAdapter.getGroups().get(sectionIdx).getClass());
-        section42 = (SuggestionsSection) mAdapter.getGroups().get(sectionIdx);
+        assertEquals(SuggestionsSection.class, mAdapter.getChildren().get(sectionIdx).getClass());
+        section42 = (SuggestionsSection) mAdapter.getChildren().get(sectionIdx);
         assertMatches(sectionWithMoreButton(3), section42);
         section42.removeSuggestion(articles.get(0));
         section42.removeSuggestion(articles.get(1));
@@ -564,13 +525,10 @@ public class NewTabPageAdapterTest {
         // Part 1: ShowMoreButton = false
         suggestionsSource = new FakeSuggestionsSource();
         suggestionsSource.setStatusForCategory(category, CategoryStatus.INITIALIZING);
-        suggestionsSource.setInfoForCategory(
-                category, new SuggestionsCategoryInfo(
-                                  "", ContentSuggestionsCardLayout.MINIMAL_CARD, false, true));
+        suggestionsSource.setInfoForCategory(category, createInfo(category, false, true));
 
         // 2.1 - Initial state.
-        mAdapter =
-                NewTabPageAdapter.create(new MockNewTabPageManager(suggestionsSource), null, null);
+        mAdapter = new NewTabPageAdapter(new MockNewTabPageManager(suggestionsSource), null, null);
         assertItemsFor(sectionWithStatusCard());
 
         // 2.2 - With suggestions.
@@ -579,8 +537,8 @@ public class NewTabPageAdapterTest {
         assertItemsFor(section(3));
 
         // 2.3 - When all suggestions are dismissed.
-        assertEquals(SuggestionsSection.class, mAdapter.getGroups().get(sectionIdx).getClass());
-        section42 = (SuggestionsSection) mAdapter.getGroups().get(sectionIdx);
+        assertEquals(SuggestionsSection.class, mAdapter.getChildren().get(sectionIdx).getClass());
+        section42 = (SuggestionsSection) mAdapter.getChildren().get(sectionIdx);
         assertMatches(section(3), section42);
         section42.removeSuggestion(articles.get(0));
         section42.removeSuggestion(articles.get(1));
@@ -625,24 +583,18 @@ public class NewTabPageAdapterTest {
 
         int dynamicCategory1 = 1010;
         List<SnippetArticle> dynamics1 = createDummySuggestions(5);
-        mSource.setInfoForCategory(
-                dynamicCategory1, new SuggestionsCategoryInfo("Dynamic 1",
-                                          ContentSuggestionsCardLayout.MINIMAL_CARD, true, false));
+        mSource.setInfoForCategory(dynamicCategory1, createInfo(dynamicCategory1, true, false));
         mSource.setStatusForCategory(dynamicCategory1, CategoryStatus.AVAILABLE);
         mSource.setSuggestionsForCategory(dynamicCategory1, dynamics1);
-        mAdapter =
-                NewTabPageAdapter.create(new MockNewTabPageManager(mSource), null, null); // Reload
+        mAdapter = new NewTabPageAdapter(new MockNewTabPageManager(mSource), null, null); // Reload
         assertItemsFor(section(3), sectionWithMoreButton(5));
 
         int dynamicCategory2 = 1011;
         List<SnippetArticle> dynamics2 = createDummySuggestions(11);
-        mSource.setInfoForCategory(
-                dynamicCategory2, new SuggestionsCategoryInfo("Dynamic 2",
-                                          ContentSuggestionsCardLayout.MINIMAL_CARD, false, false));
+        mSource.setInfoForCategory(dynamicCategory2, createInfo(dynamicCategory1, false, false));
         mSource.setStatusForCategory(dynamicCategory2, CategoryStatus.AVAILABLE);
         mSource.setSuggestionsForCategory(dynamicCategory2, dynamics2);
-        mAdapter =
-                NewTabPageAdapter.create(new MockNewTabPageManager(mSource), null, null); // Reload
+        mAdapter = new NewTabPageAdapter(new MockNewTabPageManager(mSource), null, null); // Reload
         assertItemsFor(section(3), sectionWithMoreButton(5), section(11));
     }
 
@@ -652,7 +604,7 @@ public class NewTabPageAdapterTest {
     @Test
     @Feature({"Ntp"})
     public void testCategoryOrder() {
-        final int basicGroupCount = 4; // above-the-fold, sign in promo, footer, spacer.
+        final int basicChildCount = 4; // above-the-fold, sign in promo, footer, spacer.
         FakeSuggestionsSource suggestionsSource = new FakeSuggestionsSource();
         registerCategory(suggestionsSource, KnownCategories.ARTICLES, 0);
         registerCategory(suggestionsSource, KnownCategories.BOOKMARKS, 0);
@@ -660,19 +612,19 @@ public class NewTabPageAdapterTest {
         registerCategory(suggestionsSource, KnownCategories.DOWNLOADS, 0);
 
         NewTabPageAdapter ntpAdapter =
-                NewTabPageAdapter.create(new MockNewTabPageManager(suggestionsSource), null, null);
-        List<ItemGroup> groups = ntpAdapter.getGroups();
+                new NewTabPageAdapter(new MockNewTabPageManager(suggestionsSource), null, null);
+        List<TreeNode> children = ntpAdapter.getChildren();
 
-        assertEquals(basicGroupCount + 4, groups.size());
-        assertEquals(AboveTheFoldItem.class, groups.get(0).getClass());
-        assertEquals(SuggestionsSection.class, groups.get(1).getClass());
-        assertEquals(KnownCategories.ARTICLES, getCategory(groups.get(1)));
-        assertEquals(SuggestionsSection.class, groups.get(2).getClass());
-        assertEquals(KnownCategories.BOOKMARKS, getCategory(groups.get(2)));
-        assertEquals(SuggestionsSection.class, groups.get(3).getClass());
-        assertEquals(KnownCategories.PHYSICAL_WEB_PAGES, getCategory(groups.get(3)));
-        assertEquals(SuggestionsSection.class, groups.get(4).getClass());
-        assertEquals(KnownCategories.DOWNLOADS, getCategory(groups.get(4)));
+        assertEquals(basicChildCount + 4, children.size());
+        assertEquals(AboveTheFoldItem.class, children.get(0).getClass());
+        assertEquals(SuggestionsSection.class, children.get(1).getClass());
+        assertEquals(KnownCategories.ARTICLES, getCategory(children.get(1)));
+        assertEquals(SuggestionsSection.class, children.get(2).getClass());
+        assertEquals(KnownCategories.BOOKMARKS, getCategory(children.get(2)));
+        assertEquals(SuggestionsSection.class, children.get(3).getClass());
+        assertEquals(KnownCategories.PHYSICAL_WEB_PAGES, getCategory(children.get(3)));
+        assertEquals(SuggestionsSection.class, children.get(4).getClass());
+        assertEquals(KnownCategories.DOWNLOADS, getCategory(children.get(4)));
 
         // With a different order.
         suggestionsSource = new FakeSuggestionsSource();
@@ -682,19 +634,19 @@ public class NewTabPageAdapterTest {
         registerCategory(suggestionsSource, KnownCategories.BOOKMARKS, 0);
 
         ntpAdapter =
-                NewTabPageAdapter.create(new MockNewTabPageManager(suggestionsSource), null, null);
-        groups = ntpAdapter.getGroups();
+                new NewTabPageAdapter(new MockNewTabPageManager(suggestionsSource), null, null);
+        children = ntpAdapter.getChildren();
 
-        assertEquals(basicGroupCount + 4, groups.size());
-        assertEquals(AboveTheFoldItem.class, groups.get(0).getClass());
-        assertEquals(SuggestionsSection.class, groups.get(1).getClass());
-        assertEquals(KnownCategories.ARTICLES, getCategory(groups.get(1)));
-        assertEquals(SuggestionsSection.class, groups.get(2).getClass());
-        assertEquals(KnownCategories.PHYSICAL_WEB_PAGES, getCategory(groups.get(2)));
-        assertEquals(SuggestionsSection.class, groups.get(3).getClass());
-        assertEquals(KnownCategories.DOWNLOADS, getCategory(groups.get(3)));
-        assertEquals(SuggestionsSection.class, groups.get(4).getClass());
-        assertEquals(KnownCategories.BOOKMARKS, getCategory(groups.get(4)));
+        assertEquals(basicChildCount + 4, children.size());
+        assertEquals(AboveTheFoldItem.class, children.get(0).getClass());
+        assertEquals(SuggestionsSection.class, children.get(1).getClass());
+        assertEquals(KnownCategories.ARTICLES, getCategory(children.get(1)));
+        assertEquals(SuggestionsSection.class, children.get(2).getClass());
+        assertEquals(KnownCategories.PHYSICAL_WEB_PAGES, getCategory(children.get(2)));
+        assertEquals(SuggestionsSection.class, children.get(3).getClass());
+        assertEquals(KnownCategories.DOWNLOADS, getCategory(children.get(3)));
+        assertEquals(SuggestionsSection.class, children.get(4).getClass());
+        assertEquals(KnownCategories.BOOKMARKS, getCategory(children.get(4)));
 
         // With unknown categories.
         suggestionsSource = new FakeSuggestionsSource();
@@ -703,22 +655,22 @@ public class NewTabPageAdapterTest {
         registerCategory(suggestionsSource, KnownCategories.DOWNLOADS, 0);
 
         ntpAdapter =
-                NewTabPageAdapter.create(new MockNewTabPageManager(suggestionsSource), null, null);
+                new NewTabPageAdapter(new MockNewTabPageManager(suggestionsSource), null, null);
 
         // The adapter is already initialised, it will not accept new categories anymore.
         registerCategory(suggestionsSource, 42, 1);
         registerCategory(suggestionsSource, KnownCategories.BOOKMARKS, 1);
 
-        groups = ntpAdapter.getGroups();
+        children = ntpAdapter.getChildren();
 
-        assertEquals(basicGroupCount + 3, groups.size());
-        assertEquals(AboveTheFoldItem.class, groups.get(0).getClass());
-        assertEquals(SuggestionsSection.class, groups.get(1).getClass());
-        assertEquals(KnownCategories.ARTICLES, getCategory(groups.get(1)));
-        assertEquals(SuggestionsSection.class, groups.get(2).getClass());
-        assertEquals(KnownCategories.PHYSICAL_WEB_PAGES, getCategory(groups.get(2)));
-        assertEquals(SuggestionsSection.class, groups.get(3).getClass());
-        assertEquals(KnownCategories.DOWNLOADS, getCategory(groups.get(3)));
+        assertEquals(basicChildCount + 3, children.size());
+        assertEquals(AboveTheFoldItem.class, children.get(0).getClass());
+        assertEquals(SuggestionsSection.class, children.get(1).getClass());
+        assertEquals(KnownCategories.ARTICLES, getCategory(children.get(1)));
+        assertEquals(SuggestionsSection.class, children.get(2).getClass());
+        assertEquals(KnownCategories.PHYSICAL_WEB_PAGES, getCategory(children.get(2)));
+        assertEquals(SuggestionsSection.class, children.get(3).getClass());
+        assertEquals(KnownCategories.DOWNLOADS, getCategory(children.get(3)));
     }
 
     @Test
@@ -729,10 +681,10 @@ public class NewTabPageAdapterTest {
         doNothing().when(suggestionsSource).dismissSuggestion(any(SnippetArticle.class));
 
         registerCategory(suggestionsSource, KnownCategories.ARTICLES, 3);
-        NewTabPageAdapter adapter = spy(
-                new NewTabPageAdapter(new MockNewTabPageManager(suggestionsSource), null, null));
-        adapter.finishInitialization();
-        doNothing().when(adapter).announceItemRemoved(anyString());
+        NewTabPageAdapter adapter =
+                new NewTabPageAdapter(new MockNewTabPageManager(suggestionsSource), null, null);
+        AdapterDataObserver dataObserver = mock(AdapterDataObserver.class);
+        adapter.registerAdapterDataObserver(dataObserver);
 
         // Adapter content:
         // Idx | Item
@@ -744,17 +696,21 @@ public class NewTabPageAdapterTest {
         // 6   | Spacer
 
         adapter.dismissItem(3); // Dismiss the second suggestion of the second section.
-        verify(adapter).notifyItemRemoved(3);
+        verify(dataObserver).onItemRangeRemoved(3, 1);
+        verify(dataObserver).onItemRangeChanged(5, 1, null);
 
         // Make sure the call with the updated position works properly.
         adapter.dismissItem(3);
-        verify(adapter, times(2)).notifyItemRemoved(3);
+        verify(dataObserver, times(2)).onItemRangeRemoved(3, 1);
+        verify(dataObserver).onItemRangeChanged(4, 1, null);
 
         // Dismiss the last suggestion in the section. We should now show the status card.
         adapter.dismissItem(2);
-        verify(adapter).notifyItemRemoved(2);
-        verify(adapter).notifyItemInserted(2);
-        verify(adapter).notifyItemInserted(3);
+        verify(dataObserver).onItemRangeRemoved(2, 1);
+        verify(dataObserver).onItemRangeInserted(2, 1);
+        verify(dataObserver).onItemRangeInserted(3, 1);
+        verify(dataObserver).onItemRangeInserted(4, 1);
+        verify(dataObserver, times(4)).onItemRangeChanged(6, 1, null);
 
         // Adapter content:
         // Idx | Item
@@ -762,16 +718,20 @@ public class NewTabPageAdapterTest {
         // 0   | Above-the-fold
         // 1   | Header
         // 2   | Status
-        // 3   | Progress Indicator
-        // 4   | Footer
-        // 5   | Spacer
+        // 3   | Action
+        // 4   | Progress Indicator
+        // 5   | Footer
+        // 6   | Spacer
 
         final int newSuggestionCount = 7;
+        final int changedCount = 3; // status, action and progress will be replaced by articles.
         suggestionsSource.setSuggestionsForCategory(
                 KnownCategories.ARTICLES, createDummySuggestions(newSuggestionCount));
         adapter.onNewSuggestions(KnownCategories.ARTICLES);
-        verify(adapter).notifyItemRangeChanged(2, 2); // status and progress replaced by articles.
-        verify(adapter).notifyItemRangeInserted(4, newSuggestionCount - 2);
+        verify(dataObserver).onItemRangeChanged(2, changedCount, null);
+        verify(dataObserver)
+                .onItemRangeInserted(2 + changedCount, newSuggestionCount - changedCount);
+        verify(dataObserver).onItemRangeChanged(newSuggestionCount + 3, 1, null);
 
         // Adapter content:
         // Idx | Item
@@ -785,75 +745,81 @@ public class NewTabPageAdapterTest {
         suggestionsSource.setSuggestionsForCategory(
                 KnownCategories.ARTICLES, createDummySuggestions(0));
         adapter.onCategoryStatusChanged(KnownCategories.ARTICLES, CategoryStatus.SIGNED_OUT);
-        verify(adapter, times(2)).notifyItemRangeChanged(2, 2);
-        verify(adapter).notifyItemRangeRemoved(4, newSuggestionCount - 2);
+        verify(dataObserver, times(2)).onItemRangeChanged(2, changedCount, null);
+        verify(dataObserver)
+                .onItemRangeRemoved(2 + changedCount, newSuggestionCount - changedCount);
+        verify(dataObserver, times(5)).onItemRangeChanged(6, 1, null);
     }
 
     @Test
     @Feature({"Ntp"})
     public void testSigninPromo() {
+        when(mMockSigninManager.isSignInAllowed()).thenReturn(true);
         when(mMockSigninManager.isSignedInOnNative()).thenReturn(false);
         MockNewTabPageManager ntpManager = new MockNewTabPageManager(mSource);
-        NewTabPageAdapter adapter = NewTabPageAdapter.create(ntpManager, null, null);
+        NewTabPageAdapter adapter = new NewTabPageAdapter(ntpManager, null, null);
 
-        assertEquals(5, adapter.getGroups().size());
-        ItemGroup signinPromoGroup = adapter.getGroup(4);
+        TreeNode signinPromo = adapter.getChildren().get(2);
 
         // Adapter content:
-        // Idx | Item
-        // ----|----------------
-        // 0   | Above-the-fold
-        // 1   | Header
-        // 2   | Status
-        // 3   | Progress Indicator
-        // 4   | Sign in promo
-        // 5   | Footer
-        // 6   | Spacer
+        // Idx | Item               | Item Index
+        // ----|--------------------|-------------
+        // 0   | Above-the-fold     | 0
+        // 1   | Header             | 1
+        // 2   | Status             | 1
+        // 3   | Action             | 1
+        // 4   | Progress Indicator | 1
+        // 5   | Sign in promo      | 2
+        // 6   | Footer             | 3
+        // 7   | Spacer             | 4
 
-        assertEquals(1, signinPromoGroup.getItems().size());
-        assertEquals(NewTabPageItem.VIEW_TYPE_PROMO, signinPromoGroup.getItems().get(0).getType());
+        assertEquals(1, signinPromo.getItemCount());
+        assertEquals(ItemViewType.PROMO, signinPromo.getItemViewType(0));
 
         ntpManager.mSignInStateObserver.onSignedIn();
-        assertEquals(0, signinPromoGroup.getItems().size());
+        assertEquals(0, signinPromo.getItemCount());
 
         ntpManager.mSignInStateObserver.onSignedOut();
-        assertEquals(1, signinPromoGroup.getItems().size());
+        assertEquals(1, signinPromo.getItemCount());
     }
 
     @Test
     @Feature({"Ntp"})
     public void testSigninPromoDismissal() {
+        when(mMockSigninManager.isSignInAllowed()).thenReturn(true);
         when(mMockSigninManager.isSignedInOnNative()).thenReturn(false);
         ChromePreferenceManager.getInstance(RuntimeEnvironment.application)
                 .setNewTabPageSigninPromoDismissed(false);
         MockNewTabPageManager ntpManager = new MockNewTabPageManager(mSource);
-        NewTabPageAdapter adapter = NewTabPageAdapter.create(ntpManager, null, null);
+        NewTabPageAdapter adapter = new NewTabPageAdapter(ntpManager, null, null);
+        final int signInPromoIndex = 5;
 
-        assertEquals(5, adapter.getGroups().size());
-        ItemGroup signinPromoGroup = adapter.getGroup(4);
+        assertEquals(5, adapter.getChildren().size());
+        TreeNode signinPromo = adapter.getChildren().get(2);
 
         // Adapter content:
-        // Idx | Item
-        // ----|----------------
-        // 0   | Above-the-fold
-        // 1   | Header
-        // 2   | Status
-        // 3   | Progress Indicator
-        // 4   | Sign in promo
-        // 5   | Footer
-        // 6   | Spacer
+        // Idx | Item               | Item Index
+        // ----|--------------------|-------------
+        // 0   | Above-the-fold     | 0
+        // 1   | Header             | 1
+        // 2   | Status             | 1
+        // 3   | Action             | 1
+        // 4   | Progress Indicator | 1
+        // 5   | Sign in promo      | 2
+        // 6   | Footer             | 3
+        // 7   | Spacer             | 4
 
-        assertEquals(NewTabPageItem.VIEW_TYPE_PROMO, signinPromoGroup.getItems().get(0).getType());
+        assertEquals(ItemViewType.PROMO, signinPromo.getItemViewType(0));
 
-        adapter.dismissItem(4);
-        assertTrue(signinPromoGroup.getItems().isEmpty());
+        adapter.dismissItem(signInPromoIndex);
+        assertEquals(0, signinPromo.getItemCount());
         assertTrue(ChromePreferenceManager.getInstance(RuntimeEnvironment.application)
                            .getNewTabPageSigninPromoDismissed());
 
-        adapter = NewTabPageAdapter.create(ntpManager, null, null);
-        assertEquals(5, adapter.getGroups().size());
+        adapter = new NewTabPageAdapter(ntpManager, null, null);
+        assertEquals(5, adapter.getChildren().size());
         // The items below the signin promo move up, footer is now at the position of the promo.
-        assertEquals(NewTabPageItem.VIEW_TYPE_FOOTER, adapter.getItemViewType(4));
+        assertEquals(ItemViewType.FOOTER, adapter.getItemViewType(signInPromoIndex));
     }
 
     /** Registers the category with hasMoreButton=false and showIfEmpty=true*/
@@ -863,15 +829,13 @@ public class NewTabPageAdapterTest {
         // AVAILABLE.
         suggestionsSource.setStatusForCategory(category, CategoryStatus.AVAILABLE);
         // Important: showIfEmpty flag to true.
-        suggestionsSource.setInfoForCategory(
-                category, new SuggestionsCategoryInfo(
-                                  "", ContentSuggestionsCardLayout.FULL_CARD, false, true));
+        suggestionsSource.setInfoForCategory(category, createInfo(category, false, true));
         suggestionsSource.setSuggestionsForCategory(
                 category, createDummySuggestions(suggestionCount));
     }
 
-    private int getCategory(ItemGroup itemGroup) {
-        return ((SuggestionsSection) itemGroup).getCategory();
+    private int getCategory(TreeNode item) {
+        return ((SuggestionsSection) item).getCategory();
     }
 
     private static class MockNewTabPageManager implements NewTabPageManager {
@@ -1034,16 +998,17 @@ public class NewTabPageAdapterTest {
 
         @Override
         public void closeContextMenu() {
-            throw new UnsupportedAddressTypeException();
-        }
-
-        public void setSuggestionsSource(SuggestionsSource suggestionsSource) {
-            mSuggestionsSource = suggestionsSource;
+            throw new UnsupportedOperationException();
         }
 
         @Override
         public void registerSignInStateObserver(SignInStateObserver signInStateObserver) {
             mSignInStateObserver = signInStateObserver;
+        }
+
+        @Override
+        public boolean isCurrentPage() {
+            return true;
         }
     }
 }

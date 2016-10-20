@@ -179,6 +179,7 @@ class ServiceWorkerURLRequestJobTest
       http_info.ssl_info.security_bits = 0x100;
       // SSL3 TLS_DHE_RSA_WITH_AES_256_CBC_SHA
       http_info.ssl_info.connection_status = 0x300039;
+      http_info.headers = make_scoped_refptr(new net::HttpResponseHeaders(""));
       version_->SetMainScriptHttpResponseInfo(http_info);
     }
 
@@ -363,12 +364,13 @@ class ProviderDeleteHelper : public EmbeddedWorkerTestHelper {
 
  protected:
   void OnFetchEvent(int embedded_worker_id,
-                    int response_id,
+                    int fetch_event_id,
                     const ServiceWorkerFetchRequest& request,
+                    mojom::FetchEventPreloadHandlePtr preload_handle,
                     const FetchCallback& callback) override {
     context()->RemoveProviderHost(mock_render_process_id(), kProviderID);
     SimulateSend(new ServiceWorkerHostMsg_FetchEventResponse(
-        embedded_worker_id, response_id,
+        embedded_worker_id, fetch_event_id,
         SERVICE_WORKER_FETCH_EVENT_RESULT_RESPONSE,
         ServiceWorkerResponse(
             GURL(), 200, "OK", blink::WebServiceWorkerResponseTypeDefault,
@@ -446,11 +448,12 @@ class BlobResponder : public EmbeddedWorkerTestHelper {
 
  protected:
   void OnFetchEvent(int embedded_worker_id,
-                    int response_id,
+                    int fetch_event_id,
                     const ServiceWorkerFetchRequest& request,
+                    mojom::FetchEventPreloadHandlePtr preload_handle,
                     const FetchCallback& callback) override {
     SimulateSend(new ServiceWorkerHostMsg_FetchEventResponse(
-        embedded_worker_id, response_id,
+        embedded_worker_id, fetch_event_id,
         SERVICE_WORKER_FETCH_EVENT_RESULT_RESPONSE,
         ServiceWorkerResponse(
             GURL(), 200, "OK", blink::WebServiceWorkerResponseTypeDefault,
@@ -528,11 +531,12 @@ class StreamResponder : public EmbeddedWorkerTestHelper {
 
  protected:
   void OnFetchEvent(int embedded_worker_id,
-                    int response_id,
+                    int fetch_event_id,
                     const ServiceWorkerFetchRequest& request,
+                    mojom::FetchEventPreloadHandlePtr preload_handle,
                     const FetchCallback& callback) override {
     SimulateSend(new ServiceWorkerHostMsg_FetchEventResponse(
-        embedded_worker_id, response_id,
+        embedded_worker_id, fetch_event_id,
         SERVICE_WORKER_FETCH_EVENT_RESULT_RESPONSE,
         ServiceWorkerResponse(
             GURL(), 200, "OK", blink::WebServiceWorkerResponseTypeDefault,
@@ -841,8 +845,9 @@ class FailFetchHelper : public EmbeddedWorkerTestHelper {
 
  protected:
   void OnFetchEvent(int embedded_worker_id,
-                    int response_id,
+                    int fetch_event_id,
                     const ServiceWorkerFetchRequest& request,
+                    mojom::FetchEventPreloadHandlePtr preload_handle,
                     const FetchCallback& callback) override {
     SimulateWorkerStopped(embedded_worker_id);
     callback.Run(SERVICE_WORKER_ERROR_ABORT, base::Time::Now());
@@ -953,12 +958,13 @@ class EarlyResponseHelper : public EmbeddedWorkerTestHelper {
 
  protected:
   void OnFetchEvent(int embedded_worker_id,
-                    int response_id,
+                    int fetch_event_id,
                     const ServiceWorkerFetchRequest& request,
+                    mojom::FetchEventPreloadHandlePtr preload_handle,
                     const FetchCallback& callback) override {
     callback_ = callback;
     SimulateSend(new ServiceWorkerHostMsg_FetchEventResponse(
-        embedded_worker_id, response_id,
+        embedded_worker_id, fetch_event_id,
         SERVICE_WORKER_FETCH_EVENT_RESULT_RESPONSE,
         ServiceWorkerResponse(
             GURL(), 200, "OK", blink::WebServiceWorkerResponseTypeDefault,
@@ -1012,7 +1018,7 @@ class DelayedResponseHelper : public EmbeddedWorkerTestHelper {
 
   void Respond() {
     SimulateSend(new ServiceWorkerHostMsg_FetchEventResponse(
-        embedded_worker_id_, response_id_,
+        embedded_worker_id_, fetch_event_id_,
         SERVICE_WORKER_FETCH_EVENT_RESULT_RESPONSE,
         ServiceWorkerResponse(
             GURL(), 200, "OK", blink::WebServiceWorkerResponseTypeDefault,
@@ -1027,17 +1033,18 @@ class DelayedResponseHelper : public EmbeddedWorkerTestHelper {
 
  protected:
   void OnFetchEvent(int embedded_worker_id,
-                    int response_id,
+                    int fetch_event_id,
                     const ServiceWorkerFetchRequest& request,
+                    mojom::FetchEventPreloadHandlePtr preload_handle,
                     const FetchCallback& callback) override {
     embedded_worker_id_ = embedded_worker_id;
-    response_id_ = response_id;
+    fetch_event_id_ = fetch_event_id;
     callback_ = callback;
   }
 
  private:
   int embedded_worker_id_ = 0;
-  int response_id_ = 0;
+  int fetch_event_id_ = 0;
   FetchCallback callback_;
   DISALLOW_COPY_AND_ASSIGN(DelayedResponseHelper);
 };

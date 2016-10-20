@@ -8,6 +8,7 @@
 #include "core/frame/VisualViewport.h"
 #include "core/layout/LayoutBox.h"
 #include "core/layout/LayoutTestHelper.h"
+#include "core/page/PrintContext.h"
 #include "core/paint/PaintLayerScrollableArea.h"
 #include "platform/testing/HistogramTester.h"
 
@@ -26,7 +27,8 @@ class ScrollAnchorTest : public RenderingTest {
 
  protected:
   void update() {
-    // TODO(skobes): Use SimTest instead of RenderingTest and move into Source/web?
+    // TODO(skobes): Use SimTest instead of RenderingTest and move into
+    // Source/web?
     document().view()->updateAllLifecyclePhases();
   }
 
@@ -53,7 +55,7 @@ class ScrollAnchorTest : public RenderingTest {
     update();
   }
 
-  void scrollLayoutViewport(DoubleSize delta) {
+  void scrollLayoutViewport(ScrollOffset delta) {
     Element* scrollingElement = document().scrollingElement();
     if (delta.width())
       scrollingElement->setScrollLeft(scrollingElement->scrollLeft() +
@@ -76,7 +78,7 @@ TEST_F(ScrollAnchorTest, UMAMetricUpdated) {
   ScrollableArea* viewport = layoutViewport();
 
   // Scroll position not adjusted, metric not updated.
-  scrollLayoutViewport(DoubleSize(0, 150));
+  scrollLayoutViewport(ScrollOffset(0, 150));
   histogramTester.expectTotalCount("Layout.ScrollAnchor.AdjustedScrollOffset",
                                    0);
 
@@ -85,7 +87,7 @@ TEST_F(ScrollAnchorTest, UMAMetricUpdated) {
   histogramTester.expectUniqueSample("Layout.ScrollAnchor.AdjustedScrollOffset",
                                      1, 1);
 
-  EXPECT_EQ(250, viewport->scrollPosition().y());
+  EXPECT_EQ(250, viewport->scrollOffsetInt().height());
   EXPECT_EQ(document().getElementById("block2")->layoutObject(),
             scrollAnchor(viewport).anchorObject());
 }
@@ -101,10 +103,10 @@ TEST_F(ScrollAnchorTest, Basic) {
   // No anchor at origin (0,0).
   EXPECT_EQ(nullptr, scrollAnchor(viewport).anchorObject());
 
-  scrollLayoutViewport(DoubleSize(0, 150));
+  scrollLayoutViewport(ScrollOffset(0, 150));
   setHeight(document().getElementById("block1"), 200);
 
-  EXPECT_EQ(250, viewport->scrollPosition().y());
+  EXPECT_EQ(250, viewport->scrollOffsetInt().height());
   EXPECT_EQ(document().getElementById("block2")->layoutObject(),
             scrollAnchor(viewport).anchorObject());
 
@@ -137,12 +139,12 @@ TEST_F(ScrollAnchorTest, VisualViewportAnchors) {
   setHeight(document().getElementById("div"), 10);
   EXPECT_EQ(document().getElementById("text")->layoutObject(),
             scrollAnchor(lViewport).anchorObject());
-  EXPECT_EQ(top - 90, vViewport.scrollPosition().y());
+  EXPECT_EQ(top - 90, vViewport.scrollOffsetInt().height());
 
   setHeight(document().getElementById("div"), 100);
   EXPECT_EQ(document().getElementById("text")->layoutObject(),
             scrollAnchor(lViewport).anchorObject());
-  EXPECT_EQ(top, vViewport.scrollPosition().y());
+  EXPECT_EQ(top, vViewport.scrollOffsetInt().height());
 
   // Scrolling the visual viewport should clear the anchor.
   vViewport.setLocation(FloatPoint(0, 0));
@@ -175,15 +177,15 @@ TEST_F(ScrollAnchorTest, ClippedScrollersSkipped) {
   ScrollableArea* viewport = layoutViewport();
 
   document().getElementById("scroller")->setScrollTop(100);
-  scrollLayoutViewport(DoubleSize(0, 350));
+  scrollLayoutViewport(ScrollOffset(0, 350));
 
   setHeight(document().getElementById("innerChanger"), 200);
   setHeight(document().getElementById("outerChanger"), 150);
 
-  EXPECT_EQ(300, scroller->scrollPosition().y());
+  EXPECT_EQ(300, scroller->scrollOffsetInt().height());
   EXPECT_EQ(document().getElementById("innerAnchor")->layoutObject(),
             scrollAnchor(scroller).anchorObject());
-  EXPECT_EQ(500, viewport->scrollPosition().y());
+  EXPECT_EQ(500, viewport->scrollOffsetInt().height());
   EXPECT_EQ(document().getElementById("outerAnchor")->layoutObject(),
             scrollAnchor(viewport).anchorObject());
 }
@@ -202,11 +204,11 @@ TEST_F(ScrollAnchorTest, AnchoringWhenContentRemoved) {
       "<div id='anchor'></div>");
 
   ScrollableArea* viewport = layoutViewport();
-  scrollLayoutViewport(DoubleSize(0, 1600));
+  scrollLayoutViewport(ScrollOffset(0, 1600));
 
   setHeight(document().getElementById("changer"), 0);
 
-  EXPECT_EQ(100, viewport->scrollPosition().y());
+  EXPECT_EQ(100, viewport->scrollOffsetInt().height());
   EXPECT_EQ(document().getElementById("anchor")->layoutObject(),
             scrollAnchor(viewport).anchorObject());
 }
@@ -235,9 +237,37 @@ TEST_F(ScrollAnchorTest, AnchoringWhenContentRemovedFromScrollingDiv) {
 
   setHeight(document().getElementById("changer"), 0);
 
-  EXPECT_EQ(100, scroller->scrollPosition().y());
+  EXPECT_EQ(100, scroller->scrollOffsetInt().height());
   EXPECT_EQ(document().getElementById("anchor")->layoutObject(),
             scrollAnchor(scroller).anchorObject());
+}
+
+// Test that a non-anchoring scroll on scroller clears scroll anchors for all
+// parent scrollers.
+TEST_F(ScrollAnchorTest, ClearScrollAnchorsOnAncestors) {
+  setBodyInnerHTML(
+      "<style>"
+      "    body { height: 1000px } div { height: 200px }"
+      "    #scroller { height: 100px; width: 200px; overflow: scroll; }"
+      "</style>"
+      "<div id='changer'>abc</div>"
+      "<div id='anchor'>def</div>"
+      "<div id='scroller'><div></div></div>");
+
+  ScrollableArea* viewport = layoutViewport();
+
+  scrollLayoutViewport(ScrollOffset(0, 250));
+  setHeight(document().getElementById("changer"), 300);
+
+  EXPECT_EQ(350, viewport->scrollOffsetInt().height());
+  EXPECT_EQ(document().getElementById("anchor")->layoutObject(),
+            scrollAnchor(viewport).anchorObject());
+
+  // Scrolling the nested scroller should clear the anchor on the main frame.
+  ScrollableArea* scroller =
+      scrollerForElement(document().getElementById("scroller"));
+  scroller->scrollBy(ScrollOffset(0, 100), UserScroll);
+  EXPECT_EQ(nullptr, scrollAnchor(viewport).anchorObject());
 }
 
 TEST_F(ScrollAnchorTest, FractionalOffsetsAreRoundedBeforeComparing) {
@@ -247,13 +277,13 @@ TEST_F(ScrollAnchorTest, FractionalOffsetsAreRoundedBeforeComparing) {
       "<div id='block2' style='height: 100px'>def</div>");
 
   ScrollableArea* viewport = layoutViewport();
-  scrollLayoutViewport(DoubleSize(0, 100));
+  scrollLayoutViewport(ScrollOffset(0, 100));
 
   document().getElementById("block1")->setAttribute(HTMLNames::styleAttr,
                                                     "height: 50.6px");
   update();
 
-  EXPECT_EQ(101, viewport->scrollPosition().y());
+  EXPECT_EQ(101, viewport->scrollOffsetInt().height());
 }
 
 TEST_F(ScrollAnchorTest, AnchorWithLayerInScrollingDiv) {
@@ -274,17 +304,58 @@ TEST_F(ScrollAnchorTest, AnchorWithLayerInScrollingDiv) {
   Element* block1 = document().getElementById("block1");
   Element* block2 = document().getElementById("block2");
 
-  scroller->scrollBy(DoubleSize(0, 150), UserScroll);
+  scroller->scrollBy(ScrollOffset(0, 150), UserScroll);
 
   // In this layout pass we will anchor to #block2 which has its own PaintLayer.
   setHeight(block1, 200);
-  EXPECT_EQ(250, scroller->scrollPosition().y());
+  EXPECT_EQ(250, scroller->scrollOffsetInt().height());
   EXPECT_EQ(block2->layoutObject(), scrollAnchor(scroller).anchorObject());
 
-  // Test that the anchor object can be destroyed without affecting the scroll position.
+  // Test that the anchor object can be destroyed without affecting the scroll
+  // position.
   block2->remove();
   update();
-  EXPECT_EQ(250, scroller->scrollPosition().y());
+  EXPECT_EQ(250, scroller->scrollOffsetInt().height());
+}
+
+// Verify that a nested scroller with a div that has its own PaintLayer can be
+// removed without causing a crash. This test passes if it doesn't crash.
+TEST_F(ScrollAnchorTest, RemoveScrollerWithLayerInScrollingDiv) {
+  setBodyInnerHTML(
+      "<style>"
+      "    body { height: 2000px }"
+      "    #scroller { overflow: scroll; width: 500px; height: 400px}"
+      "    #block1 { height: 100px; width: 100px; overflow: hidden}"
+      "    #anchor { height: 1000px; }"
+      "</style>"
+      "<div id='changer1'></div>"
+      "<div id='scroller'>"
+      "  <div id='changer2'></div>"
+      "  <div id='block1'></div>"
+      "  <div id='anchor'></div>"
+      "</div>");
+
+  ScrollableArea* viewport = layoutViewport();
+  ScrollableArea* scroller =
+      scrollerForElement(document().getElementById("scroller"));
+  Element* changer1 = document().getElementById("changer1");
+  Element* changer2 = document().getElementById("changer2");
+  Element* anchor = document().getElementById("anchor");
+
+  scroller->scrollBy(ScrollOffset(0, 150), UserScroll);
+  scrollLayoutViewport(ScrollOffset(0, 50));
+
+  // In this layout pass both the inner and outer scroller will anchor to
+  // #anchor.
+  setHeight(changer1, 100);
+  setHeight(changer2, 100);
+  EXPECT_EQ(250, scroller->scrollOffsetInt().height());
+  EXPECT_EQ(anchor->layoutObject(), scrollAnchor(scroller).anchorObject());
+  EXPECT_EQ(anchor->layoutObject(), scrollAnchor(viewport).anchorObject());
+
+  // Test that the inner scroller can be destroyed without crashing.
+  document().getElementById("scroller")->remove();
+  update();
 }
 
 TEST_F(ScrollAnchorTest, ExcludeAnonymousCandidates) {
@@ -335,7 +406,7 @@ TEST_F(ScrollAnchorTest, FullyContainedInlineBlock) {
       "    <span id=ib2>def</span>"
       "</span>");
 
-  scrollLayoutViewport(DoubleSize(0, 150));
+  scrollLayoutViewport(ScrollOffset(0, 150));
 
   Element* ib1 = document().getElementById("ib1");
   ib1->setAttribute(HTMLNames::styleAttr, "line-height: 150px");
@@ -358,7 +429,7 @@ TEST_F(ScrollAnchorTest, TextBounds) {
       "abc <b id=b>def</b> ghi"
       "<div id=a>after</div>");
 
-  scrollLayoutViewport(DoubleSize(0, 150));
+  scrollLayoutViewport(ScrollOffset(0, 150));
 
   setHeight(document().getElementById("a"), 100);
   EXPECT_EQ(document().getElementById("b")->layoutObject()->slowFirstChild(),
@@ -376,7 +447,7 @@ TEST_F(ScrollAnchorTest, ExcludeFixedPosition) {
       "<div id=c>content</div>"
       "<div id=a>after</div>");
 
-  scrollLayoutViewport(DoubleSize(0, 50));
+  scrollLayoutViewport(ScrollOffset(0, 50));
 
   setHeight(document().getElementById("a"), 100);
   EXPECT_EQ(document().getElementById("c")->layoutObject(),
@@ -411,22 +482,25 @@ TEST_F(ScrollAnchorTest, ExcludeAbsolutePositionThatSticksToViewport) {
   Element* absPos = document().getElementById("abs");
   Element* relPos = document().getElementById("rel");
 
-  scroller->scrollBy(DoubleSize(0, 25), UserScroll);
+  scroller->scrollBy(ScrollOffset(0, 25), UserScroll);
   setHeight(document().getElementById("a"), 100);
 
-  // When the scroller is position:static, the anchor cannot be position:absolute.
+  // When the scroller is position:static, the anchor cannot be
+  // position:absolute.
   EXPECT_EQ(relPos->layoutObject(), scrollAnchor(scroller).anchorObject());
 
   scrollerElement->setAttribute(HTMLNames::styleAttr, "position: relative");
   update();
-  scroller->scrollBy(DoubleSize(0, 25), UserScroll);
+  scroller->scrollBy(ScrollOffset(0, 25), UserScroll);
   setHeight(document().getElementById("a"), 125);
 
-  // When the scroller is position:relative, the anchor may be position:absolute.
+  // When the scroller is position:relative, the anchor may be
+  // position:absolute.
   EXPECT_EQ(absPos->layoutObject(), scrollAnchor(scroller).anchorObject());
 }
 
-// Test that we descend into zero-height containers that have overflowing content.
+// Test that we descend into zero-height containers that have overflowing
+// content.
 TEST_F(ScrollAnchorTest, DescendsIntoContainerWithOverflow) {
   setBodyInnerHTML(
       "<style>"
@@ -445,10 +519,10 @@ TEST_F(ScrollAnchorTest, DescendsIntoContainerWithOverflow) {
 
   ScrollableArea* viewport = layoutViewport();
 
-  scrollLayoutViewport(DoubleSize(0, 200));
+  scrollLayoutViewport(ScrollOffset(0, 200));
   setHeight(document().getElementById("changer"), 200);
 
-  EXPECT_EQ(300, viewport->scrollPosition().y());
+  EXPECT_EQ(300, viewport->scrollOffsetInt().height());
   EXPECT_EQ(document().getElementById("bottom")->layoutObject(),
             scrollAnchor(viewport).anchorObject());
 }
@@ -482,10 +556,10 @@ TEST_F(ScrollAnchorTest, DescendsIntoContainerWithFloat) {
 
   ScrollableArea* viewport = layoutViewport();
 
-  scrollLayoutViewport(DoubleSize(0, 200));
+  scrollLayoutViewport(ScrollOffset(0, 200));
   setHeight(document().getElementById("a"), 100);
 
-  EXPECT_EQ(200, viewport->scrollPosition().y());
+  EXPECT_EQ(200, viewport->scrollOffsetInt().height());
   EXPECT_EQ(document().getElementById("float")->layoutObject(),
             scrollAnchor(viewport).anchorObject());
 }
@@ -503,13 +577,13 @@ TEST_F(ScrollAnchorTest, ChangeInFlowStateDisablesAnchoringForMainScroller) {
       "<div id='content'></div>");
 
   ScrollableArea* viewport = layoutViewport();
-  scrollLayoutViewport(DoubleSize(0, 200));
+  scrollLayoutViewport(ScrollOffset(0, 200));
 
   document().getElementById("header")->setAttribute(HTMLNames::styleAttr,
                                                     "position: fixed;");
   update();
 
-  EXPECT_EQ(200, viewport->scrollPosition().y());
+  EXPECT_EQ(200, viewport->scrollOffsetInt().height());
 }
 
 // This test verifies that scroll anchoring is disabled when any element within
@@ -537,7 +611,7 @@ TEST_F(ScrollAnchorTest, ChangeInFlowStateDisablesAnchoringForScrollingDiv) {
                                                      "position: absolute;");
   update();
 
-  EXPECT_EQ(100, scroller->scrollPosition().y());
+  EXPECT_EQ(100, scroller->scrollOffsetInt().height());
 }
 
 TEST_F(ScrollAnchorTest, FlexboxDelayedClampingAlsoDelaysAdjustment) {
@@ -567,7 +641,7 @@ TEST_F(ScrollAnchorTest, FlexboxDelayedClampingAlsoDelaysAdjustment) {
   scroller->setScrollTop(100);
 
   setHeight(document().getElementById("before"), 100);
-  EXPECT_EQ(150, scrollerForElement(scroller)->scrollPosition().y());
+  EXPECT_EQ(150, scrollerForElement(scroller)->scrollOffsetInt().height());
 }
 
 TEST_F(ScrollAnchorTest, FlexboxDelayedAdjustmentRespectsSANACLAP) {
@@ -598,7 +672,7 @@ TEST_F(ScrollAnchorTest, FlexboxDelayedAdjustmentRespectsSANACLAP) {
   document().getElementById("spacer")->setAttribute(HTMLNames::styleAttr,
                                                     "margin-top: 50px");
   update();
-  EXPECT_EQ(100, scrollerForElement(scroller)->scrollPosition().y());
+  EXPECT_EQ(100, scrollerForElement(scroller)->scrollOffsetInt().height());
 }
 
 // Test then an element and its children are not selected as the anchor when
@@ -621,16 +695,16 @@ TEST_F(ScrollAnchorTest, OptOutElement) {
       "<div class='div' id='secondDiv'></div>");
 
   ScrollableArea* viewport = layoutViewport();
-  scrollLayoutViewport(DoubleSize(0, 50));
+  scrollLayoutViewport(ScrollOffset(0, 50));
 
   // No opt-out.
   setHeight(document().getElementById("changer"), 100);
-  EXPECT_EQ(150, viewport->scrollPosition().y());
+  EXPECT_EQ(150, viewport->scrollOffsetInt().height());
   EXPECT_EQ(document().getElementById("innerDiv")->layoutObject(),
             scrollAnchor(viewport).anchorObject());
 
   // Clear anchor and opt-out element.
-  scrollLayoutViewport(DoubleSize(0, 10));
+  scrollLayoutViewport(ScrollOffset(0, 10));
   document()
       .getElementById("firstDiv")
       ->setAttribute(HTMLNames::styleAttr,
@@ -639,7 +713,7 @@ TEST_F(ScrollAnchorTest, OptOutElement) {
 
   // Opted out element and it's children skipped.
   setHeight(document().getElementById("changer"), 200);
-  EXPECT_EQ(260, viewport->scrollPosition().y());
+  EXPECT_EQ(260, viewport->scrollOffsetInt().height());
   EXPECT_EQ(document().getElementById("secondDiv")->layoutObject(),
             scrollAnchor(viewport).anchorObject());
 }
@@ -652,11 +726,11 @@ TEST_F(ScrollAnchorTest,
 
   ScrollableArea* viewport = layoutViewport();
 
-  scrollLayoutViewport(DoubleSize(0, 50));
+  scrollLayoutViewport(ScrollOffset(0, 50));
   document().body()->setAttribute(HTMLNames::styleAttr, "padding-top: 20px");
   update();
 
-  EXPECT_EQ(50, viewport->scrollPosition().y());
+  EXPECT_EQ(50, viewport->scrollOffsetInt().height());
   EXPECT_EQ(nullptr, scrollAnchor(viewport).anchorObject());
 }
 
@@ -667,12 +741,12 @@ TEST_F(ScrollAnchorTest, AnchorNodeAncestorChangingNonLayoutAffectingProperty) {
       "<div id='block2'>def</div>");
 
   ScrollableArea* viewport = layoutViewport();
-  scrollLayoutViewport(DoubleSize(0, 150));
+  scrollLayoutViewport(ScrollOffset(0, 150));
 
   document().body()->setAttribute(HTMLNames::styleAttr, "color: red");
   setHeight(document().getElementById("block1"), 200);
 
-  EXPECT_EQ(250, viewport->scrollPosition().y());
+  EXPECT_EQ(250, viewport->scrollOffsetInt().height());
   EXPECT_EQ(document().getElementById("block2")->layoutObject(),
             scrollAnchor(viewport).anchorObject());
 }
@@ -688,7 +762,7 @@ TEST_F(ScrollAnchorTest, TransformIsLayoutAffecting) {
 
   ScrollableArea* viewport = layoutViewport();
 
-  scrollLayoutViewport(DoubleSize(0, 50));
+  scrollLayoutViewport(ScrollOffset(0, 50));
   document().getElementById("block1")->setAttribute(
       HTMLNames::styleAttr, "transform: matrix(1, 0, 0, 1, 25, 25);");
   update();
@@ -698,7 +772,7 @@ TEST_F(ScrollAnchorTest, TransformIsLayoutAffecting) {
   setHeight(document().getElementById("a"), 100);
   update();
 
-  EXPECT_EQ(50, viewport->scrollPosition().y());
+  EXPECT_EQ(50, viewport->scrollOffsetInt().height());
   EXPECT_EQ(nullptr, scrollAnchor(viewport).anchorObject());
 }
 
@@ -726,17 +800,17 @@ TEST_F(ScrollAnchorTest, OptOutBody) {
   ScrollableArea* viewport = layoutViewport();
 
   document().getElementById("scroller")->setScrollTop(100);
-  scrollLayoutViewport(DoubleSize(0, 100));
+  scrollLayoutViewport(ScrollOffset(0, 100));
 
   setHeight(document().getElementById("innerChanger"), 200);
   setHeight(document().getElementById("outerChanger"), 150);
 
   // Scroll anchoring should apply within #scroller.
-  EXPECT_EQ(300, scroller->scrollPosition().y());
+  EXPECT_EQ(300, scroller->scrollOffsetInt().height());
   EXPECT_EQ(document().getElementById("innerAnchor")->layoutObject(),
             scrollAnchor(scroller).anchorObject());
   // Scroll anchoring should not apply within main frame.
-  EXPECT_EQ(100, viewport->scrollPosition().y());
+  EXPECT_EQ(100, viewport->scrollOffsetInt().height());
   EXPECT_EQ(nullptr, scrollAnchor(viewport).anchorObject());
 }
 
@@ -767,16 +841,16 @@ TEST_F(ScrollAnchorTest, OptOutScrollingDiv) {
   ScrollableArea* viewport = layoutViewport();
 
   document().getElementById("scroller")->setScrollTop(100);
-  scrollLayoutViewport(DoubleSize(0, 100));
+  scrollLayoutViewport(ScrollOffset(0, 100));
 
   setHeight(document().getElementById("innerChanger"), 200);
   setHeight(document().getElementById("outerChanger"), 150);
 
   // Scroll anchoring should not apply within #scroller.
-  EXPECT_EQ(100, scroller->scrollPosition().y());
+  EXPECT_EQ(100, scroller->scrollOffsetInt().height());
   EXPECT_EQ(nullptr, scrollAnchor(scroller).anchorObject());
   // Scroll anchoring should apply within main frame.
-  EXPECT_EQ(250, viewport->scrollPosition().y());
+  EXPECT_EQ(250, viewport->scrollOffsetInt().height());
   EXPECT_EQ(document().getElementById("outerAnchor")->layoutObject(),
             scrollAnchor(viewport).anchorObject());
 }
@@ -828,30 +902,48 @@ TEST_F(ScrollAnchorTest, NonDefaultRootScroller) {
   setHeight(document().getElementById("firstChild"), 1000);
 
   // Scroll anchoring should be applied to #rootScroller.
-  EXPECT_EQ(1000, scroller->scrollPosition().y());
+  EXPECT_EQ(1000, scroller->scrollOffset().height());
   EXPECT_EQ(document().getElementById("target")->layoutObject(),
             scrollAnchor(scroller).anchorObject());
   // Scroll anchoring should not apply within main frame.
-  EXPECT_EQ(0, layoutViewport()->scrollPosition().y());
+  EXPECT_EQ(0, layoutViewport()->scrollOffset().height());
   EXPECT_EQ(nullptr, scrollAnchor(layoutViewport()).anchorObject());
+}
+
+// This test verifies that scroll anchoring is disabled when the document is in
+// printing mode.
+TEST_F(ScrollAnchorTest, AnchoringDisabledForPrinting) {
+  setBodyInnerHTML(
+      "<style> body { height: 1000px } div { height: 100px } </style>"
+      "<div id='block1'>abc</div>"
+      "<div id='block2'>def</div>");
+
+  ScrollableArea* viewport = layoutViewport();
+  scrollLayoutViewport(ScrollOffset(0, 150));
+
+  // This will trigger printing and layout.
+  PrintContext::numberOfPages(document().frame(), FloatSize(500, 500));
+
+  EXPECT_EQ(150, viewport->scrollOffsetInt().height());
+  EXPECT_EQ(nullptr, scrollAnchor(viewport).anchorObject());
 }
 
 class ScrollAnchorCornerTest : public ScrollAnchorTest {
  protected:
   void checkCorner(Corner corner,
-                   DoublePoint startPos,
-                   DoubleSize expectedAdjustment) {
+                   ScrollOffset startOffset,
+                   ScrollOffset expectedAdjustment) {
     ScrollableArea* viewport = layoutViewport();
     Element* element = document().getElementById("changer");
 
-    viewport->setScrollPosition(startPos, UserScroll);
+    viewport->setScrollOffset(startOffset, UserScroll);
     element->setAttribute(HTMLNames::classAttr, "change");
     update();
 
-    DoublePoint endPos = startPos;
-    endPos.move(expectedAdjustment);
+    ScrollOffset endPos = startOffset;
+    endPos += expectedAdjustment;
 
-    EXPECT_EQ(endPos, viewport->scrollPositionDouble());
+    EXPECT_EQ(endPos, viewport->scrollOffset());
     EXPECT_EQ(document().getElementById("a")->layoutObject(),
               scrollAnchor(viewport).anchorObject());
     EXPECT_EQ(corner, scrollAnchor(viewport).corner());
@@ -872,7 +964,7 @@ TEST_F(ScrollAnchorCornerTest, CornersLTR) {
       "<div id='changer'></div>"
       "<div id='a'></div>");
 
-  checkCorner(Corner::TopLeft, DoublePoint(20, 20), DoubleSize(0, 100));
+  checkCorner(Corner::TopLeft, ScrollOffset(20, 20), ScrollOffset(0, 100));
 }
 
 // Verify that we anchor to the top left corner of an anchor element for
@@ -888,7 +980,7 @@ TEST_F(ScrollAnchorCornerTest, CornersVerticalLR) {
       "<div id='changer'></div>"
       "<div id='a'></div>");
 
-  checkCorner(Corner::TopLeft, DoublePoint(20, 20), DoubleSize(100, 0));
+  checkCorner(Corner::TopLeft, ScrollOffset(20, 20), ScrollOffset(100, 0));
 }
 
 // Verify that we anchor to the top right corner of an anchor element for RTL.
@@ -903,7 +995,7 @@ TEST_F(ScrollAnchorCornerTest, CornersRTL) {
       "<div id='changer'></div>"
       "<div id='a'></div>");
 
-  checkCorner(Corner::TopRight, DoublePoint(-20, 20), DoubleSize(0, 100));
+  checkCorner(Corner::TopRight, ScrollOffset(-20, 20), ScrollOffset(0, 100));
 }
 
 // Verify that we anchor to the top right corner of an anchor element for
@@ -919,7 +1011,7 @@ TEST_F(ScrollAnchorCornerTest, CornersVerticalRL) {
       "<div id='changer'></div>"
       "<div id='a'></div>");
 
-  checkCorner(Corner::TopRight, DoublePoint(-20, 20), DoubleSize(-100, 0));
+  checkCorner(Corner::TopRight, ScrollOffset(-20, 20), ScrollOffset(-100, 0));
 }
 
 TEST_F(ScrollAnchorTest, IgnoreNonBlockLayoutAxis) {
@@ -940,7 +1032,7 @@ TEST_F(ScrollAnchorTest, IgnoreNonBlockLayoutAxis) {
       "<div id='b'></div><div id='c'></div>");
 
   ScrollableArea* viewport = layoutViewport();
-  scrollLayoutViewport(DoubleSize(150, 0));
+  scrollLayoutViewport(ScrollOffset(150, 0));
 
   Element* a = document().getElementById("a");
   Element* b = document().getElementById("b");
@@ -948,15 +1040,15 @@ TEST_F(ScrollAnchorTest, IgnoreNonBlockLayoutAxis) {
 
   a->setAttribute(HTMLNames::styleAttr, "height: 150px");
   update();
-  EXPECT_EQ(DoublePoint(150, 0), viewport->scrollPositionDouble());
+  EXPECT_EQ(ScrollOffset(150, 0), viewport->scrollOffset());
   EXPECT_EQ(nullptr, scrollAnchor(viewport).anchorObject());
 
-  scrollLayoutViewport(DoubleSize(0, 50));
+  scrollLayoutViewport(ScrollOffset(0, 50));
 
   a->setAttribute(HTMLNames::styleAttr, "height: 200px");
   b->setAttribute(HTMLNames::styleAttr, "width: 150px");
   update();
-  EXPECT_EQ(DoublePoint(150, 100), viewport->scrollPositionDouble());
+  EXPECT_EQ(ScrollOffset(150, 100), viewport->scrollOffset());
   EXPECT_EQ(c->layoutObject(), scrollAnchor(viewport).anchorObject());
 
   a->setAttribute(HTMLNames::styleAttr, "height: 100px");
@@ -965,19 +1057,19 @@ TEST_F(ScrollAnchorTest, IgnoreNonBlockLayoutAxis) {
                                              "writing-mode: vertical-rl");
   document().scrollingElement()->setScrollLeft(0);
   document().scrollingElement()->setScrollTop(0);
-  scrollLayoutViewport(DoubleSize(0, 150));
+  scrollLayoutViewport(ScrollOffset(0, 150));
 
   a->setAttribute(HTMLNames::styleAttr, "width: 150px");
   update();
-  EXPECT_EQ(DoublePoint(0, 150), viewport->scrollPositionDouble());
+  EXPECT_EQ(ScrollOffset(0, 150), viewport->scrollOffset());
   EXPECT_EQ(nullptr, scrollAnchor(viewport).anchorObject());
 
-  scrollLayoutViewport(DoubleSize(-50, 0));
+  scrollLayoutViewport(ScrollOffset(-50, 0));
 
   a->setAttribute(HTMLNames::styleAttr, "width: 200px");
   b->setAttribute(HTMLNames::styleAttr, "height: 150px");
   update();
-  EXPECT_EQ(DoublePoint(-100, 150), viewport->scrollPositionDouble());
+  EXPECT_EQ(ScrollOffset(-100, 150), viewport->scrollOffset());
   EXPECT_EQ(c->layoutObject(), scrollAnchor(viewport).anchorObject());
 }
 }

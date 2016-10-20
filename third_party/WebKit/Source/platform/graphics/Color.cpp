@@ -37,7 +37,8 @@ namespace blink {
 
 // VS 2015 and above allow these definitions and in this case require them
 #if !COMPILER(MSVC) || _MSC_VER >= 1900
-// FIXME: Use C++11 strong enums to avoid static data member with initializer definition problems.
+// FIXME: Use C++11 enum classes to avoid static data member initializer
+// definition problems.
 const RGBA32 Color::black;
 const RGBA32 Color::white;
 const RGBA32 Color::darkGray;
@@ -309,7 +310,7 @@ Color Color::dark() const {
   getRGBA(r, g, b, a);
 
   float v = std::max(r, std::max(g, b));
-  float multiplier = std::max(0.0f, (v - 0.33f) / v);
+  float multiplier = (v == 0.0f) ? 0.0f : std::max(0.0f, (v - 0.33f) / v);
 
   return Color(static_cast<int>(multiplier * r * scaleFactor),
                static_cast<int>(multiplier * g * scaleFactor),
@@ -362,8 +363,9 @@ Color Color::blendWithWhite() const {
 
   Color newColor;
   for (int alpha = cStartAlpha; alpha <= cEndAlpha; alpha += cAlphaIncrement) {
-    // We have a solid color.  Convert to an equivalent color that looks the same when blended with white
-    // at the current alpha.  Try using less transparency if the numbers end up being negative.
+    // We have a solid color.  Convert to an equivalent color that looks the
+    // same when blended with white at the current alpha.  Try using less
+    // transparency if the numbers end up being negative.
     int r = blendComponent(red(), alpha);
     int g = blendComponent(green(), alpha);
     int b = blendComponent(blue(), alpha);

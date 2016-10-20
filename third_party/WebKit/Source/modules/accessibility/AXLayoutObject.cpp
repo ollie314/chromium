@@ -328,7 +328,6 @@ bool AXLayoutObject::isEditable() const {
   if (getLayoutObject() && getLayoutObject()->isTextControl())
     return true;
 
-  m_layoutObject->document().updateStyleAndLayoutTree();
   if (getNode() && hasEditableStyle(*getNode()))
     return true;
 
@@ -347,7 +346,6 @@ bool AXLayoutObject::isEditable() const {
 // Requires layoutObject to be present because it relies on style
 // user-modify. Don't move this logic to AXNodeObject.
 bool AXLayoutObject::isRichlyEditable() const {
-  m_layoutObject->document().updateStyleAndLayoutTree();
   if (getNode() && hasRichlyEditableStyle(*getNode()))
     return true;
 
@@ -500,6 +498,9 @@ bool AXLayoutObject::computeAccessibilityIsIgnored(
   if (decision == IncludeObject)
     return false;
   if (decision == IgnoreObject)
+    return true;
+
+  if (m_layoutObject->isAnonymousBlock())
     return true;
 
   // If this element is within a parent that cannot have children, it should not

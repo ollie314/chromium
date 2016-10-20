@@ -37,7 +37,6 @@
 #include "ui/views/controls/focus_ring.h"
 #include "ui/views/controls/focusable_border.h"
 #include "ui/views/controls/menu/menu_config.h"
-#include "ui/views/controls/menu/menu_model_adapter.h"
 #include "ui/views/controls/menu/menu_runner.h"
 #include "ui/views/controls/prefix_selector.h"
 #include "ui/views/controls/textfield/textfield.h"
@@ -409,12 +408,6 @@ Combobox::Combobox(ui::ComboboxModel* model, Style style)
 #endif
 
   UpdateBorder();
-  if (UseMd()) {
-    // set_background() takes ownership but takes a raw pointer.
-    std::unique_ptr<Background> b =
-        PlatformStyle::CreateComboboxBackground(GetArrowContainerWidth());
-    set_background(b.release());
-  }
 
   // Initialize the button images.
   Button::ButtonState button_states[] = {
@@ -513,6 +506,11 @@ void Combobox::SetInvalid(bool invalid) {
 
   invalid_ = invalid;
 
+  if (HasFocus() && UseMd()) {
+    FocusRing::Install(this, invalid_
+                                 ? ui::NativeTheme::kColorId_AlertSeverityHigh
+                                 : ui::NativeTheme::kColorId_NumColors);
+  }
   UpdateBorder();
   SchedulePaint();
 }
@@ -716,8 +714,11 @@ void Combobox::OnFocus() {
   View::OnFocus();
   // Border renders differently when focused.
   SchedulePaint();
-  if (UseMd())
-    FocusRing::Install(this);
+  if (UseMd()) {
+    FocusRing::Install(this, invalid_
+                                 ? ui::NativeTheme::kColorId_AlertSeverityHigh
+                                 : ui::NativeTheme::kColorId_NumColors);
+  }
 }
 
 void Combobox::OnBlur() {
@@ -767,12 +768,11 @@ void Combobox::ButtonPressed(Button* sender, const ui::Event& event) {
 }
 
 void Combobox::UpdateBorder() {
-  std::unique_ptr<FocusableBorder> border(
-      PlatformStyle::CreateComboboxBorder());
+  std::unique_ptr<FocusableBorder> border(new FocusableBorder());
   if (style_ == STYLE_ACTION)
     border->SetInsets(5, 10, 5, 10);
   if (invalid_)
-    border->SetColor(gfx::kGoogleRed700);
+    border->SetColorId(ui::NativeTheme::kColorId_AlertSeverityHigh);
   SetBorder(std::move(border));
 }
 
@@ -930,12 +930,10 @@ void Combobox::ShowDropDownMenu(ui::MenuSourceType source_type) {
   // Allow |menu_runner_| to be set by the testing API, but if this method is
   // ever invoked recursively, ensure the old menu is closed.
   if (!menu_runner_ || menu_runner_->IsRunning()) {
-    menu_model_adapter_.reset(new MenuModelAdapter(
-        menu_model_.get(), base::Bind(&Combobox::OnMenuClosed,
-                                      base::Unretained(this), original_state)));
-    menu_runner_.reset(
-        new MenuRunner(menu_model_adapter_->CreateMenu(),
-                       MenuRunner::COMBOBOX | MenuRunner::ASYNC));
+    menu_runner_.reset(new MenuRunner(
+        menu_model_.get(), MenuRunner::COMBOBOX | MenuRunner::ASYNC,
+        base::Bind(&Combobox::OnMenuClosed, base::Unretained(this),
+                   original_state)));
   }
   menu_runner_->RunMenuAt(GetWidget(), nullptr, bounds, anchor_position,
                           source_type);
@@ -943,7 +941,6 @@ void Combobox::ShowDropDownMenu(ui::MenuSourceType source_type) {
 
 void Combobox::OnMenuClosed(Button::ButtonState original_button_state) {
   menu_runner_.reset();
-  menu_model_adapter_.reset();
   if (arrow_button_)
     arrow_button_->SetState(original_button_state);
   closed_time_ = base::Time::Now();

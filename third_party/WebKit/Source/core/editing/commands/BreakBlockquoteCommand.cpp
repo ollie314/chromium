@@ -93,10 +93,13 @@ void BreakBlockquoteCommand::doApply(EditingState* editingState) {
   if (endingSelection().isNone())
     return;
 
-  VisiblePosition visiblePos = endingSelection().visibleStartDeprecated();
+  document().updateStyleAndLayoutIgnorePendingStylesheets();
 
-  // pos is a position equivalent to the caret.  We use downstream() so that pos will
-  // be in the first node that we need to move (there are a few exceptions to this, see below).
+  VisiblePosition visiblePos = endingSelection().visibleStart();
+
+  // pos is a position equivalent to the caret.  We use downstream() so that pos
+  // will be in the first node that we need to move (there are a few exceptions
+  // to this, see below).
   Position pos = mostForwardCaretPosition(endingSelection().start());
 
   // Find the top-most blockquote from the start.
@@ -110,14 +113,16 @@ void BreakBlockquoteCommand::doApply(EditingState* editingState) {
   bool isLastVisPosInNode =
       isLastVisiblePositionInNode(visiblePos, topBlockquote);
 
-  // If the position is at the beginning of the top quoted content, we don't need to break the quote.
-  // Instead, insert the break before the blockquote, unless the position is as the end of the the quoted content.
+  // If the position is at the beginning of the top quoted content, we don't
+  // need to break the quote. Instead, insert the break before the blockquote,
+  // unless the position is as the end of the the quoted content.
   if (isFirstVisiblePositionInNode(visiblePos, topBlockquote) &&
       !isLastVisPosInNode) {
     insertNodeBefore(breakElement, topBlockquote, editingState);
     if (editingState->isAborted())
       return;
-    setEndingSelection(createVisibleSelectionDeprecated(
+    document().updateStyleAndLayoutIgnorePendingStylesheets();
+    setEndingSelection(createVisibleSelection(
         Position::beforeNode(breakElement), TextAffinity::Downstream,
         endingSelection().isDirectional()));
     rebalanceWhitespace();
@@ -129,23 +134,26 @@ void BreakBlockquoteCommand::doApply(EditingState* editingState) {
   if (editingState->isAborted())
     return;
 
-  // If we're inserting the break at the end of the quoted content, we don't need to break the quote.
+  document().updateStyleAndLayoutIgnorePendingStylesheets();
+
+  // If we're inserting the break at the end of the quoted content, we don't
+  // need to break the quote.
   if (isLastVisPosInNode) {
-    setEndingSelection(createVisibleSelectionDeprecated(
+    setEndingSelection(createVisibleSelection(
         Position::beforeNode(breakElement), TextAffinity::Downstream,
         endingSelection().isDirectional()));
     rebalanceWhitespace();
     return;
   }
 
-  // Don't move a line break just after the caret.  Doing so would create an extra, empty paragraph
-  // in the new blockquote.
+  // Don't move a line break just after the caret.  Doing so would create an
+  // extra, empty paragraph in the new blockquote.
   if (lineBreakExistsAtVisiblePosition(visiblePos)) {
     pos = nextPositionOf(pos, PositionMoveType::GraphemeCluster);
   }
 
   // Adjust the position so we don't split at the beginning of a quote.
-  while (isFirstVisiblePositionInNode(createVisiblePositionDeprecated(pos),
+  while (isFirstVisiblePositionInNode(createVisiblePosition(pos),
                                       toHTMLQuoteElement(enclosingNodeOfType(
                                           pos, isMailHTMLBlockquoteElement)))) {
     pos = previousPositionOf(pos, PositionMoveType::GraphemeCluster);
@@ -174,13 +182,15 @@ void BreakBlockquoteCommand::doApply(EditingState* editingState) {
 
   // If there's nothing inside topBlockquote to move, we're finished.
   if (!startNode->isDescendantOf(topBlockquote)) {
-    setEndingSelection(createVisibleSelectionDeprecated(
-        createVisiblePositionDeprecated(firstPositionInOrBeforeNode(startNode)),
+    document().updateStyleAndLayoutIgnorePendingStylesheets();
+    setEndingSelection(createVisibleSelection(
+        createVisiblePosition(firstPositionInOrBeforeNode(startNode)),
         endingSelection().isDirectional()));
     return;
   }
 
-  // Build up list of ancestors in between the start node and the top blockquote.
+  // Build up list of ancestors in between the start node and the top
+  // blockquote.
   HeapVector<Member<Element>> ancestors;
   for (Element* node = startNode->parentElement();
        node && node != topBlockquote; node = node->parentElement())
@@ -255,10 +265,12 @@ void BreakBlockquoteCommand::doApply(EditingState* editingState) {
   if (editingState->isAborted())
     return;
 
+  document().updateStyleAndLayoutIgnorePendingStylesheets();
+
   // Put the selection right before the break.
-  setEndingSelection(createVisibleSelectionDeprecated(
-      Position::beforeNode(breakElement), TextAffinity::Downstream,
-      endingSelection().isDirectional()));
+  setEndingSelection(createVisibleSelection(Position::beforeNode(breakElement),
+                                            TextAffinity::Downstream,
+                                            endingSelection().isDirectional()));
   rebalanceWhitespace();
 }
 

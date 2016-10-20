@@ -28,11 +28,8 @@
 #include "components/signin/core/browser/signin_manager_base.h"
 #include "components/sync/base/experiments.h"
 #include "components/sync/base/model_type.h"
+#include "components/sync/base/sync_prefs.h"
 #include "components/sync/base/unrecoverable_error_handler.h"
-#include "components/sync/core/network_time_update_callback.h"
-#include "components/sync/core/shutdown_reason.h"
-#include "components/sync/core/sync_manager_factory.h"
-#include "components/sync/core/user_share.h"
 #include "components/sync/device_info/local_device_info_provider.h"
 #include "components/sync/driver/data_type_controller.h"
 #include "components/sync/driver/data_type_manager.h"
@@ -43,11 +40,14 @@
 #include "components/sync/driver/startup_controller.h"
 #include "components/sync/driver/sync_client.h"
 #include "components/sync/driver/sync_frontend.h"
-#include "components/sync/driver/sync_prefs.h"
 #include "components/sync/driver/sync_service.h"
 #include "components/sync/driver/sync_stopped_reporter.h"
 #include "components/sync/engine/model_safe_worker.h"
+#include "components/sync/engine/net/network_time_update_callback.h"
+#include "components/sync/engine/shutdown_reason.h"
+#include "components/sync/engine/sync_manager_factory.h"
 #include "components/sync/js/sync_js_controller.h"
+#include "components/sync/syncable/user_share.h"
 #include "components/version_info/version_info.h"
 #include "google_apis/gaia/google_service_auth_error.h"
 #include "google_apis/gaia/oauth2_token_service.h"
@@ -310,7 +310,7 @@ class ProfileSyncService : public syncer::SyncService,
   base::string16 GetLastSyncedTimeString() const override;
   std::string GetBackendInitializationStateString() const override;
   syncer::SyncCycleSnapshot GetLastCycleSnapshot() const override;
-  base::Value* GetTypeStatusMap() const override;
+  base::Value* GetTypeStatusMap() override;
   const GURL& sync_service_url() const override;
   std::string unrecoverable_error_message() const override;
   tracked_objects::Location unrecoverable_error_location() const override;
@@ -374,7 +374,7 @@ class ProfileSyncService : public syncer::SyncService,
   void OnDirectoryTypeUpdateCounterUpdated(
       syncer::ModelType type,
       const syncer::UpdateCounters& counters) override;
-  void OnDirectoryTypeStatusCounterUpdated(
+  void OnDatatypeStatusCounterUpdated(
       syncer::ModelType type,
       const syncer::StatusCounters& counters) override;
   void OnConnectionStatusChange(syncer::ConnectionStatus status) override;

@@ -4,7 +4,7 @@
 
 #include "services/ui/ime/ime_server_impl.h"
 
-#include "services/shell/public/cpp/connector.h"
+#include "services/service_manager/public/cpp/connector.h"
 #include "services/ui/ime/ime_registrar_impl.h"
 
 namespace ui {
@@ -13,10 +13,10 @@ IMEServerImpl::IMEServerImpl() : current_id_(0) {}
 
 IMEServerImpl::~IMEServerImpl() {}
 
-void IMEServerImpl::Init(shell::Connector* connector) {
+void IMEServerImpl::Init(service_manager::Connector* connector) {
   // TODO(moshayedi): crbug.com/641041. Look up the driver from the mojo:catalog
   // service.
-  connector->Connect("mojo:test_ime_driver");
+  connector->Connect("service:test_ime_driver");
 }
 
 void IMEServerImpl::AddBinding(mojom::IMEServerRequest request) {

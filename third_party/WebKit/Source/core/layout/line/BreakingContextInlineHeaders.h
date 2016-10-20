@@ -253,11 +253,7 @@ inline bool requiresLineBoxForContent(LineLayoutInline flow,
       (flow.style(lineInfo.isFirstLine())->lineHeight() !=
            parent.style(lineInfo.isFirstLine())->lineHeight() ||
        flow.style()->verticalAlign() != parent.style()->verticalAlign() ||
-       !parent.style()
-            ->font()
-            .getFontMetrics()
-            .hasIdenticalAscentDescentAndLineGap(
-                flow.style()->font().getFontMetrics())))
+       !parent.style()->hasIdenticalAscentDescentAndLineGap(flow.styleRef())))
     return true;
   return false;
 }
@@ -819,8 +815,6 @@ ALWAYS_INLINE bool BreakingContext::rewindToMidWordBreak(
     len = end - start;
   }
   FloatRect rect = font.selectionRectForText(run, FloatPoint(), 0, 0, len);
-  DCHECK(m_width.fitsOnLine(rect.width() -
-                            1));  // avoid failure when rect is rounded up.
   return rewindToMidWordBreak(wordMeasurement, end, rect.width());
 }
 

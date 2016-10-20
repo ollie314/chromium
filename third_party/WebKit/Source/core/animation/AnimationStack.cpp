@@ -104,7 +104,7 @@ ActiveInterpolationsMap AnimationStack::activeInterpolations(
     AnimationStack* animationStack,
     const HeapVector<Member<const InertEffect>>* newAnimations,
     const HeapHashSet<Member<const Animation>>* suppressedAnimations,
-    KeyframeEffect::Priority priority,
+    KeyframeEffectReadOnly::Priority priority,
     PropertyHandleFilter propertyHandleFilter) {
   ActiveInterpolationsMap result;
 
@@ -163,7 +163,7 @@ bool AnimationStack::getAnimatedBoundingBox(FloatBox& box,
   for (const auto& sampledEffect : m_sampledEffects) {
     if (sampledEffect->effect() &&
         sampledEffect->effect()->affects(PropertyHandle(property))) {
-      KeyframeEffect* effect = sampledEffect->effect();
+      KeyframeEffectReadOnly* effect = sampledEffect->effect();
       const Timing& timing = effect->specifiedTiming();
       double startRange = 0;
       double endRange = 1;

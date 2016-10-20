@@ -14,8 +14,6 @@ declare_args() {
   xcode_build = ""
   machine_os_build = ""
 
-  use_ios_simulator = current_cpu == "x86" || current_cpu == "x64"
-
   # Version of iOS that we're targeting.
   ios_deployment_target = "9.0"
 
@@ -24,6 +22,17 @@ declare_args() {
   # ios_enable_code_signing_flag=<bool> flag to make the invocation clearer.
   ios_enable_code_signing = true
   ios_code_signing_identity = ""
+
+  # Prefix for CFBundleIdentifier property of iOS bundles (correspond to the
+  # "Organization Identifier" in Xcode). Code signing will fail if no mobile
+  # provisioning for the selected code signing identify support that prefix.
+  ios_app_bundle_id_prefix = "org.chromium"
+
+  # If true, then allow using Xcode to automatically manage certificates. This
+  # requires loading a separate Xcode project and enable automatically managed
+  # certificates. When true, all test application will use the same bundle id
+  # to avoid running out of certificates if using a free account.
+  ios_automatically_manage_certs = true
 
   # If non-empty, this list must contain valid cpu architecture, and the final
   # build will be a multi-architecture build (aka fat build) supporting the
@@ -43,6 +52,8 @@ declare_args() {
 
 assert(custom_toolchain == "" || additional_target_cpus == [],
        "cannot define both custom_toolchain and additional_target_cpus")
+
+use_ios_simulator = current_cpu == "x86" || current_cpu == "x64"
 
 # Initialize additional_toolchains from additional_target_cpus. Assert here
 # that the list does not contains $target_cpu nor duplicates as this would

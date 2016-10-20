@@ -26,6 +26,8 @@ WebInspector.SecurityPanel = function()
     /** @type {!Map<!WebInspector.NetworkLogView.MixedContentFilterValues, number>} */
     this._filterRequestCounts = new Map();
 
+    /** @type {!Map<!WebInspector.Target, !Array<!WebInspector.EventTarget.EventDescriptor>>}*/
+    this._eventListeners = new Map();
     WebInspector.targetManager.observeTargets(this, WebInspector.Target.Capability.Network);
 }
 
@@ -257,21 +259,33 @@ WebInspector.SecurityPanel.prototype = {
         if (this._target)
             return;
 
-        this._target = target;
-
-        var resourceTreeModel = WebInspector.ResourceTreeModel.fromTarget(this._target);
+        var listeners = [];
+        var resourceTreeModel = WebInspector.ResourceTreeModel.fromTarget(target);
         if (resourceTreeModel) {
-            resourceTreeModel.addEventListener(WebInspector.ResourceTreeModel.Events.MainFrameNavigated, this._onMainFrameNavigated, this);
-            resourceTreeModel.addEventListener(WebInspector.ResourceTreeModel.Events.InterstitialShown, this._onInterstitialShown, this);
-            resourceTreeModel.addEventListener(WebInspector.ResourceTreeModel.Events.InterstitialHidden, this._onInterstitialHidden, this);
+            listeners = listeners.concat([
+                resourceTreeModel.addEventListener(WebInspector.ResourceTreeModel.Events.MainFrameNavigated, this._onMainFrameNavigated, this),
+                resourceTreeModel.addEventListener(WebInspector.ResourceTreeModel.Events.InterstitialShown, this._onInterstitialShown, this),
+                resourceTreeModel.addEventListener(WebInspector.ResourceTreeModel.Events.InterstitialHidden, this._onInterstitialHidden, this),
+            ]);
         }
 
         var networkManager = WebInspector.NetworkManager.fromTarget(target);
-        networkManager.addEventListener(WebInspector.NetworkManager.Events.ResponseReceived, this._onResponseReceived, this);
-        networkManager.addEventListener(WebInspector.NetworkManager.Events.RequestFinished, this._onRequestFinished, this);
+        if (networkManager) {
+            listeners = listeners.concat([
+                networkManager.addEventListener(WebInspector.NetworkManager.Events.ResponseReceived, this._onResponseReceived, this),
+                networkManager.addEventListener(WebInspector.NetworkManager.Events.RequestFinished, this._onRequestFinished, this),
+            ]);
+        }
 
         var securityModel = WebInspector.SecurityModel.fromTarget(target);
-        securityModel.addEventListener(WebInspector.SecurityModel.Events.SecurityStateChanged, this._onSecurityStateChanged, this);
+        if (securityModel) {
+            listeners = listeners.concat([
+                securityModel.addEventListener(WebInspector.SecurityModel.Events.SecurityStateChanged, this._onSecurityStateChanged, this)
+            ]);
+        }
+
+        this._target = target;
+        this._eventListeners.set(target, listeners);
     },
 
     /**
@@ -280,6 +294,13 @@ WebInspector.SecurityPanel.prototype = {
      */
     targetRemoved: function(target)
     {
+        if (this._target !== target)
+            return;
+
+        delete this._target;
+
+        WebInspector.EventTarget.removeEventListeners(this._eventListeners.get(target));
+        this._eventListeners.delete(target);
     },
 
     /**
@@ -613,7 +634,7 @@ WebInspector.SecurityMainView = function(panel)
     var lockSpectrum = this._summarySection.createChild("div", "lock-spectrum");
     lockSpectrum.createChild("div", "lock-icon lock-icon-secure").title = WebInspector.UIString("Secure");
     lockSpectrum.createChild("div", "lock-icon lock-icon-neutral").title = WebInspector.UIString("Not Secure");
-    lockSpectrum.createChild("div", "lock-icon lock-icon-insecure").title = WebInspector.UIString("Insecure (Broken)");
+    lockSpectrum.createChild("div", "lock-icon lock-icon-insecure").title = WebInspector.UIString("Not Secure (Broken)");
 
     this._summarySection.createChild("div", "triangle-pointer-container").createChild("div", "triangle-pointer-wrapper").createChild("div", "triangle-pointer");
 
@@ -660,7 +681,7 @@ WebInspector.SecurityMainView.prototype = {
         this._summarySection.classList.add("security-summary-" + this._securityState);
         var summaryExplanationStrings = {
             "unknown":  WebInspector.UIString("The security of this page is unknown."),
-            "insecure": WebInspector.UIString("This page is insecure (broken HTTPS)."),
+            "insecure": WebInspector.UIString("This page is not secure (broken HTTPS)."),
             "neutral":  WebInspector.UIString("This page is not secure."),
             "secure":   WebInspector.UIString("This page is secure (valid HTTPS).")
         }
@@ -708,13 +729,13 @@ WebInspector.SecurityMainView.prototype = {
 
         if (this._insecureContentStatus && (this._insecureContentStatus.ranMixedContent || this._insecureContentStatus.displayedMixedContent)) {
             if (this._insecureContentStatus.ranMixedContent)
-                this._addMixedContentExplanation(this._securityExplanationsMain, this._insecureContentStatus.ranInsecureContentStyle, WebInspector.UIString("Active Mixed Content"), WebInspector.UIString("You have recently allowed insecure content (such as scripts or iframes) to run on this site."), WebInspector.NetworkLogView.MixedContentFilterValues.BlockOverridden, showBlockOverriddenMixedContentInNetworkPanel);
+                this._addMixedContentExplanation(this._securityExplanationsMain, this._insecureContentStatus.ranInsecureContentStyle, WebInspector.UIString("Active Mixed Content"), WebInspector.UIString("You have recently allowed non-secure content (such as scripts or iframes) to run on this site."), WebInspector.NetworkLogView.MixedContentFilterValues.BlockOverridden, showBlockOverriddenMixedContentInNetworkPanel);
             if (this._insecureContentStatus.displayedMixedContent)
                 this._addMixedContentExplanation(this._securityExplanationsMain, this._insecureContentStatus.displayedInsecureContentStyle, WebInspector.UIString("Mixed Content"), WebInspector.UIString("The site includes HTTP resources."), WebInspector.NetworkLogView.MixedContentFilterValues.Displayed, showDisplayedMixedContentInNetworkPanel);
         }
 
         if (this._panel.filterRequestCount(WebInspector.NetworkLogView.MixedContentFilterValues.Blocked) > 0)
-            this._addMixedContentExplanation(this._securityExplanationsExtra, SecurityAgent.SecurityState.Info, WebInspector.UIString("Blocked mixed content"), WebInspector.UIString("Your page requested insecure resources that were blocked."), WebInspector.NetworkLogView.MixedContentFilterValues.Blocked, showBlockedMixedContentInNetworkPanel);
+            this._addMixedContentExplanation(this._securityExplanationsExtra, SecurityAgent.SecurityState.Info, WebInspector.UIString("Blocked mixed content"), WebInspector.UIString("Your page requested non-secure resources that were blocked."), WebInspector.NetworkLogView.MixedContentFilterValues.Blocked, showBlockedMixedContentInNetworkPanel);
 
         /**
          * @param {!Event} e
@@ -865,10 +886,11 @@ WebInspector.SecurityOriginView = function(panel, origin, originState)
         var table = new WebInspector.SecurityDetailsTable();
         connectionSection.appendChild(table.element());
         table.addRow("Protocol", originState.securityDetails.protocol);
-        table.addRow("Key Exchange", originState.securityDetails.keyExchange);
+        if (originState.securityDetails.keyExchange)
+            table.addRow("Key Exchange", originState.securityDetails.keyExchange);
         if (originState.securityDetails.keyExchangeGroup)
             table.addRow("Key Exchange Group", originState.securityDetails.keyExchangeGroup);
-        table.addRow("Cipher Suite", originState.securityDetails.cipher + (originState.securityDetails.mac ? " with " + originState.securityDetails.mac : ""));
+        table.addRow("Cipher", originState.securityDetails.cipher + (originState.securityDetails.mac ? " with " + originState.securityDetails.mac : ""));
 
         // Create the certificate section outside the callback, so that it appears in the right place.
         var certificateSection = this.element.createChild("div", "origin-view-section");
@@ -968,7 +990,7 @@ WebInspector.SecurityOriginView.prototype = {
             sanDiv.classList.add("empty-san");
         } else {
             var truncatedNumToShow = 2;
-            var listIsTruncated = sanList.length > truncatedNumToShow;
+            var listIsTruncated = sanList.length > truncatedNumToShow + 1;
             for (var i = 0; i < sanList.length; i++) {
                 var span = sanDiv.createChild("span", "san-entry");
                 span.textContent = sanList[i];

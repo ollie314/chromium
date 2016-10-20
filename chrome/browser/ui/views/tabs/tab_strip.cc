@@ -322,6 +322,7 @@ NewTabButton::NewTabButton(TabStrip* tab_strip, views::ButtonListener* listener)
     : views::ImageButton(listener),
       tab_strip_(tab_strip),
       destroyed_(NULL) {
+  set_animate_on_state_change(true);
 #if defined(OS_LINUX) && !defined(OS_CHROMEOS)
   set_triggerable_event_flags(triggerable_event_flags() |
                               ui::EF_MIDDLE_MOUSE_BUTTON);
@@ -600,8 +601,8 @@ TabStrip::TabStrip(TabStripController* controller)
 }
 
 TabStrip::~TabStrip() {
-  FOR_EACH_OBSERVER(TabStripObserver, observers_,
-                    TabStripDeleted(this));
+  for (TabStripObserver& observer : observers_)
+    observer.TabStripDeleted(this);
 
   // The animations may reference the tabs. Shut down the animation before we
   // delete the tabs.
@@ -699,8 +700,8 @@ void TabStrip::AddTabAt(int model_index,
 
   SwapLayoutIfNecessary();
 
-  FOR_EACH_OBSERVER(TabStripObserver, observers_,
-                    TabStripAddedTabAt(this, model_index));
+  for (TabStripObserver& observer : observers_)
+    observer.TabStripAddedTabAt(this, model_index);
 
   // Stop dragging when a new tab is added and dragging a window. Doing
   // otherwise results in a confusing state if the user attempts to reattach. We
@@ -740,8 +741,8 @@ void TabStrip::MoveTab(int from_model_index,
   }
   SwapLayoutIfNecessary();
 
-  FOR_EACH_OBSERVER(TabStripObserver, observers_,
-                    TabStripMovedTab(this, from_model_index, to_model_index));
+  for (TabStripObserver& observer : observers_)
+    observer.TabStripMovedTab(this, from_model_index, to_model_index);
 }
 
 void TabStrip::RemoveTabAt(content::WebContents* contents, int model_index) {
@@ -762,8 +763,8 @@ void TabStrip::RemoveTabAt(content::WebContents* contents, int model_index) {
   }
   SwapLayoutIfNecessary();
 
-  FOR_EACH_OBSERVER(TabStripObserver, observers_,
-                    TabStripRemovedTabAt(this, model_index));
+  for (TabStripObserver& observer : observers_)
+    observer.TabStripRemovedTabAt(this, model_index);
 
   // Stop dragging when a new tab is removed and dragging a window. Doing
   // otherwise results in a confusing state if the user attempts to reattach. We
@@ -1442,7 +1443,9 @@ void TabStrip::PaintChildren(const ui::PaintContext& context) {
     active_tab->Paint(context);
 
   // Paint the New Tab button.
-  if (newtab_button_->state() != views::CustomButton::STATE_PRESSED) {
+  if (newtab_button_->state() == views::CustomButton::STATE_PRESSED) {
+    newtab_button_->Paint(context);
+  } else {
     // Match the inactive tab opacity for non-pressed states.  See comments in
     // NewTabButton::PaintFill() for why we don't do this for the pressed state.
     // This call doesn't need to set |lcd_text_requires_opaque_layer| to false
@@ -2425,8 +2428,10 @@ void TabStrip::GenerateIdealBounds() {
                          GetLayoutConstant(TABSTRIP_NEW_TAB_BUTTON_OVERLAP));
   const int old_max_x = newtab_button_bounds_.right();
   newtab_button_bounds_.set_origin(gfx::Point(new_tab_x, 0));
-  if (newtab_button_bounds_.right() != old_max_x)
-    FOR_EACH_OBSERVER(TabStripObserver, observers_, TabStripMaxXChanged(this));
+  if (newtab_button_bounds_.right() != old_max_x) {
+    for (TabStripObserver& observer : observers_)
+      observer.TabStripMaxXChanged(this);
+  }
 }
 
 int TabStrip::GenerateIdealBoundsForPinnedTabs(int* first_non_pinned_index) {

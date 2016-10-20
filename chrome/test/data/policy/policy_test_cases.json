@@ -2,7 +2,7 @@
   "-- Template --": {
     "intro": "Top-level entries map a policy name to its test parameters, described below. The name of the top level entry should be of the form <policy name>[.suffix]. The optional suffix is used for defining multiple test cases for a single policy.",
 
-    "os": ["List of operating systems that support this policy. Valid values:", "win", "linux", "mac", "chromeos", "Defaults to empty if not specified."],
+    "os": ["List of operating systems that support this policy. Valid values:", "win", "linux", "mac", "chromeos", "android", "Defaults to empty if not specified."],
     "official_only": "Whether this policy exists in official builds only. Defaults to |false| if not specified.",
     "can_be_recommended": "Whether a recommended value may be set for the policy. Defaults to |false| if not specified.",
     "test_policy": "A policy dictionary that should make the preferences affected by this policy become policy-controlled. Usually just sets the current policy. Defaults to an empty dictionary if not specified.",
@@ -296,21 +296,28 @@
     "pref": "settings.force_safesearch",
     "test_policy": { "ForceSafeSearch": true },
     "settings_pages": [],
-    "os": ["win", "linux", "mac", "chromeos"]
+    "os": ["win", "linux", "mac", "chromeos", "android"]
   },
 
   "ForceGoogleSafeSearch": {
     "pref": "settings.force_google_safesearch",
     "test_policy": { "ForceGoogleSafeSearch": true },
     "settings_pages": [],
-    "os": ["win", "linux", "mac", "chromeos"]
+    "os": ["win", "linux", "mac", "chromeos", "android"]
   },
 
   "ForceYouTubeSafetyMode": {
     "pref": "settings.force_youtube_safety_mode",
     "test_policy": { "ForceYouTubeSafetyMode": true },
     "settings_pages": [],
-    "os": ["win", "linux", "mac", "chromeos"]
+    "os": ["win", "linux", "mac", "chromeos", "android"]
+  },
+
+  "ForceYouTubeRestrict": {
+    "pref": "settings.force_youtube_restrict",
+    "test_policy": { "ForceYouTubeRestrict": 1 },
+    "settings_pages": [],
+    "os": ["win", "linux", "mac", "chromeos", "android"]
   },
 
   "MetricsReportingEnabled": {
@@ -360,27 +367,77 @@
     ]
   },
 
-  "DisabledPlugins": {
+  "DisabledPlugins.0": {
+    "note": "This policy is deprecated. This test tests its migration path.",
     "os": ["win", "linux", "mac", "chromeos"],
-    "test_policy": { "DisabledPlugins": ["Flash"] },
+    "test_policy": { "DisabledPlugins": ["*Flash*"] },
     "pref_mappings": [
-      { "pref": "plugins.plugins_disabled" }
+      { "pref": "profile.managed_default_content_settings.plugins",
+        "indicator_selector": "[content-setting=plugins]",
+        "indicator_tests": [
+          { "policy": { "DisabledPlugins": ["*Flash*"] },
+            "value": "block"}
+        ]
+      }
     ]
   },
 
-  "EnabledPlugins": {
+  "DisabledPlugins.1": {
+    "note": "This policy is deprecated. This test tests its migration path.",
     "os": ["win", "linux", "mac", "chromeos"],
-    "test_policy": { "EnabledPlugins": ["Flash"] },
+    "test_policy": { "DisabledPlugins": ["*PDF*"] },
     "pref_mappings": [
-      { "pref": "plugins.plugins_enabled" }
+      { "pref": "plugins.always_open_pdf_externally",
+        "indicator_tests": [
+          { "policy": { "DisabledPlugins": ["*PDF*"] }}
+        ]
+      }
+    ]
+  },
+
+  "EnabledPlugins.0": {
+    "note": "This policy is deprecated. This test tests its migration path.",
+    "os": ["win", "linux", "mac", "chromeos"],
+    "test_policy": { "EnabledPlugins": ["*Flash*"] },
+    "pref_mappings": [
+      { "pref": "profile.managed_default_content_settings.plugins",
+        "indicator_selector": "[content-setting=plugins]",
+        "indicator_tests": [
+          { "policy": { "EnabledPlugins": ["*Flash*"] },
+            "value": "allow"}
+        ]
+      }
+    ]
+  },
+
+  "EnabledPlugins.1": {
+    "note": "This policy is deprecated. This test tests its migration path.",
+    "os": ["win", "linux", "mac", "chromeos"],
+    "test_policy": { "EnabledPlugins": ["*PDF*"] },
+    "pref_mappings": [
+      { "pref": "plugins.always_open_pdf_externally",
+        "indicator_tests": [
+          { "policy": { "EnabledPlugins": ["*PDF*"] }}
+        ]
+      }
     ]
   },
 
   "DisabledPluginsExceptions": {
-    "os": ["win", "linux", "mac", "chromeos"],
-    "test_policy": { "DisabledPluginsExceptions": ["Flash"] },
+    "note": "This policy is deprecated it doesn't map to a pref value anymore.",
+    "os": ["win", "linux", "mac", "chromeos"]
+  },
+
+  "AlwaysOpenPdfExternally": {
+    "os": ["win", "linux", "mac"],
+    "test_policy": { "AlwaysOpenPdfExternally": true },
     "pref_mappings": [
-      { "pref": "plugins.plugins_disabled_exceptions" }
+      { "pref": "plugins.always_open_pdf_externally",
+        "indicator_tests": [
+          { "policy": { "AlwaysOpenPdfExternally": false }},
+          { "policy": { "AlwaysOpenPdfExternally": true }}
+        ]
+      }
     ]
   },
 
@@ -2590,6 +2647,16 @@
     "test_policy": { "ArcBackupRestoreEnabled": false },
     "pref_mappings": [
       { "pref": "arc.backup_restore.enabled" }
+    ]
+  },
+
+  "ReportArcStatusEnabled": {
+    "os": ["chromeos"],
+    "can_be_recommended": false,
+    "test_policy": { "ReportArcStatusEnabled": false },
+    "pref_mappings": [
+      { "pref": "arc.status_reporting_enabled",
+        "local_state": true }
     ]
   },
 

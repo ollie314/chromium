@@ -5,7 +5,8 @@
  *                     2000 Simon Hausmann <hausmann@kde.org>
  *                     2000 Stefan Schimanski <1Stein@gmx.de>
  *                     2001 George Staikos <staikos@kde.org>
- * Copyright (C) 2004, 2005, 2006, 2007, 2008, 2009, 2010, 2011 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006, 2007, 2008, 2009, 2010, 2011 Apple Inc. All
+ * rights reserved.
  * Copyright (C) 2005 Alexey Proskuryakov <ap@nypop.com>
  * Copyright (C) 2008 Nokia Corporation and/or its subsidiary(-ies)
  * Copyright (C) 2008 Eric Seidel <eric@webkit.org>
@@ -84,6 +85,7 @@
 #include "platform/plugins/PluginData.h"
 #include "platform/text/TextStream.h"
 #include "public/platform/InterfaceProvider.h"
+#include "public/platform/InterfaceRegistry.h"
 #include "public/platform/WebFrameScheduler.h"
 #include "public/platform/WebScreenInfo.h"
 #include "public/platform/WebViewScheduler.h"
@@ -98,17 +100,18 @@ using namespace HTMLNames;
 
 namespace {
 
-// Convenience class for initializing a GraphicsContext to build a DragImage from a specific
-// region specified by |bounds|. After painting the using context(), the DragImage returned from
-// createImage() will only contain the content in |bounds| with the appropriate device scale
-// factor included.
+// Convenience class for initializing a GraphicsContext to build a DragImage
+// from a specific region specified by |bounds|. After painting the using
+// context(), the DragImage returned from createImage() will only contain the
+// content in |bounds| with the appropriate device scale factor included.
 class DragImageBuilder {
   STACK_ALLOCATED();
 
  public:
   DragImageBuilder(const LocalFrame& localFrame, const FloatRect& bounds)
       : m_localFrame(&localFrame), m_bounds(bounds) {
-    // TODO(oshima): Remove this when all platforms are migrated to use-zoom-for-dsf.
+    // TODO(oshima): Remove this when all platforms are migrated to
+    // use-zoom-for-dsf.
     float deviceScaleFactor =
         m_localFrame->host()->deviceScaleFactorDeprecated();
     float pageScaleFactor = m_localFrame->host()->visualViewport().scale();
@@ -244,11 +247,14 @@ template class CORE_TEMPLATE_EXPORT Supplement<LocalFrame>;
 LocalFrame* LocalFrame::create(FrameLoaderClient* client,
                                FrameHost* host,
                                FrameOwner* owner,
-                               InterfaceProvider* interfaceProvider) {
+                               InterfaceProvider* interfaceProvider,
+                               InterfaceRegistry* interfaceRegistry) {
   LocalFrame* frame = new LocalFrame(
       client, host, owner,
       interfaceProvider ? interfaceProvider
-                        : InterfaceProvider::getEmptyInterfaceProvider());
+                        : InterfaceProvider::getEmptyInterfaceProvider(),
+      interfaceRegistry ? interfaceRegistry
+                        : InterfaceRegistry::getEmptyInterfaceRegistry());
   InspectorInstrumentation::frameAttachedToParent(frame);
   return frame;
 }
@@ -377,6 +383,10 @@ void LocalFrame::reload(FrameLoadType loadType,
 }
 
 void LocalFrame::detach(FrameDetachType type) {
+  // Note that detach() can be re-entered, so it's not possible to
+  // DCHECK(!m_isDetaching) here.
+  m_isDetaching = true;
+
   PluginScriptForbiddenScope forbidPluginDestructorScripting;
   m_loader.stopAllLoaders();
   // Don't allow any new child frames to load in this frame: attaching a new
@@ -386,13 +396,15 @@ void LocalFrame::detach(FrameDetachType type) {
   m_loader.dispatchUnloadEvent();
   detachChildren();
 
-  // All done if detaching the subframes brought about a detach of this frame also.
+  // All done if detaching the subframes brought about a detach of this frame
+  // also.
   if (!client())
     return;
 
-  // stopAllLoaders() needs to be called after detachChildren(), because detachChildren()
-  // will trigger the unload event handlers of any child frames, and those event
-  // handlers might start a new subresource load in this frame.
+  // stopAllLoaders() needs to be called after detachChildren(), because
+  // detachChildren() will trigger the unload event handlers of any child
+  // frames, and those event handlers might start a new subresource load in this
+  // frame.
   m_loader.stopAllLoaders();
   m_loader.detach();
   document()->shutdown();
@@ -405,8 +417,8 @@ void LocalFrame::detach(FrameDetachType type) {
     return;
 
   client()->willBeDetached();
-  // Notify ScriptController that the frame is closing, since its cleanup ends up calling
-  // back to FrameLoaderClient via WindowProxy.
+  // Notify ScriptController that the frame is closing, since its cleanup ends
+  // up calling back to FrameLoaderClient via WindowProxy.
   script().clearForClose();
   setView(nullptr);
 
@@ -476,6 +488,7 @@ void LocalFrame::detachChildren() {
 }
 
 void LocalFrame::setDOMWindow(LocalDOMWindow* domWindow) {
+  // TODO(haraken): Update this comment.
   // Oilpan: setDOMWindow() cannot be used when finalizing. Which
   // is acceptable as its actions are either not needed or handled
   // by other means --
@@ -487,16 +500,15 @@ void LocalFrame::setDOMWindow(LocalDOMWindow* domWindow) {
   //
   //  - Calling LocalDOMWindow::reset() is not needed (called from
   //    Frame::setDOMWindow().) The Member references it clears will now
-  //    die with the window. And the registered DOMWindowProperty instances that don't,
-  //    only keep a weak reference to this frame, so there's no need to be
-  //    explicitly notified that this frame is going away.
+  //    die with the window. And the registered DOMWindowProperty instances that
+  //    don't, only keep a weak reference to this frame, so there's no need to
+  //    be explicitly notified that this frame is going away.
   if (domWindow)
     script().clearWindowProxy();
 
   if (m_domWindow)
     m_domWindow->reset();
   m_domWindow = domWindow;
-  page()->chromeClient().installSupplements(*this);
 }
 
 Document* LocalFrame::document() const {
@@ -543,11 +555,12 @@ void LocalFrame::setPrinting(bool printing,
                              const FloatSize& pageSize,
                              const FloatSize& originalPageSize,
                              float maximumShrinkRatio) {
-  // In setting printing, we should not validate resources already cached for the document.
-  // See https://bugs.webkit.org/show_bug.cgi?id=43704
+  // In setting printing, we should not validate resources already cached for
+  // the document.  See https://bugs.webkit.org/show_bug.cgi?id=43704
   ResourceCacheValidationSuppressor validationSuppressor(document()->fetcher());
 
-  document()->setPrinting(printing);
+  document()->setPrinting(printing ? Document::Printing
+                                   : Document::FinishingPrinting);
   view()->adjustMediaTypeForPrinting(printing);
 
   if (shouldUsePrintingLayout()) {
@@ -569,6 +582,9 @@ void LocalFrame::setPrinting(bool printing,
     if (child->isLocalFrame())
       toLocalFrame(child)->setPrinting(printing, FloatSize(), FloatSize(), 0);
   }
+
+  if (!printing)
+    document()->setPrinting(Document::NotPrinting);
 }
 
 bool LocalFrame::shouldUsePrintingLayout() const {
@@ -622,7 +638,8 @@ void LocalFrame::setPageAndTextZoomFactors(float pageZoomFactor,
     return;
 
   // Respect SVGs zoomAndPan="disabled" property in standalone SVG documents.
-  // FIXME: How to handle compound documents + zoomAndPan="disabled"? Needs SVG WG clarification.
+  // FIXME: How to handle compound documents + zoomAndPan="disabled"? Needs SVG
+  // WG clarification.
   if (document->isSVGDocument()) {
     if (!document->accessSVGExtensions().zoomAndPanEnabled())
       return;
@@ -630,12 +647,13 @@ void LocalFrame::setPageAndTextZoomFactors(float pageZoomFactor,
 
   if (m_pageZoomFactor != pageZoomFactor) {
     if (FrameView* view = this->view()) {
-      // Update the scroll position when doing a full page zoom, so the content stays in relatively the same position.
-      LayoutPoint scrollPosition = view->scrollPosition();
+      // Update the scroll position when doing a full page zoom, so the content
+      // stays in relatively the same position.
+      ScrollOffset scrollOffset = view->scrollOffset();
       float percentDifference = (pageZoomFactor / m_pageZoomFactor);
-      view->setScrollPosition(
-          DoublePoint(scrollPosition.x() * percentDifference,
-                      scrollPosition.y() * percentDifference),
+      view->setScrollOffset(
+          ScrollOffset(scrollOffset.width() * percentDifference,
+                       scrollOffset.height() * percentDifference),
           ProgrammaticScroll);
     }
   }
@@ -703,11 +721,7 @@ String LocalFrame::selectedText() const {
 String LocalFrame::selectedTextForClipboard() const {
   if (!document())
     return emptyString();
-
-  // TODO(xiaochengh): The use of updateStyleAndLayoutIgnorePendingStylesheets
-  // needs to be audited.  See http://crbug.com/590369 for more details.
-  document()->updateStyleAndLayoutIgnorePendingStylesheets();
-
+  DCHECK(!document()->needsLayoutTreeUpdate());
   return selection().selectedTextForClipboard();
 }
 
@@ -832,7 +846,8 @@ bool LocalFrame::shouldThrottleRendering() const {
 inline LocalFrame::LocalFrame(FrameLoaderClient* client,
                               FrameHost* host,
                               FrameOwner* owner,
-                              InterfaceProvider* interfaceProvider)
+                              InterfaceProvider* interfaceProvider,
+                              InterfaceRegistry* interfaceRegistry)
     : Frame(client, host, owner),
       m_frameScheduler(page()->chromeClient().createFrameScheduler(
           client->frameBlameContext())),
@@ -849,7 +864,8 @@ inline LocalFrame::LocalFrame(FrameLoaderClient* client,
       m_pageZoomFactor(parentPageZoomFactor(this)),
       m_textZoomFactor(parentTextZoomFactor(this)),
       m_inViewSourceMode(false),
-      m_interfaceProvider(interfaceProvider) {
+      m_interfaceProvider(interfaceProvider),
+      m_interfaceRegistry(interfaceRegistry) {
   if (isLocalRoot())
     m_instrumentingAgents = new InstrumentingAgents();
   else

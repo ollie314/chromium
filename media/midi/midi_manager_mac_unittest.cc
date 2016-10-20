@@ -17,10 +17,11 @@
 #include "base/synchronization/lock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-namespace media {
 namespace midi {
 
 namespace {
+
+using mojom::Result;
 
 void Noop(const MIDIPacketList*, void*, void*) {}
 
@@ -171,4 +172,3 @@ TEST_F(MidiManagerMacTest, MidiNotification) {
 }  // namespace
 
 }  // namespace midi
-}  // namespace media

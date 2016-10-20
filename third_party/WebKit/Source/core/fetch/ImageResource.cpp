@@ -32,8 +32,8 @@
 #include "core/svg/graphics/SVGImage.h"
 #include "platform/RuntimeEnabledFeatures.h"
 #include "platform/SharedBuffer.h"
-#include "platform/TraceEvent.h"
 #include "platform/graphics/BitmapImage.h"
+#include "platform/tracing/TraceEvent.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebCachePolicy.h"
 #include "wtf/CurrentTime.h"
@@ -48,9 +48,10 @@ namespace blink {
 ImageResource* ImageResource::fetch(FetchRequest& request,
                                     ResourceFetcher* fetcher) {
   if (request.resourceRequest().requestContext() ==
-      WebURLRequest::RequestContextUnspecified)
+      WebURLRequest::RequestContextUnspecified) {
     request.mutableResourceRequest().setRequestContext(
         WebURLRequest::RequestContextImage);
+  }
   if (fetcher->context().pageDismissalEventBeingDispatched()) {
     KURL requestURL = request.resourceRequest().url();
     if (requestURL.isValid() &&
@@ -71,7 +72,8 @@ ImageResource::ImageResource(const ResourceRequest& resourceRequest,
     : Resource(resourceRequest, Image, options),
       m_devicePixelRatioHeaderValue(1.0),
       m_image(nullptr),
-      m_hasDevicePixelRatioHeaderValue(false) {
+      m_hasDevicePixelRatioHeaderValue(false),
+      m_isSchedulingReload(false) {
   RESOURCE_LOADING_DVLOG(1) << "new ImageResource(ResourceRequest) " << this;
 }
 
@@ -80,7 +82,8 @@ ImageResource::ImageResource(blink::Image* image,
     : Resource(ResourceRequest(""), Image, options),
       m_devicePixelRatioHeaderValue(1.0),
       m_image(image),
-      m_hasDevicePixelRatioHeaderValue(false) {
+      m_hasDevicePixelRatioHeaderValue(false),
+      m_isSchedulingReload(false) {
   RESOURCE_LOADING_DVLOG(1) << "new ImageResource(Image) " << this;
   setStatus(Cached);
 }
@@ -98,6 +101,11 @@ DEFINE_TRACE(ImageResource) {
 }
 
 void ImageResource::checkNotify() {
+  // Don't notify observers and clients of completion if this ImageResource is
+  // about to be reloaded.
+  if (m_isSchedulingReload)
+    return;
+
   notifyObserversInternal(MarkFinishedOption::ShouldMarkFinished);
   Resource::checkNotify();
 }
@@ -125,6 +133,12 @@ void ImageResource::markObserverFinished(ImageResourceObserver* observer) {
 
 void ImageResource::didAddClient(ResourceClient* client) {
   DCHECK((m_multipartParser && isLoading()) || !data() || m_image);
+
+  // Don't notify observers and clients of completion if this ImageResource is
+  // about to be reloaded.
+  if (m_isSchedulingReload)
+    return;
+
   Resource::didAddClient(client);
 }
 
@@ -150,7 +164,7 @@ void ImageResource::addObserver(ImageResourceObserver* observer) {
     observer->imageChanged(this);
   }
 
-  if (isLoaded()) {
+  if (isLoaded() && !m_isSchedulingReload) {
     markObserverFinished(observer);
     observer->imageNotifyFinished(this);
   }
@@ -216,12 +230,13 @@ void ImageResource::allClientsAndObserversRemoved() {
     // If possible, delay the resetting until back at the event loop. Doing so
     // after a conservative GC prevents resetAnimation() from upsetting ongoing
     // animation updates (crbug.com/613709)
-    if (!ThreadHeap::willObjectBeLazilySwept(this))
+    if (!ThreadHeap::willObjectBeLazilySwept(this)) {
       Platform::current()->currentThread()->getWebTaskRunner()->postTask(
           BLINK_FROM_HERE, WTF::bind(&ImageResource::doResetAnimation,
                                      wrapWeakPersistent(this)));
-    else
+    } else {
       m_image->resetAnimation();
+    }
   }
   if (m_multipartParser)
     m_multipartParser->cancel();
@@ -302,11 +317,12 @@ LayoutSize ImageResource::imageSize(
   LayoutSize size;
 
   if (m_image->isBitmapImage() &&
-      shouldRespectImageOrientation == RespectImageOrientation)
+      shouldRespectImageOrientation == RespectImageOrientation) {
     size =
         LayoutSize(toBitmapImage(m_image.get())->sizeRespectingOrientation());
-  else
+  } else {
     size = LayoutSize(m_image->size());
+  }
 
   if (sizeType == IntrinsicCorrectedToDPR && m_hasDevicePixelRatioHeaderValue &&
       m_devicePixelRatioHeaderValue > 0)
@@ -424,14 +440,6 @@ void ImageResource::finish(double loadFinishTime) {
   Resource::finish(loadFinishTime);
 }
 
-void ImageResource::onMemoryDump(WebMemoryDumpLevelOfDetail levelOfDetail,
-                                 WebProcessMemoryDump* memoryDump) const {
-  Resource::onMemoryDump(levelOfDetail, memoryDump);
-  const String name = getMemoryDumpName() + "/encoded_data";
-  if (m_image && !m_image->isNull())
-    m_image->data()->onMemoryDump(name, memoryDump);
-}
-
 void ImageResource::error(const ResourceError& error) {
   if (m_multipartParser)
     m_multipartParser->cancel();
@@ -446,9 +454,10 @@ void ImageResource::responseReceived(
   DCHECK(!handle);
   DCHECK(!m_multipartParser);
   // If there's no boundary, just handle the request normally.
-  if (response.isMultipart() && !response.multipartBoundary().isEmpty())
+  if (response.isMultipart() && !response.multipartBoundary().isEmpty()) {
     m_multipartParser = new MultipartImageResourceParser(
         response, response.multipartBoundary(), this);
+  }
   Resource::responseReceived(response, std::move(handle));
   if (RuntimeEnabledFeatures::clientHintsEnabled()) {
     m_devicePixelRatioHeaderValue =
@@ -532,14 +541,31 @@ void ImageResource::reloadIfLoFi(ResourceFetcher* fetcher) {
   if (isLoaded() &&
       !response().httpHeaderField("chrome-proxy").contains("q=low"))
     return;
+
+  // Prevent clients and observers from being notified of completion while the
+  // reload is being scheduled, so that e.g. canceling an existing load in
+  // progress doesn't cause clients and observers to be notified of completion
+  // prematurely.
+  DCHECK(!m_isSchedulingReload);
+  m_isSchedulingReload = true;
+
   setCachePolicyBypassingCache();
   setLoFiStateOff();
-  if (isLoading())
+  if (isLoading()) {
     loader()->cancel();
-  clear();
-  notifyObservers();
+    // Canceling the loader causes error() to be called, which in turn calls
+    // clear() and notifyObservers(), so there's no need to call these again
+    // here.
+  } else {
+    clear();
+    notifyObservers();
+  }
 
   setStatus(NotStarted);
+
+  DCHECK(m_isSchedulingReload);
+  m_isSchedulingReload = false;
+
   fetcher->startLoad(this);
 }
 
@@ -582,9 +608,10 @@ void ImageResource::multipartDataReceived(const char* bytes, size_t size) {
 }
 
 bool ImageResource::isAccessAllowed(SecurityOrigin* securityOrigin) {
-  if (response().wasFetchedViaServiceWorker())
+  if (response().wasFetchedViaServiceWorker()) {
     return response().serviceWorkerResponseType() !=
            WebServiceWorkerResponseTypeOpaque;
+  }
   if (!getImage()->currentFrameHasSingleSecurityOrigin())
     return false;
   if (passesAccessControlCheck(securityOrigin))

@@ -34,13 +34,13 @@
 #include "cc/output/compositor_frame_sink.h"
 #include "cc/output/swap_promise.h"
 #include "cc/resources/resource_format.h"
+#include "cc/surfaces/surface_sequence_generator.h"
 #include "cc/trees/compositor_mode.h"
 #include "cc/trees/layer_tree.h"
 #include "cc/trees/layer_tree_host.h"
 #include "cc/trees/layer_tree_host_client.h"
 #include "cc/trees/layer_tree_settings.h"
 #include "cc/trees/proxy.h"
-#include "cc/trees/surface_sequence_generator.h"
 #include "cc/trees/swap_promise_manager.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/geometry/rect.h"
@@ -151,7 +151,6 @@ class CC_EXPORT LayerTreeHostInProcess : public LayerTreeHost {
   void SetDeferCommits(bool defer_commits) override;
   void LayoutAndUpdateLayers() override;
   void Composite(base::TimeTicks frame_begin_time) override;
-  void SetNeedsRedraw() override;
   void SetNeedsRedrawRect(const gfx::Rect& damage_rect) override;
   void SetNextCommitForcesRedraw() override;
   void NotifyInputThrottledUntilCommit() override;
@@ -189,7 +188,9 @@ class CC_EXPORT LayerTreeHostInProcess : public LayerTreeHost {
       LayerTreeHostImplClient* client);
   void DidLoseCompositorFrameSink();
   void DidCommitAndDrawFrame() { client_->DidCommitAndDrawFrame(); }
-  void DidCompleteSwapBuffers() { client_->DidCompleteSwapBuffers(); }
+  void DidReceiveCompositorFrameAck() {
+    client_->DidReceiveCompositorFrameAck();
+  }
   bool UpdateLayers();
   // Called when the compositor completed page scale animation.
   void DidCompletePageScaleAnimation();

@@ -208,7 +208,8 @@ void Notification::dispatchShowEvent() {
 }
 
 void Notification::dispatchClickEvent() {
-  UserGestureIndicator gestureIndicator(DefinitelyProcessingNewUserGesture);
+  UserGestureIndicator gestureIndicator(
+      UserGestureToken::create(UserGestureToken::NewGesture));
   ScopedWindowFocusAllowedIndicator windowFocusAllowed(getExecutionContext());
   dispatchEvent(Event::create(EventTypeNames::click));
 }
@@ -374,7 +375,7 @@ const AtomicString& Notification::interfaceName() const {
   return EventTargetNames::Notification;
 }
 
-void Notification::stop() {
+void Notification::contextDestroyed() {
   notificationManager()->notifyDelegateDestroyed(this);
 
   m_state = State::Closed;

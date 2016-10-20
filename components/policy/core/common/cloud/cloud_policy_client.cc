@@ -32,6 +32,8 @@ DeviceMode TranslateProtobufDeviceMode(
       return DEVICE_MODE_ENTERPRISE;
     case em::DeviceRegisterResponse::RETAIL:
       return DEVICE_MODE_LEGACY_RETAIL_MODE;
+    case em::DeviceRegisterResponse::CHROME_AD:
+      return DEVICE_MODE_ENTERPRISE_AD;
   }
   LOG(ERROR) << "Unknown enrollment mode in registration response: " << mode;
   return DEVICE_MODE_NOT_SET;
@@ -185,7 +187,7 @@ void CloudPolicyClient::OnRegisterWithCertificateRequestSigned(bool success,
           GetRequestContext()));
   policy_fetch_request_job_->SetClientID(client_id_);
   em::SignedData* signed_request = policy_fetch_request_job_->GetRequest()->
-      mutable_cert_based_register_request()->mutable_signed_request();
+      mutable_certificate_based_register_request()->mutable_signed_request();
   signed_request->set_data(signed_data.data());
   signed_request->set_signature(signed_data.signature());
   signed_request->set_extra_data_bytes(signed_data.extra_data_bytes());
@@ -767,19 +769,23 @@ void CloudPolicyClient::OnGcmIdUpdated(
 }
 
 void CloudPolicyClient::NotifyPolicyFetched() {
-  FOR_EACH_OBSERVER(Observer, observers_, OnPolicyFetched(this));
+  for (auto& observer : observers_)
+    observer.OnPolicyFetched(this);
 }
 
 void CloudPolicyClient::NotifyRegistrationStateChanged() {
-  FOR_EACH_OBSERVER(Observer, observers_, OnRegistrationStateChanged(this));
+  for (auto& observer : observers_)
+    observer.OnRegistrationStateChanged(this);
 }
 
 void CloudPolicyClient::NotifyRobotAuthCodesFetched() {
-  FOR_EACH_OBSERVER(Observer, observers_, OnRobotAuthCodesFetched(this));
+  for (auto& observer : observers_)
+    observer.OnRobotAuthCodesFetched(this);
 }
 
 void CloudPolicyClient::NotifyClientError() {
-  FOR_EACH_OBSERVER(Observer, observers_, OnClientError(this));
+  for (auto& observer : observers_)
+    observer.OnClientError(this);
 }
 
 }  // namespace policy

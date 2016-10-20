@@ -11,7 +11,7 @@
 #include "mash/quick_launch/quick_launch.h"
 #include "mash/session/session.h"
 #include "mash/task_viewer/task_viewer.h"
-#include "services/shell/public/cpp/service_context.h"
+#include "services/service_manager/public/cpp/service_context.h"
 #include "services/ui/ime/test_ime_driver/test_ime_application.h"
 #include "services/ui/service.h"
 
@@ -25,27 +25,29 @@ MashPackagedService::MashPackagedService() {}
 
 MashPackagedService::~MashPackagedService() {}
 
-bool MashPackagedService::OnConnect(const shell::Identity& remote_identity,
-                                    shell::InterfaceRegistry* registry) {
+bool MashPackagedService::OnConnect(
+    const service_manager::Identity& remote_identity,
+    service_manager::InterfaceRegistry* registry) {
   registry->AddInterface<ServiceFactory>(this);
   return true;
 }
 
 void MashPackagedService::Create(
-    const shell::Identity& remote_identity,
+    const service_manager::Identity& remote_identity,
     mojo::InterfaceRequest<ServiceFactory> request) {
   service_factory_bindings_.AddBinding(this, std::move(request));
 }
 
-void MashPackagedService::CreateService(shell::mojom::ServiceRequest request,
-                                        const std::string& mojo_name) {
+void MashPackagedService::CreateService(
+    service_manager::mojom::ServiceRequest request,
+    const std::string& mojo_name) {
   if (service_) {
     LOG(ERROR) << "request to create additional service " << mojo_name;
     return;
   }
   service_ = CreateService(mojo_name);
   if (service_) {
-    service_->set_context(base::MakeUnique<shell::ServiceContext>(
+    service_->set_context(base::MakeUnique<service_manager::ServiceContext>(
         service_.get(), std::move(request)));
     return;
   }
@@ -54,29 +56,29 @@ void MashPackagedService::CreateService(shell::mojom::ServiceRequest request,
 }
 
 // Please see header file for details on adding new services.
-std::unique_ptr<shell::Service> MashPackagedService::CreateService(
+std::unique_ptr<service_manager::Service> MashPackagedService::CreateService(
     const std::string& name) {
-  if (name == "mojo:ash")
+  if (name == "service:ash")
     return base::WrapUnique(new ash::mus::WindowManagerApplication);
-  if (name == "mojo:accessibility_autoclick")
+  if (name == "service:accessibility_autoclick")
     return base::WrapUnique(new ash::autoclick::AutoclickApplication);
-  if (name == "mojo:touch_hud")
+  if (name == "service:touch_hud")
     return base::WrapUnique(new ash::touch_hud::TouchHudApplication);
-  if (name == "mojo:mash_session")
+  if (name == "service:mash_session")
     return base::WrapUnique(new mash::session::Session);
-  if (name == "mojo:ui")
+  if (name == "service:ui")
     return base::WrapUnique(new ui::Service);
-  if (name == "mojo:quick_launch")
+  if (name == "service:quick_launch")
     return base::WrapUnique(new mash::quick_launch::QuickLaunch);
-  if (name == "mojo:task_viewer")
+  if (name == "service:task_viewer")
     return base::WrapUnique(new mash::task_viewer::TaskViewer);
-  if (name == "mojo:test_ime_driver")
+  if (name == "service:test_ime_driver")
     return base::WrapUnique(new ui::test::TestIMEApplication);
 #if defined(OS_LINUX)
-  if (name == "mojo:font_service")
+  if (name == "service:font_service")
     return base::WrapUnique(new font_service::FontServiceApp);
 #endif
-  if (name == "mojo:app_driver")
+  if (name == "service:app_driver")
     return base::WrapUnique(new mash::app_driver::AppDriver);
   return nullptr;
 }

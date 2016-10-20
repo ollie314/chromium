@@ -29,7 +29,7 @@ class SyncPointManager;
 }
 
 namespace media {
-class MediaService;
+class MediaGpuChannelManager;
 }
 
 namespace ui {
@@ -51,7 +51,7 @@ class GpuServiceInternal : public gpu::GpuChannelManagerDelegate,
   friend class GpuMain;
 
   GpuServiceInternal(const gpu::GPUInfo& gpu_info,
-                     gpu::GpuWatchdogThread* watchdog,
+                     std::unique_ptr<gpu::GpuWatchdogThread> watchdog,
                      gpu::GpuMemoryBufferFactory* memory_buffer_factory,
                      scoped_refptr<base::SingleThreadTaskRunner> io_runner);
 
@@ -103,7 +103,7 @@ class GpuServiceInternal : public gpu::GpuChannelManagerDelegate,
   // An event that will be signalled when we shutdown.
   base::WaitableEvent shutdown_event_;
 
-  gpu::GpuWatchdogThread* watchdog_thread_;
+  std::unique_ptr<gpu::GpuWatchdogThread> watchdog_thread_;
 
   gpu::GpuMemoryBufferFactory* gpu_memory_buffer_factory_;
 
@@ -114,7 +114,7 @@ class GpuServiceInternal : public gpu::GpuChannelManagerDelegate,
 
   std::unique_ptr<gpu::SyncPointManager> owned_sync_point_manager_;
   std::unique_ptr<gpu::GpuChannelManager> gpu_channel_manager_;
-  std::unique_ptr<media::MediaService> media_service_;
+  std::unique_ptr<media::MediaGpuChannelManager> media_gpu_channel_manager_;
   mojo::Binding<mojom::GpuServiceInternal> binding_;
 
   DISALLOW_COPY_AND_ASSIGN(GpuServiceInternal);

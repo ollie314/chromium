@@ -43,7 +43,6 @@ namespace ash {
 using DisplayInfoList = std::vector<display::ManagedDisplayInfo>;
 
 namespace test {
-class AshTestBase;
 class DisplayManagerTestApi;
 }
 
@@ -78,6 +77,9 @@ class ASH_EXPORT DisplayManager
     // Get the ui::DisplayConfigurator.
     virtual ui::DisplayConfigurator* display_configurator() = 0;
 #endif
+
+    virtual std::string GetInternalDisplayNameString() = 0;
+    virtual std::string GetUnknownDisplayNameString() = 0;
   };
 
   // How the second display will be used.
@@ -348,15 +350,13 @@ class ASH_EXPORT DisplayManager
   void AddObserver(display::DisplayObserver* observer);
   void RemoveObserver(display::DisplayObserver* observer);
 
+  // Returns a display::Display object for a secondary display if it exists
+  // or returns invalid display if there is no secondary display.
+  // TODO(rjkroege): Display swapping is an obsolete feature pre-dating
+  // multi-display support so remove it.
+  const display::Display& GetSecondaryDisplay() const;
+
  private:
-  FRIEND_TEST_ALL_PREFIXES(ExtendedDesktopTest, ConvertPoint);
-  FRIEND_TEST_ALL_PREFIXES(DisplayManagerTest, TestNativeDisplaysChanged);
-  FRIEND_TEST_ALL_PREFIXES(DisplayManagerTest,
-                           NativeDisplaysChangedAfterPrimaryChange);
-  FRIEND_TEST_ALL_PREFIXES(DisplayManagerTest, AutomaticOverscanInsets);
-  FRIEND_TEST_ALL_PREFIXES(DisplayManagerTest, Rotate);
-  friend class DisplayManagerTest;
-  friend class test::AshTestBase;
   friend class test::DisplayManagerTestApi;
 
   bool software_mirroring_enabled() const {

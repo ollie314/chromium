@@ -21,7 +21,7 @@
 #include "media/gpu/ipc/service/gpu_jpeg_decode_accelerator.h"
 #include "media/gpu/ipc/service/gpu_video_decode_accelerator.h"
 #include "media/gpu/ipc/service/gpu_video_encode_accelerator.h"
-#include "media/gpu/ipc/service/media_service.h"
+#include "media/gpu/ipc/service/media_gpu_channel_manager.h"
 #include "ui/gl/gl_implementation.h"
 #include "ui/gl/gl_switches.h"
 #include "ui/gl/gpu_switching_manager.h"
@@ -32,20 +32,20 @@ namespace ui {
 
 GpuServiceInternal::GpuServiceInternal(
     const gpu::GPUInfo& gpu_info,
-    gpu::GpuWatchdogThread* watchdog_thread,
+    std::unique_ptr<gpu::GpuWatchdogThread> watchdog_thread,
     gpu::GpuMemoryBufferFactory* gpu_memory_buffer_factory,
     scoped_refptr<base::SingleThreadTaskRunner> io_runner)
     : io_runner_(std::move(io_runner)),
       shutdown_event_(base::WaitableEvent::ResetPolicy::MANUAL,
                       base::WaitableEvent::InitialState::NOT_SIGNALED),
-      watchdog_thread_(watchdog_thread),
+      watchdog_thread_(std::move(watchdog_thread)),
       gpu_memory_buffer_factory_(gpu_memory_buffer_factory),
       gpu_info_(gpu_info),
       binding_(this) {}
 
 GpuServiceInternal::~GpuServiceInternal() {
   binding_.Close();
-  media_service_.reset();
+  media_gpu_channel_manager_.reset();
   gpu_channel_manager_.reset();
   owned_sync_point_manager_.reset();
 
@@ -88,7 +88,7 @@ void GpuServiceInternal::DidCreateOffscreenContext(const GURL& active_url) {
 }
 
 void GpuServiceInternal::DidDestroyChannel(int client_id) {
-  media_service_->RemoveChannel(client_id);
+  media_gpu_channel_manager_->RemoveChannel(client_id);
   NOTIMPLEMENTED();
 }
 
@@ -138,12 +138,13 @@ void GpuServiceInternal::Initialize(const InitializeCallback& callback) {
   // IPC messages before the sandbox has been enabled and all other necessary
   // initialization has succeeded.
   gpu_channel_manager_.reset(new gpu::GpuChannelManager(
-      gpu_preferences_, this, watchdog_thread_,
+      gpu_preferences_, this, watchdog_thread_.get(),
       base::ThreadTaskRunnerHandle::Get().get(), io_runner_.get(),
       &shutdown_event_, owned_sync_point_manager_.get(),
       gpu_memory_buffer_factory_));
 
-  media_service_.reset(new media::MediaService(gpu_channel_manager_.get()));
+  media_gpu_channel_manager_.reset(
+      new media::MediaGpuChannelManager(gpu_channel_manager_.get()));
   callback.Run(gpu_info_);
 }
 
@@ -167,7 +168,7 @@ void GpuServiceInternal::EstablishGpuChannel(
       client_id, client_tracing_id, preempts, allow_view_command_buffers,
       allow_real_time_streams);
   channel_handle.reset(handle.mojo_handle);
-  media_service_->AddChannel(client_id);
+  media_gpu_channel_manager_->AddChannel(client_id);
   callback.Run(std::move(channel_handle));
 }
 

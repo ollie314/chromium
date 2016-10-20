@@ -87,7 +87,6 @@ class HighContrastController;
 class ImmersiveHandlerFactoryAsh;
 class LaserPointerController;
 class LinkHandlerModelFactory;
-class LocaleNotificationController;
 class LockStateController;
 enum class LoginStatus;
 class MagnificationController;
@@ -205,10 +204,6 @@ class ASH_EXPORT Shell : public SystemModalContainerEventFilterDelegate,
   // Called after the logged-in user's profile is ready.
   void OnLoginUserProfilePrepared();
 
-  // Called when the login status changes.
-  // TODO(oshima): Investigate if we can merge this and |OnLoginStateChanged|.
-  void UpdateAfterLoginStatusChange(LoginStatus status);
-
   // Called when the application is exiting.
   void OnAppTerminating();
 
@@ -222,18 +217,12 @@ class ASH_EXPORT Shell : public SystemModalContainerEventFilterDelegate,
   // Called when a root window is created.
   void OnRootWindowAdded(WmWindow* root_window);
 
-  // Initializes |shelf_|.  Does nothing if it's already initialized.
-  void CreateShelf();
-
   // Creates a virtual keyboard. Deletes the old virtual keyboard if it already
   // exists.
   void CreateKeyboard();
 
   // Deactivates the virtual keyboard.
   void DeactivateKeyboard();
-
-  // Show shelf view if it was created hidden (before session has started).
-  void ShowShelf();
 
 #if defined(OS_CHROMEOS)
   // Test if MaximizeModeWindowManager is not enabled, and if
@@ -504,7 +493,6 @@ class ASH_EXPORT Shell : public SystemModalContainerEventFilterDelegate,
   std::unique_ptr<DisplayConfigurationController>
       display_configuration_controller_;
 
-  std::unique_ptr<LocaleNotificationController> locale_notification_controller_;
   std::unique_ptr<ScreenPinningController> screen_pinning_controller_;
 
 #if defined(OS_CHROMEOS)

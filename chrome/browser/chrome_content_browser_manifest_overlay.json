@@ -1,5 +1,6 @@
 {
-  "name": "exe:content_browser",
+  "name": "service:content_browser",
+  "display_name": "Chrome",
   "capabilities": {
     "provided": {
       "renderer": [
@@ -7,6 +8,7 @@
         "autofill::mojom::PasswordManagerDriver",
         "extensions::StashService",
         "metrics::mojom::LeakDetector",
+        "rappor::mojom::RapporRecorder",
         "startup_metric_utils::mojom::StartupMetricHost",
         "translate::mojom::ContentTranslateDriver"
       ],
@@ -14,8 +16,15 @@
         "metrics::mojom::CallStackProfileCollector"
       ],
       "ash": [
+        "ash::mojom::LocaleNotificationController",
+        "ash::mojom::ShelfController",
         "ash::mojom::SystemTray",
-        "ash::mojom::SystemTrayClient"
+        "ash::mojom::SystemTrayClient",
+        "ash::mojom::WallpaperController",
+        "ash::mojom::WallpaperManager"
+      ],
+      "mash:launchable": [
+        "mash::mojom::Launchable"
       ]
     }
   }

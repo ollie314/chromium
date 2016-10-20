@@ -518,10 +518,6 @@ void WebSettingsImpl::setAutoplayExperimentMode(const WebString& mode) {
   m_settings->setAutoplayExperimentMode(mode);
 }
 
-void WebSettingsImpl::setCaretBrowsingEnabled(bool enabled) {
-  m_settings->setCaretBrowsingEnabled(enabled);
-}
-
 void WebSettingsImpl::setValidationMessageTimerMagnification(int newValue) {
   m_settings->setValidationMessageTimerMagnification(newValue);
 }
@@ -667,10 +663,6 @@ void WebSettingsImpl::setSelectionStrategy(SelectionStrategyType strategy) {
 
 void WebSettingsImpl::setSmartInsertDeleteEnabled(bool enabled) {
   m_settings->setSmartInsertDeleteEnabled(enabled);
-}
-
-void WebSettingsImpl::setPinchOverlayScrollbarThickness(int thickness) {
-  m_settings->setPinchOverlayScrollbarThickness(thickness);
 }
 
 void WebSettingsImpl::setUseSolidColorScrollbars(bool enabled) {

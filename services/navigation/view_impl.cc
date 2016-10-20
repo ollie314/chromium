@@ -16,7 +16,7 @@
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/web_contents.h"
-#include "services/shell/public/cpp/connector.h"
+#include "services/service_manager/public/cpp/connector.h"
 #include "services/ui/public/cpp/window_tree_client.h"
 #include "ui/views/controls/webview/webview.h"
 #include "ui/views/mus/native_widget_mus.h"
@@ -58,15 +58,15 @@ mojom::NavigationEntryPtr EntryPtrFromNavEntry(
 
 }  // namespace
 
-ViewImpl::ViewImpl(std::unique_ptr<shell::Connector> connector,
+ViewImpl::ViewImpl(std::unique_ptr<service_manager::Connector> connector,
                    const std::string& client_user_id,
                    mojom::ViewClientPtr client,
-                   std::unique_ptr<shell::ServiceContextRef> ref)
+                   std::unique_ptr<service_manager::ServiceContextRef> ref)
     : connector_(std::move(connector)),
       client_(std::move(client)),
       ref_(std::move(ref)),
       web_view_(new views::WebView(
-          content::BrowserContext::GetBrowserContextForShellUserId(
+          content::BrowserContext::GetBrowserContextForServiceUserId(
               client_user_id))) {
   web_view_->GetWebContents()->SetDelegate(this);
   const content::NavigationController* controller =
@@ -130,10 +130,6 @@ void ViewImpl::HideInterstitial() {
     web_view_->GetWebContents()->GetInterstitialPage()->Proceed();
 }
 
-void ViewImpl::SetResizerSize(const gfx::Size& size) {
-  resizer_size_ = size;
-}
-
 void ViewImpl::AddNewContents(content::WebContents* source,
                               content::WebContents* new_contents,
                               WindowOpenDisposition disposition,
@@ -148,7 +144,7 @@ void ViewImpl::AddNewContents(content::WebContents* source,
                        initial_rect, user_gesture);
 
   const std::string new_user_id =
-      content::BrowserContext::GetShellUserIdFor(
+      content::BrowserContext::GetServiceUserIdFor(
           new_contents->GetBrowserContext());
   auto impl = base::MakeUnique<ViewImpl>(connector_->Clone(), new_user_id,
                                          std::move(client), ref_->Clone());
@@ -209,13 +205,6 @@ void ViewImpl::LoadProgressChanged(content::WebContents* source,
 
 void ViewImpl::UpdateTargetURL(content::WebContents* source, const GURL& url) {
   client_->UpdateHoverURL(url);
-}
-
-gfx::Rect ViewImpl::GetRootWindowResizerRect() const {
-  gfx::Rect bounds = web_view_->GetLocalBounds();
-  return gfx::Rect(bounds.right() - resizer_size_.width(),
-                   bounds.bottom() - resizer_size_.height(),
-                   resizer_size_.width(), resizer_size_.height());
 }
 
 void ViewImpl::Observe(int type,

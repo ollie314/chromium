@@ -42,24 +42,27 @@ using namespace blink;
 namespace WebCoreTestSupport {
 
 namespace {
+
 blink::InstallConditionalFeaturesFunction
     s_originalInstallConditionalFeaturesFunction = nullptr;
-}
 
 v8::Local<v8::Value> createInternalsObject(v8::Local<v8::Context> context) {
   ScriptState* scriptState = ScriptState::from(context);
   v8::Local<v8::Object> global = scriptState->context()->Global();
   ExecutionContext* executionContext = scriptState->getExecutionContext();
-  if (executionContext->isDocument())
-    return toV8(Internals::create(scriptState), global, scriptState->isolate());
-  if (executionContext->isWorkerGlobalScope())
-    return toV8(WorkerInternals::create(scriptState), global,
+  if (executionContext->isDocument()) {
+    return toV8(Internals::create(executionContext), global,
                 scriptState->isolate());
+  }
+  if (executionContext->isWorkerGlobalScope())
+    return toV8(WorkerInternals::create(), global, scriptState->isolate());
   return v8::Local<v8::Value>();
+}
 }
 
 void injectInternalsObject(v8::Local<v8::Context> context) {
-  // Set conditional features installation function to |installConditionalFeaturesForTests|
+  // Set conditional features installation function to
+  // |installConditionalFeaturesForTests|
   if (!s_originalInstallConditionalFeaturesFunction) {
     s_originalInstallConditionalFeaturesFunction =
         setInstallConditionalFeaturesFunction(
@@ -75,8 +78,7 @@ void injectInternalsObject(v8::Local<v8::Context> context) {
 
   global
       ->Set(scriptState->context(),
-            v8AtomicString(scriptState->isolate(), Internals::internalsId),
-            internals)
+            v8AtomicString(scriptState->isolate(), "internals"), internals)
       .ToChecked();
 }
 
@@ -93,8 +95,7 @@ void installConditionalFeaturesForTests(
       executionContext, OriginTrialContext::DontCreateIfNotExists);
 
   if (type == &V8OriginTrialsTest::wrapperTypeInfo) {
-    if (originTrialContext &&
-        originTrialContext->isFeatureEnabled("Frobulate")) {
+    if (originTrialContext && originTrialContext->isTrialEnabled("Frobulate")) {
       V8OriginTrialsTest::installOriginTrialsSampleAPI(
           scriptState->isolate(), scriptState->world(), v8::Local<v8::Object>(),
           prototypeObject, interfaceObject);
@@ -112,7 +113,8 @@ void resetInternalsObject(v8::Local<v8::Context> context) {
   Document* document = toDocument(scriptState->getExecutionContext());
   ASSERT(document);
   LocalFrame* frame = document->frame();
-  // Should the document have been detached, the page is assumed being destroyed (=> no reset required.)
+  // Should the document have been detached, the page is assumed being destroyed
+  // (=> no reset required.)
   if (!frame)
     return;
   Page* page = frame->page();

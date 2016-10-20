@@ -12,8 +12,9 @@
 #include "media/midi/midi_scheduler.h"
 #include "media/midi/usb_midi_descriptor_parser.h"
 
-namespace media {
 namespace midi {
+
+using mojom::Result;
 
 MidiManagerUsb::MidiManagerUsb(std::unique_ptr<UsbMidiDevice::Factory> factory)
     : device_factory_(std::move(factory)) {}
@@ -167,4 +168,3 @@ bool MidiManagerUsb::AddPorts(UsbMidiDevice* device, int device_id) {
 }
 
 }  // namespace midi
-}  // namespace media

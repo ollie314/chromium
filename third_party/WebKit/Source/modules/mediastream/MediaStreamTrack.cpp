@@ -60,9 +60,8 @@ MediaStreamTrack::MediaStreamTrack(ExecutionContext* context,
       m_readyState(MediaStreamSource::ReadyStateLive),
       m_isIteratingRegisteredMediaStreams(false),
       m_stopped(false),
-      m_component(component)
+      m_component(component),
       // The source's constraints aren't yet initialized at creation time.
-      ,
       m_constraints() {
   m_component->source()->addObserver(this);
 }
@@ -227,7 +226,7 @@ void MediaStreamTrack::propagateTrackEnded() {
   m_isIteratingRegisteredMediaStreams = false;
 }
 
-void MediaStreamTrack::stop() {
+void MediaStreamTrack::contextDestroyed() {
   m_stopped = true;
 }
 

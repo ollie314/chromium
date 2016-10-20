@@ -74,6 +74,7 @@
 #include "chrome/browser/android/omnibox/autocomplete_controller_android.h"
 #include "chrome/browser/android/omnibox/omnibox_prerender.h"
 #include "chrome/browser/android/password_ui_view_android.h"
+#include "chrome/browser/android/physical_web/physical_web_data_source_android.h"
 #include "chrome/browser/android/policy/policy_auditor.h"
 #include "chrome/browser/android/precache/precache_launcher.h"
 #include "chrome/browser/android/preferences/autofill/autofill_profile_bridge.h"
@@ -103,7 +104,6 @@
 #include "chrome/browser/android/webapk/webapk_installer.h"
 #include "chrome/browser/android/webapk/webapk_update_manager.h"
 #include "chrome/browser/android/webapps/add_to_homescreen_manager.h"
-#include "chrome/browser/android/webapps/webapp_registry.h"
 #include "chrome/browser/autofill/android/personal_data_manager_android.h"
 #include "chrome/browser/dom_distiller/dom_distiller_service_factory_android.h"
 #include "chrome/browser/dom_distiller/tab_utils_android.h"
@@ -120,6 +120,7 @@
 #include "chrome/browser/password_manager/account_chooser_dialog_android.h"
 #include "chrome/browser/password_manager/auto_signin_first_run_dialog_android.h"
 #include "chrome/browser/permissions/permission_update_infobar_delegate_android.h"
+#include "chrome/browser/predictors/resource_prefetch_predictor_android.h"
 #include "chrome/browser/prerender/external_prerender_handler_android.h"
 #include "chrome/browser/profiles/profile_android.h"
 #include "chrome/browser/search_engines/template_url_service_android.h"
@@ -136,9 +137,7 @@
 #include "chrome/browser/ui/android/autofill/credit_card_scanner_view_android.h"
 #include "chrome/browser/ui/android/autofill/password_generation_popup_view_android.h"
 #include "chrome/browser/ui/android/bluetooth_chooser_android.h"
-#include "chrome/browser/ui/android/certificate_viewer_android.h"
 #include "chrome/browser/ui/android/chrome_http_auth_handler.h"
-#include "chrome/browser/ui/android/connection_info_popup_android.h"
 #include "chrome/browser/ui/android/context_menu_helper.h"
 #include "chrome/browser/ui/android/infobars/app_banner_infobar_android.h"
 #include "chrome/browser/ui/android/infobars/autofill_save_card_infobar.h"
@@ -150,13 +149,15 @@
 #include "chrome/browser/ui/android/javascript_app_modal_dialog_android.h"
 #include "chrome/browser/ui/android/omnibox/omnibox_url_emphasizer.h"
 #include "chrome/browser/ui/android/omnibox/omnibox_view_util.h"
+#include "chrome/browser/ui/android/page_info/certificate_viewer_android.h"
+#include "chrome/browser/ui/android/page_info/connection_info_popup_android.h"
+#include "chrome/browser/ui/android/page_info/website_settings_popup_android.h"
 #include "chrome/browser/ui/android/snackbars/auto_signin_prompt_controller.h"
 #include "chrome/browser/ui/android/ssl_client_certificate_request.h"
 #include "chrome/browser/ui/android/tab_model/single_tab_model.h"
 #include "chrome/browser/ui/android/tab_model/tab_model_jni_bridge.h"
 #include "chrome/browser/ui/android/toolbar/toolbar_model_android.h"
 #include "chrome/browser/ui/android/usb_chooser_dialog_android.h"
-#include "chrome/browser/ui/android/website_settings_popup_android.h"
 #include "components/dom_distiller/content/browser/android/content_jni_registrar.h"
 #include "components/dom_distiller/core/android/core_jni_registrar.h"
 #include "components/gcm_driver/android/component_jni_registrar.h"
@@ -175,12 +176,15 @@
 #include "printing/printing_context_android.h"
 #endif
 
-#if defined(ENABLE_VR_SHELL)
+#if defined(ENABLE_VR_SHELL) || defined(ENABLE_WEBVR)
 #include "chrome/browser/android/vr_shell/vr_shell.h"
 #include "chrome/browser/android/vr_shell/vr_shell_delegate.h"
 #endif
 
-namespace chrome {
+#if !defined(OFFICIAL_BUILD)
+#include "chrome/browser/android/offline_pages/evaluation/offline_page_evaluation_bridge.h"
+#endif
+
 namespace android {
 
 static base::android::RegistrationMethod kChromeRegisteredMethods[] = {
@@ -228,12 +232,12 @@ static base::android::RegistrationMethod kChromeRegisteredMethods[] = {
     {"CardUnmaskPrompt", autofill::CardUnmaskPromptViewAndroid::Register},
     {"CertificateViewer", RegisterCertificateViewer},
     {"ChildAccountService", RegisterChildAccountService},
-    {"ChromeApplication", ChromeApplication::RegisterBindings},
+    {"ChromeApplication", chrome::android::ChromeApplication::RegisterBindings},
     {"ChromeBlimpClientContextDelegate",
      ChromeBlimpClientContextDelegateAndroid::RegisterJni},
     {"ChromeBrowserProvider",
      ChromeBrowserProvider::RegisterChromeBrowserProvider},
-    {"ChromeFeatureList", RegisterChromeFeatureListJni},
+    {"ChromeFeatureList", chrome::android::RegisterChromeFeatureListJni},
     {"ChromeHttpAuthHandler",
      ChromeHttpAuthHandler::RegisterChromeHttpAuthHandler},
 #if defined(ENABLE_MEDIA_ROUTER)
@@ -245,7 +249,7 @@ static base::android::RegistrationMethod kChromeRegisteredMethods[] = {
     {"ConnectionInfoPopupAndroid",
      ConnectionInfoPopupAndroid::RegisterConnectionInfoPopupAndroid},
     {"SecurityStateModel", RegisterSecurityStateModelAndroid},
-    {"ConnectivityChecker", RegisterConnectivityChecker},
+    {"ConnectivityChecker", chrome::android::RegisterConnectivityChecker},
     {"ContextMenuHelper", RegisterContextMenuHelper},
     {"ContextualSearchManager", RegisterContextualSearchManager},
     {"ContextualSearchSceneLayer", RegisterContextualSearchSceneLayer},
@@ -266,7 +270,8 @@ static base::android::RegistrationMethod kChromeRegisteredMethods[] = {
     {"DownloadController", DownloadController::RegisterDownloadController},
     {"DownloadManagerService",
      DownloadManagerService::RegisterDownloadManagerService},
-    {"ExternalDataUseObserverBridge", RegisterExternalDataUseObserver},
+    {"ExternalDataUseObserverBridge",
+     chrome::android::RegisterExternalDataUseObserver},
     {"ExternalPrerenderRequestHandler",
      prerender::ExternalPrerenderHandlerAndroid::
          RegisterExternalPrerenderHandlerAndroid},
@@ -285,12 +290,13 @@ static base::android::RegistrationMethod kChromeRegisteredMethods[] = {
      invalidation::InvalidationServiceFactoryAndroid::Register},
     {"SimpleConfirmInfoBarBuilder", RegisterSimpleConfirmInfoBarBuilder},
     {"ShortcutHelper", ShortcutHelper::RegisterShortcutHelper},
-    {"JavaExceptionReporter", RegisterJavaExceptionReporterJni},
+    {"JavaExceptionReporter",
+     chrome::android::RegisterJavaExceptionReporterJni},
     {"JavascriptAppModalDialog",
      JavascriptAppModalDialogAndroid::RegisterJavascriptAppModalDialog},
     {"LargeIconBridge", LargeIconBridge::RegisterLargeIconBridge},
     {"LaunchMetrics", metrics::RegisterLaunchMetrics},
-    {"LayerTitleCache", chrome::android::RegisterLayerTitleCache},
+    {"LayerTitleCache", RegisterLayerTitleCache},
     {"SpecialLocaleHandler", RegisterSpecialLocaleHandler},
     {"LogoBridge", RegisterLogoBridge},
     {"ManifestUpgradeDetectorFetcher",
@@ -300,7 +306,7 @@ static base::android::RegistrationMethod kChromeRegisteredMethods[] = {
     {"MostVisitedSites", MostVisitedSitesBridge::Register},
     {"NativeInfoBar", RegisterNativeInfoBar},
     {"ExternalEstimateProviderAndroid",
-     RegisterExternalEstimateProviderAndroid},
+     chrome::android::RegisterExternalEstimateProviderAndroid},
     {"NewTabPagePrefs", NewTabPagePrefs::RegisterNewTabPagePrefs},
     {"NotificationPlatformBridge",
      NotificationPlatformBridgeAndroid::RegisterNotificationPlatformBridge},
@@ -310,6 +316,10 @@ static base::android::RegistrationMethod kChromeRegisteredMethods[] = {
     {"OfflinePageBridge", offline_pages::android::RegisterOfflinePageBridge},
     {"OfflinePageDownloadBridge",
      offline_pages::android::OfflinePageDownloadBridge::Register},
+#if !defined(OFFICIAL_BUILD)
+    {"OfflinePageEvaluationBridge",
+     offline_pages::android::OfflinePageEvaluationBridge::Register},
+#endif
     {"OmniboxPrerender", RegisterOmniboxPrerender},
     {"OmniboxUrlEmphasizer",
      OmniboxUrlEmphasizer::RegisterOmniboxUrlEmphasizer},
@@ -325,6 +335,8 @@ static base::android::RegistrationMethod kChromeRegisteredMethods[] = {
      PermissionUpdateInfoBarDelegate::RegisterPermissionUpdateInfoBarDelegate},
     {"PersonalDataManagerAndroid",
      autofill::PersonalDataManagerAndroid::Register},
+    {"PhysicalWebDataSourceAndroid",
+     PhysicalWebDataSourceAndroid::RegisterPhysicalWebDataSource},
     {"PolicyAuditor", RegisterPolicyAuditor},
     {"PrecacheLauncher", RegisterPrecacheLauncher},
     {"PrefServiceBridge", PrefServiceBridge::RegisterPrefServiceBridge},
@@ -337,10 +349,12 @@ static base::android::RegistrationMethod kChromeRegisteredMethods[] = {
     {"ReaderModeSceneLayer", RegisterReaderModeSceneLayer},
     {"RemoteMediaPlayerBridge",
      remote_media::RemoteMediaPlayerBridge::RegisterRemoteMediaPlayerBridge},
-    {"RevenueStats", RegisterRevenueStats},
+    {"ResourcePrefetchPredictor",
+     predictors::RegisterResourcePrefetchPredictor},
+    {"RevenueStats", chrome::android::RegisterRevenueStats},
     {"SafeBrowsingApiBridge", safe_browsing::RegisterSafeBrowsingApiBridge},
-    {"SceneLayer", chrome::android::RegisterSceneLayer},
-    {"ScreenshotTask", RegisterScreenshotTask},
+    {"SceneLayer", RegisterSceneLayer},
+    {"ScreenshotTask", chrome::android::RegisterScreenshotTask},
     {"ServiceTabLauncher", ServiceTabLauncher::Register},
     {"SessionTabHelper", RegisterSessionTabHelper},
     {"SigninInvestigator", SigninInvestigatorAndroid::Register},
@@ -350,14 +364,15 @@ static base::android::RegistrationMethod kChromeRegisteredMethods[] = {
     {"SpellCheckerSessionBridge", spellcheck::android::RegisterSpellcheckJni},
 #endif
     {"SqliteCursor", SQLiteCursor::RegisterSqliteCursor},
-    {"SSLClientCertificateRequest", RegisterSSLClientCertificateRequestAndroid},
-    {"StartupMetricUtils", RegisterStartupMetricUtils},
-    {"StaticTabSceneLayer", chrome::android::RegisterStaticTabSceneLayer},
+    {"SSLClientCertificateRequest",
+     chrome::android::RegisterSSLClientCertificateRequestAndroid},
+    {"StartupMetricUtils", chrome::android::RegisterStartupMetricUtils},
+    {"StaticTabSceneLayer", RegisterStaticTabSceneLayer},
     {"SupervisedUserContentProvider", SupervisedUserContentProvider::Register},
     {"Sync", syncer::RegisterSyncJni},
     {"SyncSessionsMetrics", SyncSessionsMetricsAndroid::Register},
     {"TabAndroid", TabAndroid::RegisterTabAndroid},
-    {"TabContentManager", chrome::android::RegisterTabContentManager},
+    {"TabContentManager", RegisterTabContentManager},
     {"TabListSceneLayer", RegisterTabListSceneLayer},
     {"TabModelJniBridge", TabModelJniBridge::Register},
     {"TabState", RegisterTabState},
@@ -375,14 +390,13 @@ static base::android::RegistrationMethod kChromeRegisteredMethods[] = {
     {"UsbChooserDialogAndroid", UsbChooserDialogAndroid::Register},
     {"Variations", variations::android::RegisterVariations},
     {"VariationsSession", chrome::android::RegisterVariationsSession},
-#if defined(ENABLE_VR_SHELL)
+#if defined(ENABLE_VR_SHELL) || defined(ENABLE_WEBVR)
     {"VrShell", vr_shell::RegisterVrShell},
     {"VrShellDelegate", vr_shell::RegisterVrShellDelegate},
 #endif
     {"WarmupManager", RegisterWarmupManager},
     {"WebApkInstaller", WebApkInstaller::Register},
     {"WebApkUpdateManager", WebApkUpdateManager::Register},
-    {"WebappRegistry", WebappRegistry::RegisterWebappRegistry},
     {"WebContentsFactory", RegisterWebContentsFactory},
     {"WebsitePreferenceBridge", RegisterWebsitePreferenceBridge},
     {"WebsiteSettingsPopupAndroid",
@@ -400,4 +414,3 @@ bool RegisterBrowserJNI(JNIEnv* env) {
 }
 
 }  // namespace android
-}  // namespace chrome

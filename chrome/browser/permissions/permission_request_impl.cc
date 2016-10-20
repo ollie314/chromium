@@ -5,11 +5,9 @@
 #include "chrome/browser/permissions/permission_request_impl.h"
 
 #include "build/build_config.h"
-#include "chrome/browser/permissions/permission_decision_auto_blocker.h"
 #include "chrome/browser/permissions/permission_uma_util.h"
 #include "chrome/browser/permissions/permission_util.h"
 #include "chrome/grit/generated_resources.h"
-#include "chrome/grit/theme_resources.h"
 #include "components/url_formatter/elide_url.h"
 #include "net/base/escape.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -39,8 +37,7 @@ PermissionRequestImpl::~PermissionRequestImpl() {
   }
 }
 
-gfx::VectorIconId PermissionRequestImpl::GetVectorIconId() const {
-#if !defined(OS_MACOSX) && !defined(OS_ANDROID)
+PermissionRequest::IconId PermissionRequestImpl::GetIconId() const {
   switch (permission_type_) {
     case content::PermissionType::GEOLOCATION:
       return gfx::VectorIconId::LOCATION_ON;
@@ -62,35 +59,6 @@ gfx::VectorIconId PermissionRequestImpl::GetVectorIconId() const {
       NOTREACHED();
       return gfx::VectorIconId::VECTOR_ICON_NONE;
   }
-#else  // !defined(OS_MACOSX) && !defined(OS_ANDROID)
-  return gfx::VectorIconId::VECTOR_ICON_NONE;
-#endif
-}
-
-int PermissionRequestImpl::GetIconId() const {
-  int icon_id = IDR_INFOBAR_WARNING;
-#if defined(OS_MACOSX) || defined(OS_ANDROID)
-  switch (permission_type_) {
-    case content::PermissionType::GEOLOCATION:
-      icon_id = IDR_INFOBAR_GEOLOCATION;
-      break;
-#if defined(ENABLE_NOTIFICATIONS)
-    case content::PermissionType::NOTIFICATIONS:
-    case content::PermissionType::PUSH_MESSAGING:
-      icon_id = IDR_INFOBAR_DESKTOP_NOTIFICATIONS;
-      break;
-#endif
-    case content::PermissionType::MIDI_SYSEX:
-      icon_id = IDR_ALLOWED_MIDI_SYSEX;
-      break;
-    case content::PermissionType::FLASH:
-      icon_id = IDR_ALLOWED_PLUGINS;
-      break;
-    default:
-      NOTREACHED();
-  }
-#endif
-  return icon_id;
 }
 
 base::string16 PermissionRequestImpl::GetMessageTextFragment() const {
@@ -181,4 +149,27 @@ PermissionRequestGestureType PermissionRequestImpl::GetGestureType()
     const {
   return has_gesture_ ? PermissionRequestGestureType::GESTURE
                       : PermissionRequestGestureType::NO_GESTURE;
+}
+
+ContentSettingsType PermissionRequestImpl::GetContentSettingsType() const {
+  switch (permission_type_) {
+    case content::PermissionType::GEOLOCATION:
+      return CONTENT_SETTINGS_TYPE_GEOLOCATION;
+    case content::PermissionType::PUSH_MESSAGING:
+#if defined(ENABLE_NOTIFICATIONS)
+    case content::PermissionType::NOTIFICATIONS:
+#endif
+      return CONTENT_SETTINGS_TYPE_NOTIFICATIONS;
+    case content::PermissionType::MIDI_SYSEX:
+      return CONTENT_SETTINGS_TYPE_MIDI_SYSEX;
+#if defined(OS_CHROMEOS)
+    case content::PermissionType::PROTECTED_MEDIA_IDENTIFIER:
+      return CONTENT_SETTINGS_TYPE_PROTECTED_MEDIA_IDENTIFIER;
+#endif
+    case content::PermissionType::FLASH:
+      return CONTENT_SETTINGS_TYPE_PLUGINS;
+    default:
+      NOTREACHED();
+      return CONTENT_SETTINGS_TYPE_DEFAULT;
+  }
 }

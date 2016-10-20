@@ -32,21 +32,16 @@
 #define KeyframeEffect_h
 
 #include "core/CoreExport.h"
-#include "core/animation/EffectInput.h"
+#include "core/animation/AnimationEffectTiming.h"
 #include "core/animation/EffectModel.h"
 #include "core/animation/KeyframeEffectReadOnly.h"
-#include "core/animation/TimingInput.h"
-#include "platform/heap/Handle.h"
-#include "wtf/RefPtr.h"
 
 namespace blink {
 
-class KeyframeEffectOptions;
-class Dictionary;
 class Element;
 class ExceptionState;
+class KeyframeEffectOptions;
 class PropertyHandle;
-class SampledEffect;
 
 // Represents the effect of an Animation on an Element's properties.
 // http://w3c.github.io/web-animations/#keyframe-effect
@@ -54,12 +49,11 @@ class CORE_EXPORT KeyframeEffect final : public KeyframeEffectReadOnly {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  enum Priority { DefaultPriority, TransitionPriority };
-
   static KeyframeEffect* create(Element*,
                                 EffectModel*,
                                 const Timing&,
-                                Priority = DefaultPriority,
+                                KeyframeEffectReadOnly::Priority =
+                                    KeyframeEffectReadOnly::DefaultPriority,
                                 EventDelegate* = nullptr);
   // Web Animations API Bindings constructors.
   static KeyframeEffect* create(
@@ -84,63 +78,14 @@ class CORE_EXPORT KeyframeEffect final : public KeyframeEffectReadOnly {
 
   bool isKeyframeEffect() const override { return true; }
 
-  bool affects(PropertyHandle) const;
-  const EffectModel* model() const { return m_model.get(); }
-  EffectModel* model() { return m_model.get(); }
-  void setModel(EffectModel* model) { m_model = model; }
-  Priority getPriority() const { return m_priority; }
-  Element* target() const { return m_target; }
-
-  void notifySampledEffectRemovedFromAnimationStack();
-
-  bool isCandidateForAnimationOnCompositor(double animationPlaybackRate) const;
-  // Must only be called once.
-  bool maybeStartAnimationOnCompositor(int group,
-                                       double startTime,
-                                       double timeOffset,
-                                       double animationPlaybackRate);
-  bool hasActiveAnimationsOnCompositor() const;
-  bool hasActiveAnimationsOnCompositor(CSSPropertyID) const;
-  bool cancelAnimationOnCompositor();
-  void restartAnimationOnCompositor();
-  void cancelIncompatibleAnimationsOnCompositor();
-  void pauseAnimationForTestingOnCompositor(double pauseTime);
-
-  void attachCompositedLayers();
-
-  void setCompositorAnimationIdsForTesting(
-      const Vector<int>& compositorAnimationIds) {
-    m_compositorAnimationIds = compositorAnimationIds;
-  }
-
-  DECLARE_VIRTUAL_TRACE();
-
-  void downgradeToNormal() { m_priority = DefaultPriority; }
-
- protected:
-  void applyEffects();
-  void clearEffects();
-  void updateChildrenAndEffects() const override;
-  void attach(Animation*) override;
-  void detach() override;
-  void specifiedTimingChanged() override;
-  double calculateTimeToEffectChange(bool forwards,
-                                     double inheritedTime,
-                                     double timeToNextIteration) const override;
-  virtual bool hasIncompatibleStyle();
-  bool hasMultipleTransformProperties() const;
+  AnimationEffectTiming* timing() override;
 
  private:
   KeyframeEffect(Element*,
                  EffectModel*,
                  const Timing&,
-                 Priority,
+                 KeyframeEffectReadOnly::Priority,
                  EventDelegate*);
-
-  Priority m_priority;
-  Vector<int> m_compositorAnimationIds;
-
-  friend class AnimationAnimationV8Test;
 };
 
 DEFINE_TYPE_CASTS(KeyframeEffect,

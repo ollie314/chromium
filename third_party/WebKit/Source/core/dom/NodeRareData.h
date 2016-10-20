@@ -22,6 +22,7 @@
 #ifndef NodeRareData_h
 #define NodeRareData_h
 
+#include "bindings/core/v8/TraceWrapperMember.h"
 #include "core/dom/MutationObserverRegistration.h"
 #include "core/dom/NodeListsNodeData.h"
 #include "platform/heap/Handle.h"
@@ -34,7 +35,7 @@ class NodeMutationObserverData final
   WTF_MAKE_NONCOPYABLE(NodeMutationObserverData);
 
  public:
-  HeapVector<Member<MutationObserverRegistration>> registry;
+  HeapVector<TraceWrapperMember<MutationObserverRegistration>> registry;
   HeapHashSet<Member<MutationObserverRegistration>> transientRegistry;
 
   static NodeMutationObserverData* create() {
@@ -70,7 +71,11 @@ class NodeRareData : public GarbageCollectedFinalized<NodeRareData>,
 
   void clearNodeLists() { m_nodeLists.clear(); }
   NodeListsNodeData* nodeLists() const { return m_nodeLists.get(); }
+  // ensureNodeLists() and a following NodeListsNodeData functions must be
+  // wrapped with a ThreadState::GCForbiddenScope in order to avoid an
+  // initialized m_nodeLists is cleared by NodeRareData::traceAfterDispatch().
   NodeListsNodeData& ensureNodeLists() {
+    DCHECK(ThreadState::current()->isGCForbidden());
     if (!m_nodeLists)
       m_nodeLists = NodeListsNodeData::create();
     return *m_nodeLists;
@@ -80,8 +85,10 @@ class NodeRareData : public GarbageCollectedFinalized<NodeRareData>,
     return m_mutationObserverData.get();
   }
   NodeMutationObserverData& ensureMutationObserverData() {
-    if (!m_mutationObserverData)
+    if (!m_mutationObserverData) {
       m_mutationObserverData = NodeMutationObserverData::create();
+      ScriptWrappableVisitor::writeBarrier(this, m_mutationObserverData);
+    }
     return *m_mutationObserverData;
   }
 

@@ -61,19 +61,19 @@ class NTPSnippetsBridge
   void DismissSuggestion(
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj,
+      const base::android::JavaParamRef<jstring>& jurl,
+      jint global_position,
       jint category,
+      jint category_position,
       const base::android::JavaParamRef<jstring>& id_within_category);
 
   void DismissCategory(JNIEnv* env,
                        const base::android::JavaParamRef<jobject>& obj,
                        jint category);
 
-  // Checks if the URL has been visited. The callback will not be called
-  // synchronously.
-  void GetURLVisited(JNIEnv* env,
-                     const base::android::JavaParamRef<jobject>& obj,
-                     const base::android::JavaParamRef<jobject>& callback,
-                     const base::android::JavaParamRef<jstring>& jurl);
+  void RestoreDismissedCategories(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj);
 
   void OnPageShown(
       JNIEnv* env,

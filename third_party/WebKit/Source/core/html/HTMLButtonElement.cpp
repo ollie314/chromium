@@ -79,8 +79,8 @@ const AtomicString& HTMLButtonElement::formControlType() const {
 bool HTMLButtonElement::isPresentationAttribute(
     const QualifiedName& name) const {
   if (name == alignAttr) {
-    // Don't map 'align' attribute.  This matches what Firefox and IE do, but not Opera.
-    // See http://bugs.webkit.org/show_bug.cgi?id=12071
+    // Don't map 'align' attribute.  This matches what Firefox and IE do, but
+    // not Opera.  See http://bugs.webkit.org/show_bug.cgi?id=12071
     return false;
   }
 
@@ -142,7 +142,7 @@ void HTMLButtonElement::defaultEventHandler(Event* event) {
     }
     if (event->type() == EventTypeNames::keyup &&
         toKeyboardEvent(event)->key() == " ") {
-      if (active())
+      if (isActive())
         dispatchSimulatedClick(event);
       event->setDefaultHandled();
       return;

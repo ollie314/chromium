@@ -51,9 +51,9 @@ class CORE_EXPORT HTMLFrameOwnerElement : public HTMLElement,
 
   void disconnectContentFrame();
 
-  // Most subclasses use LayoutPart (either LayoutEmbeddedObject or LayoutIFrame)
-  // except for HTMLObjectElement and HTMLEmbedElement which may return any
-  // LayoutObject when using fallback content.
+  // Most subclasses use LayoutPart (either LayoutEmbeddedObject or
+  // LayoutIFrame) except for HTMLObjectElement and HTMLEmbedElement which may
+  // return any LayoutObject when using fallback content.
   LayoutPart* layoutPart() const;
 
   Document* getSVGDocument(ExceptionState&) const;
@@ -86,6 +86,7 @@ class CORE_EXPORT HTMLFrameOwnerElement : public HTMLElement,
   int marginWidth() const override { return -1; }
   int marginHeight() const override { return -1; }
   bool allowFullscreen() const override { return false; }
+  AtomicString csp() const override { return nullAtom; }
   const WebVector<WebPermissionType>& delegatedPermissions() const override;
 
   DECLARE_VIRTUAL_TRACE();

@@ -6,7 +6,7 @@
 
 #include "base/values.h"
 #include "services/catalog/store.h"
-#include "services/shell/public/cpp/names.h"
+#include "services/service_manager/public/cpp/names.h"
 
 namespace catalog {
 namespace {
@@ -35,84 +35,59 @@ bool ReadStringSetFromValue(const base::Value& value,
   return ReadStringSet(*list_value, string_set);
 }
 
-bool ReadStringSetFromDictionary(const base::DictionaryValue& dictionary,
-                                 const std::string& key,
-                                 std::set<std::string>* string_set) {
-  const base::ListValue* list_value = nullptr;
-  if (dictionary.HasKey(key) && !dictionary.GetList(key, &list_value)) {
-    LOG(ERROR) << "Entry::Deserialize: " << key << " must be a list.";
-    return false;
-  }
-  if (list_value)
-    return ReadStringSet(*list_value, string_set);
-  return true;
-}
-
-bool BuildCapabilities(const base::DictionaryValue& value,
-                       shell::CapabilitySpec* capabilities) {
-  DCHECK(capabilities);
-  const base::DictionaryValue* provided_value = nullptr;
-  if (value.HasKey(Store::kCapabilities_ProvidedKey) &&
-      !value.GetDictionary(Store::kCapabilities_ProvidedKey,
-                           &provided_value)) {
-    LOG(ERROR) << "Entry::Deserialize: " << Store::kCapabilities_ProvidedKey
+bool BuildInterfaceProviderSpecs(
+    const base::DictionaryValue& value,
+    service_manager::InterfaceProviderSpec* interface_provider_specs) {
+  DCHECK(interface_provider_specs);
+  const base::DictionaryValue* provides_value = nullptr;
+  if (value.HasKey(Store::kInterfaceProviderSpecs_ProvidesKey) &&
+      !value.GetDictionary(Store::kInterfaceProviderSpecs_ProvidesKey,
+                           &provides_value)) {
+    LOG(ERROR) << "Entry::Deserialize: "
+               << Store::kInterfaceProviderSpecs_ProvidesKey
                << " must be a dictionary.";
     return false;
   }
-  if (provided_value) {
-    shell::CapabilityRequest provided;
-    base::DictionaryValue::Iterator it(*provided_value);
+  if (provides_value) {
+    base::DictionaryValue::Iterator it(*provides_value);
     for(; !it.IsAtEnd(); it.Advance()) {
-      shell::Interfaces interfaces;
+      service_manager::InterfaceSet interfaces;
       if (!ReadStringSetFromValue(it.value(), &interfaces)) {
         LOG(ERROR) << "Entry::Deserialize: Invalid interface list in provided "
-                   << " classes dictionary";
+                   << " capabilities dictionary";
         return false;
       }
-      capabilities->provided[it.key()] = interfaces;
+      interface_provider_specs->provides[it.key()] = interfaces;
     }
   }
 
-  const base::DictionaryValue* required_value = nullptr;
-  if (value.HasKey(Store::kCapabilities_RequiredKey) &&
-      !value.GetDictionary(Store::kCapabilities_RequiredKey,
-                           &required_value)) {
-    LOG(ERROR) << "Entry::Deserialize: " << Store::kCapabilities_RequiredKey
+  const base::DictionaryValue* requires_value = nullptr;
+  if (value.HasKey(Store::kInterfaceProviderSpecs_RequiresKey) &&
+      !value.GetDictionary(Store::kInterfaceProviderSpecs_RequiresKey,
+                           &requires_value)) {
+    LOG(ERROR) << "Entry::Deserialize: "
+               << Store::kInterfaceProviderSpecs_RequiresKey
                << " must be a dictionary.";
     return false;
   }
-  if (required_value) {
-    base::DictionaryValue::Iterator it(*required_value);
+  if (requires_value) {
+    base::DictionaryValue::Iterator it(*requires_value);
     for (; !it.IsAtEnd(); it.Advance()) {
-      shell::CapabilityRequest spec;
-      const base::DictionaryValue* entry_value = nullptr;
-      if (!it.value().GetAsDictionary(&entry_value)) {
-        LOG(ERROR) << "Entry::Deserialize: " << Store::kCapabilities_RequiredKey
-                   << " must be a dictionary.";
+      service_manager::CapabilitySet capabilities;
+      const base::ListValue* entry_value = nullptr;
+      if (!it.value().GetAsList(&entry_value)) {
+        LOG(ERROR) << "Entry::Deserialize: "
+                   << Store::kInterfaceProviderSpecs_RequiresKey
+                   << " entry must be a list.";
         return false;
       }
-      if (!ReadStringSetFromDictionary(
-              *entry_value, Store::kCapabilities_ClassesKey, &spec.classes)) {
-        LOG(ERROR) << "Entry::Deserialize: Invalid classes list in required "
-                   << "capabilities dictionary.";
+      if (!ReadStringSet(*entry_value, &capabilities)) {
+        LOG(ERROR) << "Entry::Deserialize: Invalid capabilities list in "
+                   << "requires dictionary.";
         return false;
       }
-      shell::Interfaces interfaces;
-      if (!ReadStringSetFromDictionary(*entry_value,
-                                       Store::kCapabilities_InterfacesKey,
-                                       &interfaces)) {
-        LOG(ERROR) << "Entry::Deserialize: Invalid interfaces list in required "
-                   << "capabilities dictionary.";
-        return false;
-      }
-      if (interfaces.count("*") > 0) {
-        LOG(ERROR) << "Entry::Deserializer: Wildcard not valid in interfaces "
-                   << "list.";
-        return false;
-      }
-      spec.interfaces = interfaces;
 
-      capabilities->required[it.key()] = spec;
+      interface_provider_specs->requires[it.key()] = capabilities;
     }
   }
   return true;
@@ -122,7 +97,9 @@ bool BuildCapabilities(const base::DictionaryValue& value,
 
 Entry::Entry() {}
 Entry::Entry(const std::string& name)
-    : name_(name), qualifier_(shell::GetNamePath(name)), display_name_(name) {}
+    : name_(name),
+      qualifier_(service_manager::GetNamePath(name)),
+      display_name_(name) {}
 Entry::~Entry() {}
 
 std::unique_ptr<base::DictionaryValue> Entry::Serialize() const {
@@ -133,31 +110,25 @@ std::unique_ptr<base::DictionaryValue> Entry::Serialize() const {
   value->SetString(Store::kQualifierKey, qualifier_);
   std::unique_ptr<base::DictionaryValue> spec(new base::DictionaryValue);
 
-  std::unique_ptr<base::DictionaryValue> provided(new base::DictionaryValue);
-  for (const auto& i : capabilities_.provided) {
+  std::unique_ptr<base::DictionaryValue> provides(new base::DictionaryValue);
+  for (const auto& i : connection_spec_.provides) {
     std::unique_ptr<base::ListValue> interfaces(new base::ListValue);
     for (const auto& interface_name : i.second)
       interfaces->AppendString(interface_name);
-    provided->Set(i.first, std::move(interfaces));
+    provides->Set(i.first, std::move(interfaces));
   }
-  spec->Set(Store::kCapabilities_ProvidedKey, std::move(provided));
+  spec->Set(Store::kInterfaceProviderSpecs_ProvidesKey, std::move(provides));
 
-  std::unique_ptr<base::DictionaryValue> required(new base::DictionaryValue);
-  for (const auto& i : capabilities_.required) {
-    std::unique_ptr<base::DictionaryValue> request(new base::DictionaryValue);
-    std::unique_ptr<base::ListValue> classes(new base::ListValue);
-    for (const auto& class_name : i.second.classes)
-      classes->AppendString(class_name);
-    request->Set(Store::kCapabilities_ClassesKey, std::move(classes));
-    std::unique_ptr<base::ListValue> interfaces(new base::ListValue);
-    for (const auto& interface_name : i.second.interfaces)
-      interfaces->AppendString(interface_name);
-    request->Set(Store::kCapabilities_InterfacesKey, std::move(interfaces));
-    required->Set(i.first, std::move(request));
+  std::unique_ptr<base::DictionaryValue> requires(new base::DictionaryValue);
+  for (const auto& i : connection_spec_.requires) {
+    std::unique_ptr<base::ListValue> capabilities(new base::ListValue);
+    for (const auto& class_name : i.second)
+      capabilities->AppendString(class_name);
+    requires->Set(i.first, std::move(capabilities));
   }
-  spec->Set(Store::kCapabilities_RequiredKey, std::move(required));
+  spec->Set(Store::kInterfaceProviderSpecs_RequiresKey, std::move(requires));
 
-  value->Set(Store::kCapabilitiesKey, std::move(spec));
+  value->Set(Store::kInterfaceProviderSpecsKey, std::move(spec));
   return value;
 }
 
@@ -185,7 +156,7 @@ std::unique_ptr<Entry> Entry::Deserialize(const base::DictionaryValue& value) {
                << Store::kNameKey << " key";
     return nullptr;
   }
-  if (!shell::IsValidName(name_string)) {
+  if (!service_manager::IsValidName(name_string)) {
     LOG(ERROR) << "Entry::Deserialize: " << name_string << " is not a valid "
                << "Mojo name";
     return nullptr;
@@ -202,7 +173,7 @@ std::unique_ptr<Entry> Entry::Deserialize(const base::DictionaryValue& value) {
     }
     entry->set_qualifier(qualifier);
   } else {
-    entry->set_qualifier(shell::GetNamePath(name_string));
+    entry->set_qualifier(service_manager::GetNamePath(name_string));
   }
 
   // Human-readable name.
@@ -214,21 +185,22 @@ std::unique_ptr<Entry> Entry::Deserialize(const base::DictionaryValue& value) {
   }
   entry->set_display_name(display_name);
 
-  // Capability spec.
-  const base::DictionaryValue* capabilities = nullptr;
-  if (!value.GetDictionary(Store::kCapabilitiesKey, &capabilities)) {
+  // InterfaceProvider specs.
+  const base::DictionaryValue* interface_provider_specs = nullptr;
+  if (!value.GetDictionary(Store::kInterfaceProviderSpecsKey,
+                           &interface_provider_specs)) {
     LOG(ERROR) << "Entry::Deserialize: dictionary has no "
-               << Store::kCapabilitiesKey << " key";
+               << Store::kInterfaceProviderSpecsKey << " key";
     return nullptr;
   }
 
-  shell::CapabilitySpec spec;
-  if (!BuildCapabilities(*capabilities, &spec)) {
-    LOG(ERROR) << "Entry::Deserialize: failed to build capability spec for "
-               << entry->name();
+  service_manager::InterfaceProviderSpec spec;
+  if (!BuildInterfaceProviderSpecs(*interface_provider_specs, &spec)) {
+    LOG(ERROR) << "Entry::Deserialize: failed to build InterfaceProvider spec "
+               << "for " << entry->name();
     return nullptr;
   }
-  entry->set_capabilities(spec);
+  entry->set_connection_spec(spec);
 
   if (value.HasKey(Store::kServicesKey)) {
     const base::ListValue* services = nullptr;
@@ -249,19 +221,20 @@ std::unique_ptr<Entry> Entry::Deserialize(const base::DictionaryValue& value) {
 }
 
 bool Entry::ProvidesClass(const std::string& clazz) const {
-  return capabilities_.provided.find(clazz) != capabilities_.provided.end();
+  return connection_spec_.provides.find(clazz) !=
+      connection_spec_.provides.end();
 }
 
 bool Entry::operator==(const Entry& other) const {
   return other.name_ == name_ && other.qualifier_ == qualifier_ &&
          other.display_name_ == display_name_ &&
-         other.capabilities_ == capabilities_;
+         other.connection_spec_ == connection_spec_;
 }
 
 bool Entry::operator<(const Entry& other) const {
-  return std::tie(name_, qualifier_, display_name_, capabilities_) <
+  return std::tie(name_, qualifier_, display_name_, connection_spec_) <
          std::tie(other.name_, other.qualifier_, other.display_name_,
-                  other.capabilities_);
+                  other.connection_spec_);
 }
 
 }  // catalog
@@ -269,15 +242,16 @@ bool Entry::operator<(const Entry& other) const {
 namespace mojo {
 
 // static
-shell::mojom::ResolveResultPtr
-    TypeConverter<shell::mojom::ResolveResultPtr, catalog::Entry>::Convert(
-        const catalog::Entry& input) {
-  shell::mojom::ResolveResultPtr result(shell::mojom::ResolveResult::New());
+service_manager::mojom::ResolveResultPtr
+TypeConverter<service_manager::mojom::ResolveResultPtr,
+              catalog::Entry>::Convert(const catalog::Entry& input) {
+  service_manager::mojom::ResolveResultPtr result(
+      service_manager::mojom::ResolveResult::New());
   result->name = input.name();
   const catalog::Entry& package = input.package() ? *input.package() : input;
   result->resolved_name = package.name();
   result->qualifier = input.qualifier();
-  result->capabilities = input.capabilities();
+  result->connection_spec = input.connection_spec();
   result->package_path = package.path();
   return result;
 }

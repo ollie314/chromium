@@ -19,10 +19,6 @@ DefaultSystemTrayDelegate::DefaultSystemTrayDelegate()
 
 DefaultSystemTrayDelegate::~DefaultSystemTrayDelegate() {}
 
-bool DefaultSystemTrayDelegate::GetTrayVisibilityOnStartup() {
-  return true;
-}
-
 LoginStatus DefaultSystemTrayDelegate::GetUserLoginStatus() const {
   return LoginStatus::USER;
 }
@@ -46,10 +42,6 @@ void DefaultSystemTrayDelegate::GetSystemUpdateInfo(UpdateInfo* info) const {
 
 bool DefaultSystemTrayDelegate::ShouldShowSettings() {
   return true;
-}
-
-bool DefaultSystemTrayDelegate::ShouldShowDisplayNotification() {
-  return false;
 }
 
 void DefaultSystemTrayDelegate::ToggleBluetooth() {

@@ -919,14 +919,13 @@ void Element::scrollLayoutBoxBy(const ScrollToOptions& scrollToOptions) {
                                            scrollBehavior);
   LayoutBox* box = layoutBox();
   if (box) {
-    double currentScaledLeft = box->scrollLeft();
-    double currentScaledTop = box->scrollTop();
-    double newScaledLeft =
+    float currentScaledLeft = box->scrollLeft().toFloat();
+    float currentScaledTop = box->scrollTop().toFloat();
+    float newScaledLeft =
         left * box->style()->effectiveZoom() + currentScaledLeft;
-    double newScaledTop =
-        top * box->style()->effectiveZoom() + currentScaledTop;
-    box->scrollToOffset(DoubleSize(newScaledLeft, newScaledTop),
-                        scrollBehavior);
+    float newScaledTop = top * box->style()->effectiveZoom() + currentScaledTop;
+    box->scrollToPosition(FloatPoint(newScaledLeft, newScaledTop),
+                          scrollBehavior);
   }
 }
 
@@ -937,8 +936,8 @@ void Element::scrollLayoutBoxTo(const ScrollToOptions& scrollToOptions) {
 
   LayoutBox* box = layoutBox();
   if (box) {
-    double scaledLeft = box->scrollLeft();
-    double scaledTop = box->scrollTop();
+    float scaledLeft = box->scrollLeft().toFloat();
+    float scaledTop = box->scrollTop().toFloat();
     if (scrollToOptions.hasLeft())
       scaledLeft =
           ScrollableArea::normalizeNonFiniteScroll(scrollToOptions.left()) *
@@ -947,7 +946,7 @@ void Element::scrollLayoutBoxTo(const ScrollToOptions& scrollToOptions) {
       scaledTop =
           ScrollableArea::normalizeNonFiniteScroll(scrollToOptions.top()) *
           box->style()->effectiveZoom();
-    box->scrollToOffset(DoubleSize(scaledLeft, scaledTop), scrollBehavior);
+    box->scrollToPosition(FloatPoint(scaledLeft, scaledTop), scrollBehavior);
   }
 }
 
@@ -972,12 +971,12 @@ void Element::scrollFrameBy(const ScrollToOptions& scrollToOptions) {
   if (!viewport)
     return;
 
-  double newScaledLeft =
-      left * frame->pageZoomFactor() + viewport->scrollPositionDouble().x();
-  double newScaledTop =
-      top * frame->pageZoomFactor() + viewport->scrollPositionDouble().y();
-  viewport->setScrollPosition(DoublePoint(newScaledLeft, newScaledTop),
-                              ProgrammaticScroll, scrollBehavior);
+  float newScaledLeft =
+      left * frame->pageZoomFactor() + viewport->scrollOffset().width();
+  float newScaledTop =
+      top * frame->pageZoomFactor() + viewport->scrollOffset().height();
+  viewport->setScrollOffset(ScrollOffset(newScaledLeft, newScaledTop),
+                            ProgrammaticScroll, scrollBehavior);
 }
 
 void Element::scrollFrameTo(const ScrollToOptions& scrollToOptions) {
@@ -992,8 +991,8 @@ void Element::scrollFrameTo(const ScrollToOptions& scrollToOptions) {
   if (!viewport)
     return;
 
-  double scaledLeft = viewport->scrollPositionDouble().x();
-  double scaledTop = viewport->scrollPositionDouble().y();
+  float scaledLeft = viewport->scrollOffset().width();
+  float scaledTop = viewport->scrollOffset().height();
   if (scrollToOptions.hasLeft())
     scaledLeft =
         ScrollableArea::normalizeNonFiniteScroll(scrollToOptions.left()) *
@@ -1002,8 +1001,8 @@ void Element::scrollFrameTo(const ScrollToOptions& scrollToOptions) {
     scaledTop =
         ScrollableArea::normalizeNonFiniteScroll(scrollToOptions.top()) *
         frame->pageZoomFactor();
-  viewport->setScrollPosition(DoublePoint(scaledLeft, scaledTop),
-                              ProgrammaticScroll, scrollBehavior);
+  viewport->setScrollOffset(ScrollOffset(scaledLeft, scaledTop),
+                            ProgrammaticScroll, scrollBehavior);
 }
 
 bool Element::hasCompositorProxy() const {
@@ -1344,9 +1343,7 @@ static inline ClassStringContent classStringHasClassName(
     ++i;
   } while (i < length);
 
-  if (i == length && length == 1)
-    return ClassStringContent::Empty;
-  if (i == length && length > 1)
+  if (i == length && length >= 1)
     return ClassStringContent::WhiteSpaceOnly;
 
   return ClassStringContent::HasClasses;
@@ -1609,7 +1606,7 @@ void Element::removedFrom(ContainerNode* insertionPoint) {
   if (document().page())
     document().page()->pointerLockController().elementRemoved(this);
 
-  setSavedLayerScrollOffset(IntSize());
+  setSavedLayerScrollOffset(ScrollOffset());
 
   if (insertionPoint->isInTreeScope() && treeScope() == document()) {
     const AtomicString& idValue = getIdAttribute();
@@ -1740,7 +1737,7 @@ void Element::detachLayoutTree(const AttachContext& context) {
   ContainerNode::detachLayoutTree(context);
 
   if (!context.performingReattach && isUserActionElement()) {
-    if (hovered())
+    if (isHovered())
       document().hoveredNodeDetached(*this);
     if (inActiveChain())
       document().activeChainNodeDetached(*this);
@@ -1838,7 +1835,7 @@ PassRefPtr<ComputedStyle> Element::originalStyleForLayoutObject() {
   return document().ensureStyleResolver().styleForElement(this);
 }
 
-void Element::recalcStyle(StyleRecalcChange change, Text* nextTextSibling) {
+void Element::recalcStyle(StyleRecalcChange change) {
   DCHECK(document().inStyleRecalc());
   DCHECK(!document().lifecycle().inDetach());
   DCHECK(!parentOrShadowHostNode()->needsStyleRecalc());
@@ -1861,6 +1858,7 @@ void Element::recalcStyle(StyleRecalcChange change, Text* nextTextSibling) {
     if (parentComputedStyle())
       change = recalcOwnStyle(change);
     clearNeedsStyleRecalc();
+    clearNeedsReattachLayoutTree();
   }
 
   // If we reattached we don't need to recalc the style of our descendants
@@ -1892,13 +1890,11 @@ void Element::recalcStyle(StyleRecalcChange change, Text* nextTextSibling) {
                         childNeedsStyleRecalc() ? Force : change);
 
     clearChildNeedsStyleRecalc();
+    clearChildNeedsReattachLayoutTree();
   }
 
   if (hasCustomStyleCallbacks())
     didRecalcStyle(change);
-
-  if (change == Reattach)
-    reattachWhitespaceSiblingsIfNeeded(nextTextSibling);
 }
 
 PassRefPtr<ComputedStyle> Element::propagateInheritedProperties(
@@ -1946,10 +1942,9 @@ StyleRecalcChange Element::recalcOwnStyle(StyleRecalcChange change) {
   }
 
   if (localChange == Reattach) {
-    // TODO(nainar): Remove the style parameter being passed into
-    // buildLayoutTree().  ComputedStyle will now be stored on Node and accessed
-    // in buildLayoutTree() using mutableComputedStyle().
-    return rebuildLayoutTree(*newStyle);
+    document().addNonAttachedStyle(*this, std::move(newStyle));
+    setNeedsReattachLayoutTree();
+    return rebuildLayoutTree();
   }
 
   DCHECK(oldStyle);
@@ -1991,13 +1986,32 @@ StyleRecalcChange Element::recalcOwnStyle(StyleRecalcChange change) {
   return localChange;
 }
 
-StyleRecalcChange Element::rebuildLayoutTree(ComputedStyle& newStyle) {
+StyleRecalcChange Element::rebuildLayoutTree() {
+  DCHECK(inActiveDocument());
   AttachContext reattachContext;
-  reattachContext.resolvedStyle = &newStyle;
+  reattachContext.resolvedStyle = document().getNonAttachedStyle(*this);
   bool layoutObjectWillChange = needsAttach() || layoutObject();
+
+  // We are calling Element::rebuildLayoutTree() from inside
+  // Element::recalcOwnStyle where we set the NeedsReattachLayoutTree
+  // flag - so needsReattachLayoutTree() should always be true.
+  DCHECK(parentNode());
+  DCHECK(parentNode()->childNeedsReattachLayoutTree());
+  DCHECK(needsReattachLayoutTree());
   reattachLayoutTree(reattachContext);
-  if (layoutObjectWillChange || layoutObject())
+  // Since needsReattachLayoutTree() is always true we go into
+  // reattachLayoutTree() which reattaches all the descendant
+  // sub-trees. At this point no child should need reattaching.
+  DCHECK(!childNeedsReattachLayoutTree());
+
+  if (layoutObjectWillChange || layoutObject()) {
+    // nextTextSibling is passed on to recalcStyle from recalcDescendantStyles
+    // we can either traverse the current subtree from this node onwards
+    // or store it.
+    // The choice is between increased time and increased memory complexity.
+    reattachWhitespaceSiblingsIfNeeded(nextTextSibling());
     return Reattach;
+  }
   return ReattachNoLayoutObject;
 }
 
@@ -2486,7 +2500,7 @@ void Element::removeAttributeInternal(
     SynchronizationOfLazyAttribute inSynchronizationOfLazyAttribute) {
   MutableAttributeCollection attributes =
       ensureUniqueElementData().attributes();
-  ASSERT_WITH_SECURITY_IMPLICATION(index < attributes.size());
+  SECURITY_DCHECK(index < attributes.size());
 
   QualifiedName name = attributes[index].name();
   AtomicString valueBeingRemoved = attributes[index].value();
@@ -2635,8 +2649,12 @@ void Element::updateFocusAppearance(
     if (this == frame->selection().rootEditableElement())
       return;
 
+    // TODO(xiaochengh): The use of updateStyleAndLayoutIgnorePendingStylesheets
+    // needs to be audited.  See http://crbug.com/590369 for more details.
+    document().updateStyleAndLayoutIgnorePendingStylesheets();
+
     // FIXME: We should restore the previous selection if there is one.
-    VisibleSelection newSelection = createVisibleSelectionDeprecated(
+    VisibleSelection newSelection = createVisibleSelection(
         firstPositionInOrBeforeNode(this), TextAffinity::Downstream);
     // Passing DoNotSetFocus as this function is called after
     // FocusController::setFocusedElement() and we don't want to change the
@@ -2645,11 +2663,6 @@ void Element::updateFocusAppearance(
                                     FrameSelection::CloseTyping |
                                         FrameSelection::ClearTypingStyle |
                                         FrameSelection::DoNotSetFocus);
-
-    // TODO(xiaochengh): The use of updateStyleAndLayoutIgnorePendingStylesheets
-    // needs to be audited.  See http://crbug.com/590369 for more details.
-    document().updateStyleAndLayoutIgnorePendingStylesheets();
-
     frame->selection().revealSelection();
   } else if (layoutObject() && !layoutObject()->isLayoutPart()) {
     layoutObject()->scrollRectToVisible(boundingBox());
@@ -3614,12 +3627,12 @@ void Element::scheduleSVGFilterLayerUpdateHack() {
   document().scheduleSVGFilterLayerUpdateHack(*this);
 }
 
-IntSize Element::savedLayerScrollOffset() const {
+ScrollOffset Element::savedLayerScrollOffset() const {
   return hasRareData() ? elementRareData()->savedLayerScrollOffset()
-                       : IntSize();
+                       : ScrollOffset();
 }
 
-void Element::setSavedLayerScrollOffset(const IntSize& size) {
+void Element::setSavedLayerScrollOffset(const ScrollOffset& size) {
   if (size.isZero() && !hasRareData())
     return;
   ensureElementRareData().setSavedLayerScrollOffset(size);
@@ -3837,7 +3850,8 @@ void Element::styleAttributeChanged(
              (containingShadowRoot() &&
               containingShadowRoot()->type() == ShadowRootType::UserAgent) ||
              document().contentSecurityPolicy()->allowInlineStyle(
-                 document().url(), String(), startLineNumber, newStyleString)) {
+                 this, document().url(), String(), startLineNumber,
+                 newStyleString)) {
     setInlineStyleFromString(newStyleString);
   }
 

@@ -43,7 +43,8 @@ class CORE_EXPORT DOMTimer final : public GarbageCollectedFinalized<DOMTimer>,
   USING_GARBAGE_COLLECTED_MIXIN(DOMTimer);
 
  public:
-  // Creates a new timer owned by the ExecutionContext, starts it and returns its ID.
+  // Creates a new timer owned by the ExecutionContext, starts it and returns
+  // its ID.
   static int install(ExecutionContext*,
                      ScheduledAction*,
                      int timeout,
@@ -53,16 +54,16 @@ class CORE_EXPORT DOMTimer final : public GarbageCollectedFinalized<DOMTimer>,
   ~DOMTimer() override;
 
   // ActiveDOMObject
-  void stop() override;
+  void contextDestroyed() override;
 
   // Eager finalization is needed to promptly stop this Timer object.
-  // Otherwise timer events might fire at an object that's slated for destruction
-  // (when lazily swept), but some of its members (m_action) may already have
-  // been finalized & must not be accessed.
+  // Otherwise timer events might fire at an object that's slated for
+  // destruction (when lazily swept), but some of its members (m_action) may
+  // already have been finalized & must not be accessed.
   EAGERLY_FINALIZE();
   DECLARE_VIRTUAL_TRACE();
 
-  void disposeTimer();
+  void stop() override;
 
  private:
   friend class DOMTimerCoordinator;  // For create().

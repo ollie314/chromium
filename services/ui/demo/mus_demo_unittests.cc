@@ -6,7 +6,7 @@
 #include "base/command_line.h"
 #include "base/macros.h"
 #include "base/run_loop.h"
-#include "services/shell/public/cpp/service_test.h"
+#include "services/service_manager/public/cpp/service_test.h"
 #include "services/ui/public/interfaces/window_server_test.mojom.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -22,9 +22,9 @@ void RunCallback(bool* success, const base::Closure& callback, bool result) {
   callback.Run();
 }
 
-class MusDemoTest : public shell::test::ServiceTest {
+class MusDemoTest : public service_manager::test::ServiceTest {
  public:
-  MusDemoTest() : shell::test::ServiceTest(kTestAppName) {}
+  MusDemoTest() : service_manager::test::ServiceTest(kTestAppName) {}
   ~MusDemoTest() override {}
 
   void SetUp() override {
@@ -39,10 +39,10 @@ class MusDemoTest : public shell::test::ServiceTest {
 }  // namespace
 
 TEST_F(MusDemoTest, CheckMusDemoDraws) {
-  connector()->Connect("mojo:mus_demo");
+  connector()->Connect("service:mus_demo");
 
   ::ui::mojom::WindowServerTestPtr test_interface;
-  connector()->ConnectToInterface("mojo:ui", &test_interface);
+  connector()->ConnectToInterface("service:ui", &test_interface);
 
   base::RunLoop run_loop;
   bool success = false;

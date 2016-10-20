@@ -27,6 +27,9 @@ FakeIntentHelperInstance::~FakeIntentHelperInstance() {}
 void FakeIntentHelperInstance::AddPreferredPackage(
     const mojo::String& package_name) {}
 
+void FakeIntentHelperInstance::HandleIntent(mojom::IntentInfoPtr intent,
+                                            mojom::ActivityNamePtr activity) {}
+
 void FakeIntentHelperInstance::HandleUrl(const mojo::String& url,
                                          const mojo::String& package_name) {}
 
@@ -35,17 +38,16 @@ void FakeIntentHelperInstance::HandleUrlList(
     mojom::ActivityNamePtr activity,
     mojom::ActionType action) {}
 
-void FakeIntentHelperInstance::HandleUrlListDeprecated(
-    mojo::Array<mojom::UrlWithMimeTypePtr> urls,
-    const mojo::String& package_name,
-    mojom::ActionType action) {}
-
 void FakeIntentHelperInstance::Init(mojom::IntentHelperHostPtr host_ptr) {}
 
 void FakeIntentHelperInstance::RequestActivityIcons(
     mojo::Array<mojom::ActivityNamePtr> activities,
     ::arc::mojom::ScaleFactor scale_factor,
     const RequestActivityIconsCallback& callback) {}
+
+void FakeIntentHelperInstance::RequestIntentHandlerList(
+    mojom::IntentInfoPtr intent,
+    const RequestIntentHandlerListCallback& callback) {}
 
 void FakeIntentHelperInstance::RequestUrlHandlerList(
     const mojo::String& url,

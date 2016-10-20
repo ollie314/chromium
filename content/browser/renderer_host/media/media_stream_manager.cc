@@ -168,10 +168,6 @@ bool CalledOnIOThread() {
          !BrowserThread::IsMessageLoopValid(BrowserThread::IO);
 }
 
-GURL ConvertToGURL(const url::Origin& origin) {
-  return origin.unique() ? GURL() : GURL(origin.Serialize());
-}
-
 bool GetDeviceIDFromHMAC(const std::string& salt,
                          const url::Origin& security_origin,
                          const std::string& hmac_device_id,
@@ -307,9 +303,9 @@ class MediaStreamManager::DeviceRequest {
     target_frame_id_ = requesting_frame_id;
     ui_request_.reset(new MediaStreamRequest(
         requesting_process_id, requesting_frame_id, page_request_id,
-        ConvertToGURL(security_origin), user_gesture, request_type,
+        security_origin.GetURL(), user_gesture, request_type,
         requested_audio_device_id, requested_video_device_id, audio_type_,
-        video_type_));
+        video_type_, controls.disable_local_echo));
   }
 
   // Creates a tab capture specific MediaStreamRequest object that is used by
@@ -321,8 +317,8 @@ class MediaStreamManager::DeviceRequest {
     target_frame_id_ = target_render_frame_id;
     ui_request_.reset(new MediaStreamRequest(
         target_render_process_id, target_render_frame_id, page_request_id,
-        ConvertToGURL(security_origin), user_gesture, request_type, "", "",
-        audio_type_, video_type_));
+        security_origin.GetURL(), user_gesture, request_type, "", "",
+        audio_type_, video_type_, controls.disable_local_echo));
   }
 
   bool HasUIRequest() const { return ui_request_.get() != nullptr; }
@@ -348,7 +344,7 @@ class MediaStreamManager::DeviceRequest {
 
     media_observer->OnMediaRequestStateChanged(
         target_process_id_, target_frame_id_, page_request_id,
-        ConvertToGURL(security_origin), stream_type, new_state);
+        security_origin.GetURL(), stream_type, new_state);
   }
 
   MediaRequestState state(MediaStreamType stream_type) const {
@@ -538,6 +534,18 @@ void MediaStreamManager::GenerateStream(MediaStreamRequester* requester,
       security_origin, user_gesture, MEDIA_GENERATE_STREAM, controls, salt);
 
   const std::string& label = AddRequest(request);
+
+  if (!generate_stream_test_callback_.is_null()) {
+    // The test callback is responsible to verify whether the |controls| is
+    // as expected. Then we need to finish getUserMedia and let Javascript
+    // access the result.
+    if (generate_stream_test_callback_.Run(controls)) {
+      FinalizeGenerateStream(label, request);
+    } else {
+      FinalizeRequestFailed(label, request, MEDIA_DEVICE_INVALID_STATE);
+    }
+    return;
+  }
 
   // Post a task and handle the request asynchronously. The reason is that the
   // requester won't have a label for the request until this function returns
@@ -1183,11 +1191,9 @@ bool MediaStreamManager::SetupTabCaptureRequest(DeviceRequest* request) {
   }
 
   // Customize controls for a WebContents based capture.
-  int target_render_process_id = 0;
-  int target_render_frame_id = 0;
-
-  bool has_valid_device_id = WebContentsMediaCaptureId::ExtractTabCaptureTarget(
-      capture_device_id, &target_render_process_id, &target_render_frame_id);
+  content::WebContentsMediaCaptureId web_id;
+  bool has_valid_device_id =
+      WebContentsMediaCaptureId::Parse(capture_device_id, &web_id);
   if (!has_valid_device_id ||
       (request->audio_type() != MEDIA_TAB_AUDIO_CAPTURE &&
        request->audio_type() != MEDIA_NO_SERVICE) ||
@@ -1195,16 +1201,19 @@ bool MediaStreamManager::SetupTabCaptureRequest(DeviceRequest* request) {
        request->video_type() != MEDIA_NO_SERVICE)) {
     return false;
   }
-  request->tab_capture_device_id = capture_device_id;
+  web_id.disable_local_echo = request->controls.disable_local_echo;
 
-  request->CreateTabCaptureUIRequest(target_render_process_id,
-                                     target_render_frame_id);
+  request->tab_capture_device_id = web_id.ToString();
+
+  request->CreateTabCaptureUIRequest(web_id.render_process_id,
+                                     web_id.main_render_frame_id);
 
   DVLOG(3) << "SetupTabCaptureRequest "
-           << ", {capture_device_id = " << capture_device_id <<  "}"
-           << ", {target_render_process_id = " << target_render_process_id
+           << ", {capture_device_id = " << capture_device_id << "}"
+           << ", {target_render_process_id = " << web_id.render_process_id
            << "}"
-           << ", {target_render_frame_id = " << target_render_frame_id << "}";
+           << ", {target_render_frame_id = " << web_id.main_render_frame_id
+           << "}";
   return true;
 }
 
@@ -1964,7 +1973,7 @@ bool MediaStreamManager::DoesMediaDeviceIDMatchHMAC(
 bool MediaStreamManager::IsOriginAllowed(int render_process_id,
                                          const url::Origin& origin) {
   if (!ChildProcessSecurityPolicyImpl::GetInstance()->CanRequestURL(
-          render_process_id, ConvertToGURL(origin))) {
+          render_process_id, origin.GetURL())) {
     LOG(ERROR) << "MSM: Renderer requested a URL it's not allowed to use.";
     return false;
   }
@@ -2033,6 +2042,11 @@ void MediaStreamManager::ProcessOpenEnumerationRequests(
                                 device_infos);
     }
   }
+}
+
+void MediaStreamManager::SetGenerateStreamCallbackForTesting(
+    GenerateStreamTestCallback test_callback) {
+  generate_stream_test_callback_ = test_callback;
 }
 
 }  // namespace content

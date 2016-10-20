@@ -82,9 +82,6 @@ class CONTENT_EXPORT Navigator : public base::RefCounted<Navigator> {
   // back with RendererDidNavigate on success or DiscardPendingEntry on failure.
   // The callbacks can be inside of this function, or at some future time.
   //
-  // The entry has a PageID of -1 if newly created (corresponding to navigation
-  // to a new URL).
-  //
   // If this method returns false, then the navigation is discarded (equivalent
   // to calling DiscardPendingEntry on the NavigationController).
   //
@@ -101,7 +98,10 @@ class CONTENT_EXPORT Navigator : public base::RefCounted<Navigator> {
   // navigates it in the correct process. Returns false if the
   // FrameNavigationEntry can't be found or the navigation fails. This is only
   // used in OOPIF-enabled modes.
-  virtual bool NavigateNewChildFrame(RenderFrameHostImpl* render_frame_host);
+  // TODO(creis): Remove |default_url| once we have collected UMA stats on the
+  // cases that we use a different URL from history than the frame's src.
+  virtual bool NavigateNewChildFrame(RenderFrameHostImpl* render_frame_host,
+                                     const GURL& default_url);
 
   // Navigation requests -------------------------------------------------------
 
@@ -114,6 +114,7 @@ class CONTENT_EXPORT Navigator : public base::RefCounted<Navigator> {
       const GURL& url,
       bool uses_post,
       const scoped_refptr<ResourceRequestBodyImpl>& body,
+      const std::string& extra_headers,
       SiteInstance* source_site_instance,
       const Referrer& referrer,
       WindowOpenDisposition disposition,
@@ -134,7 +135,8 @@ class CONTENT_EXPORT Navigator : public base::RefCounted<Navigator> {
       const GlobalRequestID& transferred_global_request_id,
       bool should_replace_current_entry,
       const std::string& method,
-      scoped_refptr<ResourceRequestBodyImpl> post_body) {}
+      scoped_refptr<ResourceRequestBodyImpl> post_body,
+      const std::string& extra_headers) {}
 
   // PlzNavigate
   // Called after receiving a BeforeUnloadACK IPC from the renderer. If

@@ -5,7 +5,7 @@
 #ifndef NET_PROXY_MOJO_PROXY_RESOLVER_FACTORY_IMPL_H_
 #define NET_PROXY_MOJO_PROXY_RESOLVER_FACTORY_IMPL_H_
 
-#include <set>
+#include <map>
 
 #include "base/callback.h"
 #include "base/macros.h"
@@ -29,7 +29,7 @@ class MojoProxyResolverFactoryImpl : public interfaces::ProxyResolverFactory {
 
   // interfaces::ProxyResolverFactory override.
   void CreateResolver(
-      const mojo::String& pac_script,
+      const std::string& pac_script,
       interfaces::ProxyResolverRequest request,
       interfaces::ProxyResolverFactoryRequestClientPtr client) override;
 
@@ -38,7 +38,7 @@ class MojoProxyResolverFactoryImpl : public interfaces::ProxyResolverFactory {
   const std::unique_ptr<ProxyResolverV8TracingFactory>
       proxy_resolver_impl_factory_;
 
-  std::set<Job*> jobs_;
+  std::map<Job*, std::unique_ptr<Job>> jobs_;
 
   DISALLOW_COPY_AND_ASSIGN(MojoProxyResolverFactoryImpl);
 };

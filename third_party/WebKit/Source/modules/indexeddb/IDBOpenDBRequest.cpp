@@ -108,11 +108,12 @@ void IDBOpenDBRequest::onUpgradeNeeded(int64_t oldVersion,
     // This database hasn't had a version before.
     oldVersion = IDBDatabaseMetadata::DefaultVersion;
   }
-  IDBDatabaseMetadata oldMetadata(metadata);
-  oldMetadata.version = oldVersion;
+  IDBDatabaseMetadata oldDatabaseMetadata(
+      metadata.name, metadata.id, oldVersion, metadata.maxObjectStoreId);
 
   m_transaction = IDBTransaction::createVersionChange(
-      getScriptState(), m_transactionId, idbDatabase, this, oldMetadata);
+      getScriptState(), m_transactionId, idbDatabase, this,
+      oldDatabaseMetadata);
   setResult(IDBAny::create(idbDatabase));
 
   if (m_version == IDBDatabaseMetadata::NoVersion)
@@ -175,8 +176,8 @@ bool IDBOpenDBRequest::shouldEnqueueEvent() const {
 }
 
 DispatchEventResult IDBOpenDBRequest::dispatchEventInternal(Event* event) {
-  // If the connection closed between onUpgradeNeeded and the delivery of the "success" event,
-  // an "error" event should be fired instead.
+  // If the connection closed between onUpgradeNeeded and the delivery of the
+  // "success" event, an "error" event should be fired instead.
   if (event->type() == EventTypeNames::success &&
       resultAsAny()->getType() == IDBAny::IDBDatabaseType &&
       resultAsAny()->idbDatabase()->isClosePending()) {

@@ -26,12 +26,16 @@ const ThreatSeverity kLeastSeverity =
     std::numeric_limits<ThreatSeverity>::max();
 
 ListInfos GetListInfos() {
+  // NOTE(vakh): When adding a store here, add the corresponding store-specific
+  // histograms also.
   return ListInfos(
       {ListInfo(true, "UrlMalware.store", GetUrlMalwareId(),
                 SB_THREAT_TYPE_URL_MALWARE),
        ListInfo(true, "UrlSoceng.store", GetUrlSocEngId(),
                 SB_THREAT_TYPE_URL_PHISHING),
-       ListInfo(false, "", GetChromeUrlApiId(), SB_THREAT_TYPE_API_ABUSE)});
+       ListInfo(false, "", GetChromeUrlApiId(), SB_THREAT_TYPE_API_ABUSE),
+       ListInfo(true, "UrlUws.store", GetUrlUwsId(),
+                SB_THREAT_TYPE_URL_UNWANTED)});
 }
 
 // Returns the severity information about a given SafeBrowsing list. The lowest
@@ -41,8 +45,10 @@ ThreatSeverity GetThreatSeverity(const ListIdentifier& list_id) {
     case MALWARE_THREAT:
     case SOCIAL_ENGINEERING_PUBLIC:
       return 0;
-    case API_ABUSE:
+    case UNWANTED_SOFTWARE:
       return 1;
+    case API_ABUSE:
+      return 2;
     default:
       NOTREACHED() << "Unexpected ThreatType encountered in GetThreatSeverity";
       return kLeastSeverity;
@@ -77,7 +83,10 @@ scoped_refptr<V4LocalDatabaseManager> V4LocalDatabaseManager::Create(
 }
 
 V4LocalDatabaseManager::V4LocalDatabaseManager(const base::FilePath& base_path)
-    : base_path_(base_path), enabled_(false), list_infos_(GetListInfos()) {
+    : base_path_(base_path),
+      enabled_(false),
+      list_infos_(GetListInfos()),
+      weak_factory_(this) {
   DCHECK(!base_path_.empty());
   DCHECK(!list_infos_.empty());
 
@@ -136,7 +145,7 @@ bool V4LocalDatabaseManager::CheckBrowseUrl(const GURL& url, Client* client) {
 
   std::unique_ptr<PendingCheck> check = base::MakeUnique<PendingCheck>(
       client, ClientCallbackType::CHECK_BROWSE_URL,
-      StoresToCheck({GetUrlMalwareId(), GetUrlSocEngId()}), url);
+      StoresToCheck({GetUrlMalwareId(), GetUrlSocEngId(), GetUrlUwsId()}), url);
   if (!v4_database_) {
     queued_checks_.push_back(std::move(check));
     return false;
@@ -147,7 +156,13 @@ bool V4LocalDatabaseManager::CheckBrowseUrl(const GURL& url, Client* client) {
     return true;
   }
 
-  PerformFullHashCheck(std::move(check), full_hash_to_store_and_hash_prefixes);
+  // Post the task to check full hashes back on the IO thread to follow the
+  // documented behavior of CheckBrowseUrl.
+  BrowserThread::PostTask(
+      BrowserThread::IO, FROM_HERE,
+      base::Bind(&V4LocalDatabaseManager::PerformFullHashCheck, this,
+                 base::Passed(std::move(check)),
+                 full_hash_to_store_and_hash_prefixes));
   return false;
 }
 
@@ -237,7 +252,7 @@ void V4LocalDatabaseManager::StartOnIOThread(
   SafeBrowsingDatabaseManager::StartOnIOThread(request_context_getter, config);
 
   db_updated_callback_ = base::Bind(&V4LocalDatabaseManager::DatabaseUpdated,
-                                    base::Unretained(this));
+                                    weak_factory_.GetWeakPtr());
 
   SetupUpdateProtocolManager(request_context_getter, config);
   SetupDatabase();
@@ -272,7 +287,7 @@ void V4LocalDatabaseManager::StopOnIOThread(bool shutdown) {
 // End: SafeBrowsingDatabaseManager implementation
 //
 
-void V4LocalDatabaseManager::DatabaseReady(
+void V4LocalDatabaseManager::DatabaseReadyForChecks(
     std::unique_ptr<V4Database> v4_database) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
@@ -281,14 +296,29 @@ void V4LocalDatabaseManager::DatabaseReady(
   if (enabled_) {
     v4_database_ = std::move(v4_database);
 
-    // The database is in place. Start fetching updates now.
-    v4_update_protocol_manager_->ScheduleNextUpdate(
-        v4_database_->GetStoreStateMap());
+    // The consistency of the stores read from the disk needs to verified. Post
+    // that task on the task runner. It calls |DatabaseReadyForUpdates|
+    // callback with the stores to reset, if any, and then we can schedule the
+    // database updates.
+    v4_database_->VerifyChecksum(
+        base::Bind(&V4LocalDatabaseManager::DatabaseReadyForUpdates,
+                   weak_factory_.GetWeakPtr()));
 
     ProcessQueuedChecks();
   } else {
     // Schedule the deletion of v4_database off IO thread.
     V4Database::Destroy(std::move(v4_database));
+  }
+}
+
+void V4LocalDatabaseManager::DatabaseReadyForUpdates(
+    const std::vector<ListIdentifier>& stores_to_reset) {
+  if (enabled_) {
+    v4_database_->ResetStores(stores_to_reset);
+
+    // The database is ready to process updates. Schedule them now.
+    v4_update_protocol_manager_->ScheduleNextUpdate(
+        v4_database_->GetStoreStateMap());
   }
 }
 
@@ -407,7 +437,7 @@ void V4LocalDatabaseManager::PerformFullHashCheck(
   v4_get_hash_protocol_manager_->GetFullHashes(
       full_hash_to_store_and_hash_prefixes,
       base::Bind(&V4LocalDatabaseManager::OnFullHashResponse,
-                 base::Unretained(this), base::Passed(std::move(check))));
+                 weak_factory_.GetWeakPtr(), base::Passed(std::move(check))));
 }
 
 void V4LocalDatabaseManager::ProcessQueuedChecks() {
@@ -455,16 +485,18 @@ void V4LocalDatabaseManager::SetupDatabase() {
   // Do not create the database on the IO thread since this may be an expensive
   // operation. Instead, do that on the task_runner and when the new database
   // has been created, swap it out on the IO thread.
-  NewDatabaseReadyCallback db_ready_callback = base::Bind(
-      &V4LocalDatabaseManager::DatabaseReady, base::Unretained(this));
+  NewDatabaseReadyCallback db_ready_callback =
+      base::Bind(&V4LocalDatabaseManager::DatabaseReadyForChecks,
+                 weak_factory_.GetWeakPtr());
   V4Database::Create(task_runner_, base_path_, list_infos_, db_ready_callback);
 }
 
 void V4LocalDatabaseManager::SetupUpdateProtocolManager(
     net::URLRequestContextGetter* request_context_getter,
     const V4ProtocolConfig& config) {
-  V4UpdateCallback callback = base::Bind(
-      &V4LocalDatabaseManager::UpdateRequestCompleted, base::Unretained(this));
+  V4UpdateCallback callback =
+      base::Bind(&V4LocalDatabaseManager::UpdateRequestCompleted,
+                 weak_factory_.GetWeakPtr());
 
   v4_update_protocol_manager_ =
       V4UpdateProtocolManager::Create(request_context_getter, config, callback);

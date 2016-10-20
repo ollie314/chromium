@@ -5,6 +5,7 @@
 import("//build/config/features.gni")
 import("//build/config/ui.gni")
 import("//build/json_schema_api.gni")
+import("//chrome/common/features.gni")
 import("//tools/json_schema_compiler/json_features.gni")
 
 assert(enable_extensions)
@@ -54,7 +55,6 @@ schema_sources = [
   "language_settings_private.idl",
   "manifest_types.json",
   "media_galleries.idl",
-  "metrics_private.json",
   "notification_provider.idl",
   "notifications.idl",
   "omnibox.json",

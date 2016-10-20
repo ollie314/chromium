@@ -1,12 +1,6 @@
 -ActivityLogApiTest.TriggerEvent
 -BrowserActionApiTest.BrowserActionPopupWithIframe
--BrowserTest.ClearPendingOnFailUnlessNTP
--ChromeRenderProcessHostTest.DevToolsOnSelfInOwnProcess
--ChromeRenderProcessHostTest.DevToolsOnSelfInOwnProcessPPT
 -ChromeServiceWorker*
--ContinueWhereILeftOffTest.PostWithPassword
--ContinueWhereILeftOffTest.PostWithPasswordBrowserClose
--ContinueWhereILeftOffTest.PostWithPasswordCloseAllBrowsers
 -CrazyExtensionTest.Crazy
 -DevToolsSanityTest.TestNetworkRawHeadersText
 -ErrorPageTest.IFrameDNSError_JavaScript
@@ -19,10 +13,9 @@
 -ExtensionBindingsApiTest.ModuleSystem
 -ExtensionBrowserTest.WindowOpenExtension
 -ExtensionResourceRequestPolicyTest.Iframe
--ExtensionWebRequestApiTest.WebRequestComplex
+# ExtensionWebRequestApiTest.WebRequestDeclarative2 crashes on bots but passes locally
 -ExtensionWebRequestApiTest.WebRequestDeclarative2
 -ExtensionWebRequestApiTest.WebRequestUnloadImmediately
--ExtensionWebRequestApiTest.WebRequestWithWithheldPermissions
 -ExternallyConnectableMessagingTest.FromPopup
 -FindInPageControllerTest.SearchWithinSpecialURL
 -IsolatedAppTest.CookieIsolation
@@ -31,7 +24,6 @@
 -MediaGalleriesPlatformAppBrowserTest.Scan
 -MediaGalleriesPlatformAppBrowserTest.ToURL
 -OptionsWebUIExtendedTest.OverlayBackToChild
--PasswordManagerBrowserTestBase.NoPromptIfLinkClicked
 -PDFExtensionTest.PdfAccessibilityInOOPIF
 -PlatformAppBrowserTest.ActiveAppsAreRecorded
 -PlatformAppBrowserTest.Restrictions
@@ -40,7 +32,6 @@
 -PrerenderBrowserTest.PrerenderCrossProcessServerRedirect
 -PrerenderBrowserTest.PrerenderCrossProcessServerRedirectNoHang
 -RedirectTest.ClientServerServer
--RestartTest.PostWithPassword
 -SafeBrowsing*
 -SubresourceFilterBrowserTest.MainFrameActivation
 -SubresourceFilterBrowserTest.MainFrameActivationOnStartup
@@ -62,38 +53,15 @@
 -WebNavigationApiTest.RequestOpenTab
 -WebNavigationApiTest.SrcDoc
 -WebNavigationApiTest.UserAction
--WebViewTests/WebViewPluginTest.TestLoadPluginInternalResource/0
--WebViewTests/WebViewPluginTest.TestLoadPluginInternalResource/1
--WebViewTests/WebViewTest.AcceptTouchEvents/0
--WebViewTests/WebViewTest.NestedGuestContainerBounds/0
--WebViewTests/WebViewTest.Shim_TestChromeExtensionRelativePath/*
--WebViewTests/WebViewTest.Shim_TestChromeExtensionURL/*
--WebViewTests/WebViewTest.Shim_TestDeclarativeWebRequestAPI/*
--WebViewTests/WebViewTest.Shim_TestDeclarativeWebRequestAPISendMessage/*
 -WebViewTests/WebViewTest.Shim_TestInlineScriptFromAccessibleResources/*
--WebViewTests/WebViewTest.Shim_TestInvalidChromeExtensionURL/*
--WebViewTests/WebViewTest.Shim_TestLoadAbortChromeExtensionURLWrongPartition/*
--WebViewTests/WebViewTest.Shim_TestLoadAbortEmptyResponse/*
--WebViewTests/WebViewTest.Shim_TestLoadStartLoadRedirect/*
 -WebViewTests/WebViewTest.Shim_TestMailtoLink/*
 -WebViewTests/WebViewTest.Shim_TestNavigationToExternalProtocol/*
 -WebViewTests/WebViewTest.Shim_TestNestedSubframes/*
--WebViewTests/WebViewTest.Shim_TestWebRequestAPIErrorOccurred/*
--WebViewTests/WebViewTest.Shim_TestWebRequestAPIGoogleProperty/*
--WebViewTests/WebViewTest.Shim_TestWebRequestAPIWithHeaders/*
 -WebViewTests/WebViewTest.Shim_TestWebViewInsideFrame/*
 
 # Errors related to forms submission.
 -PhishingDOMFeatureExtractorTest.SubFrames
 -PhishingDOMFeatureExtractorTest.SubframeRemoval
-
-# https://crbug.com/647712: Nested URL blocking needs to work with PlzNavigate
--ProcessManagerBrowserTest.NestedURLNavigationsToExtensionAllowed
--ProcessManagerBrowserTest.NestedURLNavigationsToExtensionBlocked
--WebViewGuestTouchFocusTest.TouchFocusesBrowserPluginInEmbedder
--WebViewScrollGuestContent/WebViewScrollGuestContentTest.ScrollGuestContent/0
--WebViewScrollBubbling/WebViewGuestScrollTouchTest.TestGuestGestureScrollsBubble*
--WebViewTests/WebViewFocusTest.TouchFocusesEmbedder/0
 
 # Fail in Debug.
 -BookmarkBubbleSignInDelegateTest.*
@@ -101,3 +69,8 @@
 -GetAuthTokenFunctionTest.ComponentWithChromeClientId
 -PolicyTest.ExtensionInstallBlacklistSharedModules
 -WebNavigationApiTest.ServerRedirect
+
+# https://crbug.com/652767: NavigationHandle::GetResponseHeaders sometimes
+# returns null for browser-side navigations
+-PageLoadMetricsBrowserTest.Ignore204Pages
+-PageLoadMetricsBrowserTest.IgnoreDownloads

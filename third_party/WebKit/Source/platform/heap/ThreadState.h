@@ -301,6 +301,20 @@ class PLATFORM_EXPORT ThreadState {
   }
   bool sweepForbidden() const { return m_sweepForbidden; }
 
+  class MainThreadGCForbiddenScope final {
+    STACK_ALLOCATED();
+
+   public:
+    MainThreadGCForbiddenScope()
+        : m_threadState(ThreadState::mainThreadState()) {
+      m_threadState->enterGCForbiddenScope();
+    }
+    ~MainThreadGCForbiddenScope() { m_threadState->leaveGCForbiddenScope(); }
+
+   private:
+    ThreadState* const m_threadState;
+  };
+
   void flushHeapDoesNotContainCacheIfNeeded();
 
   // Safepoint related functionality.

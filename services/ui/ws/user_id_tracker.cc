@@ -4,13 +4,14 @@
 
 #include "services/ui/ws/user_id_tracker.h"
 
-#include "services/shell/public/interfaces/connector.mojom.h"
+#include "services/service_manager/public/interfaces/connector.mojom.h"
 #include "services/ui/ws/user_id_tracker_observer.h"
 
 namespace ui {
 namespace ws {
 
-UserIdTracker::UserIdTracker() : active_id_(shell::mojom::kRootUserID) {
+UserIdTracker::UserIdTracker()
+    : active_id_(service_manager::mojom::kRootUserID) {
   ids_.insert(active_id_);
 }
 
@@ -28,8 +29,8 @@ void UserIdTracker::SetActiveUserId(const UserId& id) {
 
   const UserId previously_active_id = active_id_;
   active_id_ = id;
-  FOR_EACH_OBSERVER(UserIdTrackerObserver, observers_,
-                    OnActiveUserIdChanged(previously_active_id, id));
+  for (auto& observer : observers_)
+    observer.OnActiveUserIdChanged(previously_active_id, id);
 }
 
 void UserIdTracker::AddUserId(const UserId& id) {
@@ -37,13 +38,15 @@ void UserIdTracker::AddUserId(const UserId& id) {
     return;
 
   ids_.insert(id);
-  FOR_EACH_OBSERVER(UserIdTrackerObserver, observers_, OnUserIdAdded(id));
+  for (auto& observer : observers_)
+    observer.OnUserIdAdded(id);
 }
 
 void UserIdTracker::RemoveUserId(const UserId& id) {
   DCHECK(IsValidUserId(id));
   ids_.erase(id);
-  FOR_EACH_OBSERVER(UserIdTrackerObserver, observers_, OnUserIdRemoved(id));
+  for (auto& observer : observers_)
+    observer.OnUserIdRemoved(id);
 }
 
 void UserIdTracker::AddObserver(UserIdTrackerObserver* observer) {

@@ -76,6 +76,7 @@ class CORE_EXPORT FileInputType final : public InputType,
   bool canSetStringValue() const override;
   FileList* files() override;
   void setFiles(FileList*) override;
+  ValueMode valueMode() const override;
   bool canSetValue(const String&) override;
   // Checked first, before internal storage or the value attribute.
   bool getTypeSpecificValue(String&) override;
@@ -88,6 +89,7 @@ class CORE_EXPORT FileInputType final : public InputType,
   void disabledAttributeChanged() override;
   void multipleAttributeChanged() override;
   String defaultToolTip(const InputTypeView&) const override;
+  void copyNonAttributeProperties(const HTMLInputElement&) override;
 
   // FileChooserClient implementation.
   void filesChosen(const Vector<FileChooserFileInfo>&) override;

@@ -12,20 +12,16 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/files/file_util.h"
-#include "base/files/scoped_file.h"
 #include "base/location.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
-#include "base/strings/stringprintf.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "content/browser/browser_thread_impl.h"
 #include "content/browser/renderer_host/media/media_stream_manager.h"
 #include "content/browser/renderer_host/media/media_stream_requester.h"
-#include "content/browser/renderer_host/media/media_stream_ui_proxy.h"
 #include "content/browser/renderer_host/media/video_capture_manager.h"
 #include "content/common/media/video_capture_messages.h"
 #include "content/public/common/content_switches.h"
@@ -33,20 +29,14 @@
 #include "content/public/test/test_browser_context.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "content/test/test_content_browser_client.h"
-#include "media/audio/audio_manager.h"
+#include "media/audio/mock_audio_manager.h"
 #include "media/base/media_switches.h"
 #include "media/base/video_capture_types.h"
-#include "media/base/video_frame.h"
 #include "net/url_request/url_request_context.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-#if defined(OS_CHROMEOS)
-#include "chromeos/audio/cras_audio_handler.h"
-#endif
-
 using ::testing::_;
-using ::testing::AtLeast;
 using ::testing::AnyNumber;
 using ::testing::DoAll;
 using ::testing::InSequence;
@@ -60,39 +50,6 @@ namespace content {
 // Id used to identify the capture session between renderer and
 // video_capture_host. This is an arbitrary value.
 static const int kDeviceId = 555;
-
-// Define to enable test where video is dumped to file.
-// #define DUMP_VIDEO
-
-// Define to use a real video capture device.
-// #define TEST_REAL_CAPTURE_DEVICE
-
-// Simple class used for dumping video to a file. This can be used for
-// verifying the output.
-class DumpVideo {
- public:
-  DumpVideo() {}
-  const gfx::Size& coded_size() const { return coded_size_; }
-  void StartDump(const gfx::Size& coded_size) {
-    base::FilePath file_name = base::FilePath(base::StringPrintf(
-        FILE_PATH_LITERAL("dump_w%d_h%d.yuv"),
-        coded_size.width(),
-        coded_size.height()));
-    file_.reset(base::OpenFile(file_name, "wb"));
-    coded_size_ = coded_size;
-  }
-  void NewVideoFrame(const void* buffer) {
-    if (file_.get() != NULL) {
-      const int size = media::VideoFrame::AllocationSize(
-          media::PIXEL_FORMAT_I420, coded_size_);
-      ASSERT_EQ(1U, fwrite(buffer, size, 1, file_.get()));
-    }
-  }
-
- private:
-  base::ScopedFILE file_;
-  gfx::Size coded_size_;
-};
 
 class MockMediaStreamRequester : public MediaStreamRequester {
  public:
@@ -130,67 +87,21 @@ class MockMediaStreamRequester : public MediaStreamRequester {
 class MockVideoCaptureHost : public VideoCaptureHost {
  public:
   MockVideoCaptureHost(MediaStreamManager* manager)
-      : VideoCaptureHost(manager),
-        return_buffers_(false),
-        dump_video_(false) {}
+      : VideoCaptureHost(manager) {}
 
-  // A list of mock methods.
   MOCK_METHOD4(OnNewBufferCreated,
                void(int device_id,
                     base::SharedMemoryHandle handle,
                     int length,
                     int buffer_id));
-  MOCK_METHOD2(OnBufferFreed, void(int device_id, int buffer_id));
-  MOCK_METHOD1(OnBufferFilled, void(int device_id));
-  MOCK_METHOD2(OnStateChanged, void(int device_id, VideoCaptureState state));
-
-  // Use class DumpVideo to write I420 video to file.
-  void SetDumpVideo(bool enable) {
-    dump_video_ = enable;
-  }
-
-  void SetReturnReceivedDibs(bool enable) {
-    return_buffers_ = enable;
-  }
-
-  // Return Dibs we currently have received.
-  void ReturnReceivedDibs(int device_id)  {
-    int handle = GetReceivedDib();
-    while (handle) {
-      this->OnRendererFinishedWithBuffer(device_id, handle, gpu::SyncToken(),
-                                         -1.0);
-      handle = GetReceivedDib();
-    }
-  }
-
-  int GetReceivedDib() {
-    if (filled_dib_.empty())
-      return 0;
-    auto it = filled_dib_.begin();
-    int h = it->first;
-    filled_dib_.erase(it);
-
-    return h;
-  }
 
  private:
-  ~MockVideoCaptureHost() override {
-  }
+  ~MockVideoCaptureHost() override {}
 
-  // This method is used to dispatch IPC messages to the renderer. We intercept
-  // these messages here and dispatch to our mock methods to verify the
-  // conversation between this object and the renderer.
   bool Send(IPC::Message* message) override {
-    CHECK(message);
-
-    // In this method we dispatch the messages to the according handlers as if
-    // we are the renderer.
     bool handled = true;
     IPC_BEGIN_MESSAGE_MAP(MockVideoCaptureHost, *message)
-      IPC_MESSAGE_HANDLER(VideoCaptureMsg_NewBuffer, OnNewBufferCreatedDispatch)
-      IPC_MESSAGE_HANDLER(VideoCaptureMsg_FreeBuffer, OnBufferFreedDispatch)
-      IPC_MESSAGE_HANDLER(VideoCaptureMsg_BufferReady, OnBufferFilledDispatch)
-      IPC_MESSAGE_HANDLER(VideoCaptureMsg_StateChanged, OnStateChangedDispatch)
+      IPC_MESSAGE_HANDLER(VideoCaptureMsg_NewBuffer, OnNewBufferCreated)
       IPC_MESSAGE_UNHANDLED(handled = false)
     IPC_END_MESSAGE_MAP()
     EXPECT_TRUE(handled);
@@ -198,55 +109,6 @@ class MockVideoCaptureHost : public VideoCaptureHost {
     delete message;
     return true;
   }
-
-  // These handler methods do minimal things and delegate to the mock methods.
-  void OnNewBufferCreatedDispatch(int device_id,
-                                  base::SharedMemoryHandle handle,
-                                  uint32_t length,
-                                  int buffer_id) {
-    OnNewBufferCreated(device_id, handle, length, buffer_id);
-    std::unique_ptr<base::SharedMemory> dib =
-        base::MakeUnique<base::SharedMemory>(handle, false);
-    dib->Map(length);
-    filled_dib_[buffer_id] = std::move(dib);
-  }
-
-  void OnBufferFreedDispatch(int device_id, int buffer_id) {
-    OnBufferFreed(device_id, buffer_id);
-
-    auto it = filled_dib_.find(buffer_id);
-    ASSERT_TRUE(it != filled_dib_.end());
-    filled_dib_.erase(it);
-  }
-
-  void OnBufferFilledDispatch(
-      const VideoCaptureMsg_BufferReady_Params& params) {
-    base::SharedMemory* dib = filled_dib_[params.buffer_id].get();
-    ASSERT_TRUE(dib != NULL);
-    if (dump_video_) {
-      if (dumper_.coded_size().IsEmpty())
-        dumper_.StartDump(params.coded_size);
-      ASSERT_TRUE(dumper_.coded_size() == params.coded_size)
-          << "Dump format does not handle variable resolution.";
-      dumper_.NewVideoFrame(dib->memory());
-    }
-
-    OnBufferFilled(params.device_id);
-    if (return_buffers_) {
-      VideoCaptureHost::OnRendererFinishedWithBuffer(
-          params.device_id, params.buffer_id, gpu::SyncToken(), -1.0);
-    }
-  }
-
-  void OnStateChangedDispatch(int device_id, VideoCaptureState state) {
-    OnStateChanged(device_id, state);
-  }
-
-  std::map<int, std::unique_ptr<base::SharedMemory>> filled_dib_;
-  bool return_buffers_;
-  bool dump_video_;
-  media::VideoCaptureFormat format_;
-  DumpVideo dumper_;
 };
 
 ACTION_P2(ExitMessageLoop, task_runner, quit_closure) {
@@ -256,29 +118,25 @@ ACTION_P2(ExitMessageLoop, task_runner, quit_closure) {
 // This is an integration test of VideoCaptureHost in conjunction with
 // MediaStreamManager, VideoCaptureManager, VideoCaptureController, and
 // VideoCaptureDevice.
-class VideoCaptureHostTest : public testing::Test {
+class VideoCaptureHostTest : public testing::Test,
+                             public mojom::VideoCaptureObserver {
  public:
   VideoCaptureHostTest()
       : thread_bundle_(content::TestBrowserThreadBundle::IO_MAINLOOP),
+        audio_manager_(
+            new media::MockAudioManager(base::ThreadTaskRunnerHandle::Get())),
         task_runner_(base::ThreadTaskRunnerHandle::Get()),
-        opened_session_id_(kInvalidMediaCaptureSessionId) {}
+        opened_session_id_(kInvalidMediaCaptureSessionId),
+        observer_binding_(this) {}
 
   void SetUp() override {
     SetBrowserClientForTesting(&browser_client_);
 
-#if defined(OS_CHROMEOS)
-    chromeos::CrasAudioHandler::InitializeForTesting();
-#endif
-
-    // Create our own MediaStreamManager.
-    audio_manager_ = media::AudioManager::CreateForTesting(task_runner_);
-#ifndef TEST_REAL_CAPTURE_DEVICE
     base::CommandLine::ForCurrentProcess()->AppendSwitch(
         switches::kUseFakeDeviceForMediaStream);
-#endif
+    base::CommandLine::ForCurrentProcess()->AppendSwitch(
+        switches::kUseFakeUIForMediaStream);
     media_stream_manager_.reset(new MediaStreamManager(audio_manager_.get()));
-    media_stream_manager_->UseFakeUIForTests(
-        std::unique_ptr<FakeMediaStreamUIProxy>());
 
     // Create a Host and connect it to a simulated IPC channel.
     host_ = new MockVideoCaptureHost(media_stream_manager_.get());
@@ -288,10 +146,8 @@ class VideoCaptureHostTest : public testing::Test {
   }
 
   void TearDown() override {
-    // Verifies and removes the expectations on host_ and
-    // returns true iff successful.
     Mock::VerifyAndClearExpectations(host_.get());
-    EXPECT_EQ(0u, host_->entries_.size());
+    EXPECT_TRUE(host_->controllers_.empty());
 
     CloseSession();
 
@@ -300,11 +156,7 @@ class VideoCaptureHostTest : public testing::Test {
 
     // Release the reference to the mock object. The object will be destructed
     // on the current message loop.
-    host_ = NULL;
-
-#if defined(OS_CHROMEOS)
-    chromeos::CrasAudioHandler::Shutdown();
-#endif
+    host_ = nullptr;
   }
 
   void OpenSession() {
@@ -374,96 +226,98 @@ class VideoCaptureHostTest : public testing::Test {
   }
 
  protected:
+  // mojom::VideoCaptureObserver implementation.
+  MOCK_METHOD1(OnStateChanged, void(mojom::VideoCaptureState));
+  void OnBufferReady(int32_t buffer_id,
+                     mojom::VideoFrameInfoPtr info) override {
+    DoOnBufferReady(buffer_id);
+  }
+  MOCK_METHOD1(DoOnBufferReady, void(int32_t));
+  MOCK_METHOD1(OnBufferDestroyed, void(int32_t));
+
   void StartCapture() {
-    EXPECT_CALL(*host_.get(), OnNewBufferCreated(kDeviceId, _, _, _))
-        .Times(AnyNumber())
-        .WillRepeatedly(Return());
-
     base::RunLoop run_loop;
-    EXPECT_CALL(*host_.get(), OnBufferFilled(kDeviceId))
-        .Times(AnyNumber())
-        .WillOnce(ExitMessageLoop(task_runner_, run_loop.QuitClosure()));
-
     media::VideoCaptureParams params;
     params.requested_format = media::VideoCaptureFormat(
         gfx::Size(352, 288), 30, media::PIXEL_FORMAT_I420);
-    host_->OnStartCapture(kDeviceId, opened_session_id_, params);
+
+    EXPECT_CALL(*this, OnStateChanged(mojom::VideoCaptureState::STARTED));
+    EXPECT_CALL(*host_.get(), OnNewBufferCreated(kDeviceId, _, _, _))
+        .Times(AnyNumber())
+        .WillRepeatedly(Return());
+    EXPECT_CALL(*this, DoOnBufferReady(_))
+        .Times(AnyNumber())
+        .WillOnce(ExitMessageLoop(task_runner_, run_loop.QuitClosure()));
+
+    host_->Start(kDeviceId, opened_session_id_, params,
+                 observer_binding_.CreateInterfacePtrAndBind());
+
     run_loop.Run();
   }
 
   void StartStopCapture() {
     // Quickly start and then stop capture, without giving much chance for
-    // asynchronous start operations to complete.
+    // asynchronous capture operations to produce frames.
     InSequence s;
     base::RunLoop run_loop;
-    EXPECT_CALL(*host_.get(),
-                OnStateChanged(kDeviceId, VIDEO_CAPTURE_STATE_STOPPED));
+
     media::VideoCaptureParams params;
     params.requested_format = media::VideoCaptureFormat(
         gfx::Size(352, 288), 30, media::PIXEL_FORMAT_I420);
-    host_->OnStartCapture(kDeviceId, opened_session_id_, params);
-    host_->OnStopCapture(kDeviceId);
+
+    EXPECT_CALL(*this, OnStateChanged(mojom::VideoCaptureState::STARTED));
+    host_->Start(kDeviceId, opened_session_id_, params,
+                 observer_binding_.CreateInterfacePtrAndBind());
+
+    EXPECT_CALL(*this, OnStateChanged(mojom::VideoCaptureState::STOPPED));
+    host_->Stop(kDeviceId);
     run_loop.RunUntilIdle();
     WaitForVideoDeviceThread();
   }
 
-#ifdef DUMP_VIDEO
-  void CaptureAndDumpVideo(int width, int height, int frame_rate) {
+  void PauseResumeCapture() {
     InSequence s;
-    EXPECT_CALL(*host_.get(), OnNewBufferCreated(kDeviceId, _, _, _))
-        .Times(AnyNumber()).WillRepeatedly(Return());
-
     base::RunLoop run_loop;
-    EXPECT_CALL(*host_, OnBufferFilled(kDeviceId, _, _, _, _, _, _, _, _, _))
-        .Times(AnyNumber())
-        .WillOnce(ExitMessageLoop(message_loop_, run_loop.QuitClosure()));
+
+    EXPECT_CALL(*this, OnStateChanged(mojom::VideoCaptureState::PAUSED));
+    host_->Pause(kDeviceId);
 
     media::VideoCaptureParams params;
-    params.requested_format =
-        media::VideoCaptureFormat(gfx::Size(width, height), frame_rate);
-    host_->SetDumpVideo(true);
-    host_->OnStartCapture(kDeviceId, opened_session_id_, params);
-    run_loop.Run();
+    params.requested_format = media::VideoCaptureFormat(
+        gfx::Size(352, 288), 30, media::PIXEL_FORMAT_I420);
+
+    EXPECT_CALL(*this, OnStateChanged(mojom::VideoCaptureState::RESUMED));
+    host_->Resume(kDeviceId, opened_session_id_, params);
+    run_loop.RunUntilIdle();
+    WaitForVideoDeviceThread();
   }
-#endif
 
   void StopCapture() {
     base::RunLoop run_loop;
-    EXPECT_CALL(*host_.get(),
-                OnStateChanged(kDeviceId, VIDEO_CAPTURE_STATE_STOPPED))
-        .WillOnce(ExitMessageLoop(task_runner_, run_loop.QuitClosure()));
 
-    host_->OnStopCapture(kDeviceId);
-    host_->SetReturnReceivedDibs(true);
-    host_->ReturnReceivedDibs(kDeviceId);
+    EXPECT_CALL(*this, OnStateChanged(mojom::VideoCaptureState::STOPPED))
+        .WillOnce(ExitMessageLoop(task_runner_, run_loop.QuitClosure()));
+    host_->Stop(kDeviceId);
 
     run_loop.Run();
 
-    host_->SetReturnReceivedDibs(false);
-    // Expect the VideoCaptureDevice has been stopped
-    EXPECT_EQ(0u, host_->entries_.size());
+    EXPECT_TRUE(host_->controllers_.empty());
   }
 
-  void NotifyPacketReady() {
+  void WaitForOneCapturedBuffer() {
     base::RunLoop run_loop;
-    EXPECT_CALL(*host_.get(), OnBufferFilled(kDeviceId))
+
+    EXPECT_CALL(*this, DoOnBufferReady(_))
         .Times(AnyNumber())
         .WillOnce(ExitMessageLoop(task_runner_, run_loop.QuitClosure()))
         .RetiresOnSaturation();
     run_loop.Run();
   }
 
-  void ReturnReceivedPackets() {
-    host_->ReturnReceivedDibs(kDeviceId);
-  }
-
   void SimulateError() {
-    // Expect a change state to error state sent through IPC.
-    EXPECT_CALL(*host_.get(),
-                OnStateChanged(kDeviceId, VIDEO_CAPTURE_STATE_ERROR)).Times(1);
+    EXPECT_CALL(*this, OnStateChanged(mojom::VideoCaptureState::FAILED));
     VideoCaptureControllerID id(kDeviceId);
     host_->OnError(id);
-    // Wait for the error callback.
     base::RunLoop().RunUntilIdle();
   }
 
@@ -480,18 +334,21 @@ class VideoCaptureHostTest : public testing::Test {
   scoped_refptr<MockVideoCaptureHost> host_;
 
  private:
-  // media_stream_manager_ needs to outlive thread_bundle_ because it is a
-  // MessageLoop::DestructionObserver. audio_manager_ needs to outlive
-  // thread_bundle_ because it uses the underlying message loop.
+  // |media_stream_manager_| needs to outlive |thread_bundle_| because it is a
+  // MessageLoop::DestructionObserver.
   StrictMock<MockMediaStreamRequester> stream_requester_;
   std::unique_ptr<MediaStreamManager> media_stream_manager_;
-  content::TestBrowserThreadBundle thread_bundle_;
+  const content::TestBrowserThreadBundle thread_bundle_;
+  // |audio_manager_| needs to outlive |thread_bundle_| because it uses the
+  // underlying message loop.
   media::ScopedAudioManagerPtr audio_manager_;
   content::TestBrowserContext browser_context_;
   content::TestContentBrowserClient browser_client_;
-  scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
+  const scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
   int opened_session_id_;
   std::string opened_device_label_;
+
+  mojo::Binding<mojom::VideoCaptureObserver> observer_binding_;
 
   DISALLOW_COPY_AND_ASSIGN(VideoCaptureHostTest);
 };
@@ -501,8 +358,7 @@ TEST_F(VideoCaptureHostTest, CloseSessionWithoutStopping) {
 
   // When the session is closed via the stream without stopping capture, the
   // ENDED event is sent.
-  EXPECT_CALL(*host_.get(),
-              OnStateChanged(kDeviceId, VIDEO_CAPTURE_STATE_ENDED)).Times(1);
+  EXPECT_CALL(*this, OnStateChanged(mojom::VideoCaptureState::ENDED));
   CloseSession();
   base::RunLoop().RunUntilIdle();
 }
@@ -513,9 +369,8 @@ TEST_F(VideoCaptureHostTest, StopWhileStartPending) {
 
 TEST_F(VideoCaptureHostTest, StartCapturePlayStop) {
   StartCapture();
-  NotifyPacketReady();
-  NotifyPacketReady();
-  ReturnReceivedPackets();
+  WaitForOneCapturedBuffer();
+  WaitForOneCapturedBuffer();
   StopCapture();
 }
 
@@ -526,21 +381,18 @@ TEST_F(VideoCaptureHostTest, StartCaptureErrorStop) {
 }
 
 TEST_F(VideoCaptureHostTest, StartCaptureError) {
-  EXPECT_CALL(*host_.get(),
-              OnStateChanged(kDeviceId, VIDEO_CAPTURE_STATE_STOPPED)).Times(0);
+  EXPECT_CALL(*this, OnStateChanged(mojom::VideoCaptureState::STOPPED))
+      .Times(0);
   StartCapture();
-  NotifyPacketReady();
+  WaitForOneCapturedBuffer();
   SimulateError();
   base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(200));
 }
 
-#ifdef DUMP_VIDEO
-TEST_F(VideoCaptureHostTest, CaptureAndDumpVideoVga) {
-  CaptureAndDumpVideo(640, 480, 30);
+TEST_F(VideoCaptureHostTest, PauseResumeCapture) {
+  StartCapture();
+  PauseResumeCapture();
+  StopCapture();
 }
-TEST_F(VideoCaptureHostTest, CaptureAndDump720P) {
-  CaptureAndDumpVideo(1280, 720, 30);
-}
-#endif
 
 }  // namespace content

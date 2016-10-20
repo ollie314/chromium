@@ -8,6 +8,7 @@
 #include "base/guid.h"
 #include "build/build_config.h"
 #include "content/public/browser/client_certificate_delegate.h"
+#include "content/public/browser/memory_coordinator_delegate.h"
 #include "content/public/browser/navigation_ui_data.h"
 #include "content/public/browser/vpn_service_proxy.h"
 #include "content/public/common/sandbox_type.h"
@@ -370,7 +371,7 @@ bool ContentBrowserClient::IsPluginAllowedToUseDevChannelAPIs(
   return false;
 }
 
-std::string ContentBrowserClient::GetShellUserIdForBrowserContext(
+std::string ContentBrowserClient::GetServiceUserIdForBrowserContext(
     BrowserContext* browser_context) {
   return base::GenerateGUID();
 }
@@ -417,18 +418,16 @@ base::string16 ContentBrowserClient::GetAppContainerSidForSandboxType(
       L"S-1-15-2-3251537155-1984446955-2931258699-841473695-1938553385-"
       L"924012148-129201922");
 }
-
-bool ContentBrowserClient::IsWin32kLockdownEnabledForMimeType(
-    const std::string& mime_type) const {
-  // TODO(wfh): Enable this by default once Win32k lockdown for PPAPI processes
-  // is enabled by default in Chrome. See crbug.com/523278.
-  return false;
-}
 #endif  // defined(OS_WIN)
 
 std::unique_ptr<base::Value> ContentBrowserClient::GetServiceManifestOverlay(
     const std::string& name) {
   return nullptr;
+}
+
+std::unique_ptr<MemoryCoordinatorDelegate>
+ContentBrowserClient::GetMemoryCoordinatorDelegate() {
+  return std::unique_ptr<MemoryCoordinatorDelegate>();
 }
 
 }  // namespace content

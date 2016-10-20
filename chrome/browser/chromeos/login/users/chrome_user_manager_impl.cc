@@ -151,6 +151,7 @@ extensions::FeatureSessionType GetFeatureSessionTypeForUser(
     const user_manager::User* user) {
   switch (user->GetType()) {
     case user_manager::USER_TYPE_REGULAR:
+    case user_manager::USER_TYPE_CHILD:
       return extensions::FeatureSessionType::REGULAR;
     case user_manager::USER_TYPE_KIOSK_APP:
       return extensions::FeatureSessionType::KIOSK;
@@ -1213,7 +1214,7 @@ void ChromeUserManagerImpl::SetUserAffiliation(
         g_browser_process->platform_part()->browser_policy_connector_chromeos();
     const bool is_affiliated = chromeos::IsUserAffiliated(
         user_affiliation_ids, connector->GetDeviceAffiliationIDs(),
-        account_id.GetUserEmail(), connector->GetEnterpriseDomain());
+        account_id.GetUserEmail());
     user->SetAffiliation(is_affiliated);
 
     if (user->GetType() == user_manager::USER_TYPE_REGULAR) {

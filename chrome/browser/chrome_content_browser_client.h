@@ -184,11 +184,6 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       content::WebContents* web_contents,
       net::SSLCertRequestInfo* cert_request_info,
       std::unique_ptr<content::ClientCertificateDelegate> delegate) override;
-  void AddCertificate(net::CertificateMimeType cert_type,
-                      const void* cert_data,
-                      size_t cert_size,
-                      int render_process_id,
-                      int render_frame_id) override;
   content::MediaObserver* GetMediaObserver() override;
   content::PlatformNotificationService* GetPlatformNotificationService()
       override;
@@ -280,25 +275,22 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   bool PreSpawnRenderer(sandbox::TargetPolicy* policy) override;
   base::string16 GetAppContainerSidForSandboxType(
       int sandbox_type) const override;
-  bool IsWin32kLockdownEnabledForMimeType(
-      const std::string& mime_type) const override;
 #endif
   void ExposeInterfacesToRenderer(
-      shell::InterfaceRegistry* registry,
+      service_manager::InterfaceRegistry* registry,
       content::RenderProcessHost* render_process_host) override;
   void ExposeInterfacesToMediaService(
-      shell::InterfaceRegistry* registry,
+      service_manager::InterfaceRegistry* registry,
       content::RenderFrameHost* render_frame_host) override;
   void RegisterRenderFrameMojoInterfaces(
-      shell::InterfaceRegistry* registry,
+      service_manager::InterfaceRegistry* registry,
       content::RenderFrameHost* render_frame_host) override;
   void ExposeInterfacesToGpuProcess(
-      shell::InterfaceRegistry* registry,
+      service_manager::InterfaceRegistry* registry,
       content::GpuProcessHost* render_process_host) override;
-  void RegisterInProcessMojoApplications(
-      StaticMojoApplicationMap* apps) override;
-  void RegisterOutOfProcessMojoApplications(
-      OutOfProcessMojoApplicationMap* apps) override;
+  void RegisterInProcessServices(StaticServiceMap* services) override;
+  void RegisterOutOfProcessServices(
+      OutOfProcessServiceMap* services) override;
   std::unique_ptr<base::Value> GetServiceManifestOverlay(
       const std::string& name) override;
   void OpenURL(content::BrowserContext* browser_context,
@@ -313,6 +305,8 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       content::NavigationHandle* handle) override;
   std::unique_ptr<content::NavigationUIData> GetNavigationUIData(
       content::NavigationHandle* navigation_handle) override;
+  std::unique_ptr<content::MemoryCoordinatorDelegate>
+  GetMemoryCoordinatorDelegate() override;
 
  private:
   friend class DisableWebRtcEncryptionFlagTest;

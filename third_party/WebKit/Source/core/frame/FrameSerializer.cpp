@@ -61,9 +61,9 @@
 #include "core/style/StyleImage.h"
 #include "platform/Histogram.h"
 #include "platform/SerializedResource.h"
-#include "platform/TraceEvent.h"
 #include "platform/graphics/Image.h"
 #include "platform/heap/Handle.h"
+#include "platform/tracing/TraceEvent.h"
 #include "wtf/HashSet.h"
 #include "wtf/text/CString.h"
 #include "wtf/text/StringBuilder.h"
@@ -157,7 +157,8 @@ void SerializerMarkupAccumulator::appendElement(StringBuilder& result,
   if (!shouldIgnoreElement(element))
     MarkupAccumulator::appendElement(result, element, namespaces);
 
-  // TODO(tiger): Refactor MarkupAccumulator so it is easier to append an element like this, without special cases for XHTML
+  // TODO(tiger): Refactor MarkupAccumulator so it is easier to append an
+  // element like this, without special cases for XHTML
   if (isHTMLHeadElement(element)) {
     result.append("<meta http-equiv=\"Content-Type\" content=\"");
     appendAttributeValue(result, m_document->suggestedMIMEType());
@@ -169,7 +170,8 @@ void SerializerMarkupAccumulator::appendElement(StringBuilder& result,
       result.append("\">");
   }
 
-  // FIXME: For object (plugins) tags and video tag we could replace them by an image of their current contents.
+  // FIXME: For object (plugins) tags and video tag we could replace them by an
+  // image of their current contents.
 }
 
 void SerializerMarkupAccumulator::appendAttribute(StringBuilder& out,
@@ -233,7 +235,8 @@ void SerializerMarkupAccumulator::appendRewrittenAttribute(
   m_elementsWithRewrittenLinks.add(&element);
 
   // Append the rewritten attribute.
-  // TODO(tiger): Refactor MarkupAccumulator so it is easier to append an attribute like this.
+  // TODO(tiger): Refactor MarkupAccumulator so it is easier to append an
+  // attribute like this.
   out.append(' ');
   out.append(attributeName);
   out.append("=\"");
@@ -290,7 +293,8 @@ void FrameSerializer::serializeFrame(const LocalFrame& frame) {
       continue;
 
     Element& element = toElement(*node);
-    // We have to process in-line style as it might contain some resources (typically background images).
+    // We have to process in-line style as it might contain some resources
+    // (typically background images).
     if (element.isStyledElement()) {
       retrieveResourcesForProperties(element.inlineStyle(), document);
       retrieveResourcesForProperties(element.presentationAttributeStyle(),
@@ -328,6 +332,16 @@ void FrameSerializer::serializeFrame(const LocalFrame& frame) {
 
 void FrameSerializer::serializeCSSStyleSheet(CSSStyleSheet& styleSheet,
                                              const KURL& url) {
+  // If the URL is invalid or if it is a data URL this means that this CSS is
+  // defined inline, respectively in a <style> tag or in the data URL itself.
+  bool isInlineCss = !url.isValid() || url.protocolIsData();
+  // If this CSS is not inline then it is identifiable by its URL. So just skip
+  // it if it has already been analyzed before.
+  if (!isInlineCss && (m_resourceURLs.contains(url) ||
+                       m_delegate.shouldSkipResourceWithURL(url))) {
+    return;
+  }
+
   TRACE_EVENT2("page-serialization", "FrameSerializer::serializeCSSStyleSheet",
                "type", "CSS", "url", url.elidedString().utf8().data());
   // Only report UMA metric if this is not a reentrant CSS serialization call.
@@ -337,25 +351,24 @@ void FrameSerializer::serializeCSSStyleSheet(CSSStyleSheet& styleSheet,
     cssStartTime = monotonicallyIncreasingTime();
   }
 
-  StringBuilder cssText;
-  cssText.append("@charset \"");
-  cssText.append(styleSheet.contents()->charset().lower());
-  cssText.append("\";\n\n");
+  // If this CSS is inlined its definition was already serialized with the frame
+  // HTML code that was previously generated. No need to regenerate it here.
+  if (!isInlineCss) {
+    StringBuilder cssText;
+    cssText.append("@charset \"");
+    cssText.append(styleSheet.contents()->charset().lower());
+    cssText.append("\";\n\n");
 
-  for (unsigned i = 0; i < styleSheet.length(); ++i) {
-    CSSRule* rule = styleSheet.item(i);
-    String itemText = rule->cssText();
-    if (!itemText.isEmpty()) {
-      cssText.append(itemText);
-      if (i < styleSheet.length() - 1)
-        cssText.append("\n\n");
+    for (unsigned i = 0; i < styleSheet.length(); ++i) {
+      CSSRule* rule = styleSheet.item(i);
+      String itemText = rule->cssText();
+      if (!itemText.isEmpty()) {
+        cssText.append(itemText);
+        if (i < styleSheet.length() - 1)
+          cssText.append("\n\n");
+      }
     }
 
-    // Some rules have resources associated with them that we need to retrieve.
-    serializeCSSRule(rule);
-  }
-
-  if (shouldAddURL(url)) {
     WTF::TextEncoding textEncoding(styleSheet.contents()->charset());
     ASSERT(textEncoding.isValid());
     String textString = cssText.toString();
@@ -366,6 +379,11 @@ void FrameSerializer::serializeCSSStyleSheet(CSSStyleSheet& styleSheet,
                            SharedBuffer::create(text.data(), text.length())));
     m_resourceURLs.add(url);
   }
+
+  // Sub resources need to be serialized even if the CSS definition doesn't
+  // need to be.
+  for (unsigned i = 0; i < styleSheet.length(); ++i)
+    serializeCSSRule(styleSheet.item(i));
 
   if (cssStartTime != 0) {
     m_isSerializingCss = false;
@@ -393,8 +411,6 @@ void FrameSerializer::serializeCSSRule(CSSRule* rule) {
       KURL sheetBaseURL = rule->parentStyleSheet()->baseURL();
       ASSERT(sheetBaseURL.isValid());
       KURL importURL = KURL(sheetBaseURL, importRule->href());
-      if (m_resourceURLs.contains(importURL))
-        break;
       if (importRule->styleSheet())
         serializeCSSStyleSheet(*importRule->styleSheet(), importURL);
       break;
@@ -487,9 +503,9 @@ void FrameSerializer::retrieveResourcesForProperties(
   if (!styleDeclaration)
     return;
 
-  // The background-image and list-style-image (for ul or ol) are the CSS properties
-  // that make use of images. We iterate to make sure we include any other
-  // image properties there might be.
+  // The background-image and list-style-image (for ul or ol) are the CSS
+  // properties that make use of images. We iterate to make sure we include any
+  // other image properties there might be.
   unsigned propertyCount = styleDeclaration->propertyCount();
   for (unsigned i = 0; i < propertyCount; ++i) {
     const CSSValue& cssValue = styleDeclaration->propertyAt(i).value();

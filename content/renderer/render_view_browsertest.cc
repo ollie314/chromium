@@ -227,10 +227,6 @@ class RenderViewImplTest : public RenderViewTest {
     return static_cast<RenderViewImpl*>(view_);
   }
 
-  int view_page_id() {
-    return view()->page_id_;
-  }
-
   TestRenderFrame* frame() {
     return static_cast<TestRenderFrame*>(view()->GetMainRenderFrame());
   }
@@ -244,7 +240,6 @@ class RenderViewImplTest : public RenderViewTest {
     int pending_offset = offset + view()->history_list_offset_;
 
     request_params.page_state = state;
-    request_params.page_id = view()->page_id_ + offset;
     request_params.nav_entry_id = pending_offset + 1;
     request_params.pending_history_list_offset = pending_offset;
     request_params.current_history_list_offset = view()->history_list_offset_;
@@ -609,7 +604,6 @@ TEST_F(RenderViewImplTest, OnNavigationHttpPost) {
   common_params.navigation_type = FrameMsg_Navigate_Type::NORMAL;
   common_params.transition = ui::PAGE_TRANSITION_TYPED;
   common_params.method = "POST";
-  request_params.page_id = -1;
 
   // Set up post data.
   const char raw_data[] = "post \0\ndata";
@@ -642,51 +636,6 @@ TEST_F(RenderViewImplTest, OnNavigationHttpPost) {
   EXPECT_EQ(blink::WebHTTPBody::Element::TypeData, element.type);
   EXPECT_EQ(length, element.data.size());
   EXPECT_EQ(0, memcmp(raw_data, element.data.data(), length));
-}
-
-// Check that page ID will be initialized in case of navigation
-// that replaces current entry.
-TEST_F(RenderViewImplTest, OnBrowserNavigationUpdatePageID) {
-  // An http url will trigger a resource load so cannot be used here.
-  CommonNavigationParams common_params;
-  StartNavigationParams start_params;
-  RequestNavigationParams request_params;
-  common_params.url = GURL("data:text/html,<div>Page</div>");
-  common_params.navigation_type = FrameMsg_Navigate_Type::NORMAL;
-  common_params.transition = ui::PAGE_TRANSITION_TYPED;
-
-  // Set up params to emulate a browser side navigation
-  // that should replace current entry.
-  common_params.should_replace_current_entry = true;
-  request_params.page_id = -1;
-  request_params.nav_entry_id = 1;
-  request_params.current_history_list_length = 1;
-
-  frame()->Navigate(common_params, start_params, request_params);
-  ProcessPendingMessages();
-
-  // Page ID should be initialized.
-  EXPECT_NE(view_page_id(), -1);
-
-  const IPC::Message* frame_navigate_msg =
-      render_thread_->sink().GetUniqueMessageMatching(
-          FrameHostMsg_DidCommitProvisionalLoad::ID);
-  EXPECT_TRUE(frame_navigate_msg);
-
-  FrameHostMsg_DidCommitProvisionalLoad::Param host_nav_params;
-  FrameHostMsg_DidCommitProvisionalLoad::Read(frame_navigate_msg,
-                                              &host_nav_params);
-  EXPECT_TRUE(std::get<0>(host_nav_params).page_state.IsValid());
-
-  const IPC::Message* frame_page_id_msg =
-      render_thread_->sink().GetUniqueMessageMatching(
-          FrameHostMsg_DidAssignPageId::ID);
-  EXPECT_TRUE(frame_page_id_msg);
-
-  FrameHostMsg_DidAssignPageId::Param host_page_id_params;
-  FrameHostMsg_DidAssignPageId::Read(frame_page_id_msg, &host_page_id_params);
-
-  EXPECT_EQ(std::get<0>(host_page_id_params), view_page_id());
 }
 
 #if defined(OS_ANDROID)
@@ -1020,9 +969,7 @@ TEST_F(RenderViewImplTest,  DISABLED_LastCommittedUpdateState) {
   ASSERT_TRUE(msg_A);
   ViewHostMsg_UpdateState::Param param;
   ViewHostMsg_UpdateState::Read(msg_A, &param);
-  int page_id_A = std::get<0>(param);
-  PageState state_A = std::get<1>(param);
-  EXPECT_EQ(1, page_id_A);
+  PageState state_A = std::get<0>(param);
   render_thread_->sink().ClearMessages();
 
   // Load page C, which will trigger an UpdateState message for page B.
@@ -1034,9 +981,7 @@ TEST_F(RenderViewImplTest,  DISABLED_LastCommittedUpdateState) {
       ViewHostMsg_UpdateState::ID);
   ASSERT_TRUE(msg_B);
   ViewHostMsg_UpdateState::Read(msg_B, &param);
-  int page_id_B = std::get<0>(param);
-  PageState state_B = std::get<1>(param);
-  EXPECT_EQ(2, page_id_B);
+  PageState state_B = std::get<0>(param);
   EXPECT_NE(state_A, state_B);
   render_thread_->sink().ClearMessages();
 
@@ -1049,9 +994,7 @@ TEST_F(RenderViewImplTest,  DISABLED_LastCommittedUpdateState) {
       ViewHostMsg_UpdateState::ID);
   ASSERT_TRUE(msg_C);
   ViewHostMsg_UpdateState::Read(msg_C, &param);
-  int page_id_C = std::get<0>(param);
-  PageState state_C = std::get<1>(param);
-  EXPECT_EQ(3, page_id_C);
+  PageState state_C = std::get<0>(param);
   EXPECT_NE(state_B, state_C);
   render_thread_->sink().ClearMessages();
 
@@ -1063,7 +1006,6 @@ TEST_F(RenderViewImplTest,  DISABLED_LastCommittedUpdateState) {
   request_params_C.current_history_list_length = 4;
   request_params_C.current_history_list_offset = 3;
   request_params_C.pending_history_list_offset = 2;
-  request_params_C.page_id = 3;
   request_params_C.page_state = state_C;
   frame()->Navigate(common_params_C, StartNavigationParams(), request_params_C);
   ProcessPendingMessages();
@@ -1073,7 +1015,7 @@ TEST_F(RenderViewImplTest,  DISABLED_LastCommittedUpdateState) {
   // This leads to two changes to the back/forward list but only one change to
   // the RenderView's page ID.
 
-  // Back to page B (page_id 2), without committing.
+  // Back to page B without committing.
   CommonNavigationParams common_params_B;
   RequestNavigationParams request_params_B;
   common_params_B.navigation_type = FrameMsg_Navigate_Type::NORMAL;
@@ -1081,11 +1023,10 @@ TEST_F(RenderViewImplTest,  DISABLED_LastCommittedUpdateState) {
   request_params_B.current_history_list_length = 4;
   request_params_B.current_history_list_offset = 2;
   request_params_B.pending_history_list_offset = 1;
-  request_params_B.page_id = 2;
   request_params_B.page_state = state_B;
   frame()->Navigate(common_params_B, StartNavigationParams(), request_params_B);
 
-  // Back to page A (page_id 1) and commit.
+  // Back to page A and commit.
   CommonNavigationParams common_params;
   RequestNavigationParams request_params;
   common_params.navigation_type = FrameMsg_Navigate_Type::NORMAL;
@@ -1093,20 +1034,17 @@ TEST_F(RenderViewImplTest,  DISABLED_LastCommittedUpdateState) {
   request_params.current_history_list_length = 4;
   request_params.current_history_list_offset = 2;
   request_params.pending_history_list_offset = 0;
-  request_params.page_id = 1;
   request_params.page_state = state_A;
   frame()->Navigate(common_params, StartNavigationParams(), request_params);
   ProcessPendingMessages();
 
   // Now ensure that the UpdateState message we receive is consistent
-  // and represents page C in both page_id and state.
+  // and represents page C in state.
   const IPC::Message* msg = render_thread_->sink().GetUniqueMessageMatching(
       ViewHostMsg_UpdateState::ID);
   ASSERT_TRUE(msg);
   ViewHostMsg_UpdateState::Read(msg, &param);
-  int page_id = std::get<0>(param);
-  PageState state = std::get<1>(param);
-  EXPECT_EQ(page_id_C, page_id);
+  PageState state = std::get<0>(param);
   EXPECT_NE(state_A, state);
   EXPECT_NE(state_B, state);
   EXPECT_EQ(state_C, state);
@@ -1700,7 +1638,6 @@ TEST_F(RenderViewImplTest, SetEditableSelectionAndComposition) {
   EXPECT_EQ(0, info.selectionEnd);
 }
 
-
 TEST_F(RenderViewImplTest, OnExtendSelectionAndDelete) {
   // Load an HTML page consisting of an input field.
   LoadHTML("<html>"
@@ -1725,6 +1662,53 @@ TEST_F(RenderViewImplTest, OnExtendSelectionAndDelete) {
   EXPECT_EQ(2, info.selectionEnd);
 }
 
+TEST_F(RenderViewImplTest, OnDeleteSurroundingText) {
+  // Load an HTML page consisting of an input field.
+  LoadHTML(
+      "<html>"
+      "<head>"
+      "</head>"
+      "<body>"
+      "<input id=\"test1\" value=\"abcdefghijklmnopqrstuvwxyz\"></input>"
+      "</body>"
+      "</html>");
+  ExecuteJavaScriptForTests("document.getElementById('test1').focus();");
+
+  frame()->SetEditableSelectionOffsets(10, 10);
+  frame()->DeleteSurroundingText(3, 4);
+  blink::WebTextInputInfo info = view()->webview()->textInputInfo();
+  EXPECT_EQ("abcdefgopqrstuvwxyz", info.value);
+  EXPECT_EQ(7, info.selectionStart);
+  EXPECT_EQ(7, info.selectionEnd);
+
+  frame()->SetEditableSelectionOffsets(4, 8);
+  frame()->DeleteSurroundingText(2, 5);
+  info = view()->webview()->textInputInfo();
+  EXPECT_EQ("abefgouvwxyz", info.value);
+  EXPECT_EQ(2, info.selectionStart);
+  EXPECT_EQ(6, info.selectionEnd);
+
+  frame()->SetEditableSelectionOffsets(5, 5);
+  frame()->DeleteSurroundingText(10, 0);
+  info = view()->webview()->textInputInfo();
+  EXPECT_EQ("ouvwxyz", info.value);
+  EXPECT_EQ(0, info.selectionStart);
+  EXPECT_EQ(0, info.selectionEnd);
+
+  frame()->DeleteSurroundingText(0, 10);
+  info = view()->webview()->textInputInfo();
+  EXPECT_EQ("", info.value);
+  EXPECT_EQ(0, info.selectionStart);
+  EXPECT_EQ(0, info.selectionEnd);
+
+  frame()->DeleteSurroundingText(10, 10);
+  info = view()->webview()->textInputInfo();
+  EXPECT_EQ("", info.value);
+
+  EXPECT_EQ(0, info.selectionStart);
+  EXPECT_EQ(0, info.selectionEnd);
+}
+
 // Test that the navigating specific frames works correctly.
 TEST_F(RenderViewImplTest, NavigateSubframe) {
   // Load page A.
@@ -1740,7 +1724,6 @@ TEST_F(RenderViewImplTest, NavigateSubframe) {
   request_params.current_history_list_length = 1;
   request_params.current_history_list_offset = 0;
   request_params.pending_history_list_offset = 1;
-  request_params.page_id = -1;
 
   TestRenderFrame* subframe =
       static_cast<TestRenderFrame*>(RenderFrameImpl::FromWebFrame(
@@ -1779,7 +1762,7 @@ TEST_F(RenderViewImplTest, MessageOrderInDidChangeSelection) {
     if (type == ViewHostMsg_TextInputStateChanged::ID) {
       is_input_type_called = true;
       last_input_type = i;
-    } else if (type == ViewHostMsg_SelectionChanged::ID) {
+    } else if (type == FrameHostMsg_SelectionChanged::ID) {
       is_selection_called = true;
       last_selection = i;
     }
@@ -2202,7 +2185,6 @@ TEST_F(RenderViewImplTest, NavigationStartForCrossProcessHistoryNavigation) {
   RequestNavigationParams request_params;
   request_params.page_state =
       PageState::CreateForTesting(common_params.url, false, nullptr, nullptr);
-  request_params.page_id = 1;
   request_params.nav_entry_id = 42;
   request_params.pending_history_list_offset = 1;
   request_params.current_history_list_offset = 0;
@@ -2240,7 +2222,6 @@ TEST_F(RenderViewImplTest, HistoryIsProperlyUpdatedOnNavigation) {
   request_params.current_history_list_length = 2;
   request_params.current_history_list_offset = 1;
   request_params.pending_history_list_offset = 2;
-  request_params.page_id = -1;
   frame()->Navigate(CommonNavigationParams(), StartNavigationParams(),
                     request_params);
 

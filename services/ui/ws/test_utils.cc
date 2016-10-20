@@ -9,7 +9,7 @@
 #include "base/memory/ptr_util.h"
 #include "cc/output/copy_output_request.h"
 #include "gpu/ipc/client/gpu_channel_host.h"
-#include "services/shell/public/interfaces/connector.mojom.h"
+#include "services/service_manager/public/interfaces/connector.mojom.h"
 #include "services/ui/public/interfaces/cursor.mojom.h"
 #include "services/ui/surfaces/display_compositor.h"
 #include "services/ui/ws/display_binding.h"
@@ -191,8 +191,9 @@ int EventDispatcherTestApi::NumberPointerTargetsForWindow(
 WindowTree* TestDisplayBinding::CreateWindowTree(ServerWindow* root) {
   const uint32_t embed_flags = 0;
   WindowTree* tree = window_server_->EmbedAtWindow(
-      root, shell::mojom::kRootUserID, ui::mojom::WindowTreeClientPtr(),
-      embed_flags, base::WrapUnique(new WindowManagerAccessPolicy));
+      root, service_manager::mojom::kRootUserID,
+      ui::mojom::WindowTreeClientPtr(), embed_flags,
+      base::WrapUnique(new WindowManagerAccessPolicy));
   tree->ConfigureWindowManager();
   return tree;
 }
@@ -357,6 +358,13 @@ void TestWindowTreeClient::OnWindowPredefinedCursorChanged(
   tracker_.OnWindowPredefinedCursorChanged(window_id, cursor_id);
 }
 
+void TestWindowTreeClient::OnWindowSurfaceChanged(
+    Id window_id,
+    const cc::SurfaceId& surface_id,
+    const cc::SurfaceSequence& surface_sequence,
+    const gfx::Size& frame_size,
+    float device_scale_factor) {}
+
 void TestWindowTreeClient::OnDragDropStart(
     mojo::Map<mojo::String, mojo::Array<uint8_t>> mime_data) {}
 
@@ -485,7 +493,7 @@ WindowEventTargetingHelper::WindowEventTargetingHelper()
     : wm_client_(nullptr),
       display_binding_(nullptr),
       display_(nullptr),
-      display_compositor_(new DisplayCompositor()) {
+      display_compositor_(new DisplayCompositor(nullptr)) {
   PlatformDisplayInitParams display_init_params;
   display_init_params.display_compositor = display_compositor_;
   display_ = new Display(window_server(), display_init_params);

@@ -82,11 +82,14 @@ class PLATFORM_EXPORT ImageBufferSurface {
                     SkXfermode::Mode);
   virtual void setHasExpensiveOp() {}
   virtual GLuint getBackingTextureHandleForOverwrite() { return 0; }
-  virtual void flush(
-      FlushReason);  // Execute all deferred rendering immediately
-  virtual void flushGpu(FlushReason reason) {
-    flush(reason);
-  }  // Like flush, but flushes all the way down to the GPU context if the surface uses the GPU
+
+  // Executes all deferred rendering immediately.
+  virtual void flush(FlushReason);
+
+  // Like flush, but flushes all the way down to the GPU context if the surface
+  // uses the GPU.
+  virtual void flushGpu(FlushReason reason) { flush(reason); }
+
   virtual void prepareSurfaceForPaintingIfNeeded() {}
   virtual bool writePixels(const SkImageInfo& origInfo,
                            const void* pixels,
@@ -94,7 +97,8 @@ class PLATFORM_EXPORT ImageBufferSurface {
                            int x,
                            int y);
 
-  // May return nullptr if the surface is GPU-backed and the GPU context was lost.
+  // May return nullptr if the surface is GPU-backed and the GPU context was
+  // lost.
   virtual sk_sp<SkImage> newImageSnapshot(AccelerationHint, SnapshotReason) = 0;
 
   OpacityMode getOpacityMode() const { return m_opacityMode; }

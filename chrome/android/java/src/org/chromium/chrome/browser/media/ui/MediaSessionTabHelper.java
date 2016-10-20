@@ -31,20 +31,28 @@ import java.net.URISyntaxException;
  * A tab helper responsible for enabling/disabling media controls and passing
  * media actions from the controls to the {@link org.chromium.content.browser.MediaSession}
  */
-public class MediaSessionTabHelper {
+public class MediaSessionTabHelper implements MediaImageCallback {
     private static final String TAG = "MediaSession";
 
     private static final String UNICODE_PLAY_CHARACTER = "\u25B6";
     private static final int MINIMAL_FAVICON_SIZE = 114;
 
     private Tab mTab;
+    private Bitmap mPageMediaImage = null;
     private Bitmap mFavicon = null;
+    private Bitmap mCurrentMediaImage = null;
     private String mOrigin = null;
     private WebContents mWebContents;
     private WebContentsObserver mWebContentsObserver;
     private int mPreviousVolumeControlStream = AudioManager.USE_DEFAULT_STREAM_TYPE;
     private MediaNotificationInfo.Builder mNotificationInfoBuilder = null;
-    private MediaMetadata mFallbackMetadata;
+    // The fallback title if |mPageMetadata| is null or its title is empty.
+    private String mFallbackTitle = null;
+    // The metadata set by the page.
+    private MediaMetadata mPageMetadata = null;
+    // The currently showing metadata.
+    private MediaMetadata mCurrentMetadata = null;
+    private MediaImageManager mMediaImageManager = null;
 
     private MediaNotificationListener mControlsListener = new MediaNotificationListener() {
         @Override
@@ -93,23 +101,10 @@ public class MediaSessionTabHelper {
             }
 
             @Override
-            public void mediaSessionStateChanged(boolean isControllable, boolean isPaused,
-                    MediaMetadata metadata) {
+            public void mediaSessionStateChanged(boolean isControllable, boolean isPaused) {
                 if (!isControllable) {
                     hideNotification();
                     return;
-                }
-
-                mFallbackMetadata = null;
-
-                // The page's title is used as a placeholder if no title is specified in the
-                // metadata.
-                if (metadata == null || TextUtils.isEmpty(metadata.getTitle())) {
-                    mFallbackMetadata = new MediaMetadata(
-                            sanitizeMediaTitle(mTab.getTitle()),
-                            metadata == null ? "" : metadata.getArtist(),
-                            metadata == null ? "" : metadata.getAlbum());
-                    metadata = mFallbackMetadata;
                 }
 
                 Intent contentIntent = Tab.createBringTabToFrontIntent(mTab.getId());
@@ -118,15 +113,17 @@ public class MediaSessionTabHelper {
                             MediaNotificationUma.SOURCE_MEDIA);
                 }
 
+                mCurrentMetadata = getMetadata();
+                mCurrentMediaImage = getNotificationImage();
                 mNotificationInfoBuilder =
                         new MediaNotificationInfo.Builder()
-                                .setMetadata(metadata)
+                                .setMetadata(mCurrentMetadata)
                                 .setPaused(isPaused)
                                 .setOrigin(mOrigin)
                                 .setTabId(mTab.getId())
                                 .setPrivate(mTab.isIncognito())
                                 .setIcon(R.drawable.audio_playing)
-                                .setLargeIcon(mFavicon)
+                                .setLargeIcon(mCurrentMediaImage)
                                 .setDefaultLargeIcon(R.drawable.audio_playing_square)
                                 .setActions(MediaNotificationInfo.ACTION_PLAY_PAUSE
                                         | MediaNotificationInfo.ACTION_SWIPEAWAY)
@@ -142,6 +139,16 @@ public class MediaSessionTabHelper {
                     activity.setVolumeControlStream(AudioManager.STREAM_MUSIC);
                 }
             }
+
+            @Override
+            public void mediaSessionMetadataChanged(MediaMetadata metadata) {
+                mPageMetadata = metadata;
+                if (mPageMetadata != null) {
+                    mMediaImageManager.downloadImage(mPageMetadata.getArtwork(),
+                            MediaSessionTabHelper.this);
+                }
+                updateNotificationMetadata();
+            }
         };
     }
 
@@ -151,6 +158,7 @@ public class MediaSessionTabHelper {
         cleanupWebContents();
         mWebContents = webContents;
         if (mWebContents != null) mWebContentsObserver = createWebContentsObserver(mWebContents);
+        mMediaImageManager.setWebContents(mWebContents);
     }
 
     private void cleanupWebContents() {
@@ -172,11 +180,7 @@ public class MediaSessionTabHelper {
 
             if (!updateFavicon(icon)) return;
 
-            if (mNotificationInfoBuilder == null) return;
-
-            mNotificationInfoBuilder.setLargeIcon(mFavicon);
-            MediaNotificationManager.show(
-                    ContextUtils.getApplicationContext(), mNotificationInfoBuilder.build());
+            updateNotificationImage();
         }
 
         @Override
@@ -194,6 +198,7 @@ public class MediaSessionTabHelper {
             if (mOrigin != null && mOrigin.equals(origin)) return;
             mOrigin = origin;
             mFavicon = null;
+            mPageMediaImage = null;
 
             if (mNotificationInfoBuilder == null) return;
 
@@ -206,14 +211,11 @@ public class MediaSessionTabHelper {
         @Override
         public void onTitleUpdated(Tab tab) {
             assert tab == mTab;
-            if (mNotificationInfoBuilder == null || mFallbackMetadata == null) return;
-
-            mFallbackMetadata = new MediaMetadata(mFallbackMetadata);
-            mFallbackMetadata.setTitle(sanitizeMediaTitle(mTab.getTitle()));
-            mNotificationInfoBuilder.setMetadata(mFallbackMetadata);
-
-            MediaNotificationManager.show(ContextUtils.getApplicationContext(),
-                    mNotificationInfoBuilder.build());
+            String newFallbackTitle = sanitizeMediaTitle(tab.getTitle());
+            if (!TextUtils.equals(mFallbackTitle, newFallbackTitle)) {
+                mFallbackTitle = newFallbackTitle;
+                updateNotificationMetadata();
+            }
         }
 
         @Override
@@ -231,6 +233,8 @@ public class MediaSessionTabHelper {
     private MediaSessionTabHelper(Tab tab) {
         mTab = tab;
         mTab.addObserver(mTabObserver);
+        mMediaImageManager = new MediaImageManager(
+            MINIMAL_FAVICON_SIZE, MediaNotificationManager.getMaximumLargeIconSize());
         if (mTab.getWebContents() != null) setWebContents(tab.getWebContents());
 
         Activity activity = getActivityFromTab(mTab);
@@ -302,5 +306,68 @@ public class MediaSessionTabHelper {
         }
         mFavicon = MediaNotificationManager.scaleIconForDisplay(icon);
         return true;
+    }
+
+    /**
+     * Updates the metadata in media notification. This method should be called whenever
+     * |mPageMetadata| or |mFallbackTitle| is changed.
+     */
+    private void updateNotificationMetadata() {
+        if (mNotificationInfoBuilder == null) return;
+
+        MediaMetadata newMetadata = getMetadata();
+        if (mCurrentMetadata.equals(newMetadata)) return;
+
+        mCurrentMetadata = newMetadata;
+        mNotificationInfoBuilder.setMetadata(mCurrentMetadata);
+        MediaNotificationManager.show(
+                ContextUtils.getApplicationContext(), mNotificationInfoBuilder.build());
+    }
+
+    /**
+     * @return The up-to-date MediaSession metadata. Returns the cached object like |mPageMetadata|
+     * or |mCurrentMetadata| if it reflects the current state. Otherwise will return a new
+     * {@link MediaMetadata} object.
+     */
+    private MediaMetadata getMetadata() {
+        String title = mFallbackTitle;
+        String artist = "";
+        String album = "";
+        if (mPageMetadata != null) {
+            if (!TextUtils.isEmpty(mPageMetadata.getTitle())) return mPageMetadata;
+
+            artist = mPageMetadata.getArtist();
+            album = mPageMetadata.getAlbum();
+        }
+
+        if (mCurrentMetadata != null && TextUtils.equals(title, mCurrentMetadata.getTitle())
+                && TextUtils.equals(artist, mCurrentMetadata.getArtist())
+                && TextUtils.equals(album, mCurrentMetadata.getAlbum())) {
+            return mCurrentMetadata;
+        }
+
+        return new MediaMetadata(title, artist, album);
+    }
+
+    @Override
+    public void onImageDownloaded(Bitmap image) {
+        mPageMediaImage = image;
+        updateNotificationImage();
+    }
+
+    private void updateNotificationImage() {
+        Bitmap newMediaImage = getNotificationImage();
+        if (mCurrentMediaImage == newMediaImage) return;
+
+        mCurrentMediaImage = newMediaImage;
+
+        if (mNotificationInfoBuilder == null) return;
+        mNotificationInfoBuilder.setLargeIcon(mCurrentMediaImage);
+        MediaNotificationManager.show(
+                ContextUtils.getApplicationContext(), mNotificationInfoBuilder.build());
+    }
+
+    private Bitmap getNotificationImage() {
+        return (mPageMediaImage != null) ? mPageMediaImage : mFavicon;
     }
 }

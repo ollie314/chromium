@@ -126,6 +126,7 @@ SKIP = {
 
   # One off builders. Note that Swarming does support ARM.
   'Linux ARM Cross-Compile',
+  'Site Isolation Android',
   'Site Isolation Linux',
   'Site Isolation Win',
 }
@@ -158,6 +159,7 @@ SKIP_GN_ISOLATE_MAP_TARGETS = {
 
   # this is used at least on iOS
   'gn_all',
+  'cronet_test',
 
   # These are listed in Builders that are skipped for other reasons.
   'chrome_junit_tests',

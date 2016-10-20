@@ -9,7 +9,7 @@
 #include "media/base/media_log.h"
 #include "media/mojo/services/mojo_media_client.h"
 #include "mojo/public/cpp/bindings/strong_binding.h"
-#include "services/shell/public/interfaces/interface_provider.mojom.h"
+#include "services/service_manager/public/interfaces/interface_provider.mojom.h"
 
 #if defined(ENABLE_MOJO_AUDIO_DECODER)
 #include "media/mojo/services/mojo_audio_decoder_service.h"
@@ -34,9 +34,9 @@
 namespace media {
 
 ServiceFactoryImpl::ServiceFactoryImpl(
-    shell::mojom::InterfaceProviderPtr interfaces,
+    service_manager::mojom::InterfaceProviderPtr interfaces,
     scoped_refptr<MediaLog> media_log,
-    std::unique_ptr<shell::ServiceContextRef> connection_ref,
+    std::unique_ptr<service_manager::ServiceContextRef> connection_ref,
     MojoMediaClient* mojo_media_client)
     :
 #if defined(ENABLE_MOJO_CDM)
@@ -85,7 +85,7 @@ void ServiceFactoryImpl::CreateVideoDecoder(
 }
 
 void ServiceFactoryImpl::CreateRenderer(
-    const mojo::String& audio_device_id,
+    const std::string& audio_device_id,
     mojo::InterfaceRequest<mojom::Renderer> request) {
 #if defined(ENABLE_MOJO_RENDERER)
   RendererFactory* renderer_factory = GetRendererFactory();
@@ -105,11 +105,10 @@ void ServiceFactoryImpl::CreateRenderer(
     return;
   }
 
-  mojo::MakeStrongBinding(
-      base::MakeUnique<MojoRendererService>(
-          cdm_service_context_.GetWeakPtr(), std::move(audio_sink),
-          std::move(video_sink), std::move(renderer)),
-      std::move(request));
+  MojoRendererService::Create(
+      cdm_service_context_.GetWeakPtr(), std::move(audio_sink),
+      std::move(video_sink), std::move(renderer),
+      MojoRendererService::InitiateSurfaceRequestCB(), std::move(request));
 #endif  // defined(ENABLE_MOJO_RENDERER)
 }
 

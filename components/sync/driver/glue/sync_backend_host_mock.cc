@@ -4,8 +4,8 @@
 
 #include "components/sync/driver/glue/sync_backend_host_mock.h"
 
-#include "components/sync/core/activation_context.h"
 #include "components/sync/driver/sync_frontend.h"
+#include "components/sync/engine/activation_context.h"
 
 namespace syncer {
 
@@ -81,7 +81,7 @@ void SyncBackendHostMock::ActivateNonBlockingDataType(
 void SyncBackendHostMock::DeactivateNonBlockingDataType(ModelType type) {}
 
 UserShare* SyncBackendHostMock::GetUserShare() const {
-  return NULL;
+  return nullptr;
 }
 
 SyncBackendHost::Status SyncBackendHostMock::GetDetailedStatus() {
@@ -119,7 +119,7 @@ void SyncBackendHostMock::GetModelSafeRoutingInfo(
 void SyncBackendHostMock::FlushDirectory() const {}
 
 base::MessageLoop* SyncBackendHostMock::GetSyncLoopForTesting() {
-  return NULL;
+  return nullptr;
 }
 
 void SyncBackendHostMock::RefreshTypesForTest(ModelTypeSet types) {}

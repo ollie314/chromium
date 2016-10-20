@@ -27,7 +27,6 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
-#include "components/content_settings/content/common/content_settings_messages.h"
 #include "components/content_settings/core/browser/content_settings_details.h"
 #include "components/content_settings/core/browser/content_settings_info.h"
 #include "components/content_settings/core/browser/content_settings_registry.h"
@@ -45,6 +44,7 @@
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
+#include "content/public/common/content_constants.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "net/cookies/canonical_cookie.h"
 #include "storage/common/fileapi/file_system_types.h"
@@ -106,16 +106,16 @@ TabSpecificContentSettings::TabSpecificContentSettings(WebContents* tab)
       subresource_filter_enabled_(false),
       subresource_filter_blockage_indicated_(false),
       observer_(this) {
-  ClearBlockedContentSettingsExceptForCookies();
-  ClearCookieSpecificContentSettings();
+  ClearContentSettingsExceptForNavigationRelatedSettings();
+  ClearNavigationRelatedContentSettings();
 
   observer_.Add(HostContentSettingsMapFactory::GetForProfile(
       Profile::FromBrowserContext(tab->GetBrowserContext())));
 }
 
 TabSpecificContentSettings::~TabSpecificContentSettings() {
-  FOR_EACH_OBSERVER(
-      SiteDataObserver, observer_list_, ContentSettingsDestroyed());
+  for (SiteDataObserver& observer : observer_list_)
+    observer.ContentSettingsDestroyed();
 }
 
 TabSpecificContentSettings* TabSpecificContentSettings::GetForFrame(
@@ -217,15 +217,18 @@ void TabSpecificContentSettings::FileSystemAccessed(int render_process_id,
 }
 
 // static
-void TabSpecificContentSettings::ServiceWorkerAccessed(int render_process_id,
-                                                       int render_frame_id,
-                                                       const GURL& scope,
-                                                       bool blocked_by_policy) {
+void TabSpecificContentSettings::ServiceWorkerAccessed(
+    int render_process_id,
+    int render_frame_id,
+    const GURL& scope,
+    bool blocked_by_policy_javascript,
+    bool blocked_by_policy_cookie) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   TabSpecificContentSettings* settings =
       GetForFrame(render_process_id, render_frame_id);
   if (settings)
-    settings->OnServiceWorkerAccessed(scope, blocked_by_policy);
+    settings->OnServiceWorkerAccessed(scope, blocked_by_policy_javascript,
+                                      blocked_by_policy_cookie);
 }
 
 bool TabSpecificContentSettings::IsContentBlocked(
@@ -470,15 +473,25 @@ void TabSpecificContentSettings::OnLocalStorageAccessed(
 
 void TabSpecificContentSettings::OnServiceWorkerAccessed(
     const GURL& scope,
-    bool blocked_by_policy) {
+    bool blocked_by_policy_javascript,
+    bool blocked_by_policy_cookie) {
   DCHECK(scope.is_valid());
-  if (blocked_by_policy) {
+  if (blocked_by_policy_javascript || blocked_by_policy_cookie) {
     blocked_local_shared_objects_.service_workers()->AddServiceWorker(
         scope.GetOrigin(), std::vector<GURL>(1, scope));
-    OnContentBlocked(CONTENT_SETTINGS_TYPE_COOKIES);
   } else {
     allowed_local_shared_objects_.service_workers()->AddServiceWorker(
         scope.GetOrigin(), std::vector<GURL>(1, scope));
+  }
+
+  if (blocked_by_policy_javascript) {
+    OnContentBlocked(CONTENT_SETTINGS_TYPE_JAVASCRIPT);
+  } else {
+    OnContentAllowed(CONTENT_SETTINGS_TYPE_JAVASCRIPT);
+  }
+  if (blocked_by_policy_cookie) {
+    OnContentBlocked(CONTENT_SETTINGS_TYPE_COOKIES);
+  } else {
     OnContentAllowed(CONTENT_SETTINGS_TYPE_COOKIES);
   }
 }
@@ -651,9 +664,11 @@ void TabSpecificContentSettings::OnMidiSysExAccessBlocked(
   OnContentBlocked(CONTENT_SETTINGS_TYPE_MIDI_SYSEX);
 }
 
-void TabSpecificContentSettings::ClearBlockedContentSettingsExceptForCookies() {
+void TabSpecificContentSettings::
+ClearContentSettingsExceptForNavigationRelatedSettings() {
   for (auto& status : content_settings_status_) {
-    if (status.first == CONTENT_SETTINGS_TYPE_COOKIES)
+    if (status.first == CONTENT_SETTINGS_TYPE_COOKIES ||
+        status.first == CONTENT_SETTINGS_TYPE_JAVASCRIPT)
       continue;
     status.second.blocked = false;
     status.second.blockage_indicated_to_user = false;
@@ -667,18 +682,26 @@ void TabSpecificContentSettings::ClearBlockedContentSettingsExceptForCookies() {
       content::NotificationService::NoDetails());
 }
 
-void TabSpecificContentSettings::ClearCookieSpecificContentSettings() {
+void TabSpecificContentSettings::ClearNavigationRelatedContentSettings() {
   blocked_local_shared_objects_.Reset();
   allowed_local_shared_objects_.Reset();
-  ContentSettingsStatus& status =
-      content_settings_status_[CONTENT_SETTINGS_TYPE_COOKIES];
-  status.blocked = false;
-  status.blockage_indicated_to_user = false;
-  status.allowed = false;
+  for (ContentSettingsType type :
+    {CONTENT_SETTINGS_TYPE_COOKIES, CONTENT_SETTINGS_TYPE_JAVASCRIPT}) {
+    ContentSettingsStatus& status =
+        content_settings_status_[type];
+    status.blocked = false;
+    status.blockage_indicated_to_user = false;
+    status.allowed = false;
+  }
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_WEB_CONTENT_SETTINGS_CHANGED,
       content::Source<WebContents>(web_contents()),
       content::NotificationService::NoDetails());
+}
+
+void TabSpecificContentSettings::FlashDownloadBlocked() {
+  OnContentBlockedWithDetail(CONTENT_SETTINGS_TYPE_PLUGINS,
+                             base::UTF8ToUTF16(content::kFlashPluginName));
 }
 
 void TabSpecificContentSettings::SetDownloadsBlocked(bool blocked) {
@@ -791,7 +814,7 @@ void TabSpecificContentSettings::DidStartNavigation(
   // settings delegate's cookies so the user has a chance to modify cookie
   // settings.
   if (!navigation_handle->IsErrorPage())
-    ClearCookieSpecificContentSettings();
+    ClearNavigationRelatedContentSettings();
   ClearGeolocationContentSettings();
   ClearMidiContentSettings();
   ClearPendingProtocolHandler();
@@ -806,7 +829,7 @@ void TabSpecificContentSettings::DidFinishNavigation(
   }
 
   // Clear "blocked" flags.
-  ClearBlockedContentSettingsExceptForCookies();
+  ClearContentSettingsExceptForNavigationRelatedSettings();
   blocked_plugin_names_.clear();
   GeolocationDidNavigate(navigation_handle);
   MidiDidNavigate(navigation_handle);
@@ -839,7 +862,8 @@ void TabSpecificContentSettings::RemoveSiteDataObserver(
 }
 
 void TabSpecificContentSettings::NotifySiteDataObservers() {
-  FOR_EACH_OBSERVER(SiteDataObserver, observer_list_, OnSiteDataAccessed());
+  for (SiteDataObserver& observer : observer_list_)
+    observer.OnSiteDataAccessed();
 }
 
 void TabSpecificContentSettings::ClearGeolocationContentSettings() {

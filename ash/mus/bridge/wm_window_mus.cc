@@ -104,6 +104,8 @@ ui::mojom::ShowState MojomWindowShowStateFromUI(ui::WindowShowState state) {
 WmWindowProperty WmWindowPropertyFromUI(const std::string& ui_window_key) {
   if (ui_window_key == ui::mojom::WindowManager::kAlwaysOnTop_Property)
     return WmWindowProperty::ALWAYS_ON_TOP;
+  if (ui_window_key == ui::mojom::WindowManager::kExcludeFromMru_Property)
+    return WmWindowProperty::EXCLUDE_FROM_MRU;
   if (ui_window_key == ui::mojom::WindowManager::kShelfIconResourceId_Property)
     return WmWindowProperty::SHELF_ICON_RESOURCE_ID;
   if (ui_window_key == ui::mojom::WindowManager::kShelfItemType_Property)
@@ -247,9 +249,21 @@ bool WmWindowMus::IsBubble() {
 }
 
 ui::Layer* WmWindowMus::GetLayer() {
-  // TODO(sky): this function should be nuked entirely.
+  // TODO: http://crbug.com/652877.
   NOTIMPLEMENTED();
   return widget_ ? widget_->GetLayer() : nullptr;
+}
+
+bool WmWindowMus::GetLayerTargetVisibility() {
+  // TODO: http://crbug.com/652877.
+  NOTIMPLEMENTED();
+  return GetTargetVisibility();
+}
+
+bool WmWindowMus::GetLayerVisible() {
+  // TODO: http://crbug.com/652877.
+  NOTIMPLEMENTED();
+  return IsVisible();
 }
 
 display::Display WmWindowMus::GetDisplayNearestWindow() {
@@ -359,15 +373,14 @@ bool WmWindowMus::IsSystemModal() const {
 
 bool WmWindowMus::GetBoolProperty(WmWindowProperty key) {
   switch (key) {
-    case WmWindowProperty::SNAP_CHILDREN_TO_PIXEL_BOUNDARY:
-      return snap_children_to_pixel_boundary_;
-
     case WmWindowProperty::ALWAYS_ON_TOP:
       return IsAlwaysOnTop();
 
     case WmWindowProperty::EXCLUDE_FROM_MRU:
-      NOTIMPLEMENTED();
-      return false;
+      return GetExcludeFromMru(window_);
+
+    case WmWindowProperty::SNAP_CHILDREN_TO_PIXEL_BOUNDARY:
+      return snap_children_to_pixel_boundary_;
 
     default:
       NOTREACHED();
@@ -740,6 +753,11 @@ void WmWindowMus::StackChildBelow(WmWindow* child, WmWindow* target) {
                                ui::mojom::OrderDirection::BELOW);
 }
 
+void WmWindowMus::SetPinned(bool trusted) {
+  // http://crbug.com/622486.
+  NOTIMPLEMENTED();
+}
+
 void WmWindowMus::SetAlwaysOnTop(bool value) {
   mus::SetAlwaysOnTop(window_, value);
 }
@@ -819,7 +837,7 @@ void WmWindowMus::Unminimize() {
 }
 
 void WmWindowMus::SetExcludedFromMru(bool excluded_from_mru) {
-  NOTIMPLEMENTED();
+  SetExcludeFromMru(window_, excluded_from_mru);
 }
 
 std::vector<WmWindow*> WmWindowMus::GetChildren() {
@@ -864,10 +882,10 @@ void WmWindowMus::SetSnapsChildrenToPhysicalPixelBoundary() {
     return;
 
   snap_children_to_pixel_boundary_ = true;
-  FOR_EACH_OBSERVER(
-      WmWindowObserver, observers_,
-      OnWindowPropertyChanged(
-          this, WmWindowProperty::SNAP_CHILDREN_TO_PIXEL_BOUNDARY));
+  for (auto& observer : observers_) {
+    observer.OnWindowPropertyChanged(
+        this, WmWindowProperty::SNAP_CHILDREN_TO_PIXEL_BOUNDARY);
+  }
 }
 
 void WmWindowMus::SnapToPixelBoundaryIfNecessary() {
@@ -924,8 +942,8 @@ void WmWindowMus::OnTreeChanging(const TreeChangeParams& params) {
   wm_params.target = Get(params.target);
   wm_params.new_parent = Get(params.new_parent);
   wm_params.old_parent = Get(params.old_parent);
-  FOR_EACH_OBSERVER(WmWindowObserver, observers_,
-                    OnWindowTreeChanging(this, wm_params));
+  for (auto& observer : observers_)
+    observer.OnWindowTreeChanging(this, wm_params);
 }
 
 void WmWindowMus::OnTreeChanged(const TreeChangeParams& params) {
@@ -933,15 +951,15 @@ void WmWindowMus::OnTreeChanged(const TreeChangeParams& params) {
   wm_params.target = Get(params.target);
   wm_params.new_parent = Get(params.new_parent);
   wm_params.old_parent = Get(params.old_parent);
-  FOR_EACH_OBSERVER(WmWindowObserver, observers_,
-                    OnWindowTreeChanged(this, wm_params));
+  for (auto& observer : observers_)
+    observer.OnWindowTreeChanged(this, wm_params);
 }
 
 void WmWindowMus::OnWindowReordered(ui::Window* window,
                                     ui::Window* relative_window,
                                     ui::mojom::OrderDirection direction) {
-  FOR_EACH_OBSERVER(WmWindowObserver, observers_,
-                    OnWindowStackingChanged(this));
+  for (auto& observer : observers_)
+    observer.OnWindowStackingChanged(this);
 }
 
 void WmWindowMus::OnWindowSharedPropertyChanged(
@@ -954,15 +972,16 @@ void WmWindowMus::OnWindowSharedPropertyChanged(
     return;
   }
   if (name == ui::mojom::WindowManager::kWindowTitle_Property) {
-    FOR_EACH_OBSERVER(WmWindowObserver, observers_, OnWindowTitleChanged(this));
+    for (auto& observer : observers_)
+      observer.OnWindowTitleChanged(this);
     return;
   }
 
   // Notify WmWindowObserver of certain white-listed property changes.
   WmWindowProperty wm_property = WmWindowPropertyFromUI(name);
   if (wm_property != WmWindowProperty::INVALID_PROPERTY) {
-    FOR_EACH_OBSERVER(WmWindowObserver, observers_,
-                      OnWindowPropertyChanged(this, wm_property));
+    for (auto& observer : observers_)
+      observer.OnWindowPropertyChanged(this, wm_property);
     return;
   }
 
@@ -973,39 +992,41 @@ void WmWindowMus::OnWindowSharedPropertyChanged(
 void WmWindowMus::OnWindowBoundsChanged(ui::Window* window,
                                         const gfx::Rect& old_bounds,
                                         const gfx::Rect& new_bounds) {
-  FOR_EACH_OBSERVER(WmWindowObserver, observers_,
-                    OnWindowBoundsChanged(this, old_bounds, new_bounds));
+  for (auto& observer : observers_)
+    observer.OnWindowBoundsChanged(this, old_bounds, new_bounds);
 }
 
 void WmWindowMus::OnWindowDestroying(ui::Window* window) {
-  FOR_EACH_OBSERVER(WmWindowObserver, observers_, OnWindowDestroying(this));
+  for (auto& observer : observers_)
+    observer.OnWindowDestroying(this);
 }
 
 void WmWindowMus::OnWindowDestroyed(ui::Window* window) {
-  FOR_EACH_OBSERVER(WmWindowObserver, observers_, OnWindowDestroyed(this));
+  for (auto& observer : observers_)
+    observer.OnWindowDestroyed(this);
 }
 
 void WmWindowMus::OnWindowVisibilityChanging(ui::Window* window, bool visible) {
   DCHECK_EQ(window_, window);
-  FOR_EACH_OBSERVER(WmWindowObserver, observers_,
-                    OnWindowVisibilityChanging(this, visible));
+  for (auto& observer : observers_)
+    observer.OnWindowVisibilityChanging(this, visible);
 }
 
 void WmWindowMus::OnWindowVisibilityChanged(ui::Window* window, bool visible) {
-  FOR_EACH_OBSERVER(WmWindowObserver, observers_,
-                    OnWindowVisibilityChanged(Get(window), visible));
+  for (auto& observer : observers_)
+    observer.OnWindowVisibilityChanged(Get(window), visible);
 }
 
 void WmWindowMus::OnTransientChildAdded(ui::Window* window,
                                         ui::Window* transient) {
-  FOR_EACH_OBSERVER(WmTransientWindowObserver, transient_observers_,
-                    OnTransientChildAdded(this, Get(transient)));
+  for (auto& observer : transient_observers_)
+    observer.OnTransientChildAdded(this, Get(transient));
 }
 
 void WmWindowMus::OnTransientChildRemoved(ui::Window* window,
                                           ui::Window* transient) {
-  FOR_EACH_OBSERVER(WmTransientWindowObserver, transient_observers_,
-                    OnTransientChildRemoved(this, Get(transient)));
+  for (auto& observer : transient_observers_)
+    observer.OnTransientChildRemoved(this, Get(transient));
 }
 
 }  // namespace mus

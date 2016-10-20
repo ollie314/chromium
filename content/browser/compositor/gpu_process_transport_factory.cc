@@ -47,7 +47,7 @@
 #include "gpu/command_buffer/client/shared_memory_limits.h"
 #include "gpu/command_buffer/common/mailbox.h"
 #include "gpu/ipc/client/gpu_channel_host.h"
-#include "services/shell/runner/common/client_util.h"
+#include "services/service_manager/runner/common/client_util.h"
 #include "third_party/khronos/GLES2/gl2.h"
 #include "ui/compositor/compositor.h"
 #include "ui/compositor/compositor_constants.h"
@@ -58,7 +58,7 @@
 
 #if defined(USE_AURA)
 #include "content/browser/compositor/mus_browser_compositor_output_surface.h"
-#include "content/public/common/mojo_shell_connection.h"
+#include "content/public/common/service_manager_connection.h"
 #endif
 
 #if defined(OS_WIN)
@@ -85,7 +85,7 @@
 #include "components/display_compositor/compositor_overlay_candidate_validator_android.h"
 #endif
 #if !defined(GPU_SURFACE_HANDLE_IS_ACCELERATED_WINDOW)
-#include "content/browser/gpu/gpu_surface_tracker.h"
+#include "gpu/ipc/common/gpu_surface_tracker.h"
 #endif
 
 #if defined(ENABLE_VULKAN)
@@ -100,7 +100,7 @@ namespace {
 const int kNumRetriesBeforeSoftwareFallback = 4;
 
 bool IsUsingMus() {
-  return shell::ShellIsRemote();
+  return service_manager::ServiceManagerIsRemote();
 }
 
 scoped_refptr<content::ContextProviderCommandBuffer> CreateContextCommon(
@@ -184,8 +184,7 @@ GpuProcessTransportFactory::GpuProcessTransportFactory()
 }
 
 GpuProcessTransportFactory::~GpuProcessTransportFactory() {
-  // If this fails, then we are leaking compositors.
-  CHECK(per_compositor_data_.empty());
+  DCHECK(per_compositor_data_.empty());
 
   // Make sure the lost context callback doesn't try to run during destruction.
   callback_factory_.InvalidateWeakPtrs();
@@ -197,7 +196,7 @@ std::unique_ptr<cc::SoftwareOutputDevice>
 GpuProcessTransportFactory::CreateSoftwareOutputDevice(
     ui::Compositor* compositor) {
 #if defined(USE_AURA)
-  if (shell::ShellIsRemote()) {
+  if (service_manager::ServiceManagerIsRemote()) {
     NOTREACHED();
     return nullptr;
   }
@@ -468,7 +467,8 @@ void GpuProcessTransportFactory::EstablishedGpuChannel(
       display_output_surface =
           base::MakeUnique<SoftwareBrowserCompositorOutputSurface>(
               CreateSoftwareOutputDevice(compositor.get()),
-              compositor->vsync_manager(), begin_frame_source.get());
+              compositor->vsync_manager(), begin_frame_source.get(),
+              compositor->task_runner());
     } else {
       DCHECK(context_provider);
       const auto& capabilities = context_provider->ContextCapabilities();
@@ -598,7 +598,7 @@ void GpuProcessTransportFactory::RemoveCompositor(ui::Compositor* compositor) {
   DCHECK(data);
 #if !defined(GPU_SURFACE_HANDLE_IS_ACCELERATED_WINDOW)
   if (data->surface_handle)
-    GpuSurfaceTracker::Get()->RemoveSurface(data->surface_handle);
+    gpu::GpuSurfaceTracker::Get()->RemoveSurface(data->surface_handle);
 #endif
   per_compositor_data_.erase(it);
   if (per_compositor_data_.empty()) {
@@ -612,8 +612,8 @@ void GpuProcessTransportFactory::RemoveCompositor(ui::Compositor* compositor) {
 
     // If there are any observer left at this point, make sure they clean up
     // before we destroy the GLHelper.
-    FOR_EACH_OBSERVER(ui::ContextFactoryObserver, observer_list_,
-                      OnLostResources());
+    for (auto& observer : observer_list_)
+      observer.OnLostResources();
 
     helper.reset();
     DCHECK(!gl_helper_) << "Destroying the GLHelper should not cause a new "
@@ -651,7 +651,7 @@ ui::ContextFactory* GpuProcessTransportFactory::GetContextFactory() {
 }
 
 cc::FrameSinkId GpuProcessTransportFactory::AllocateFrameSinkId() {
-  return cc::FrameSinkId(next_surface_client_id_++, 0);
+  return cc::FrameSinkId(0, next_sink_id_++);
 }
 
 void GpuProcessTransportFactory::SetDisplayVisible(ui::Compositor* compositor,
@@ -824,7 +824,7 @@ GpuProcessTransportFactory::CreatePerCompositorData(
 #if defined(GPU_SURFACE_HANDLE_IS_ACCELERATED_WINDOW)
     data->surface_handle = widget;
 #else
-    GpuSurfaceTracker* tracker = GpuSurfaceTracker::Get();
+    gpu::GpuSurfaceTracker* tracker = gpu::GpuSurfaceTracker::Get();
     data->surface_handle = tracker->AddSurfaceForNativeWidget(widget);
 #endif
   }
@@ -855,8 +855,8 @@ void GpuProcessTransportFactory::OnLostMainThreadSharedContext() {
   std::unique_ptr<display_compositor::GLHelper> lost_gl_helper =
       std::move(gl_helper_);
 
-  FOR_EACH_OBSERVER(ui::ContextFactoryObserver, observer_list_,
-                    OnLostResources());
+  for (auto& observer : observer_list_)
+    observer.OnLostResources();
 
   // Kill things that use the shared context before killing the shared context.
   lost_gl_helper.reset();

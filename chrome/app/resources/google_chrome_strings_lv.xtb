@@ -135,6 +135,7 @@ Papildu norādījumus skatiet e-pasta ziņojumā šeit: <ph name="ACCOUNT_EMAIL"
 <translation id="4771048833395599659">Šis fails var būt bīstams, tāpēc Chrome to bloķēja.</translation>
 <translation id="4794050651896644714">Saglabāt informāciju pārlūkā Chrome</translation>
 <translation id="4891791193823137474">Ļaut Google Chrome darboties fonā</translation>
+<translation id="4901390485477164536">Google Chrome ir jūsu noklusējuma pārlūks.</translation>
 <translation id="4921569541910214635">Vai datoru izmanto vairāki lietotāji? Tagad varat iestatīt pārlūku Chrome atbilstoši savām vajadzībām.</translation>
 <translation id="4925019873400497719">Chrome verificēja, ka <ph name="ISSUER" /> izsniedza šīs vietnes sertifikātu. Serveris sniedza Certificate Transparency informāciju, taču tā nebija derīga.</translation>
 <translation id="4953650215774548573">Iestatīt Google Chrome kā manu noklusējuma pārlūku</translation>
@@ -215,13 +216,11 @@ Dažas funkcijas var nebūt pieejamas. Norādiet citu profila direktoriju vai li
 <translation id="7164397146364144019">Varat palīdzēt uzlabot Chrome drošību un lietošanas ērtumu, automātiski nosūtot Google serveriem informāciju par iespējamām drošības problēmām.</translation>
 <translation id="7177347454226092725">Veicot šo darbību, no šīs ierīces tiks neatgriezeniski izdzēsti jūsu pārlūkošanas dati. Lai izgūtu datus vēlāk, pierakstieties pārlūkā Chrome kā $2.</translation>
 <translation id="7185038942300673794">Paplašinājums <ph name="EXTENSION_NAME" /> ir pievienots pārlūkam Chrome.</translation>
-<translation id="7191567847629796517">Operētājsistēmā Google Chrome OS netiek atbalstīta ārējas lietojumprogrammas palaišana, lai apstrādātu <ph name="SCHEME" /> saites. Pieprasītā saite: <ph name="PROTOLINK" />.</translation>
 <translation id="7193750696137290001">Google Chrome tiek rādīts šajā valodā.</translation>
 <translation id="7196020411877309443">Kāpēc es redzu šo dialoglodziņu?</translation>
 <translation id="7242029209006116544">Jūs pierakstāties ar pārvaldītu kontu un nodrošināt, ka tā administrators var pārvaldīt jūsu Google Chrome profilu. Jūsu Chrome dati, piemēram, lietotnes, grāmatzīmes, vēsture, paroles un citi iestatījumi tiks neatgriezeniski saistīti ar lietotāju <ph name="USER_NAME" />. Varēsiet dzēst šos datus, izmantojot Google kontu informācijas paneli, taču nevarēsiet saistīt šos datus ar citu kontu. Ja vēlaties, varat izveidot jaunu profilu, lai atsevišķi glabātu Chrome datus. <ph name="LEARN_MORE" /></translation>
 <translation id="729375352412857283">Šajā datorā drīzumā vairs netiks saņemti Google Chrome atjauninājumi, jo operētājsistēmas Windows XP un Windows Vista vairs netiks atbalstītas.</translation>
 <translation id="7339898014177206373">Jauns logs</translation>
-<translation id="7393806081343982361">Google Chrome ir jūsu noklusējuma pārlūks.</translation>
 <translation id="7398801000654795464">Pārlūkā Chrome iepriekš pierakstījāties kā lietotājs <ph name="USER_EMAIL_ADDRESS" />. Lai pierakstītos vēlreiz, lūdzu, izmantojiet to pašu kontu.</translation>
 <translation id="7400722733683201933">Par Google Chrome</translation>
 <translation id="7408085963519505752">Chrome OS noteikumi</translation>
@@ -256,12 +255,12 @@ Dažas funkcijas var nebūt pieejamas. Norādiet citu profila direktoriju vai li
 <translation id="8129812357326543296">Par &amp;Google Chrome</translation>
 <translation id="8183957050892517584">Chrome droši saglabās jūsu privāto informāciju, lai tā vairs nebūtu atkārtoti jāievada.</translation>
 <translation id="8211929904040702368">Veicot šo darbību, no šīs ierīces tiks neatgriezeniski izdzēsti vismaz <ph name="TOTAL_COUNT" /> vienumi. Lai izgūtu datus vēlāk, pierakstieties pārlūkā Chrome kā $2.</translation>
-<translation id="8227755444512189073">Google Chrome nepieciešams ieslēgt ārēju lietojumprogrammu, lai regulētu <ph name="SCHEME" /> saites. Pieprasītā saite ir <ph name="PROTOLINK" /></translation>
 <translation id="8255190535488645436">Pārlūkā Google Chrome tiek izmantota kamera un mikrofons.</translation>
 <translation id="8286862437124483331">Google Chrome mēģina rādīt paroles. Lai to atļautu, ierakstiet savu Windows paroli.</translation>
 <translation id="8290100596633877290">Eh! Google Chrome ir avarējis. Vai restartēt to tūlīt?</translation>
 <translation id="8342675569599923794">Šis fails ir bīstams, tāpēc Chrome to bloķēja.</translation>
 <translation id="8406086379114794905">Palīdziet uzlabot Chrome</translation>
+<translation id="8410645163819739900">Problēma ar lapas atvēršanu pārlūkā Google Chrome OS</translation>
 <translation id="8455999171311319804">Neobligāti: palīdziet uzlabot Chrome OS, automātiski nosūtot Google serveriem diagnostikas un lietojuma datus.</translation>
 <translation id="853189717709780425">Jūs pierakstāties pārvaldītā kontā, kura administrators var kontrolēt jūsu Google Chrome profilu. Jūsu Chrome dati, piemēram, lietotnes, grāmatzīmes, vēsture, paroles un citi iestatījumi, tiks neatgriezeniski saistīti ar lietotājvārdu <ph name="USER_NAME" />. Varēsiet dzēst šos datus, izmantojot Google kontu informācijas paneli, taču nevarēsiet šos datus saistīt ar citu kontu.</translation>
 <translation id="8540666473246803645">Google Chrome</translation>

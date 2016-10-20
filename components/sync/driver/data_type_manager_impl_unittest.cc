@@ -10,12 +10,12 @@
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "components/sync/base/model_type.h"
-#include "components/sync/core/activation_context.h"
-#include "components/sync/core/configure_reason.h"
 #include "components/sync/driver/data_type_encryption_handler.h"
 #include "components/sync/driver/data_type_manager_observer.h"
 #include "components/sync/driver/data_type_status_table.h"
 #include "components/sync/driver/fake_data_type_controller.h"
+#include "components/sync/engine/activation_context.h"
+#include "components/sync/engine/configure_reason.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace syncer {
@@ -262,9 +262,9 @@ class SyncDataTypeManagerImplTest : public testing::Test {
 
  protected:
   void SetUp() override {
-    dtm_.reset(new TestDataTypeManager(WeakHandle<DataTypeDebugInfoListener>(),
-                                       &configurer_, &controllers_,
-                                       &encryption_handler_, &observer_));
+    dtm_ = base::MakeUnique<TestDataTypeManager>(
+        WeakHandle<DataTypeDebugInfoListener>(), &configurer_, &controllers_,
+        &encryption_handler_, &observer_);
   }
 
   void SetConfigureStartExpectation() { observer_.ExpectStart(); }
@@ -319,7 +319,7 @@ class SyncDataTypeManagerImplTest : public testing::Test {
     DataTypeController::TypeMap::const_iterator it =
         controllers_.find(model_type);
     if (it == controllers_.end()) {
-      return NULL;
+      return nullptr;
     }
     return static_cast<FakeDataTypeController*>(it->second.get());
   }

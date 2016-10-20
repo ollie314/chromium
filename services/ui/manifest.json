@@ -1,6 +1,6 @@
 {
   "manifest_version":  1,
-  "name": "mojo:ui",
+  "name": "service:ui",
   "display_name": "UI Service",
   "capabilities": {
     "provided": {
@@ -21,12 +21,34 @@
       ],
       "test": [
         "ui::mojom::WindowServerTest"
+      ],
+      "ui:gpu_client": [
+        "ui::mojom::Gpu",
+        "ui::mojom::GpuService"
+      ],
+      "ui:ime_registrar": [
+        "ui::mojom::IMERegistrar"
+      ],
+      "ui:user_access_manager": [
+        "ui::mojom::UserAccessManager"
+      ],
+      "ui:window_manager": [
+        "display::mojom::DisplayController",
+        "display::mojom::TestDisplayController",
+        "ui::mojom::AccessibilityManager",
+        "ui::mojom::WindowManagerWindowTreeFactory"
+      ],
+      "ui:window_tree_host_factory": [
+        "ui::mojom::WindowTreeHostFactory"
       ]
     },
     "required": {
-      "mojo:ui": { "classes": [ "ozone" ] },
-      "*": { "classes": [ "app" ] },
-      "mojo:shell": { "classes": [ "shell:all_users", "shell:explicit_class" ] }
+      "*": [ "app" ],
+      "service:service_manager": [
+        "service_manager:all_users",
+        "service_manager:explicit_class"
+      ],
+      "service:ui": [ "ozone" ]
     }
   }
 }

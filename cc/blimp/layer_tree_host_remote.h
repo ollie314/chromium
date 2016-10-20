@@ -10,9 +10,9 @@
 #include "cc/base/cc_export.h"
 #include "cc/blimp/remote_compositor_bridge_client.h"
 #include "cc/debug/layer_tree_debug_state.h"
+#include "cc/surfaces/surface_sequence_generator.h"
 #include "cc/trees/layer_tree_host.h"
 #include "cc/trees/layer_tree_settings.h"
-#include "cc/trees/surface_sequence_generator.h"
 #include "cc/trees/swap_promise_manager.h"
 
 namespace base {
@@ -25,6 +25,8 @@ class LayerTreeHost;
 }  // namespace proto
 
 class AnimationHost;
+class EnginePictureCache;
+class ImageSerializationProcessor;
 class RemoteCompositorBridge;
 class LayerTreeHostClient;
 
@@ -36,6 +38,7 @@ class CC_EXPORT LayerTreeHostRemote : public LayerTreeHost,
     scoped_refptr<base::SingleThreadTaskRunner> main_task_runner;
     std::unique_ptr<AnimationHost> animation_host;
     std::unique_ptr<RemoteCompositorBridge> remote_compositor_bridge;
+    std::unique_ptr<EnginePictureCache> engine_picture_cache;
     LayerTreeSettings const* settings = nullptr;
 
     InitParams();
@@ -72,7 +75,6 @@ class CC_EXPORT LayerTreeHostRemote : public LayerTreeHost,
   void SetDeferCommits(bool defer_commits) override;
   void LayoutAndUpdateLayers() override;
   void Composite(base::TimeTicks frame_begin_time) override;
-  void SetNeedsRedraw() override;
   void SetNeedsRedrawRect(const gfx::Rect& damage_rect) override;
   void SetNextCommitForcesRedraw() override;
   void NotifyInputThrottledUntilCommit() override;
@@ -98,22 +100,39 @@ class CC_EXPORT LayerTreeHostRemote : public LayerTreeHost,
   LayerTreeHostRemote(InitParams* params,
                       std::unique_ptr<LayerTree> layer_tree);
 
- private:
-  enum class FramePipelineStage { NONE, ANIMATE, UPDATE_LAYERS, COMMIT };
+  LayerTreeHostClient* client() const { return client_; }
+  RemoteCompositorBridge* remote_compositor_bridge() const {
+    return remote_compositor_bridge_.get();
+  }
+
+  virtual void DispatchDrawAndSubmitCallbacks();
+  void SetTaskRunnerProviderForTesting(
+      std::unique_ptr<TaskRunnerProvider> task_runner_provider);
 
   // RemoteCompositorBridgeClient implementation.
   void BeginMainFrame() override;
+  bool ApplyScrollAndScaleUpdateFromClient(
+      const ScrollOffsetMap& client_scroll_map,
+      float client_page_scale) override;
+
+ private:
+  enum class FramePipelineStage { NONE, ANIMATE, UPDATE_LAYERS, COMMIT };
 
   void MainFrameRequested(FramePipelineStage requested_pipeline_stage);
   void ScheduleMainFrameIfNecessary();
   void MainFrameComplete();
-  void DispatchDrawAndSwapCallbacks();
   void SerializeCurrentState(proto::LayerTreeHost* layer_tree_host_proto);
 
   const int id_;
   int source_frame_number_ = 0;
   bool visible_ = false;
   bool defer_commits_ = false;
+
+  // In threaded/single-threaded mode, the LayerTree and Layers expect scroll/
+  // scale updates to come from the impl thread only during the main frame.
+  // Since we synchronize state outside of that, this is set so we can
+  // temporarily report that a commit is in progress.
+  bool synchronizing_client_updates_ = false;
 
   // Set to true if a main frame request is pending on the
   // RemoteCompositorBridge.
@@ -137,6 +156,11 @@ class CC_EXPORT LayerTreeHostRemote : public LayerTreeHost,
 
   // The RemoteCompositorBridge used to submit frame updates to the client.
   std::unique_ptr<RemoteCompositorBridge> remote_compositor_bridge_;
+
+  // Used to cache SkPictures sent with DisplayLists to the client.
+  // TODO(khushalsagar): Restructure to give this with the CompositorProtoState
+  // and eliminate this abstraction. See crbug.com/648442.
+  std::unique_ptr<EnginePictureCache> engine_picture_cache_;
 
   LayerTreeSettings settings_;
   LayerTreeDebugState debug_state_;

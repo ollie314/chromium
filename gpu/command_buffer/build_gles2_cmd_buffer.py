@@ -2288,7 +2288,7 @@ _NAMED_TYPE_INFO = {
   },
 }
 
-_ES30_COMPRESSED_TEXTURE_FORMATS = [
+_ETC_COMPRESSED_TEXTURE_FORMATS = [
   'GL_COMPRESSED_R11_EAC',
   'GL_COMPRESSED_SIGNED_R11_EAC',
   'GL_COMPRESSED_RG11_EAC',
@@ -3009,6 +3009,17 @@ _FUNCTION_INFO = {
     'result': ['GLint'],
     'error_return': -1,
   },
+  'GetBufferSubDataAsyncCHROMIUM': {
+    'type': 'Custom',
+    'data_transfer_methods': ['shm'],
+    'cmd_args': 'GLenumBufferTarget target, GLintptrNotNegative offset, '
+                'GLsizeiptr size, '
+                'uint32_t data_shm_id, uint32_t data_shm_offset',
+    'unsafe': True,
+    'impl_func': False,
+    'client_test': False,
+    'trace_level': 1,
+  },
   'GetFragDataIndexEXT': {
     'type': 'Custom',
     'data_transfer_methods': ['shm'],
@@ -3032,7 +3043,7 @@ _FUNCTION_INFO = {
     'type': 'GETn',
     'result': ['SizedResult<GLboolean>'],
     'decoder_func': 'DoGetBooleanv',
-    'gl_test_func': 'glGetBooleanv',
+    'gl_test_func': 'glGetIntegerv',
   },
   'GetBufferParameteri64v': {
     'type': 'GETn',
@@ -3060,7 +3071,7 @@ _FUNCTION_INFO = {
     'type': 'GETn',
     'result': ['SizedResult<GLfloat>'],
     'decoder_func': 'DoGetFloatv',
-    'gl_test_func': 'glGetFloatv',
+    'gl_test_func': 'glGetIntegerv',
   },
   'GetFramebufferAttachmentParameteriv': {
     'type': 'GETn',
@@ -3078,6 +3089,7 @@ _FUNCTION_INFO = {
     'result': ['SizedResult<GLint64>'],
     'client_test': False,
     'decoder_func': 'DoGetInteger64v',
+    'gl_test_func': 'glGetIntegerv',
     'unsafe': True
   },
   'GetIntegerv': {
@@ -4823,6 +4835,10 @@ static_assert(offsetof(%(cmd_name)s::Result, %(field_name)s) == %(offset)d,
         args.append("nullptr")
       else:
         args.append(arg.name)
+
+    if func.GetInfo('type') == 'GETn' and func.name != 'GetSynciv':
+      args.append('num_values')
+
     f.write("  %s(%s);\n" %
                (func.GetGLFunctionName(), ", ".join(args)))
 
@@ -6700,7 +6716,10 @@ class GETnHandler(TypeHandler):
 
     code = """  typedef cmds::%(func_name)s::Result Result;
   GLsizei num_values = 0;
-  GetNumValuesReturnedForGLGet(pname, &num_values);
+  if (!GetNumValuesReturnedForGLGet(pname, &num_values)) {
+    LOCAL_SET_GL_ERROR_INVALID_ENUM(":%(func_name)s", pname, "pname");
+    return error::kNoError;
+  }
   Result* result = GetSharedMemoryAs<Result*>(
       c.%(last_arg_name)s_shm_id, c.%(last_arg_name)s_shm_offset,
       Result::ComputeSize(num_values));
@@ -10940,12 +10959,11 @@ extern const NameToFunc g_gles2_function_table[] = {
           f.write(code % {
             'name': ToUnderscore(name),
           })
-      f.write("UpdateES30CompressedTextureFormats();");
       f.write("}\n\n");
 
-      f.write("void Validators::UpdateES30CompressedTextureFormats() {\n")
+      f.write("void Validators::UpdateETCCompressedTextureFormats() {\n")
       for name in ['CompressedTextureFormat', 'TextureInternalFormatStorage']:
-        for fmt in _ES30_COMPRESSED_TEXTURE_FORMATS:
+        for fmt in _ETC_COMPRESSED_TEXTURE_FORMATS:
           code = """  %(name)s.AddValue(%(format)s);
 """
           f.write(code % {
@@ -11014,12 +11032,6 @@ const size_t GLES2Util::enum_to_string_table_len_ =
             for es3_enum in _NAMED_TYPE_INFO[enum]['valid_es3']:
               if not es3_enum in valid_list:
                 valid_list.append(es3_enum)
-          if enum in [
-              'CompressedTextureFormat',
-              'TextureInternalFormatStorage',
-            ]:
-            for es3_enum in _ES30_COMPRESSED_TEXTURE_FORMATS:
-              valid_list.append(es3_enum)
           assert len(valid_list) == len(set(valid_list))
           if len(valid_list) > 0:
             f.write("  static const EnumToString string_table[] = {\n")

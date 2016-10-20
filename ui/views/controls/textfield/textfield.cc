@@ -252,6 +252,7 @@ Textfield::Textfield()
       selection_text_color_(SK_ColorWHITE),
       selection_background_color_(SK_ColorBLUE),
       placeholder_text_color_(kDefaultPlaceholderTextColor),
+      invalid_(false),
       text_input_type_(ui::TEXT_INPUT_TYPE_TEXT),
       text_input_flags_(0),
       performing_user_action_(false),
@@ -261,11 +262,12 @@ Textfield::Textfield()
       aggregated_clicks_(0),
       drag_start_display_offset_(0),
       touch_handles_hidden_due_to_scroll_(false),
+      use_focus_ring_(ui::MaterialDesignController::IsSecondaryUiMaterial()),
       weak_ptr_factory_(this) {
   set_context_menu_controller(this);
   set_drag_controller(this);
   GetRenderText()->SetFontList(GetDefaultFontList());
-  SetBorder(std::unique_ptr<Border>(new FocusableBorder()));
+  View::SetBorder(std::unique_ptr<Border>(new FocusableBorder()));
   SetFocusBehavior(FocusBehavior::ALWAYS);
 
   // These allow BrowserView to pass edit commands from the Chrome menu to us
@@ -324,8 +326,7 @@ void Textfield::InsertOrReplaceText(const base::string16& new_text) {
   if (new_text.empty())
     return;
   model_->InsertText(new_text);
-  OnCaretBoundsChanged();
-  SchedulePaint();
+  UpdateAfterChange(true, true);
 }
 
 base::string16 Textfield::GetSelectedText() const {
@@ -523,6 +524,19 @@ void Textfield::ApplyStyle(gfx::TextStyle style,
   SchedulePaint();
 }
 
+void Textfield::SetInvalid(bool invalid) {
+  if (invalid == invalid_)
+    return;
+  invalid_ = invalid;
+  UpdateBorder();
+
+  if (HasFocus() && use_focus_ring_) {
+    FocusRing::Install(this, invalid_
+                                 ? ui::NativeTheme::kColorId_AlertSeverityHigh
+                                 : ui::NativeTheme::kColorId_NumColors);
+  }
+}
+
 void Textfield::ClearEditHistory() {
   model_->ClearEditHistory();
 }
@@ -556,6 +570,13 @@ gfx::Size Textfield::GetPreferredSize() const {
 
 const char* Textfield::GetClassName() const {
   return kViewClassName;
+}
+
+void Textfield::SetBorder(std::unique_ptr<Border> b) {
+  if (use_focus_ring_ && HasFocus())
+    FocusRing::Uninstall(this);
+  use_focus_ring_ = false;
+  View::SetBorder(std::move(b));
 }
 
 gfx::NativeCursor Textfield::GetCursor(const ui::MouseEvent& event) {
@@ -650,6 +671,10 @@ void Textfield::OnMouseReleased(const ui::MouseEvent& event) {
   OnAfterUserAction();
 }
 
+WordLookupClient* Textfield::GetWordLookupClient() {
+  return this;
+}
+
 bool Textfield::OnKeyPressed(const ui::KeyEvent& event) {
   ui::TextEditCommand edit_command = scheduled_text_edit_command_;
   scheduled_text_edit_command_ = ui::TextEditCommand::INVALID_COMMAND;
@@ -685,9 +710,6 @@ bool Textfield::OnKeyPressed(const ui::KeyEvent& event) {
     ExecuteTextEditCommand(edit_command);
     handled = true;
   }
-
-  if (!handled)
-    OnKeypressUnhandled();
   return handled;
 }
 
@@ -983,16 +1005,18 @@ void Textfield::OnFocus() {
   GetRenderText()->set_focused(true);
   if (ShouldShowCursor())
     GetRenderText()->set_cursor_visible(true);
-  SchedulePaint();
   if (GetInputMethod())
     GetInputMethod()->SetFocusedTextInputClient(this);
   OnCaretBoundsChanged();
   if (ShouldBlinkCursor())
     StartBlinkingCursor();
-  View::OnFocus();
+  if (use_focus_ring_) {
+    FocusRing::Install(this, invalid_
+                                 ? ui::NativeTheme::kColorId_AlertSeverityHigh
+                                 : ui::NativeTheme::kColorId_NumColors);
+  }
   SchedulePaint();
-  if (ui::MaterialDesignController::IsSecondaryUiMaterial())
-    FocusRing::Install(this);
+  View::OnFocus();
 }
 
 void Textfield::OnBlur() {
@@ -1008,10 +1032,10 @@ void Textfield::OnBlur() {
 
   DestroyTouchSelection();
 
-  // Border typically draws focus indicator.
-  SchedulePaint();
-  if (ui::MaterialDesignController::IsSecondaryUiMaterial())
+  if (use_focus_ring_)
     FocusRing::Uninstall(this);
+  SchedulePaint();
+  View::OnBlur();
 }
 
 gfx::Point Textfield::GetKeyboardContextMenuLocation() {
@@ -1099,6 +1123,16 @@ bool Textfield::CanStartDragForView(View* sender,
                                     const gfx::Point& press_pt,
                                     const gfx::Point& p) {
   return initiating_drag_ && GetRenderText()->IsPointInSelection(press_pt);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Textfield, WordLookupClient overrides:
+
+bool Textfield::GetDecoratedWordAtPoint(const gfx::Point& point,
+                                        gfx::DecoratedText* decorated_word,
+                                        gfx::Point* baseline_point) {
+  return GetRenderText()->GetDecoratedWordAtPoint(point, decorated_word,
+                                                  baseline_point);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1283,7 +1317,7 @@ void Textfield::InsertText(const base::string16& new_text) {
 
 void Textfield::InsertChar(const ui::KeyEvent& event) {
   if (read_only()) {
-    OnKeypressUnhandled();
+    OnEditFailed();
     return;
   }
 
@@ -1798,6 +1832,13 @@ void Textfield::UpdateBackgroundColor() {
   SchedulePaint();
 }
 
+void Textfield::UpdateBorder() {
+  auto border = base::MakeUnique<views::FocusableBorder>();
+  if (invalid_)
+    border->SetColorId(ui::NativeTheme::kColorId_AlertSeverityHigh);
+  View::SetBorder(std::move(border));
+}
+
 void Textfield::UpdateAfterChange(bool text_changed, bool cursor_changed) {
   if (text_changed) {
     if (controller_)
@@ -2039,8 +2080,8 @@ void Textfield::PasteSelectionClipboard(const ui::MouseEvent& event) {
   OnAfterUserAction();
 }
 
-void Textfield::OnKeypressUnhandled() {
-  PlatformStyle::OnTextfieldKeypressUnhandled();
+void Textfield::OnEditFailed() {
+  PlatformStyle::OnTextfieldEditFailed();
 }
 
 bool Textfield::ShouldShowCursor() const {

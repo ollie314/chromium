@@ -15,7 +15,6 @@
 namespace {
 
 enum Milestone {
-  M55,
   M56,
   M57,
   M58,
@@ -27,8 +26,6 @@ const char* milestoneString(Milestone milestone) {
   // https://www.chromium.org/developers/calendar
 
   switch (milestone) {
-    case M55:
-      return "M55, around December 2016";
     case M56:
       return "M56, around January 2017";
     case M57:
@@ -57,16 +54,6 @@ String willBeRemoved(const char* feature,
       feature, milestoneString(milestone), details);
 }
 
-String dopplerWillBeRemoved(const char* feature,
-                            Milestone milestone,
-                            const char* details) {
-  return String::format(
-      "%s is deprecated and will be removed in %s. It has no effect as the Web "
-      "Audio doppler effects have already been removed internally. See "
-      "https://www.chromestatus.com/features/%s for more details.",
-      feature, milestoneString(milestone), details);
-}
-
 }  // anonymous namespace
 
 namespace blink {
@@ -90,14 +77,12 @@ void Deprecation::unmuteForInspector() {
 }
 
 void Deprecation::suppress(CSSPropertyID unresolvedProperty) {
-  ASSERT(unresolvedProperty >= firstCSSProperty);
-  ASSERT(unresolvedProperty <= lastUnresolvedCSSProperty);
+  DCHECK(isCSSPropertyIDWithName(unresolvedProperty));
   m_cssPropertyDeprecationBits.quickSet(unresolvedProperty);
 }
 
 bool Deprecation::isSuppressed(CSSPropertyID unresolvedProperty) {
-  ASSERT(unresolvedProperty >= firstCSSProperty);
-  ASSERT(unresolvedProperty <= lastUnresolvedCSSProperty);
+  DCHECK(isCSSPropertyIDWithName(unresolvedProperty));
   return m_cssPropertyDeprecationBits.quickGet(unresolvedProperty);
 }
 
@@ -295,22 +280,6 @@ String Deprecation::deprecationMessage(UseCounter::Feature feature) {
       return "'getMatchedCSSRules()' is deprecated. For more help, check "
              "https://code.google.com/p/chromium/issues/detail?id=437569#c2";
 
-    case UseCounter::AudioListenerDopplerFactor:
-      return dopplerWillBeRemoved("'AudioListener.dopplerFactor'", M55,
-                                  "5238926818148352");
-
-    case UseCounter::AudioListenerSpeedOfSound:
-      return dopplerWillBeRemoved("'AudioListener.speedOfSound'", M55,
-                                  "5238926818148352");
-
-    case UseCounter::AudioListenerSetVelocity:
-      return dopplerWillBeRemoved("'AudioListener.setVelocity()'", M55,
-                                  "5238926818148352");
-
-    case UseCounter::PannerNodeSetVelocity:
-      return dopplerWillBeRemoved("'PannerNode.setVelocity()'", M55,
-                                  "5238926818148352");
-
     case UseCounter::PrefixedWindowURL:
       return replacedBy("'webkitURL'", "'URL'");
 
@@ -445,19 +414,19 @@ String Deprecation::deprecationMessage(UseCounter::Feature feature) {
       return willBeRemoved(
           "Performing operations that require explicit user interaction on "
           "touchstart events",
-          M55, "5649871251963904");
+          M56, "5649871251963904");
 
     case UseCounter::TouchMoveUserGestureUtilized:
       return willBeRemoved(
           "Performing operations that require explicit user interaction on "
           "touchmove events",
-          M55, "5649871251963904");
+          M56, "5649871251963904");
 
     case UseCounter::TouchEndDuringScrollUserGestureUtilized:
       return willBeRemoved(
           "Performing operations that require explicit user interaction on "
           "touchend events that occur as part of a scroll",
-          M55, "5649871251963904");
+          M56, "5649871251963904");
 
     case UseCounter::MIDIMessageEventReceivedTime:
       return willBeRemoved("MIDIMessageEvent.receivedTime", M56,
@@ -484,6 +453,19 @@ String Deprecation::deprecationMessage(UseCounter::Feature feature) {
     // Please see: https://www.chromestatus.com/features/5728579069411328
     case UseCounter::PaymentAddressCareOf:
       return willBeRemoved("PaymentAddress.careOf", M56, "5728579069411328");
+
+    case UseCounter::VRDeprecatedFieldOfView:
+      return replacedBy("VREyeParameters.fieldOfView",
+                        "projection matrices provided by VRFrameData");
+
+    case UseCounter::VRDeprecatedGetPose:
+      return replacedBy("VRDisplay.getPose()", "VRDisplay.getFrameData()");
+
+    case UseCounter::DeprecatedBluetoothDeviceUUIDsAttribute:
+      return String::format(
+          "BluetoothDevice.uuids is deprecated and will be removed in %s. Use "
+          "getPrimaryServices() to retrieve all available UUIDs.",
+          milestoneString(M57));
 
     // Features that aren't deprecated don't have a deprecation message.
     default:

@@ -109,7 +109,8 @@ Window::~Window() {
   // Let the delegate know we're in the processing of destroying.
   if (delegate_)
     delegate_->OnWindowDestroying(this);
-  FOR_EACH_OBSERVER(WindowObserver, observers_, OnWindowDestroying(this));
+  for (WindowObserver& observer : observers_)
+    observer.OnWindowDestroying(this);
 
   // While we are being destroyed, our target handler may also be in the
   // process of destruction or already destroyed, so do not forward any
@@ -144,11 +145,9 @@ Window::~Window() {
 
   if (delegate_)
     delegate_->OnWindowDestroyed(this);
-  base::ObserverListBase<WindowObserver>::Iterator iter(&observers_);
-  for (WindowObserver* observer = iter.GetNext(); observer;
-       observer = iter.GetNext()) {
-    RemoveObserver(observer);
-    observer->OnWindowDestroyed(this);
+  for (WindowObserver& observer : observers_) {
+    RemoveObserver(&observer);
+    observer.OnWindowDestroyed(this);
   }
 
   // Delete the LayoutManager before properties. This way if the LayoutManager
@@ -195,9 +194,8 @@ void Window::SetTitle(const base::string16& title) {
   if (title == title_)
     return;
   title_ = title;
-  FOR_EACH_OBSERVER(WindowObserver,
-                    observers_,
-                    OnWindowTitleChanged(this));
+  for (WindowObserver& observer : observers_)
+    observer.OnWindowTitleChanged(this);
 }
 
 void Window::SetTransparent(bool transparent) {
@@ -278,11 +276,11 @@ gfx::Rect Window::GetBoundsInScreen() const {
 }
 
 void Window::SetTransform(const gfx::Transform& transform) {
-  FOR_EACH_OBSERVER(WindowObserver, observers_,
-                    OnWindowTransforming(this));
+  for (WindowObserver& observer : observers_)
+    observer.OnWindowTransforming(this);
   layer()->SetTransform(transform);
-  FOR_EACH_OBSERVER(WindowObserver, observers_,
-                    OnWindowTransformed(this));
+  for (WindowObserver& observer : observers_)
+    observer.OnWindowTransformed(this);
   NotifyAncestorWindowTransformed(this);
 }
 
@@ -386,7 +384,8 @@ void Window::AddChild(Window* child) {
   children_.push_back(child);
   if (layout_manager_)
     layout_manager_->OnWindowAddedToLayout(child);
-  FOR_EACH_OBSERVER(WindowObserver, observers_, OnWindowAdded(child));
+  for (WindowObserver& observer : observers_)
+    observer.OnWindowAdded(child);
   child->OnParentChanged();
 
   Window* root_window = GetRootWindow();
@@ -679,8 +678,8 @@ int64_t Window::SetPropertyInternal(const void* key,
     prop_value.deallocator = deallocator;
     prop_map_[key] = prop_value;
   }
-  FOR_EACH_OBSERVER(WindowObserver, observers_,
-                    OnWindowPropertyChanged(this, key, old));
+  for (WindowObserver& observer : observers_)
+    observer.OnWindowPropertyChanged(this, key, old);
   return old;
 }
 
@@ -719,15 +718,15 @@ void Window::SetBoundsInternal(const gfx::Rect& new_bounds) {
   // changed notification from the layer (this typically happens after animating
   // hidden). We must notify ourselves.
   if (layer()->delegate() != this)
-    OnWindowBoundsChanged(old_bounds);
+    OnLayerBoundsChanged(old_bounds);
 }
 
 void Window::SetVisible(bool visible) {
   if (visible == layer()->GetTargetVisibility())
     return;  // No change.
 
-  FOR_EACH_OBSERVER(WindowObserver, observers_,
-                    OnWindowVisibilityChanging(this, visible));
+  for (WindowObserver& observer : observers_)
+    observer.OnWindowVisibilityChanging(this, visible);
 
   client::VisibilityClient* visibility_client =
       client::GetVisibilityClient(this);
@@ -813,7 +812,8 @@ Window* Window::GetWindowForPoint(const gfx::Point& local_point,
 void Window::RemoveChildImpl(Window* child, Window* new_parent) {
   if (layout_manager_)
     layout_manager_->OnWillRemoveWindowFromLayout(child);
-  FOR_EACH_OBSERVER(WindowObserver, observers_, OnWillRemoveWindow(child));
+  for (WindowObserver& observer : observers_)
+    observer.OnWillRemoveWindow(child);
   Window* root_window = child->GetRootWindow();
   Window* new_root_window = new_parent ? new_parent->GetRootWindow() : NULL;
   if (root_window && root_window != new_root_window)
@@ -831,8 +831,8 @@ void Window::RemoveChildImpl(Window* child, Window* new_parent) {
 }
 
 void Window::OnParentChanged() {
-  FOR_EACH_OBSERVER(
-      WindowObserver, observers_, OnWindowParentChanged(this, parent_));
+  for (WindowObserver& observer : observers_)
+    observer.OnWindowParentChanged(this, parent_);
 }
 
 void Window::StackChildRelativeTo(Window* child,
@@ -883,12 +883,13 @@ void Window::StackChildLayerRelativeTo(Window* child,
 }
 
 void Window::OnStackingChanged() {
-  FOR_EACH_OBSERVER(WindowObserver, observers_, OnWindowStackingChanged(this));
+  for (WindowObserver& observer : observers_)
+    observer.OnWindowStackingChanged(this);
 }
 
 void Window::NotifyRemovingFromRootWindow(Window* new_root) {
-  FOR_EACH_OBSERVER(WindowObserver, observers_,
-                    OnWindowRemovingFromRootWindow(this, new_root));
+  for (WindowObserver& observer : observers_)
+    observer.OnWindowRemovingFromRootWindow(this, new_root);
   for (Window::Windows::const_iterator it = children_.begin();
        it != children_.end(); ++it) {
     (*it)->NotifyRemovingFromRootWindow(new_root);
@@ -896,8 +897,8 @@ void Window::NotifyRemovingFromRootWindow(Window* new_root) {
 }
 
 void Window::NotifyAddedToRootWindow() {
-  FOR_EACH_OBSERVER(WindowObserver, observers_,
-                    OnWindowAddedToRootWindow(this));
+  for (WindowObserver& observer : observers_)
+    observer.OnWindowAddedToRootWindow(this);
   for (Window::Windows::const_iterator it = children_.begin();
        it != children_.end(); ++it) {
     (*it)->NotifyAddedToRootWindow();
@@ -908,17 +909,14 @@ void Window::NotifyWindowHierarchyChange(
     const WindowObserver::HierarchyChangeParams& params) {
   params.target->NotifyWindowHierarchyChangeDown(params);
   switch (params.phase) {
-  case WindowObserver::HierarchyChangeParams::HIERARCHY_CHANGING:
-    if (params.old_parent)
-      params.old_parent->NotifyWindowHierarchyChangeUp(params);
-    break;
-  case WindowObserver::HierarchyChangeParams::HIERARCHY_CHANGED:
-    if (params.new_parent)
-      params.new_parent->NotifyWindowHierarchyChangeUp(params);
-    break;
-  default:
-    NOTREACHED();
-    break;
+    case WindowObserver::HierarchyChangeParams::HIERARCHY_CHANGING:
+      if (params.old_parent)
+        params.old_parent->NotifyWindowHierarchyChangeUp(params);
+      break;
+    case WindowObserver::HierarchyChangeParams::HIERARCHY_CHANGED:
+      if (params.new_parent)
+        params.new_parent->NotifyWindowHierarchyChangeUp(params);
+      break;
   }
 }
 
@@ -943,25 +941,21 @@ void Window::NotifyWindowHierarchyChangeAtReceiver(
   local_params.receiver = this;
 
   switch (params.phase) {
-  case WindowObserver::HierarchyChangeParams::HIERARCHY_CHANGING:
-    FOR_EACH_OBSERVER(WindowObserver, observers_,
-                      OnWindowHierarchyChanging(local_params));
-    break;
-  case WindowObserver::HierarchyChangeParams::HIERARCHY_CHANGED:
-    FOR_EACH_OBSERVER(WindowObserver, observers_,
-                      OnWindowHierarchyChanged(local_params));
-    break;
-  default:
-    NOTREACHED();
-    break;
+    case WindowObserver::HierarchyChangeParams::HIERARCHY_CHANGING:
+      for (WindowObserver& observer : observers_)
+        observer.OnWindowHierarchyChanging(local_params);
+      break;
+    case WindowObserver::HierarchyChangeParams::HIERARCHY_CHANGED:
+      for (WindowObserver& observer : observers_)
+        observer.OnWindowHierarchyChanged(local_params);
+      break;
   }
 }
 
 void Window::NotifyWindowVisibilityChanged(aura::Window* target,
                                            bool visible) {
-  if (!NotifyWindowVisibilityChangedDown(target, visible)) {
+  if (!NotifyWindowVisibilityChangedDown(target, visible))
     return; // |this| has been deleted.
-  }
   NotifyWindowVisibilityChangedUp(target, visible);
 }
 
@@ -972,8 +966,8 @@ bool Window::NotifyWindowVisibilityChangedAtReceiver(aura::Window* target,
   // exit without further access to any members.
   WindowTracker tracker;
   tracker.Add(this);
-  FOR_EACH_OBSERVER(WindowObserver, observers_,
-                    OnWindowVisibilityChanged(target, visible));
+  for (WindowObserver& observer : observers_)
+    observer.OnWindowVisibilityChanged(target, visible);
   return tracker.Contains(this);
 }
 
@@ -1011,23 +1005,12 @@ void Window::NotifyWindowVisibilityChangedUp(aura::Window* target,
 }
 
 void Window::NotifyAncestorWindowTransformed(Window* source) {
-  FOR_EACH_OBSERVER(WindowObserver, observers_,
-                    OnAncestorWindowTransformed(source, this));
+  for (WindowObserver& observer : observers_)
+    observer.OnAncestorWindowTransformed(source, this);
   for (Window::Windows::const_iterator it = children_.begin();
        it != children_.end(); ++it) {
     (*it)->NotifyAncestorWindowTransformed(source);
   }
-}
-
-void Window::OnWindowBoundsChanged(const gfx::Rect& old_bounds) {
-  bounds_ = layer()->bounds();
-  if (layout_manager_)
-    layout_manager_->OnWindowResized();
-  if (delegate_)
-    delegate_->OnBoundsChanged(old_bounds, bounds());
-  FOR_EACH_OBSERVER(WindowObserver,
-                    observers_,
-                    OnWindowBoundsChanged(this, old_bounds, bounds()));
 }
 
 bool Window::CleanupGestureState() {
@@ -1049,14 +1032,18 @@ void Window::OnPaintLayer(const ui::PaintContext& context) {
 
 void Window::OnDelegatedFrameDamage(const gfx::Rect& damage_rect_in_dip) {
   DCHECK(layer());
-  FOR_EACH_OBSERVER(WindowObserver,
-                    observers_,
-                    OnDelegatedFrameDamage(this, damage_rect_in_dip));
+  for (WindowObserver& observer : observers_)
+    observer.OnDelegatedFrameDamage(this, damage_rect_in_dip);
 }
 
-base::Closure Window::PrepareForLayerBoundsChange() {
-  return base::Bind(&Window::OnWindowBoundsChanged, base::Unretained(this),
-                    bounds());
+void Window::OnLayerBoundsChanged(const gfx::Rect& old_bounds) {
+  bounds_ = layer()->bounds();
+  if (layout_manager_)
+    layout_manager_->OnWindowResized();
+  if (delegate_)
+    delegate_->OnBoundsChanged(old_bounds, bounds_);
+  for (auto& observer : observers_)
+    observer.OnWindowBoundsChanged(this, old_bounds, bounds_);
 }
 
 bool Window::CanAcceptEvent(const ui::Event& event) {

@@ -27,6 +27,9 @@ ScriptWrappableVisitor::~ScriptWrappableVisitor() {}
 
 void ScriptWrappableVisitor::TracePrologue(
     v8::EmbedderReachableReferenceReporter* reporter) {
+  // This CHECK ensures that wrapper tracing is not started from scopes
+  // that forbid GC execution, e.g., constructors.
+  CHECK(!ThreadState::current()->isGCForbidden());
   performCleanup();
 
   DCHECK(!m_tracingInProgress);
@@ -81,9 +84,9 @@ void ScriptWrappableVisitor::performCleanup() {
   m_headersToUnmark.clear();
   m_markingDeque.clear();
   m_verifierDeque.clear();
+  m_reporter = nullptr;
   m_shouldCleanup = false;
   m_tracingInProgress = false;
-  m_reporter = nullptr;
 }
 
 void ScriptWrappableVisitor::scheduleIdleLazyCleanup() {
@@ -137,6 +140,7 @@ void ScriptWrappableVisitor::performLazyCleanup(double deadlineSeconds) {
   CHECK(m_headersToUnmark.isEmpty());
   m_markingDeque.clear();
   m_verifierDeque.clear();
+  m_reporter = nullptr;
   m_shouldCleanup = false;
   m_tracingInProgress = false;
 }
@@ -278,6 +282,10 @@ void ScriptWrappableVisitor::performCleanup(v8::Isolate* isolate) {
       V8PerIsolateData::from(isolate)->scriptWrappableVisitor();
   if (scriptWrappableVisitor)
     scriptWrappableVisitor->performCleanup();
+}
+
+WrapperVisitor* ScriptWrappableVisitor::currentVisitor(v8::Isolate* isolate) {
+  return V8PerIsolateData::from(isolate)->scriptWrappableVisitor();
 }
 
 }  // namespace blink

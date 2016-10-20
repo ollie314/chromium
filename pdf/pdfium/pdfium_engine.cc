@@ -110,6 +110,8 @@ const int32_t kMaxProgressivePaintTimeMs = 300;
 // process.
 const int32_t kMaxInitialProgressivePaintTimeMs = 250;
 
+PDFiumEngine* g_engine_for_fontmapper = nullptr;
+
 std::vector<uint32_t> GetPageNumbersFromPrintPageNumberRange(
     const PP_PrintPageNumberRange_Dev* page_ranges,
     uint32_t page_range_count) {
@@ -258,6 +260,9 @@ void* MapFont(struct _FPDF_SYSFONTINFO*, int weight, int italic,
     NOTREACHED();
     return nullptr;
   }
+
+  if (g_engine_for_fontmapper)
+    g_engine_for_fontmapper->FontSubstituted();
 
   PP_Resource font_resource = pp::PDF::GetFontFileWithFallback(
       pp::InstanceHandle(g_last_instance_id),
@@ -1171,6 +1176,10 @@ void PDFiumEngine::UnsupportedFeature(int type) {
   client_->DocumentHasUnsupportedFeature(feature);
 }
 
+void PDFiumEngine::FontSubstituted() {
+  client_->FontSubstituted();
+}
+
 void PDFiumEngine::ContinueFind(int32_t result) {
   StartFind(current_find_text_, result != 0);
 }
@@ -1223,6 +1232,7 @@ void PDFiumEngine::PrintBegin() {
 pp::Resource PDFiumEngine::PrintPages(
     const PP_PrintPageNumberRange_Dev* page_ranges, uint32_t page_range_count,
     const PP_PrintSettings_Dev& print_settings) {
+  ScopedSubstFont scoped_subst_font(this);
   if (HasPermission(PDFEngine::PERMISSION_PRINT_HIGH_QUALITY))
     return PrintPagesAsPDF(page_ranges, page_range_count, print_settings);
   else if (HasPermission(PDFEngine::PERMISSION_PRINT_LOW_QUALITY))
@@ -1375,6 +1385,7 @@ pp::Buffer_Dev PDFiumEngine::PrintPagesAsRasterPDF(
 
 pp::Buffer_Dev PDFiumEngine::GetFlattenedPrintData(const FPDF_DOCUMENT& doc) {
   pp::Buffer_Dev buffer;
+  ScopedSubstFont scoped_subst_font(this);
   int page_count = FPDF_GetPageCount(doc);
   for (int i = 0; i < page_count; ++i) {
     FPDF_PAGE page = FPDF_LoadPage(doc, i);
@@ -2287,7 +2298,13 @@ int PDFiumEngine::GetMostVisiblePage() {
   if (in_flight_visible_page_)
     return *in_flight_visible_page_;
 
+  // We can call GetMostVisiblePage through a callback from PDFium. We have
+  // to defer the page deletion otherwise we could potentially delete the page
+  // that originated the calling JS request and destroy the objects that are
+  // currently being used.
+  defer_page_unload_ = true;
   CalculateVisiblePages();
+  defer_page_unload_ = false;
   return most_visible_page_;
 }
 
@@ -2324,17 +2341,17 @@ void PDFiumEngine::OnCallback(int id) {
 }
 
 int PDFiumEngine::GetCharCount(int page_index) {
-  DCHECK(page_index >= 0 && page_index < static_cast<int>(pages_.size()));
+  DCHECK(PageIndexInBounds(page_index));
   return pages_[page_index]->GetCharCount();
 }
 
 pp::FloatRect PDFiumEngine::GetCharBounds(int page_index, int char_index) {
-  DCHECK(page_index >= 0 && page_index < static_cast<int>(pages_.size()));
+  DCHECK(PageIndexInBounds(page_index));
   return pages_[page_index]->GetCharBounds(char_index);
 }
 
 uint32_t PDFiumEngine::GetCharUnicode(int page_index, int char_index) {
-  DCHECK(page_index >= 0 && page_index < static_cast<int>(pages_.size()));
+  DCHECK(PageIndexInBounds(page_index));
   return pages_[page_index]->GetCharUnicode(char_index);
 }
 
@@ -2343,7 +2360,7 @@ void PDFiumEngine::GetTextRunInfo(int page_index,
                                   uint32_t* out_len,
                                   double* out_font_size,
                                   pp::FloatRect* out_bounds) {
-  DCHECK(page_index >= 0 && page_index < static_cast<int>(pages_.size()));
+  DCHECK(PageIndexInBounds(page_index));
   return pages_[page_index]->GetTextRunInfo(start_char_index, out_len,
                                             out_font_size, out_bounds);
 }
@@ -2447,6 +2464,7 @@ void PDFiumEngine::LoadDocument() {
     return;
 
   ScopedUnsupportedFeature scoped_unsupported_feature(this);
+  ScopedSubstFont scoped_subst_font(this);
   bool needs_password = false;
   if (TryLoadingDoc(std::string(), &needs_password)) {
     ContinueLoadingDocument(std::string());
@@ -2511,6 +2529,7 @@ void PDFiumEngine::OnGetPasswordComplete(int32_t result,
 
 void PDFiumEngine::ContinueLoadingDocument(const std::string& password) {
   ScopedUnsupportedFeature scoped_unsupported_feature(this);
+  ScopedSubstFont scoped_subst_font(this);
 
   bool needs_password = false;
   bool loaded = TryLoadingDoc(password, &needs_password);
@@ -2682,6 +2701,9 @@ bool PDFiumEngine::IsPageVisible(int index) const {
 }
 
 void PDFiumEngine::ScrollToPage(int page) {
+  if (!PageIndexInBounds(page))
+    return;
+
   in_flight_visible_page_ = page;
   client_->ScrollToPage(page);
 }
@@ -2752,8 +2774,7 @@ bool PDFiumEngine::ContinuePaint(int progressive_index,
   int rv;
   FPDF_BITMAP bitmap = progressive_paints_[progressive_index].bitmap;
   int page_index = progressive_paints_[progressive_index].page_index;
-  DCHECK_GE(page_index, 0);
-  DCHECK_LT(static_cast<size_t>(page_index), pages_.size());
+  DCHECK(PageIndexInBounds(page_index));
   FPDF_PAGE page = pages_[page_index]->GetPage();
 
   last_progressive_start_time_ = base::Time::Now();
@@ -3405,6 +3426,10 @@ void PDFiumEngine::SetSelecting(bool selecting) {
     client_->IsSelectingChanged(selecting);
 }
 
+bool PDFiumEngine::PageIndexInBounds(int index) const {
+  return index >= 0 && index < static_cast<int>(pages_.size());
+}
+
 void PDFiumEngine::Form_Invalidate(FPDF_FORMFILLINFO* param,
                                    FPDF_PAGE page,
                                    double left,
@@ -3488,14 +3513,13 @@ FPDF_PAGE PDFiumEngine::Form_GetPage(FPDF_FORMFILLINFO* param,
                                      FPDF_DOCUMENT document,
                                      int page_index) {
   PDFiumEngine* engine = static_cast<PDFiumEngine*>(param);
-  if (page_index < 0 || page_index >= static_cast<int>(engine->pages_.size()))
+  if (!engine->PageIndexInBounds(page_index))
     return nullptr;
   return engine->pages_[page_index]->GetPage();
 }
 
 FPDF_PAGE PDFiumEngine::Form_GetCurrentPage(FPDF_FORMFILLINFO* param,
                                             FPDF_DOCUMENT document) {
-  // TODO(jam): find out what this is used for.
   PDFiumEngine* engine = static_cast<PDFiumEngine*>(param);
   int index = engine->last_page_mouse_down_;
   if (index == -1) {
@@ -3725,6 +3749,15 @@ ScopedUnsupportedFeature::ScopedUnsupportedFeature(PDFiumEngine* engine)
 
 ScopedUnsupportedFeature::~ScopedUnsupportedFeature() {
   g_engine_for_unsupported = old_engine_;
+}
+
+ScopedSubstFont::ScopedSubstFont(PDFiumEngine* engine)
+    : old_engine_(g_engine_for_fontmapper) {
+  g_engine_for_fontmapper = engine;
+}
+
+ScopedSubstFont::~ScopedSubstFont() {
+  g_engine_for_fontmapper = old_engine_;
 }
 
 namespace {

@@ -9,7 +9,6 @@
 #include "ash/aura/wm_window_aura.h"
 #include "ash/common/material_design/material_design_controller.h"
 #include "ash/common/session/session_state_delegate.h"
-#include "ash/common/shell_window_ids.h"
 #include "ash/common/system/tray/system_tray_delegate.h"
 #include "ash/common/wm/system_modal_container_layout_manager.h"
 #include "ash/common/wm/window_state.h"
@@ -18,6 +17,7 @@
 #include "ash/common/wm_shell.h"
 #include "ash/common/wm_window.h"
 #include "ash/display/display_manager.h"
+#include "ash/public/cpp/shell_window_ids.h"
 #include "ash/shell.h"
 #include "ash/test/ash_md_test_base.h"
 #include "ash/test/ash_test_base.h"
@@ -60,8 +60,6 @@ class TestDelegate : public views::WidgetDelegateView {
   ~TestDelegate() override {}
 
   // Overridden from views::WidgetDelegate:
-  views::View* GetContentsView() override { return this; }
-
   ui::ModalType GetModalType() const override {
     return system_modal_ ? ui::MODAL_TYPE_SYSTEM : ui::MODAL_TYPE_NONE;
   }
@@ -695,20 +693,6 @@ TEST_P(RootWindowControllerTest, DontDeleteWindowsNotOwnedByParent) {
 
   ASSERT_FALSE(observer2.destroyed());
   delete window2;
-}
-
-typedef test::NoSessionAshTestBase NoSessionRootWindowControllerTest;
-
-// Make sure that an event handler exists for entire display area.
-TEST_F(NoSessionRootWindowControllerTest, Event) {
-  aura::Window* root = Shell::GetPrimaryRootWindow();
-  const gfx::Size size = root->bounds().size();
-  EXPECT_TRUE(root->GetEventHandlerForPoint(gfx::Point(0, 0)));
-  EXPECT_TRUE(root->GetEventHandlerForPoint(gfx::Point(0, size.height() - 1)));
-  EXPECT_TRUE(root->GetEventHandlerForPoint(gfx::Point(size.width() - 1, 0)));
-  EXPECT_TRUE(root->GetEventHandlerForPoint(gfx::Point(0, size.height() - 1)));
-  EXPECT_TRUE(root->GetEventHandlerForPoint(
-      gfx::Point(size.width() - 1, size.height() - 1)));
 }
 
 class VirtualKeyboardRootWindowControllerTest

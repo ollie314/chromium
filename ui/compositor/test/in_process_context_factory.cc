@@ -11,9 +11,9 @@
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/threading/thread.h"
-#include "cc/output/compositor_frame.h"
 #include "cc/output/context_provider.h"
 #include "cc/output/output_surface_client.h"
+#include "cc/output/output_surface_frame.h"
 #include "cc/output/texture_mailbox_deleter.h"
 #include "cc/scheduler/begin_frame_source.h"
 #include "cc/scheduler/delay_based_time_source.h"
@@ -56,25 +56,28 @@ class DirectOutputSurface : public cc::OutputSurface {
   ~DirectOutputSurface() override {}
 
   // cc::OutputSurface implementation.
+  bool BindToClient(cc::OutputSurfaceClient* client) override {
+    return OutputSurface::BindToClient(client);
+  }
   void EnsureBackbuffer() override {}
   void DiscardBackbuffer() override {}
   void BindFramebuffer() override {
     context_provider()->ContextGL()->BindFramebuffer(GL_FRAMEBUFFER, 0);
   }
-  bool BindToClient(cc::OutputSurfaceClient* client) override {
-    if (!OutputSurface::BindToClient(client))
-      return false;
-    return true;
+  void Reshape(const gfx::Size& size,
+               float device_scale_factor,
+               const gfx::ColorSpace& color_space,
+               bool has_alpha) override {
+    context_provider()->ContextGL()->ResizeCHROMIUM(
+        size.width(), size.height(), device_scale_factor, has_alpha);
   }
-  void SwapBuffers(cc::CompositorFrame frame) override {
+  void SwapBuffers(cc::OutputSurfaceFrame frame) override {
     DCHECK(context_provider_.get());
-    DCHECK(frame.gl_frame_data);
-    if (frame.gl_frame_data->sub_buffer_rect ==
-        gfx::Rect(frame.gl_frame_data->size)) {
+    if (frame.sub_buffer_rect == gfx::Rect(frame.size)) {
       context_provider_->ContextSupport()->Swap();
     } else {
       context_provider_->ContextSupport()->PartialSwapBuffers(
-          frame.gl_frame_data->sub_buffer_rect);
+          frame.sub_buffer_rect);
     }
     gpu::gles2::GLES2Interface* gl = context_provider_->ContextGL();
     const uint64_t fence_sync = gl->InsertFenceSyncCHROMIUM();
@@ -101,7 +104,7 @@ class DirectOutputSurface : public cc::OutputSurface {
   void ApplyExternalStencil() override {}
 
  private:
-  void OnSwapBuffersComplete() { client_->DidSwapBuffersComplete(); }
+  void OnSwapBuffersComplete() { client_->DidReceiveSwapBuffersAck(); }
 
   base::WeakPtrFactory<DirectOutputSurface> weak_ptr_factory_;
 
@@ -128,7 +131,8 @@ InProcessContextFactory::~InProcessContextFactory() {
 }
 
 void InProcessContextFactory::SendOnLostResources() {
-  FOR_EACH_OBSERVER(ContextFactoryObserver, observer_list_, OnLostResources());
+  for (auto& observer : observer_list_)
+    observer.OnLostResources();
 }
 
 void InProcessContextFactory::CreateCompositorFrameSink(

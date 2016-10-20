@@ -62,6 +62,7 @@ class FrameLoaderClient;
 class KURL;
 class ResourceRequest;
 class SecurityOrigin;
+class SecurityPolicyViolationEventInit;
 
 typedef int SandboxFlags;
 typedef HeapVector<Member<CSPDirectiveList>> CSPDirectiveListVector;
@@ -117,8 +118,8 @@ class CORE_EXPORT ContentSecurityPolicy
 
   // This covers the possible values of a violation's 'resource', as defined in
   // https://w3c.github.io/webappsec-csp/#violation-resource. By the time we
-  // generate a report, we're guaranteed that the value isn't 'null', so we don't
-  // need that state in this enum.
+  // generate a report, we're guaranteed that the value isn't 'null', so we
+  // don't need that state in this enum.
   enum ViolationType { InlineViolation, EvalViolation, URLViolation };
 
   enum class InlineType { Block, Attribute };
@@ -143,10 +144,20 @@ class CORE_EXPORT ContentSecurityPolicy
 
   std::unique_ptr<Vector<CSPHeaderAndType>> headers() const;
 
-  bool allowJavaScriptURLs(const String& contextURL,
+  // |element| will not be present for navigations to javascript URLs,
+  // as those checks happen in the middle of the navigation algorithm,
+  // and we generally don't have access to the responsible element.
+  bool allowJavaScriptURLs(Element*,
+                           const String& contextURL,
                            const WTF::OrdinalNumber& contextLine,
                            ReportingStatus = SendReport) const;
-  bool allowInlineEventHandler(const String& source,
+
+  // |element| will be present almost all of the time, but because of
+  // strangeness around targeting handlers for '<body>', '<svg>', and
+  // '<frameset>', it will be 'nullptr' for handlers on those
+  // elements.
+  bool allowInlineEventHandler(Element*,
+                               const String& source,
                                const String& contextURL,
                                const WTF::OrdinalNumber& contextLine,
                                ReportingStatus = SendReport) const;
@@ -158,7 +169,6 @@ class CORE_EXPORT ContentSecurityPolicy
   bool allowEval(ScriptState* = nullptr,
                  ReportingStatus = SendReport,
                  ExceptionStatus = WillNotThrowException) const;
-  bool allowDynamic() const;
   bool allowPluginType(const String& type,
                        const String& typeAttribute,
                        const KURL&,
@@ -204,22 +214,25 @@ class CORE_EXPORT ContentSecurityPolicy
                                RedirectStatus = RedirectStatus::NoRedirect,
                                ReportingStatus = SendReport) const;
 
-  // Passing 'String()' into the |nonce| arguments in the following methods represents an
-  // unnonced resource load.
+  // Passing 'String()' into the |nonce| arguments in the following methods
+  // represents an unnonced resource load.
   bool allowScriptFromSource(const KURL&,
                              const String& nonce,
+                             ParserDisposition,
                              RedirectStatus = RedirectStatus::NoRedirect,
                              ReportingStatus = SendReport) const;
   bool allowStyleFromSource(const KURL&,
                             const String& nonce,
                             RedirectStatus = RedirectStatus::NoRedirect,
                             ReportingStatus = SendReport) const;
-  bool allowInlineScript(const String& contextURL,
+  bool allowInlineScript(Element*,
+                         const String& contextURL,
                          const String& nonce,
                          const WTF::OrdinalNumber& contextLine,
                          const String& scriptContent,
                          ReportingStatus = SendReport) const;
-  bool allowInlineStyle(const String& contextURL,
+  bool allowInlineStyle(Element*,
+                        const String& contextURL,
                         const String& nonce,
                         const WTF::OrdinalNumber& contextLine,
                         const String& styleContent,
@@ -257,6 +270,7 @@ class CORE_EXPORT ContentSecurityPolicy
                     const KURL&,
                     const String& nonce,
                     const IntegrityMetadataSet&,
+                    ParserDisposition,
                     RedirectStatus = RedirectStatus::NoRedirect,
                     ReportingStatus = SendReport) const;
 
@@ -272,8 +286,9 @@ class CORE_EXPORT ContentSecurityPolicy
 
   bool isActive() const;
 
-  // If a frame is passed in, the message will be logged to its active document's console.
-  // Otherwise, the message will be logged to this object's |m_executionContext|.
+  // If a frame is passed in, the message will be logged to its active
+  // document's console.  Otherwise, the message will be logged to this object's
+  // |m_executionContext|.
   void logToConsole(ConsoleMessage*, LocalFrame* = nullptr);
 
   void reportDirectiveAsSourceExpression(const String& directiveName,
@@ -300,22 +315,26 @@ class CORE_EXPORT ContentSecurityPolicy
   void reportValueForEmptyDirective(const String& directiveName,
                                     const String& value);
 
-  // If a frame is passed in, the report will be sent using it as a context. If no frame is
-  // passed in, the report will be sent via this object's |m_executionContext| (or dropped
-  // on the floor if no such context is available).
+  // If a frame is passed in, the report will be sent using it as a context. If
+  // no frame is passed in, the report will be sent via this object's
+  // |m_executionContext| (or dropped on the floor if no such context is
+  // available).
   void reportViolation(const String& directiveText,
                        const String& effectiveDirective,
                        const String& consoleMessage,
                        const KURL& blockedURL,
                        const Vector<String>& reportEndpoints,
                        const String& header,
+                       ContentSecurityPolicyHeaderType,
                        ViolationType,
                        LocalFrame* = nullptr,
                        RedirectStatus = RedirectStatus::FollowedRedirect,
-                       int contextLine = 0);
+                       int contextLine = 0,
+                       Element* = nullptr);
 
-  // Called when mixed content is detected on a page; will trigger a violation report if
-  // the 'block-all-mixed-content' directive is specified for a policy.
+  // Called when mixed content is detected on a page; will trigger a violation
+  // report if the 'block-all-mixed-content' directive is specified for a
+  // policy.
   void reportMixedContent(const KURL& mixedURL, RedirectStatus);
 
   void reportBlockedScriptExecutionToInspector(
@@ -326,7 +345,8 @@ class CORE_EXPORT ContentSecurityPolicy
   void treatAsPublicAddress();
   String evalDisabledErrorMessage() const;
 
-  // Upgrade-Insecure-Requests and Block-All-Mixed-Content are represented in |m_insecureRequestPolicy|
+  // Upgrade-Insecure-Requests and Block-All-Mixed-Content are represented in
+  // |m_insecureRequestPolicy|
   void enforceStrictMixedContentChecking();
   void upgradeInsecureRequests();
   WebInsecureRequestPolicy getInsecureRequestPolicy() const {
@@ -346,6 +366,12 @@ class CORE_EXPORT ContentSecurityPolicy
   static bool isDirectiveName(const String&);
 
   static bool isNonceableElement(const Element*);
+
+  // This method checks whether the request should be allowed for an
+  // experimental EmbeddingCSP feature
+  // Please, see https://w3c.github.io/webappsec-csp/embedded/#origin-allowed.
+  static bool shouldEnforceEmbeddersPolicy(const ResourceResponse&,
+                                           SecurityOrigin*);
 
   Document* document() const;
 
@@ -368,6 +394,9 @@ class CORE_EXPORT ContentSecurityPolicy
 
   bool shouldSendViolationReport(const String&) const;
   void didSendViolationReport(const String&);
+  void dispatchViolationEvents(const SecurityPolicyViolationEventInit&,
+                               Element*,
+                               Document*);
 
   Member<ExecutionContext> m_executionContext;
   bool m_overrideInlineStyleAllowed;

@@ -326,7 +326,8 @@ void ProfileImpl::RegisterProfilePrefs(
   registry->RegisterBooleanPref(prefs::kSavingBrowserHistoryDisabled, false);
   registry->RegisterBooleanPref(prefs::kAllowDeletingBrowserHistory, true);
   registry->RegisterBooleanPref(prefs::kForceGoogleSafeSearch, false);
-  registry->RegisterBooleanPref(prefs::kForceYouTubeSafetyMode, false);
+  registry->RegisterIntegerPref(prefs::kForceYouTubeRestrict,
+                                safe_search_util::YOUTUBE_RESTRICT_OFF);
   registry->RegisterBooleanPref(prefs::kForceSessionSync, false);
   registry->RegisterStringPref(prefs::kAllowedDomainsForApps, std::string());
 
@@ -801,8 +802,7 @@ ExtensionSpecialStoragePolicy*
 #if defined(ENABLE_EXTENSIONS)
   if (!extension_special_storage_policy_.get()) {
     TRACE_EVENT0("browser", "ProfileImpl::GetExtensionSpecialStoragePolicy")
-    extension_special_storage_policy_ = new ExtensionSpecialStoragePolicy(
-        CookieSettingsFactory::GetForProfile(this).get());
+    extension_special_storage_policy_ = new ExtensionSpecialStoragePolicy(this);
   }
   return extension_special_storage_policy_.get();
 #else
@@ -1067,7 +1067,7 @@ void ProfileImpl::ChangeAppLocale(
       GetPrefs()->ClearPref(prefs::kApplicationLocaleAccepted);
       // We maintain kApplicationLocale property in both a global storage
       // and user's profile.  Global property determines locale of login screen,
-      // while user's profile determines his personal locale preference.
+      // while user's profile determines their personal locale preference.
       break;
     }
     case APP_LOCALE_CHANGED_VIA_LOGIN:

@@ -10,26 +10,27 @@
 #include "chrome/browser/chromeos/system/system_clock_observer.h"
 #include "mojo/public/cpp/bindings/binding.h"
 
+namespace ash {
+enum class LoginStatus;
+}
+
 // Handles method calls delegated back to chrome from ash. Also notifies ash of
 // relevant state changes in chrome.
 // TODO: Consider renaming this to SystemTrayClientChromeOS.
 class SystemTrayClient : public ash::mojom::SystemTrayClient,
                          public chromeos::system::SystemClockObserver {
  public:
-  static const char kDisplaySettingsSubPageName[];
-  static const char kDisplayOverscanSettingsSubPageName[];
-
   SystemTrayClient();
   ~SystemTrayClient() override;
 
   static SystemTrayClient* Get();
 
- private:
-  // Connects or reconnects the |system_tray_| interface.
-  void ConnectToSystemTray();
+  // Returns the login state based on the user type, lock screen status, etc.
+  static ash::LoginStatus GetUserLoginStatus();
 
-  // Handles errors on the |system_tray_| interface connection.
-  void OnClientConnectionError();
+  // Returns the container id for the parent window for new dialogs. The parent
+  // varies based on the current login and lock screen state.
+  static int GetDialogParentContainerId();
 
   // ash::mojom::SystemTrayClient:
   void ShowSettings() override;
@@ -44,10 +45,19 @@ class SystemTrayClient : public ash::mojom::SystemTrayClient,
   void ShowPaletteHelp() override;
   void ShowPaletteSettings() override;
   void ShowPublicAccountInfo() override;
+  void ShowNetworkConfigure(const std::string& network_id) override;
+  void ShowNetworkSettings(const std::string& network_id) override;
   void ShowProxySettings() override;
 
+ private:
   // chromeos::system::SystemClockObserver:
   void OnSystemClockChanged(chromeos::system::SystemClock* clock) override;
+
+  // Connects or reconnects the |system_tray_| interface.
+  void ConnectToSystemTray();
+
+  // Handles errors on the |system_tray_| interface connection.
+  void OnClientConnectionError();
 
   // System tray mojo service in ash.
   ash::mojom::SystemTrayPtr system_tray_;

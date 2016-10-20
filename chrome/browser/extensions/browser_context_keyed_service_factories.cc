@@ -20,12 +20,10 @@
 #include "chrome/browser/extensions/api/extension_action/extension_action_api.h"
 #include "chrome/browser/extensions/api/feedback_private/feedback_private_api.h"
 #include "chrome/browser/extensions/api/font_settings/font_settings_api.h"
-#include "chrome/browser/extensions/api/gcd_private/gcd_private_api.h"
 #include "chrome/browser/extensions/api/history/history_api.h"
 #include "chrome/browser/extensions/api/hotword_private/hotword_private_api.h"
 #include "chrome/browser/extensions/api/identity/identity_api.h"
 #include "chrome/browser/extensions/api/language_settings_private/language_settings_private_delegate_factory.h"
-#include "chrome/browser/extensions/api/mdns/mdns_api.h"
 #include "chrome/browser/extensions/api/omnibox/omnibox_api.h"
 #include "chrome/browser/extensions/api/passwords_private/passwords_private_event_router_factory.h"
 #include "chrome/browser/extensions/api/preference/chrome_direct_setting_api.h"
@@ -54,6 +52,7 @@
 #include "chrome/browser/extensions/warning_badge_service_factory.h"
 #include "chrome/browser/speech/extension_api/tts_extension_api.h"
 #include "chrome/browser/ui/toolbar/toolbar_actions_model_factory.h"
+#include "chrome/common/features.h"
 #include "extensions/browser/api/bluetooth_low_energy/bluetooth_low_energy_api.h"
 
 #if defined(OS_CHROMEOS)
@@ -64,6 +63,11 @@
 #include "chrome/browser/extensions/api/log_private/log_private_api.h"
 #elif defined(OS_LINUX) || defined(OS_WIN)
 #include "chrome/browser/extensions/api/input_ime/input_ime_api.h"
+#endif
+
+#if BUILDFLAG(ENABLE_SERVICE_DISCOVERY)
+#include "chrome/browser/extensions/api/gcd_private/gcd_private_api.h"
+#include "chrome/browser/extensions/api/mdns/mdns_api.h"
 #endif
 
 #if defined(ENABLE_SPELLCHECK)
@@ -94,7 +98,9 @@ void EnsureBrowserContextKeyedServiceFactoriesBuilt() {
   extensions::ExtensionWebUIOverrideRegistrar::GetFactoryInstance();
   extensions::FeedbackPrivateAPI::GetFactoryInstance();
   extensions::FontSettingsAPI::GetFactoryInstance();
+#if BUILDFLAG(ENABLE_SERVICE_DISCOVERY)
   extensions::GcdPrivateAPI::GetFactoryInstance();
+#endif
   extensions::HistoryAPI::GetFactoryInstance();
   extensions::HotwordPrivateEventService::GetFactoryInstance();
   extensions::IdentityAPI::GetFactoryInstance();
@@ -110,7 +116,9 @@ void EnsureBrowserContextKeyedServiceFactoriesBuilt() {
 #if defined(OS_CHROMEOS)
   extensions::LogPrivateAPI::GetFactoryInstance();
 #endif
+#if BUILDFLAG(ENABLE_SERVICE_DISCOVERY)
   extensions::MDnsAPI::GetFactoryInstance();
+#endif
 #if defined(OS_CHROMEOS)
   extensions::MediaPlayerAPI::GetFactoryInstance();
 #endif
@@ -119,7 +127,7 @@ void EnsureBrowserContextKeyedServiceFactoriesBuilt() {
   extensions::PasswordsPrivateEventRouterFactory::GetInstance();
 #if defined(ENABLE_PLUGINS)
   extensions::PluginManager::GetFactoryInstance();
-#endif  // defined(ENABLE_PLUGINS)
+#endif
   extensions::PreferenceAPI::GetFactoryInstance();
   extensions::ProcessesAPI::GetFactoryInstance();
   extensions::ScreenlockPrivateEventRouter::GetFactoryInstance();

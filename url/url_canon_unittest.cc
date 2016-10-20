@@ -240,6 +240,7 @@ TEST(URLCanonTest, Scheme) {
       // Don't re-escape something already escaped. Note that it will
       // "canonicalize" the 'A' to 'a', but that's OK.
     {"ht%3Atp", "ht%3atp:", Component(0, 7), false},
+    {"", ":", Component(0, 0), false},
   };
 
   std::string out_str;
@@ -282,7 +283,7 @@ TEST(URLCanonTest, Scheme) {
   out_str.clear();
   StdStringCanonOutput output(&out_str);
 
-  EXPECT_TRUE(CanonicalizeScheme("", Component(0, -1), &output, &out_comp));
+  EXPECT_FALSE(CanonicalizeScheme("", Component(0, -1), &output, &out_comp));
   output.Complete();
 
   EXPECT_EQ(std::string(":"), out_str);
@@ -1303,7 +1304,7 @@ TEST(URLCanonTest, CanonicalizeStandardURL) {
     {"http://[www.google.com]/", "http://[www.google.com]/", false},
     {"ht\ttp:@www.google.com:80/;p?#", "ht%09tp://www.google.com:80/;p?#", false},
     {"http:////////user:@google.com:99?foo", "http://user@google.com:99/?foo", true},
-    {"www.google.com", ":www.google.com/", true},
+    {"www.google.com", ":www.google.com/", false},
     {"http://192.0x00A80001", "http://192.168.0.1/", true},
     {"http://www/foo%2Ehtml", "http://www/foo.html", true},
     {"http://user:pass@/", "http://user:pass@/", false},
@@ -1758,7 +1759,7 @@ TEST(URLCanonTest, CanonicalizePathURL) {
   } path_cases[] = {
     {"javascript:", "javascript:"},
     {"JavaScript:Foo", "javascript:Foo"},
-    {":\":This /is interesting;?#", ":\":This /is interesting;?#"},
+    {"Foo:\":This /is interesting;?#", "foo:\":This /is interesting;?#"},
   };
 
   for (size_t i = 0; i < arraysize(path_cases); i++) {
@@ -2170,6 +2171,33 @@ TEST(URLCanonTest, ReplacementOverflow) {
   for (size_t i = 0; i < new_query.length(); i++)
     expected.push_back('a');
   EXPECT_TRUE(expected == repl_str);
+}
+
+TEST(URLCanonTest, DefaultPortForScheme) {
+  struct TestCases {
+    const char* scheme;
+    const int expected_port;
+  } cases[]{
+      {"http", 80},
+      {"https", 443},
+      {"ftp", 21},
+      {"ws", 80},
+      {"wss", 443},
+      {"gopher", 70},
+      {"fake-scheme", PORT_UNSPECIFIED},
+      {"HTTP", PORT_UNSPECIFIED},
+      {"HTTPS", PORT_UNSPECIFIED},
+      {"FTP", PORT_UNSPECIFIED},
+      {"WS", PORT_UNSPECIFIED},
+      {"WSS", PORT_UNSPECIFIED},
+      {"GOPHER", PORT_UNSPECIFIED},
+  };
+
+  for (auto& test_case : cases) {
+    SCOPED_TRACE(test_case.scheme);
+    EXPECT_EQ(test_case.expected_port,
+              DefaultPortForScheme(test_case.scheme, strlen(test_case.scheme)));
+  }
 }
 
 }  // namespace url

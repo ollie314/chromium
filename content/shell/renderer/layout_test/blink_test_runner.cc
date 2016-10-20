@@ -58,10 +58,11 @@
 #include "media/base/video_capturer_source.h"
 #include "net/base/filename_util.h"
 #include "net/base/net_errors.h"
-#include "services/shell/public/cpp/interface_provider.h"
+#include "services/service_manager/public/cpp/interface_provider.h"
 #include "skia/ext/platform_canvas.h"
 #include "third_party/WebKit/public/platform/FilePathConversion.h"
 #include "third_party/WebKit/public/platform/Platform.h"
+#include "third_party/WebKit/public/platform/WebInputEvent.h"
 #include "third_party/WebKit/public/platform/WebPoint.h"
 #include "third_party/WebKit/public/platform/WebRect.h"
 #include "third_party/WebKit/public/platform/WebSecurityOrigin.h"
@@ -480,10 +481,12 @@ void BlinkTestRunner::SetDatabaseQuota(int quota) {
   Send(new LayoutTestHostMsg_SetDatabaseQuota(routing_id(), quota));
 }
 
-void BlinkTestRunner::SimulateWebNotificationClick(const std::string& title,
-                                                   int action_index) {
+void BlinkTestRunner::SimulateWebNotificationClick(
+    const std::string& title,
+    int action_index,
+    const base::NullableString16& reply) {
   Send(new LayoutTestHostMsg_SimulateWebNotificationClick(routing_id(), title,
-                                                          action_index));
+                                                          action_index, reply));
 }
 
 void BlinkTestRunner::SimulateWebNotificationClose(const std::string& title,
@@ -498,6 +501,19 @@ void BlinkTestRunner::SetDeviceScaleFactor(float factor) {
 
 float BlinkTestRunner::GetWindowToViewportScale() {
   return content::GetWindowToViewportScale(render_view());
+}
+
+std::unique_ptr<blink::WebInputEvent>
+BlinkTestRunner::TransformScreenToWidgetCoordinates(
+    test_runner::WebWidgetTestProxyBase* web_widget_test_proxy_base,
+    const blink::WebInputEvent& event) {
+  return content::TransformScreenToWidgetCoordinates(web_widget_test_proxy_base,
+                                                     event);
+}
+
+test_runner::WebWidgetTestProxyBase* BlinkTestRunner::GetWebWidgetTestProxyBase(
+    blink::WebLocalFrame* frame) {
+  return content::GetWebWidgetTestProxyBase(frame);
 }
 
 void BlinkTestRunner::EnableUseZoomForDSF() {

@@ -4,8 +4,8 @@
 
 #include "components/exo/pointer.h"
 
-#include "ash/common/shell_window_ids.h"
 #include "ash/display/display_manager.h"
+#include "ash/public/cpp/shell_window_ids.h"
 #include "components/exo/pointer_delegate.h"
 #include "components/exo/pointer_stylus_delegate.h"
 #include "components/exo/surface.h"
@@ -132,6 +132,9 @@ void Pointer::SetStylusDelegate(PointerStylusDelegate* delegate) {
 
 void Pointer::OnMouseEvent(ui::MouseEvent* event) {
   Surface* target = GetEffectiveTargetForEvent(event);
+
+  if (event->flags() & ui::EF_TOUCH_ACCESSIBILITY)
+    return;
 
   auto new_pointer_type = pointer_type_;
   if ((event->flags() & ui::EF_IS_SYNTHESIZED) == 0) {

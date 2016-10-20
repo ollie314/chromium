@@ -17,7 +17,7 @@
 #include "base/files/file_util.h"
 #include "base/logging.h"
 #include "base/message_loop/message_loop.h"
-#include "base/metrics/sparse_histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/posix/eintr_wrapper.h"
 #include "base/rand_util.h"
 #include "base/trace_event/trace_event.h"
@@ -478,10 +478,15 @@ int UDPSocketPosix::SetBroadcast(bool broadcast) {
   // SO_REUSEPORT on OSX permits multiple processes to each receive
   // UDP multicast or broadcast datagrams destined for the bound
   // port.
+  // This is only being set on OSX because its behavior is platform dependent
+  // and we are playing it safe by only setting it on platforms where things
+  // break.
   rv = setsockopt(socket_, SOL_SOCKET, SO_REUSEPORT, &value, sizeof(value));
-#else
-  rv = setsockopt(socket_, SOL_SOCKET, SO_BROADCAST, &value, sizeof(value));
+  if (rv != 0)
+    return MapSystemError(errno);
 #endif  // defined(OS_MACOSX)
+  rv = setsockopt(socket_, SOL_SOCKET, SO_BROADCAST, &value, sizeof(value));
+
   return rv == 0 ? OK : MapSystemError(errno);
 }
 

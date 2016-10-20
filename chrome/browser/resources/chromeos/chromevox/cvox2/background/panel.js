@@ -44,10 +44,7 @@ Panel.init = function() {
   this.searchInput_ = $('search');
 
   /** @type {Element} @private */
-  this.brailleTextElement_ = $('braille-text');
-
-  /** @type {Element} @private */
-  this.brailleCellsElement_ = $('braille-cells');
+  this.brailleTableElement_ = $('braille-table');
 
   /**
    * The array of top-level menus.
@@ -187,8 +184,19 @@ Panel.exec = function(command) {
       this.speechElement_.innerHTML += escapeForHtml(command.data);
       break;
     case PanelCommandType.UPDATE_BRAILLE:
-      this.brailleTextElement_.textContent = command.data.text;
-      this.brailleCellsElement_.textContent = command.data.braille;
+      var groups = command.data.groups;
+      this.brailleTableElement_.deleteRow(0);
+      this.brailleTableElement_.deleteRow(0);
+      var row1 = this.brailleTableElement_.insertRow(-1);
+      var row2 = this.brailleTableElement_.insertRow(-1);
+
+      for (var i = 0; i < groups.length; i++) {
+        var topCell = row1.insertCell(-1);
+        var bottomCell = row2.insertCell(-1);
+        topCell.innerHTML = groups[i][0];
+        bottomCell.innerHTML = groups[i][1];
+      }
+
       break;
     case PanelCommandType.ENABLE_MENUS:
       Panel.onEnableMenus();
@@ -263,13 +271,13 @@ Panel.onOpenMenus = function(opt_event, opt_activateMenuTitle) {
   var categoryToMenu = {
     'navigation': jumpMenu,
     'jump_commands': jumpMenu,
+    'overview': jumpMenu,
+    'tables': jumpMenu,
     'controlling_speech': speechMenu,
+    'information': speechMenu,
     'modifier_keys': chromevoxMenu,
     'help_commands': chromevoxMenu,
 
-    'information': null,  // Get link URL, get page title, etc.
-    'overview': null,     // Headings list, etc.
-    'tables': null,       // Table navigation.
     'braille': null,
     'developer': null};
 
@@ -302,7 +310,12 @@ Panel.onOpenMenus = function(opt_event, opt_activateMenuTitle) {
   });
 
   // Insert items from the bindings into the menus.
+  var sawBindingSet = {};
   sortedBindings.forEach(goog.bind(function(binding) {
+    var command = binding.command;
+    if (sawBindingSet[command])
+      return;
+    sawBindingSet[command] = true;
     var category = cvox.CommandStore.categoryForCommand(binding.command);
     var menu = category ? categoryToMenu[category] : null;
     if (binding.title && menu) {
@@ -617,24 +630,33 @@ Panel.getCallbackForCurrentItem = function() {
  * was queued, execute it once focus is restored.
  */
 Panel.closeMenusAndRestoreFocus = function() {
-  // Make sure we're not in full-screen mode.
-  window.location = '#';
+  // Watch for the next focus event.
+  var onFocus = function(desktop, evt) {
+    desktop.removeEventListener(chrome.automation.EventType.focus, onFocus);
+    Panel.pendingCallback_ && Panel.pendingCallback_();
+  }.bind(this);
 
-  this.activeMenu_ = null;
+  chrome.automation.getDesktop(function(desktop) {
+    onFocus = /** @type {function(chrome.automation.AutomationEvent)} */(
+        onFocus.bind(this, desktop));
+    desktop.addEventListener(chrome.automation.EventType.focus,
+                             onFocus,
+                             true);
 
-  var bkgnd =
-      chrome.extension.getBackgroundPage()['ChromeVoxState']['instance'];
-  bkgnd['endExcursion'](Panel.pendingCallback_);
+    // Make sure all menus are cleared to avoid bogous output when we re-open.
+    Panel.clearMenus();
+
+    // Make sure we're not in full-screen mode.
+    window.location = '#';
+
+    this.activeMenu_ = null;
+  });
 };
 
 /**
  * Open the tutorial.
  */
 Panel.onTutorial = function() {
-  var bkgnd =
-      chrome.extension.getBackgroundPage()['ChromeVoxState']['instance'];
-  bkgnd['startExcursion']();
-
   // Change the url fragment to 'fullscreen', which signals the native
   // host code to make the window fullscreen, revealing the menus.
   window.location = '#fullscreen';

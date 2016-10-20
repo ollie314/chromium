@@ -9,7 +9,7 @@
 #include "base/run_loop.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "gpu/ipc/client/gpu_channel_host.h"
-#include "services/shell/public/cpp/connection.h"
+#include "services/service_manager/public/cpp/connection.h"
 #include "services/ui/ws/gpu_service_proxy_delegate.h"
 #include "services/ui/ws/mus_gpu_memory_buffer_manager.h"
 
@@ -31,7 +31,7 @@ GpuServiceProxy::GpuServiceProxy(GpuServiceProxyDelegate* delegate)
                       base::WaitableEvent::InitialState::NOT_SIGNALED) {
   gpu_main_.OnStart();
   // TODO(sad): Once GPU process is split, this would look like:
-  //   connector->ConnectToInterface("mojo:gpu", &gpu_service_);
+  //   connector->ConnectToInterface("service:gpu", &gpu_service_);
   gpu_main_.Create(GetProxy(&gpu_service_));
   gpu_service_->Initialize(
       base::Bind(&GpuServiceProxy::OnInitialized, base::Unretained(this)));

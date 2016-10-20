@@ -42,8 +42,8 @@
 #include "core/inspector/InspectorInstrumentation.h"
 #include "core/inspector/InspectorTraceEvents.h"
 #include "platform/RuntimeEnabledFeatures.h"
-#include "platform/TraceEvent.h"
 #include "platform/animation/CompositorAnimationPlayer.h"
+#include "platform/tracing/TraceEvent.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebCompositorSupport.h"
 #include "wtf/MathExtras.h"
@@ -653,7 +653,7 @@ bool Animation::hasPendingActivity() const {
          (!m_finished && hasEventListeners(EventTypeNames::finish));
 }
 
-void Animation::stop() {
+void Animation::contextDestroyed() {
   PlayStateUpdateScope updateScope(*this, TimingUpdateOnDemand);
 
   m_finished = true;

@@ -11,7 +11,6 @@
 #include "ash/common/shelf/shelf_view.h"
 #include "ash/common/shelf/shelf_widget.h"
 #include "ash/common/shelf/wm_shelf.h"
-#include "ash/common/shell_window_ids.h"
 #include "ash/common/system/web_notification/web_notification_tray.h"
 #include "ash/common/wm/mru_window_tracker.h"
 #include "ash/common/wm/window_state.h"
@@ -20,6 +19,7 @@
 #include "ash/common/wm_window_property.h"
 #include "ash/display/display_manager.h"
 #include "ash/public/cpp/shelf_types.h"
+#include "ash/public/cpp/shell_window_ids.h"
 #include "ash/screen_util.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
@@ -313,7 +313,8 @@ TEST_F(PanelLayoutManagerTest, UndockTest) {
   std::vector<display::ManagedDisplayInfo> info_list;
 
   const int64_t internal_display_id =
-      test::DisplayManagerTestApi().SetFirstDisplayAsInternalDisplay();
+      test::DisplayManagerTestApi(Shell::GetInstance()->display_manager())
+          .SetFirstDisplayAsInternalDisplay();
 
   // Create the primary display info.
   display::ManagedDisplayInfo internal_display =
@@ -343,7 +344,8 @@ TEST_F(PanelLayoutManagerTest, DockUndockTest) {
   std::vector<display::ManagedDisplayInfo> info_list;
 
   const int64_t internal_display_id =
-      test::DisplayManagerTestApi().SetFirstDisplayAsInternalDisplay();
+      test::DisplayManagerTestApi(Shell::GetInstance()->display_manager())
+          .SetFirstDisplayAsInternalDisplay();
 
   // Create the primary display info.
   display::ManagedDisplayInfo internal_display =

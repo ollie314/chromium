@@ -17,7 +17,6 @@
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/dbus/dbus_method_call_status.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
-#include "components/arc/arc_bridge_host_impl.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
 
@@ -31,13 +30,16 @@ constexpr int64_t kReconnectDelayInSeconds = 5;
 
 ArcBridgeServiceImpl::ArcBridgeServiceImpl()
     : session_started_(false),
-      factory_(base::Bind(ArcBridgeBootstrap::Create)),
+      factory_(base::Bind(ArcSession::Create)),
       weak_factory_(this) {
   DCHECK(!g_arc_bridge_service);
   g_arc_bridge_service = this;
 }
 
 ArcBridgeServiceImpl::~ArcBridgeServiceImpl() {
+  if (arc_session_)
+    arc_session_->RemoveObserver(this);
+
   DCHECK(g_arc_bridge_service == this);
   g_arc_bridge_service = nullptr;
 }
@@ -60,8 +62,8 @@ void ArcBridgeServiceImpl::Shutdown() {
   PrerequisitesChanged();
 }
 
-void ArcBridgeServiceImpl::SetArcBridgeBootstrapFactoryForTesting(
-    const ArcBridgeBootstrapFactory& factory) {
+void ArcBridgeServiceImpl::SetArcSessionFactoryForTesting(
+    const ArcSessionFactory& factory) {
   DCHECK(!factory.is_null());
   factory_ = factory;
 }
@@ -82,10 +84,13 @@ void ArcBridgeServiceImpl::PrerequisitesChanged() {
     VLOG(0) << "Prerequisites met, starting ARC";
     SetStopReason(StopReason::SHUTDOWN);
 
+    if (arc_session_)
+      arc_session_->RemoveObserver(this);
+
     SetState(State::CONNECTING);
-    bootstrap_ = factory_.Run();
-    bootstrap_->set_delegate(this);
-    bootstrap_->Start();
+    arc_session_ = factory_.Run();
+    arc_session_->AddObserver(this);
+    arc_session_->Start();
   } else {
     if (session_started_)
       return;
@@ -105,23 +110,19 @@ void ArcBridgeServiceImpl::StopInstance() {
   reconnect_ = false;
 
   VLOG(1) << "Stopping ARC";
-  DCHECK(bootstrap_.get());
+  DCHECK(arc_session_.get());
   SetState(State::STOPPING);
-  arc_bridge_host_.reset();
 
   // Note: this can call OnStopped() internally as a callback.
-  bootstrap_->Stop();
+  arc_session_->Stop();
 }
 
-void ArcBridgeServiceImpl::OnConnectionEstablished(
-    mojom::ArcBridgeInstancePtr instance) {
+void ArcBridgeServiceImpl::OnReady() {
   DCHECK(CalledOnValidThread());
   if (state() != State::CONNECTING) {
     VLOG(1) << "StopInstance() called while connecting";
     return;
   }
-
-  arc_bridge_host_.reset(new ArcBridgeHostImpl(std::move(instance)));
 
   // The container can be considered to have been successfully launched, so
   // restart if the connection goes down without being requested.
@@ -133,8 +134,8 @@ void ArcBridgeServiceImpl::OnConnectionEstablished(
 void ArcBridgeServiceImpl::OnStopped(StopReason stop_reason) {
   DCHECK(CalledOnValidThread());
   VLOG(0) << "ARC stopped: " << stop_reason;
-  arc_bridge_host_.reset();
-  bootstrap_.reset();
+  arc_session_->RemoveObserver(this);
+  arc_session_.reset();
   SetStopReason(stop_reason);
   SetState(State::STOPPED);
 

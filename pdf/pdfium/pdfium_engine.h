@@ -120,6 +120,7 @@ class PDFiumEngine : public PDFEngine,
   void OnDocumentComplete() override;
 
   void UnsupportedFeature(int type);
+  void FontSubstituted();
 
   std::string current_find_text() const { return current_find_text_; }
 
@@ -438,6 +439,8 @@ class PDFiumEngine : public PDFEngine,
   // Setting selection status of document.
   void SetSelecting(bool selecting);
 
+  bool PageIndexInBounds(int index) const;
+
   // FPDF_FORMFILLINFO callbacks.
   static void Form_Invalidate(FPDF_FORMFILLINFO* param,
                               FPDF_PAGE page,
@@ -742,6 +745,21 @@ class ScopedUnsupportedFeature {
 
  private:
   PDFiumEngine* const old_engine_;
+
+  DISALLOW_COPY_AND_ASSIGN(ScopedUnsupportedFeature);
+};
+
+// Create a local variable of this when calling PDFium functions which can call
+// our global callback when a substitute font is mapped.
+class ScopedSubstFont {
+ public:
+  explicit ScopedSubstFont(PDFiumEngine* engine);
+  ~ScopedSubstFont();
+
+ private:
+  PDFiumEngine* const old_engine_;
+
+  DISALLOW_COPY_AND_ASSIGN(ScopedSubstFont);
 };
 
 class PDFiumEngineExports : public PDFEngineExports {

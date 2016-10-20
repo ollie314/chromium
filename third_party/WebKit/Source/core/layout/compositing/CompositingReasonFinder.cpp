@@ -41,8 +41,8 @@ CompositingReasons CompositingReasonFinder::directReasons(
   if (RuntimeEnabledFeatures::slimmingPaintV2Enabled())
     return CompositingReasonNone;
 
-  ASSERT(potentialCompositingReasonsFromStyle(layer->layoutObject()) ==
-         layer->potentialCompositingReasonsFromStyle());
+  DCHECK_EQ(potentialCompositingReasonsFromStyle(layer->layoutObject()),
+            layer->potentialCompositingReasonsFromStyle());
   CompositingReasons styleDeterminedDirectCompositingReasons =
       layer->potentialCompositingReasonsFromStyle() &
       CompositingReasonComboAllDirectStyleDeterminedReasons;
@@ -54,7 +54,7 @@ CompositingReasons CompositingReasonFinder::directReasons(
 // This information doesn't appear to be incorporated into CompositingReasons.
 bool CompositingReasonFinder::requiresCompositingForScrollableFrame() const {
   // Need this done first to determine overflow.
-  ASSERT(!m_layoutView.needsLayout());
+  DCHECK(!m_layoutView.needsLayout());
   if (isMainFrame())
     return false;
 
@@ -99,8 +99,9 @@ CompositingReasonFinder::potentialCompositingReasonsFromStyle(
   if (style.hasCompositorProxy())
     reasons |= CompositingReasonCompositorProxy;
 
-  // If the implementation of createsGroup changes, we need to be aware of that in this part of code.
-  ASSERT((layoutObject->isTransparent() || layoutObject->hasMask() ||
+  // If the implementation of createsGroup changes, we need to be aware of that
+  // in this part of code.
+  DCHECK((layoutObject->isTransparent() || layoutObject->hasMask() ||
           layoutObject->hasFilterInducingProperty() || style.hasBlendMode()) ==
          layoutObject->createsGroup());
 
@@ -126,14 +127,15 @@ CompositingReasonFinder::potentialCompositingReasonsFromStyle(
   if (layoutObject->hasReflection())
     reasons |= CompositingReasonReflectionWithCompositedDescendants;
 
-  ASSERT(!(reasons & ~CompositingReasonComboAllStyleDeterminedReasons));
+  DCHECK(!(reasons & ~CompositingReasonComboAllStyleDeterminedReasons));
   return reasons;
 }
 
 bool CompositingReasonFinder::requiresCompositingForTransform(
     LayoutObject* layoutObject) const {
-  // Note that we ask the layoutObject if it has a transform, because the style may have transforms,
-  // but the layoutObject may be an inline that doesn't support them.
+  // Note that we ask the layoutObject if it has a transform, because the style
+  // may have transforms, but the layoutObject may be an inline that doesn't
+  // support them.
   return layoutObject->hasTransformRelatedProperty() &&
          layoutObject->style()->has3DTransform();
 }
@@ -142,6 +144,9 @@ CompositingReasons CompositingReasonFinder::nonStyleDeterminedDirectReasons(
     const PaintLayer* layer) const {
   CompositingReasons directReasons = CompositingReasonNone;
   LayoutObject* layoutObject = layer->layoutObject();
+
+  if (m_compositingTriggers & OverflowScrollTrigger && layer->clipParent())
+    directReasons |= CompositingReasonOutOfFlowClipping;
 
   if (layer->needsCompositedScrolling())
     directReasons |= CompositingReasonOverflowScrollingTouch;
@@ -154,13 +159,14 @@ CompositingReasons CompositingReasonFinder::nonStyleDeterminedDirectReasons(
       directReasons |= CompositingReasonOverflowScrollingParent;
   }
 
-  // TODO(flackr): Rename functions and variables to include sticky position (i.e. ScrollDependentPosition rather than PositionFixed).
+  // TODO(flackr): Rename functions and variables to include sticky position
+  // (i.e. ScrollDependentPosition rather than PositionFixed).
   if (requiresCompositingForScrollDependentPosition(layer))
     directReasons |= CompositingReasonScrollDependentPosition;
 
   directReasons |= layoutObject->additionalCompositingReasons();
 
-  ASSERT(!(directReasons & CompositingReasonComboAllStyleDeterminedReasons));
+  DCHECK(!(directReasons & CompositingReasonComboAllStyleDeterminedReasons));
   return directReasons;
 }
 
@@ -184,8 +190,9 @@ bool CompositingReasonFinder::requiresCompositingForScrollDependentPosition(
            LayoutRect(layer->boundingBoxForCompositing())))) {
     return false;
   }
-  // Don't promote fixed position elements that are descendants of a non-view container, e.g. transformed elements.
-  // They will stay fixed wrt the container rather than the enclosing frame.
+  // Don't promote fixed position elements that are descendants of a non-view
+  // container, e.g. transformed elements.  They will stay fixed wrt the
+  // container rather than the enclosing frame.
   if (layer->scrollsWithViewport())
     return m_layoutView.frameView()->isScrollable();
   return layer->layoutObject()->style()->position() == StickyPosition &&

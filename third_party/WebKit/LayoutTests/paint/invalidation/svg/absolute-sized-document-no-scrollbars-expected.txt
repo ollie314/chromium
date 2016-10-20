@@ -1,7 +1,5 @@
 {
-  "name": "Content Root Layer",
-  "bounds": [800, 600],
-  "children": [
+  "layers": [
     {
       "name": "LayoutView #document",
       "bounds": [800, 600],
@@ -16,11 +14,6 @@
         {
           "object": "LayoutSVGRoot svg",
           "rect": [0, 0, 576, 432],
-          "reason": "style change"
-        },
-        {
-          "object": "LayoutSVGRect rect",
-          "rect": [0, 0, 480, 360],
           "reason": "style change"
         }
       ]

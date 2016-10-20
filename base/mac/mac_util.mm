@@ -122,19 +122,6 @@ bool IsHiddenLoginItem(LSSharedFileListItemRef item) {
 
 }  // namespace
 
-std::string PathFromFSRef(const FSRef& ref) {
-  ScopedCFTypeRef<CFURLRef> url(
-      CFURLCreateFromFSRef(kCFAllocatorDefault, &ref));
-  NSString *path_string = [(NSURL *)url.get() path];
-  return [path_string fileSystemRepresentation];
-}
-
-bool FSRefFromPath(const std::string& path, FSRef* ref) {
-  OSStatus status = FSPathMakeRef((const UInt8*)path.c_str(),
-                                  ref, nil);
-  return status == noErr;
-}
-
 CGColorSpaceRef GetGenericRGBColorSpace() {
   // Leaked. That's OK, it's scoped to the lifetime of the application.
   static CGColorSpaceRef g_color_space_generic_rgb(
@@ -216,26 +203,6 @@ void SwitchFullScreenModes(FullScreenMode from_mode, FullScreenMode to_mode) {
   g_full_screen_requests[to_mode] =
       std::max(g_full_screen_requests[to_mode] + 1, 1);
   SetUIMode();
-}
-
-bool AmIForeground() {
-  ProcessSerialNumber foreground_psn = { 0 };
-  OSErr err = GetFrontProcess(&foreground_psn);
-  if (err != noErr) {
-    OSSTATUS_DLOG(WARNING, err) << "GetFrontProcess";
-    return false;
-  }
-
-  ProcessSerialNumber my_psn = { 0, kCurrentProcess };
-
-  Boolean result = FALSE;
-  err = SameProcess(&foreground_psn, &my_psn, &result);
-  if (err != noErr) {
-    OSSTATUS_DLOG(WARNING, err) << "SameProcess";
-    return false;
-  }
-
-  return result;
 }
 
 bool SetFileBackupExclusion(const FilePath& file_path) {

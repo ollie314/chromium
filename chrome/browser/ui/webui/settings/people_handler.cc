@@ -24,6 +24,7 @@
 #include "chrome/browser/signin/signin_error_controller_factory.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/signin/signin_promo.h"
+#include "chrome/browser/signin/signin_ui_util.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/sync/sync_ui_util.h"
 #include "chrome/browser/ui/browser_finder.h"
@@ -46,7 +47,7 @@
 #include "components/signin/core/common/signin_pref_names.h"
 #include "components/strings/grit/components_strings.h"
 #include "components/sync/base/passphrase_type.h"
-#include "components/sync/driver/sync_prefs.h"
+#include "components/sync/base/sync_prefs.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
@@ -740,6 +741,8 @@ PeopleHandler::GetSyncStatusDictionary() {
 
   sync_status->SetBoolean("managed", service && service->IsManaged());
   sync_status->SetBoolean("signedIn", signin->IsAuthenticated());
+  sync_status->SetString("signedInUsername",
+                         signin_ui_util::GetAuthenticatedUsername(signin));
   sync_status->SetBoolean("hasUnrecoverableError",
                           service && service->HasUnrecoverableError());
 

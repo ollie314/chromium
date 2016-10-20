@@ -45,11 +45,11 @@ import org.chromium.base.ThreadUtils;
 import org.chromium.base.library_loader.LibraryLoader;
 import org.chromium.base.library_loader.LibraryProcessType;
 import org.chromium.base.test.util.CommandLineFlags;
+import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Restriction;
 import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.ChromeTabbedActivity;
 import org.chromium.chrome.browser.IntentHandler;
@@ -90,11 +90,8 @@ import java.util.concurrent.atomic.AtomicReference;
  * Instrumentation tests for app menu, context menu, and toolbar of a {@link CustomTabActivity}.
  */
 public class CustomTabActivityTest extends CustomTabActivityTestBase {
-    private static final String READ_IT_LATER_FEATURE = "ReadItLaterInMenu";
     private static final int MAX_MENU_CUSTOM_ITEMS = 5;
     private static final int NUM_CHROME_MENU_ITEMS = 2;
-    private static final String
-            TEST_ACTION = "org.chromium.chrome.browser.customtabs.TEST_PENDING_INTENT_SENT";
     private static final String TEST_PAGE = "/chrome/test/data/android/google.html";
     private static final String TEST_PAGE_2 = "/chrome/test/data/android/test.html";
     private static final String GEOLOCATION_PAGE =
@@ -120,7 +117,7 @@ public class CustomTabActivityTest extends CustomTabActivityTestBase {
                 appContext, Environment.getExternalStorageDirectory());
         mTestPage = mTestServer.getURL(TEST_PAGE);
         mTestPage2 = mTestServer.getURL(TEST_PAGE_2);
-        PathUtils.setPrivateDataDirectorySuffix(PRIVATE_DATA_DIRECTORY_SUFFIX, appContext);
+        PathUtils.setPrivateDataDirectorySuffix(PRIVATE_DATA_DIRECTORY_SUFFIX);
         LibraryLoader.get(LibraryProcessType.PROCESS_BROWSER).ensureInitialized();
     }
 
@@ -245,8 +242,12 @@ public class CustomTabActivityTest extends CustomTabActivityTestBase {
     /**
      * Test the entries in the context menu shown when long clicking an image.
      */
-    @SmallTest
-    @RetryOnFailure
+    /*
+     * @SmallTest
+     * @RetryOnFailure
+     * BUG=crbug.com/655970
+     */
+    @DisabledTest
     public void testContextMenuEntriesForImage() throws InterruptedException, TimeoutException {
         startCustomTabActivityWithIntent(createMinimalCustomTabIntent());
 
@@ -322,8 +323,7 @@ public class CustomTabActivityTest extends CustomTabActivityTestBase {
 
         openAppMenuAndAssertMenuShown();
         Menu menu = getActivity().getAppMenuHandler().getAppMenu().getMenu();
-        final int expectedMenuSize = numMenuEntries + NUM_CHROME_MENU_ITEMS
-                + (ChromeFeatureList.isEnabled(READ_IT_LATER_FEATURE) ? 1 : 0);
+        final int expectedMenuSize = numMenuEntries + NUM_CHROME_MENU_ITEMS;
         final int actualMenuSize = getActualMenuSize(menu);
 
         assertNotNull("App menu is not initialized: ", menu);
@@ -368,8 +368,7 @@ public class CustomTabActivityTest extends CustomTabActivityTestBase {
 
         openAppMenuAndAssertMenuShown();
         Menu menu = getActivity().getAppMenuHandler().getAppMenu().getMenu();
-        final int expectedMenuSize = MAX_MENU_CUSTOM_ITEMS + NUM_CHROME_MENU_ITEMS
-                + (ChromeFeatureList.isEnabled(READ_IT_LATER_FEATURE) ? 1 : 0);
+        final int expectedMenuSize = MAX_MENU_CUSTOM_ITEMS + NUM_CHROME_MENU_ITEMS;
         final int actualMenuSize = getActualMenuSize(menu);
         assertNotNull("App menu is not initialized: ", menu);
         assertEquals(expectedMenuSize, actualMenuSize);
@@ -415,31 +414,27 @@ public class CustomTabActivityTest extends CustomTabActivityTestBase {
     @RetryOnFailure
     public void testOpenInBrowser() throws InterruptedException {
         startCustomTabActivityWithIntent(createMinimalCustomTabIntent());
+        IntentFilter filter = new IntentFilter(Intent.ACTION_VIEW);
+        filter.addDataScheme(Uri.parse(mTestServer.getURL("/")).getScheme());
+        final ActivityMonitor monitor = getInstrumentation().addMonitor(filter, null, false);
         openAppMenuAndAssertMenuShown();
-        if (ChromeFeatureList.isEnabled(READ_IT_LATER_FEATURE)) {
-            // TODO(ianwen): implement this test after read it later becomes a settled feature.
-        } else {
-            IntentFilter filter = new IntentFilter(Intent.ACTION_VIEW);
-            filter.addDataScheme(Uri.parse(mTestServer.getURL("/")).getScheme());
-            final ActivityMonitor monitor = getInstrumentation().addMonitor(filter, null, false);
-            final String menuItemTitle = mActivity.getString(R.string.menu_open_in_product_default);
-            ThreadUtils.runOnUiThread(new Runnable() {
-                @Override
-                public void run() {
-                    MenuItem item = mActivity.getAppMenuHandler()
-                            .getAppMenu().getMenu().findItem(R.id.open_in_browser_id);
-                    assertNotNull(item);
-                    assertEquals(menuItemTitle, item.getTitle().toString());
-                    mActivity.onMenuOrKeyboardAction(R.id.open_in_browser_id, false);
-                }
-            });
-            CriteriaHelper.pollInstrumentationThread(new Criteria() {
-                @Override
-                public boolean isSatisfied() {
-                    return getInstrumentation().checkMonitorHit(monitor, 1);
-                }
-            });
-        }
+        final String menuItemTitle = mActivity.getString(R.string.menu_open_in_product_default);
+        ThreadUtils.runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                MenuItem item = mActivity.getAppMenuHandler()
+                        .getAppMenu().getMenu().findItem(R.id.open_in_browser_id);
+                assertNotNull(item);
+                assertEquals(menuItemTitle, item.getTitle().toString());
+                mActivity.onMenuOrKeyboardAction(R.id.open_in_browser_id, false);
+            }
+        });
+        CriteriaHelper.pollInstrumentationThread(new Criteria() {
+            @Override
+            public boolean isSatisfied() {
+                return getInstrumentation().checkMonitorHit(monitor, 1);
+            }
+        });
     }
 
     /**
@@ -870,7 +865,8 @@ public class CustomTabActivityTest extends CustomTabActivityTestBase {
         CustomTabsSessionToken token = CustomTabsSessionToken.getSessionTokenFromIntent(intent);
         assertTrue(connection.newSession(token));
         Bundle extras = new Bundle();
-        extras.putBoolean(CustomTabsConnection.NO_PRERENDERING_KEY, true);
+        extras.putInt(
+                CustomTabsConnection.DEBUG_OVERRIDE_KEY, CustomTabsConnection.NO_PRERENDERING);
         assertTrue(connection.mayLaunchUrl(token, Uri.parse(mTestPage), extras, null));
         try {
             startCustomTabActivityWithIntent(intent);
@@ -1340,7 +1336,8 @@ public class CustomTabActivityTest extends CustomTabActivityTestBase {
         Bundle extras = null;
         if (noPrerendering) {
             extras = new Bundle();
-            extras.putBoolean(CustomTabsConnection.NO_PRERENDERING_KEY, true);
+            extras.putInt(
+                    CustomTabsConnection.DEBUG_OVERRIDE_KEY, CustomTabsConnection.NO_PRERENDERING);
         }
         assertTrue(connection.mayLaunchUrl(token, Uri.parse(mTestPage), extras, null));
         try {
@@ -1401,7 +1398,7 @@ public class CustomTabActivityTest extends CustomTabActivityTestBase {
         ThreadUtils.postOnUiThread(new Runnable() {
             @Override
             public void run() {
-                mActivity.openCurrentUrlInBrowser(true, true);
+                mActivity.openCurrentUrlInBrowser(true);
                 assertNull(mActivity.getActivityTab());
             }
         });
@@ -1458,10 +1455,11 @@ public class CustomTabActivityTest extends CustomTabActivityTestBase {
         CriteriaHelper.pollUiThread(new Criteria("No Prerender") {
             @Override
             public boolean isSatisfied() {
-                return connection.mPrerender != null && connection.mPrerender.mWebContents != null
+                return connection.mSpeculation != null
+                        && connection.mSpeculation.webContents != null
                         && ExternalPrerenderHandler.hasPrerenderedAndFinishedLoadingUrl(
                                    Profile.getLastUsedProfile(), url,
-                                   connection.mPrerender.mWebContents);
+                                   connection.mSpeculation.webContents);
             }
         });
     }

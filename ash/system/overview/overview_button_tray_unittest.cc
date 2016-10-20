@@ -6,6 +6,7 @@
 
 #include "ash/common/login_status.h"
 #include "ash/common/system/status_area_widget.h"
+#include "ash/common/test/test_session_state_delegate.h"
 #include "ash/common/wm/maximize_mode/maximize_mode_controller.h"
 #include "ash/common/wm/overview/window_selector_controller.h"
 #include "ash/common/wm_shell.h"
@@ -13,11 +14,9 @@
 #include "ash/public/cpp/shelf_types.h"
 #include "ash/root_window_controller.h"
 #include "ash/rotator/screen_rotation_animator.h"
-#include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/test/ash_test_helper.h"
 #include "ash/test/status_area_widget_test_helper.h"
-#include "ash/test/test_session_state_delegate.h"
 #include "base/command_line.h"
 #include "base/test/user_action_tester.h"
 #include "base/time/time.h"
@@ -176,12 +175,11 @@ TEST_F(OverviewButtonTrayTest, VisibilityChangesForLoginStatus) {
   WmShell::Get()->maximize_mode_controller()->EnableMaximizeModeWindowManager(
       true);
   SetUserLoggedIn(false);
-  Shell::GetInstance()->UpdateAfterLoginStatusChange(
-      LoginStatus::NOT_LOGGED_IN);
+  WmShell::Get()->UpdateAfterLoginStatusChange(LoginStatus::NOT_LOGGED_IN);
   EXPECT_FALSE(GetTray()->visible());
   SetUserLoggedIn(true);
   SetSessionStarted(true);
-  Shell::GetInstance()->UpdateAfterLoginStatusChange(LoginStatus::USER);
+  WmShell::Get()->UpdateAfterLoginStatusChange(LoginStatus::USER);
   EXPECT_TRUE(GetTray()->visible());
   SetUserAddingScreenRunning(true);
   NotifySessionStateChanged();

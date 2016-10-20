@@ -17,6 +17,7 @@
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths_internal.h"
 #include "media/cdm/cdm_paths.h"
+#include "ppapi/features/features.h"
 
 #if defined(OS_ANDROID)
 #include "base/android/path_utils.h"
@@ -64,6 +65,12 @@ const base::FilePath::CharType kFilepathSinglePrefExtensions[] =
 const base::FilePath::CharType kComponentUpdatedFlashHint[] =
     FILE_PATH_LITERAL("latest-component-updated-flash");
 #endif  // defined(OS_LINUX)
+
+#if defined(OS_CHROMEOS)
+const base::FilePath::CharType kChromeOSComponentFlash[] = FILE_PATH_LITERAL(
+    "/mnt/stateful_partition/imageloader_mounts/PepperFlashPlayer/"
+    "libpepflashplayer.so");
+#endif  // defined(OS_CHROMEOS)
 
 static base::LazyInstance<base::FilePath>
     g_invalid_specified_user_data_dir = LAZY_INSTANCE_INITIALIZER;
@@ -364,7 +371,7 @@ bool PathProvider(int key, base::FilePath* result) {
 #endif
       cur = cur.Append(FILE_PATH_LITERAL("pnacl"));
       break;
-#if defined(WIDEVINE_CDM_AVAILABLE) && defined(ENABLE_PEPPER_CDMS)
+#if defined(WIDEVINE_CDM_AVAILABLE) && BUILDFLAG(ENABLE_PEPPER_CDMS)
 #if defined(WIDEVINE_CDM_IS_COMPONENT)
     case chrome::DIR_COMPONENT_WIDEVINE_CDM:
       if (!PathService::Get(chrome::DIR_USER_DATA, &cur))
@@ -382,7 +389,7 @@ bool PathProvider(int key, base::FilePath* result) {
           media::GetPlatformSpecificDirectory(kWidevineCdmBaseDirectory));
       cur = cur.AppendASCII(kWidevineCdmAdapterFileName);
       break;
-#endif  // defined(WIDEVINE_CDM_AVAILABLE) && defined(ENABLE_PEPPER_CDMS)
+#endif  // defined(WIDEVINE_CDM_AVAILABLE) && BUILDFLAG(ENABLE_PEPPER_CDMS)
     case chrome::FILE_RESOURCES_PACK:
 #if defined(OS_MACOSX)
       cur = base::mac::FrameworkBundlePath();
@@ -569,6 +576,12 @@ bool PathProvider(int key, base::FilePath* result) {
       cur = cur.Append(kComponentUpdatedFlashHint);
       break;
 #endif  // defined(OS_LINUX)
+#if defined(OS_CHROMEOS)
+    case chrome::FILE_CHROME_OS_COMPONENT_FLASH:
+      cur = base::FilePath(kChromeOSComponentFlash);
+      create_dir = false;
+      break;
+#endif  // defined(OS_CHROMEOS)
 
     default:
       return false;

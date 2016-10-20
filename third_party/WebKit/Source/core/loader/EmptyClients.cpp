@@ -27,7 +27,9 @@
 
 #include "core/loader/EmptyClients.h"
 
+#include "core/frame/FrameHost.h"
 #include "core/frame/LocalFrame.h"
+#include "core/frame/VisualViewport.h"
 #include "core/html/HTMLFormElement.h"
 #include "core/html/forms/ColorChooser.h"
 #include "core/html/forms/DateTimeChooser.h"
@@ -37,7 +39,6 @@
 #include "public/platform/Platform.h"
 #include "public/platform/WebApplicationCacheHost.h"
 #include "public/platform/WebMediaPlayer.h"
-#include "public/platform/modules/mediasession/WebMediaSession.h"
 #include "public/platform/modules/serviceworker/WebServiceWorkerProvider.h"
 #include "public/platform/modules/serviceworker/WebServiceWorkerProviderClient.h"
 #include "wtf/PtrUtil.h"
@@ -108,6 +109,14 @@ void EmptyChromeClient::openTextDataListChooser(HTMLInputElement&) {}
 
 void EmptyChromeClient::openFileChooser(LocalFrame*, PassRefPtr<FileChooser>) {}
 
+void EmptyChromeClient::attachRootGraphicsLayer(GraphicsLayer* layer,
+                                                LocalFrame* localRoot) {
+  Page* page = localRoot ? localRoot->page() : nullptr;
+  if (!page)
+    return;
+  page->frameHost().visualViewport().attachToLayerTree(layer);
+}
+
 String EmptyChromeClient::acceptLanguages() {
   return String();
 }
@@ -158,11 +167,6 @@ std::unique_ptr<WebMediaPlayer> EmptyFrameLoaderClient::createWebMediaPlayer(
     HTMLMediaElement&,
     const WebMediaPlayerSource&,
     WebMediaPlayerClient*) {
-  return nullptr;
-}
-
-std::unique_ptr<WebMediaSession>
-EmptyFrameLoaderClient::createWebMediaSession() {
   return nullptr;
 }
 

@@ -106,6 +106,7 @@ class MHTMLGenerationManager::Job : public RenderProcessHostObserver {
   base::TimeTicks wait_on_renderer_start_time_;
   base::TimeDelta all_renderers_wait_time_;
   base::TimeDelta all_renderers_main_thread_time_;
+  base::TimeDelta longest_renderer_main_thread_time_;
 
   // User-configurable parameters. Includes the file location, binary encoding
   // choices, and whether to skip storing resources marked
@@ -282,6 +283,11 @@ void MHTMLGenerationManager::Job::MarkAsFinished() {
         "PageSerialization.MhtmlGeneration.RendererMainThreadTime.FrameTree",
         all_renderers_main_thread_time_);
   }
+  if (!longest_renderer_main_thread_time_.is_zero()) {
+    UMA_HISTOGRAM_TIMES(
+        "PageSerialization.MhtmlGeneration.RendererMainThreadTime.SlowestFrame",
+        longest_renderer_main_thread_time_);
+  }
 
   // Stopping RenderProcessExited notifications is needed to avoid calling
   // JobFinished twice.  See also https://crbug.com/612098.
@@ -293,6 +299,8 @@ void MHTMLGenerationManager::Job::ReportRendererMainThreadTime(
   DCHECK(renderer_main_thread_time > base::TimeDelta());
   if (renderer_main_thread_time > base::TimeDelta())
     all_renderers_main_thread_time_ += renderer_main_thread_time;
+  if (renderer_main_thread_time > longest_renderer_main_thread_time_)
+    longest_renderer_main_thread_time_ = renderer_main_thread_time;
 }
 
 void MHTMLGenerationManager::Job::AddFrame(RenderFrameHost* render_frame_host) {
@@ -394,8 +402,8 @@ void MHTMLGenerationManager::SaveMHTML(WebContents* web_contents,
   Job* job = NewJob(web_contents, params, callback);
   TRACE_EVENT_NESTABLE_ASYNC_BEGIN2(
       "page-serialization", "SavingMhtmlJob", job, "url",
-      web_contents->GetLastCommittedURL().possibly_invalid_spec().c_str(),
-      "file", params.file_path.value().c_str());
+      web_contents->GetLastCommittedURL().possibly_invalid_spec(),
+      "file", params.file_path.AsUTF8Unsafe());
 
   BrowserThread::PostTaskAndReplyWithResult(
       BrowserThread::FILE, FROM_HERE,

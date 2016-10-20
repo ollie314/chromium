@@ -43,15 +43,6 @@ using ntp_snippets::ContentSuggestion;
 
 namespace {
 
-void URLVisitedHistoryRequestCallback(
-    base::android::ScopedJavaGlobalRef<jobject> callback,
-    bool success,
-    const history::URLRow& row,
-    const history::VisitVector& visitVector) {
-  bool visited = success && row.visit_count() != 0;
-  base::android::RunCallbackAndroid(callback, visited);
-}
-
 // TODO(treib): Move this into the Time class itself.
 base::Time TimeFromJavaTime(jlong timestamp_ms) {
   return base::Time::UnixEpoch() +
@@ -179,7 +170,7 @@ base::android::ScopedJavaLocalRef<jobject> NTPSnippetsBridge::GetCategoryInfo(
   if (!info)
     return base::android::ScopedJavaLocalRef<jobject>(env, nullptr);
   return Java_SnippetsBridge_createSuggestionsCategoryInfo(
-      env, ConvertUTF16ToJavaString(env, info->title()),
+      env, category, ConvertUTF16ToJavaString(env, info->title()),
       static_cast<int>(info->card_layout()), info->has_more_button(),
       info->show_if_empty());
 }
@@ -231,11 +222,27 @@ void NTPSnippetsBridge::FetchSuggestionImage(
 void NTPSnippetsBridge::DismissSuggestion(
     JNIEnv* env,
     const JavaParamRef<jobject>& obj,
+    const JavaParamRef<jstring>& jurl,
+    jint global_position,
     jint category,
+    jint category_position,
     const JavaParamRef<jstring>& id_within_category) {
   content_suggestions_service_->DismissSuggestion(
       ContentSuggestion::ID(CategoryFromIDValue(category),
                             ConvertJavaStringToUTF8(env, id_within_category)));
+
+  history_service_->QueryURL(
+      GURL(ConvertJavaStringToUTF8(env, jurl)), /*want_visits=*/false,
+      base::Bind(
+          [](int global_position, Category category, int category_position,
+             bool success, const history::URLRow& row,
+             const history::VisitVector& visit_vector) {
+            bool visited = success && row.visit_count() != 0;
+            ntp_snippets::metrics::OnSuggestionDismissed(
+                global_position, category, category_position, visited);
+          },
+          global_position, CategoryFromIDValue(category), category_position),
+      &tracker_);
 }
 
 void NTPSnippetsBridge::DismissCategory(JNIEnv* env,
@@ -244,15 +251,10 @@ void NTPSnippetsBridge::DismissCategory(JNIEnv* env,
   content_suggestions_service_->DismissCategory(CategoryFromIDValue(category));
 }
 
-void NTPSnippetsBridge::GetURLVisited(JNIEnv* env,
-                                      const JavaParamRef<jobject>& obj,
-                                      const JavaParamRef<jobject>& jcallback,
-                                      const JavaParamRef<jstring>& jurl) {
-  base::android::ScopedJavaGlobalRef<jobject> callback(jcallback);
-
-  history_service_->QueryURL(
-      GURL(ConvertJavaStringToUTF8(env, jurl)), false,
-      base::Bind(&URLVisitedHistoryRequestCallback, callback), &tracker_);
+void NTPSnippetsBridge::RestoreDismissedCategories(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj) {
+  content_suggestions_service_->RestoreDismissedCategories();
 }
 
 void NTPSnippetsBridge::OnPageShown(

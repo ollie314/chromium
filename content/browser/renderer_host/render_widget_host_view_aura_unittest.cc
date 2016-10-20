@@ -248,8 +248,12 @@ class TestWindowObserver : public aura::WindowObserver {
   DISALLOW_COPY_AND_ASSIGN(TestWindowObserver);
 };
 
-class FakeSurfaceDamageObserver : public cc::SurfaceDamageObserver {
+class FakeSurfaceObserver : public cc::SurfaceObserver {
  public:
+  void OnSurfaceCreated(const cc::SurfaceId& surface_id,
+                        const gfx::Size& frame,
+                        float device_scale_factor) override {}
+
   void OnSurfaceDamaged(const cc::SurfaceId& id, bool* changed) override {
     *changed = true;
   }
@@ -366,9 +370,11 @@ class FakeRenderWidgetHostViewAura : public RenderWidgetHostViewAura {
     return GetDelegatedFrameHost()->SurfaceIdForTesting();
   }
 
-  bool HasFrameData() const {
-    return !surface_id().is_null();
+  const cc::LocalFrameId& GetLocalFrameId() const {
+    return GetDelegatedFrameHost()->LocalFrameIdForTesting();
   }
+
+  bool HasFrameData() const { return !GetLocalFrameId().is_null(); }
 
   bool released_front_lock_active() const {
     return GetDelegatedFrameHost()->ReleasedFrontLockActiveForTesting();
@@ -700,8 +706,8 @@ class RenderWidgetHostViewGuestAuraTest : public RenderWidgetHostViewAuraTest {
 
     RenderWidgetHostViewAuraTest::SetUp();
 
-    guest_view_weak_ = (new RenderWidgetHostViewGuest(widget_host_, nullptr,
-                                                      view_->GetWeakPtr()))
+    guest_view_weak_ = (RenderWidgetHostViewGuest::Create(widget_host_, nullptr,
+                                                          view_->GetWeakPtr()))
                            ->GetWeakPtr();
   }
 
@@ -1673,10 +1679,10 @@ cc::CompositorFrame MakeDelegatedFrame(float scale_factor,
 // client in response to the swap. This test verifies that the returned
 // resources are indeed reported as being in response to a swap.
 TEST_F(RenderWidgetHostViewAuraTest, ResettingCompositorReturnsResources) {
-  FakeSurfaceDamageObserver damage_observer;
+  FakeSurfaceObserver manager_observer;
   ImageTransportFactory* factory = ImageTransportFactory::GetInstance();
   cc::SurfaceManager* manager = factory->GetSurfaceManager();
-  manager->AddObserver(&damage_observer);
+  manager->AddObserver(&manager_observer);
 
   gfx::Size view_size(100, 100);
   gfx::Rect view_rect(view_size);
@@ -1704,7 +1710,7 @@ TEST_F(RenderWidgetHostViewAuraTest, ResettingCompositorReturnsResources) {
     EXPECT_EQ(0u, std::get<0>(params));  // compositor_frame_sink_id
     EXPECT_TRUE(std::get<1>(params));    // is_swap_ack
   }
-  manager->RemoveObserver(&damage_observer);
+  manager->RemoveObserver(&manager_observer);
 }
 
 // This test verifies that returned resources do not require a pending ack.
@@ -1740,10 +1746,10 @@ TEST_F(RenderWidgetHostViewAuraTest, ReturnedResources) {
 // This test verifies that when the compositor_frame_sink_id changes, then
 // DelegateFrameHost returns compositor resources without a swap ack.
 TEST_F(RenderWidgetHostViewAuraTest, TwoOutputSurfaces) {
-  FakeSurfaceDamageObserver damage_observer;
+  FakeSurfaceObserver manager_observer;
   ImageTransportFactory* factory = ImageTransportFactory::GetInstance();
   cc::SurfaceManager* manager = factory->GetSurfaceManager();
-  manager->AddObserver(&damage_observer);
+  manager->AddObserver(&manager_observer);
 
   gfx::Size view_size(100, 100);
   gfx::Rect view_rect(view_size);
@@ -1797,7 +1803,7 @@ TEST_F(RenderWidgetHostViewAuraTest, TwoOutputSurfaces) {
     EXPECT_EQ(true, std::get<1>(params));  // is_swap_ack
   }
 
-  manager->RemoveObserver(&damage_observer);
+  manager->RemoveObserver(&manager_observer);
 }
 
 // Resizing in fullscreen mode should send the up-to-date screen info.
@@ -2625,7 +2631,8 @@ class RenderWidgetHostViewAuraCopyRequestTest
     cc::SurfaceId surface_id =
         view_->GetDelegatedFrameHost()->SurfaceIdForTesting();
     if (!surface_id.is_null())
-      view_->GetDelegatedFrameHost()->WillDrawSurface(surface_id, view_rect_);
+      view_->GetDelegatedFrameHost()->WillDrawSurface(
+          surface_id.local_frame_id(), view_rect_);
     ASSERT_TRUE(view_->last_copy_request_);
   }
 

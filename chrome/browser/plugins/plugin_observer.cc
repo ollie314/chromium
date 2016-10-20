@@ -17,22 +17,24 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
+#include "chrome/browser/plugins/flash_download_interception.h"
 #include "chrome/browser/plugins/plugin_finder.h"
 #include "chrome/browser/plugins/plugin_infobar_delegates.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/tab_modal_confirm_dialog.h"
+#include "chrome/common/features.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/grit/theme_resources.h"
 #include "components/component_updater/component_updater_service.h"
-#include "components/content_settings/content/common/content_settings_messages.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/infobars/core/confirm_infobar_delegate.h"
 #include "components/infobars/core/infobar.h"
 #include "components/infobars/core/infobar_delegate.h"
 #include "components/infobars/core/simple_alert_infobar_delegate.h"
 #include "components/metrics_services_manager/metrics_services_manager.h"
+#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/plugin_service.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_view_host.h"
@@ -42,11 +44,11 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/vector_icons_public.h"
 
-#if defined(ENABLE_PLUGIN_INSTALLATION)
+#if BUILDFLAG(ENABLE_PLUGIN_INSTALLATION)
 #include "chrome/browser/plugins/plugin_installer.h"
 #include "chrome/browser/plugins/plugin_installer_observer.h"
 #include "chrome/browser/ui/tab_modal_confirm_dialog_delegate.h"
-#endif  // defined(ENABLE_PLUGIN_INSTALLATION)
+#endif  // BUILDFLAG(ENABLE_PLUGIN_INSTALLATION)
 
 using content::OpenURLParams;
 using content::PluginService;
@@ -57,7 +59,7 @@ DEFINE_WEB_CONTENTS_USER_DATA_KEY(PluginObserver);
 
 namespace {
 
-#if defined(ENABLE_PLUGIN_INSTALLATION)
+#if BUILDFLAG(ENABLE_PLUGIN_INSTALLATION)
 
 // ConfirmInstallDialogDelegate ------------------------------------------------
 
@@ -122,7 +124,7 @@ void ConfirmInstallDialogDelegate::DownloadStarted() {
 void ConfirmInstallDialogDelegate::OnlyWeakObserversLeft() {
   Cancel();
 }
-#endif  // defined(ENABLE_PLUGIN_INSTALLATION)
+#endif  // BUILDFLAG(ENABLE_PLUGIN_INSTALLATION)
 
 // ReloadPluginInfoBarDelegate -------------------------------------------------
 
@@ -139,7 +141,6 @@ class ReloadPluginInfoBarDelegate : public ConfirmInfoBarDelegate {
 
   // ConfirmInfobarDelegate:
   infobars::InfoBarDelegate::InfoBarIdentifier GetIdentifier() const override;
-  int GetIconId() const override;
   gfx::VectorIconId GetVectorIconId() const override;
   base::string16 GetMessageText() const override;
   int GetButtons() const override;
@@ -173,16 +174,8 @@ ReloadPluginInfoBarDelegate::GetIdentifier() const {
   return RELOAD_PLUGIN_INFOBAR_DELEGATE;
 }
 
-int ReloadPluginInfoBarDelegate::GetIconId() const {
-  return IDR_INFOBAR_PLUGIN_CRASHED;
-}
-
 gfx::VectorIconId ReloadPluginInfoBarDelegate::GetVectorIconId() const {
-#if !defined(OS_MACOSX) && !defined(OS_ANDROID)
   return gfx::VectorIconId::EXTENSION_CRASHED;
-#else
-  return gfx::VectorIconId::VECTOR_ICON_NONE;
-#endif
 }
 
 base::string16 ReloadPluginInfoBarDelegate::GetMessageText() const {
@@ -208,7 +201,7 @@ bool ReloadPluginInfoBarDelegate::Accept() {
 
 // PluginObserver -------------------------------------------------------------
 
-#if defined(ENABLE_PLUGIN_INSTALLATION)
+#if BUILDFLAG(ENABLE_PLUGIN_INSTALLATION)
 class PluginObserver::PluginPlaceholderHost : public PluginInstallerObserver {
  public:
   PluginPlaceholderHost(PluginObserver* observer,
@@ -255,7 +248,7 @@ class PluginObserver::PluginPlaceholderHost : public PluginInstallerObserver {
 
   int routing_id_;
 };
-#endif  // defined(ENABLE_PLUGIN_INSTALLATION)
+#endif  // BUILDFLAG(ENABLE_PLUGIN_INSTALLATION)
 
 class PluginObserver::ComponentObserver
     : public update_client::UpdateClient::Observer {
@@ -311,7 +304,7 @@ PluginObserver::PluginObserver(content::WebContents* web_contents)
 }
 
 PluginObserver::~PluginObserver() {
-#if defined(ENABLE_PLUGIN_INSTALLATION)
+#if BUILDFLAG(ENABLE_PLUGIN_INSTALLATION)
   base::STLDeleteValues(&plugin_placeholders_);
 #endif
 }
@@ -373,7 +366,7 @@ bool PluginObserver::OnMessageReceived(
                         OnBlockedOutdatedPlugin)
     IPC_MESSAGE_HANDLER(ChromeViewHostMsg_BlockedComponentUpdatedPlugin,
                         OnBlockedComponentUpdatedPlugin)
-#if defined(ENABLE_PLUGIN_INSTALLATION)
+#if BUILDFLAG(ENABLE_PLUGIN_INSTALLATION)
     IPC_MESSAGE_HANDLER(ChromeViewHostMsg_RemovePluginPlaceholderHost,
                         OnRemovePluginPlaceholderHost)
 #endif
@@ -392,7 +385,7 @@ bool PluginObserver::OnMessageReceived(
 
 void PluginObserver::OnBlockedOutdatedPlugin(int placeholder_id,
                                              const std::string& identifier) {
-#if defined(ENABLE_PLUGIN_INSTALLATION)
+#if BUILDFLAG(ENABLE_PLUGIN_INSTALLATION)
   PluginFinder* finder = PluginFinder::GetInstance();
   // Find plugin to update.
   PluginInstaller* installer = NULL;
@@ -410,7 +403,7 @@ void PluginObserver::OnBlockedOutdatedPlugin(int placeholder_id,
   // If we don't support third-party plugin installation, we shouldn't have
   // outdated plugins.
   NOTREACHED();
-#endif  // defined(ENABLE_PLUGIN_INSTALLATION)
+#endif  // BUILDFLAG(ENABLE_PLUGIN_INSTALLATION)
 }
 
 void PluginObserver::OnBlockedComponentUpdatedPlugin(
@@ -429,7 +422,7 @@ void PluginObserver::RemoveComponentObserver(int placeholder_id) {
   component_observers_.erase(it);
 }
 
-#if defined(ENABLE_PLUGIN_INSTALLATION)
+#if BUILDFLAG(ENABLE_PLUGIN_INSTALLATION)
 void PluginObserver::OnRemovePluginPlaceholderHost(int placeholder_id) {
   std::map<int, PluginPlaceholderHost*>::iterator it =
       plugin_placeholders_.find(placeholder_id);
@@ -440,7 +433,7 @@ void PluginObserver::OnRemovePluginPlaceholderHost(int placeholder_id) {
   delete it->second;
   plugin_placeholders_.erase(it);
 }
-#endif  // defined(ENABLE_PLUGIN_INSTALLATION)
+#endif  // BUILDFLAG(ENABLE_PLUGIN_INSTALLATION)
 
 void PluginObserver::OnOpenAboutPlugins() {
   web_contents()->OpenURL(
@@ -454,7 +447,10 @@ void PluginObserver::OnOpenAboutPlugins() {
 }
 
 void PluginObserver::OnShowFlashPermissionBubble() {
-  // TODO(tommycli): Show a permission bubble for the associated tab.
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+
+  FlashDownloadInterception::InterceptFlashDownloadNavigation(
+      web_contents(), web_contents()->GetLastCommittedURL());
 }
 
 void PluginObserver::OnCouldNotLoadPlugin(const base::FilePath& plugin_path) {
@@ -464,13 +460,8 @@ void PluginObserver::OnCouldNotLoadPlugin(const base::FilePath& plugin_path) {
       PluginService::GetInstance()->GetPluginDisplayNameByPath(plugin_path);
   SimpleAlertInfoBarDelegate::Create(
       InfoBarService::FromWebContents(web_contents()),
-      infobars::InfoBarDelegate::PLUGIN_OBSERVER,
-      IDR_INFOBAR_PLUGIN_CRASHED,
-#if !defined(OS_MACOSX) && !defined(OS_ANDROID)
+      infobars::InfoBarDelegate::PLUGIN_OBSERVER, 0,
       gfx::VectorIconId::EXTENSION_CRASHED,
-#else
-      gfx::VectorIconId::VECTOR_ICON_NONE,
-#endif
       l10n_util::GetStringFUTF16(IDS_PLUGIN_INITIALIZATION_ERROR_PROMPT,
                                  plugin_name),
       true);

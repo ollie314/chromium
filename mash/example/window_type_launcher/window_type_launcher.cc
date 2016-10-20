@@ -12,11 +12,11 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/platform_thread.h"
 #include "mash/session/public/interfaces/session.mojom.h"
-#include "services/shell/public/c/main.h"
-#include "services/shell/public/cpp/connection.h"
-#include "services/shell/public/cpp/connector.h"
-#include "services/shell/public/cpp/service.h"
-#include "services/shell/public/cpp/service_runner.h"
+#include "services/service_manager/public/c/main.h"
+#include "services/service_manager/public/cpp/connection.h"
+#include "services/service_manager/public/cpp/connector.h"
+#include "services/service_manager/public/cpp/service.h"
+#include "services/service_manager/public/cpp/service_runner.h"
 #include "services/ui/public/cpp/property_type_converters.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_event_dispatcher.h"
@@ -82,14 +82,16 @@ class WindowDelegateView : public views::WidgetDelegateView {
   }
 
   // WidgetDelegateView:
-  bool CanMaximize() const override { return true; }
+  bool CanMaximize() const override {
+    // Panels can't be maximized.
+    return (traits_ & PANEL) == 0;
+  }
   bool CanMinimize() const override { return true; }
   bool CanResize() const override { return (traits_ & RESIZABLE) != 0; }
   base::string16 GetWindowTitle() const override {
     return base::ASCIIToUTF16("Window");
   }
   gfx::Size GetPreferredSize() const override { return gfx::Size(300, 300); }
-  View* GetContentsView() override { return this; }
 
  private:
   const uint32_t traits_;
@@ -130,7 +132,6 @@ class ModalWindow : public views::WidgetDelegateView,
   }
 
   // Overridden from views::WidgetDelegate:
-  views::View* GetContentsView() override { return this; }
   bool CanResize() const override { return true; }
   base::string16 GetWindowTitle() const override {
     return base::ASCIIToUTF16("Modal Window");
@@ -188,7 +189,6 @@ class NonModalTransient : public views::WidgetDelegateView {
   gfx::Size GetPreferredSize() const override { return gfx::Size(250, 250); }
 
   // Overridden from views::WidgetDelegate:
-  views::View* GetContentsView() override { return this; }
   bool CanResize() const override { return true; }
   base::string16 GetWindowTitle() const override {
     return base::ASCIIToUTF16("Non-Modal Transient");
@@ -225,7 +225,7 @@ class WindowTypeLauncherView : public views::WidgetDelegateView,
                                public views::ContextMenuController {
  public:
   explicit WindowTypeLauncherView(WindowTypeLauncher* window_type_launcher,
-                                  shell::Connector* connector)
+                                  service_manager::Connector* connector)
       : window_type_launcher_(window_type_launcher),
         connector_(connector),
         create_button_(
@@ -346,7 +346,6 @@ class WindowTypeLauncherView : public views::WidgetDelegateView,
   }
 
   // Overridden from views::WidgetDelegate:
-  views::View* GetContentsView() override { return this;  }
   bool CanResize() const override { return true;  }
   base::string16 GetWindowTitle() const override {
     return base::ASCIIToUTF16("Examples: Window Builder");
@@ -369,15 +368,15 @@ class WindowTypeLauncherView : public views::WidgetDelegateView,
       NOTIMPLEMENTED();
     } else if (sender == lock_button_) {
       mash::session::mojom::SessionPtr session;
-      connector_->ConnectToInterface("mojo:mash_session", &session);
+      connector_->ConnectToInterface("service:mash_session", &session);
       session->LockScreen();
     } else if (sender == logout_button_) {
       mash::session::mojom::SessionPtr session;
-      connector_->ConnectToInterface("mojo:mash_session", &session);
+      connector_->ConnectToInterface("service:mash_session", &session);
       session->Logout();
     } else if (sender == switch_user_button_) {
       mash::session::mojom::SessionPtr session;
-      connector_->ConnectToInterface("mojo:mash_session", &session);
+      connector_->ConnectToInterface("service:mash_session", &session);
       session->SwitchUser();
     } else if (sender == widgets_button_) {
       NOTIMPLEMENTED();
@@ -433,7 +432,7 @@ class WindowTypeLauncherView : public views::WidgetDelegateView,
   }
 
   WindowTypeLauncher* window_type_launcher_;
-  shell::Connector* connector_;
+  service_manager::Connector* connector_;
   views::Button* create_button_;
   views::Button* always_on_top_button_;
   views::Button* panel_button_;
@@ -470,15 +469,16 @@ void WindowTypeLauncher::RemoveWindow(views::Widget* window) {
     base::MessageLoop::current()->QuitWhenIdle();
 }
 
-void WindowTypeLauncher::OnStart(const shell::Identity& identity) {
+void WindowTypeLauncher::OnStart(const service_manager::Identity& identity) {
   aura_init_.reset(
       new views::AuraInit(connector(), "views_mus_resources.pak"));
   window_manager_connection_ =
       views::WindowManagerConnection::Create(connector(), identity);
 }
 
-bool WindowTypeLauncher::OnConnect(const shell::Identity& remote_identity,
-                                   shell::InterfaceRegistry* registry) {
+bool WindowTypeLauncher::OnConnect(
+    const service_manager::Identity& remote_identity,
+    service_manager::InterfaceRegistry* registry) {
   registry->AddInterface<mash::mojom::Launchable>(this);
   return true;
 }
@@ -498,12 +498,13 @@ void WindowTypeLauncher::Launch(uint32_t what, mash::mojom::LaunchMode how) {
   windows_.push_back(window);
 }
 
-void WindowTypeLauncher::Create(const shell::Identity& remote_identity,
-                                mash::mojom::LaunchableRequest request) {
+void WindowTypeLauncher::Create(
+    const service_manager::Identity& remote_identity,
+    mash::mojom::LaunchableRequest request) {
   bindings_.AddBinding(this, std::move(request));
 }
 
 MojoResult ServiceMain(MojoHandle service_request_handle) {
-  return shell::ServiceRunner(new WindowTypeLauncher)
+  return service_manager::ServiceRunner(new WindowTypeLauncher)
       .Run(service_request_handle);
 }

@@ -20,10 +20,11 @@
 #include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-namespace media {
 namespace midi {
 
 namespace {
+
+using mojom::Result;
 
 class FakeMidiManager : public MidiManager {
  public:
@@ -297,4 +298,3 @@ TEST_F(MidiManagerTest, CreateMidiManager) {
 }  // namespace
 
 }  // namespace midi
-}  // namespace media

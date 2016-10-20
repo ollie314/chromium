@@ -35,6 +35,7 @@ class _CommonSystemHealthBenchmark(perf_benchmark.PerfBenchmark):
     options.config.chrome_trace_config.category_filter.AddFilterString('rail')
     options.config.enable_battor_trace = True
     options.config.enable_chrome_trace = True
+    options.SetTimelineBasedMetrics(['clockSyncLatencyMetric', 'powerMetric'])
     return options
 
   def CreateStorySet(self, options):
@@ -82,6 +83,7 @@ class _MemorySystemHealthBenchmark(perf_benchmark.PerfBenchmark):
 
   https://goo.gl/Jek2NL.
   """
+  options = {'pageset_repeat': 3}
 
   def SetExtraBrowserOptions(self, options):
     options.AppendExtraBrowserArgs([

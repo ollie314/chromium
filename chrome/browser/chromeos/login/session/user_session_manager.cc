@@ -46,8 +46,6 @@
 #include "chrome/browser/chromeos/login/helper.h"
 #include "chrome/browser/chromeos/login/lock/screen_locker.h"
 #include "chrome/browser/chromeos/login/profile_auth_data.h"
-#include "chrome/browser/chromeos/login/quick_unlock/pin_storage.h"
-#include "chrome/browser/chromeos/login/quick_unlock/pin_storage_factory.h"
 #include "chrome/browser/chromeos/login/saml/saml_offline_signin_limiter.h"
 #include "chrome/browser/chromeos/login/saml/saml_offline_signin_limiter_factory.h"
 #include "chrome/browser/chromeos/login/signin/oauth2_login_manager.h"
@@ -1138,7 +1136,7 @@ void UserSessionManager::FinalizePrepareProfile(Profile* profile) {
   profile->OnLogin();
 
   g_browser_process->platform_part()->SessionManager()->SetSessionState(
-      session_manager::SESSION_STATE_LOGGED_IN_NOT_ACTIVE);
+      session_manager::SessionState::LOGGED_IN_NOT_ACTIVE);
 
   // Send the notification before creating the browser so additional objects
   // that need the profile (e.g. the launcher) can be created first.
@@ -1281,12 +1279,6 @@ bool UserSessionManager::InitializeUserSession(Profile* profile) {
         user_flow->ShouldSkipPostLoginScreens() ||
         (oobe_controller && oobe_controller->skip_post_login_screens()) ||
         cmdline->HasSwitch(chromeos::switches::kOobeSkipPostLogin);
-
-    // The user just signed into the profile session, so it means that they
-    // entered a password (or used easy unlock). We will enable quick unlock.
-    PinStorage* pin_storage = PinStorageFactory::GetForProfile(profile);
-    if (pin_storage)
-      pin_storage->MarkStrongAuth();
 
     if (user_manager->IsCurrentUserNew() && !skip_post_login_screens) {
       // Don't specify start URLs if the administrator has configured the start
@@ -1529,9 +1521,8 @@ void UserSessionManager::NotifyPendingUserSessionsRestoreFinished() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   user_sessions_restored_ = true;
   user_sessions_restore_in_progress_ = false;
-  FOR_EACH_OBSERVER(chromeos::UserSessionStateObserver,
-                    session_state_observer_list_,
-                    PendingUserSessionsRestoreFinished());
+  for (auto& observer : session_state_observer_list_)
+    observer.PendingUserSessionsRestoreFinished();
 }
 
 void UserSessionManager::UpdateEasyUnlockKeys(const UserContext& user_context) {
@@ -1760,9 +1751,8 @@ void UserSessionManager::DoBrowserLaunchInternal(Profile* profile,
 
   // Check to see if this profile should show EndOfLife Notification and show
   // the message accordingly.
-  if (!ShouldShowEolNotification(profile))
-    return;
-  CheckEolStatus(profile);
+  if (ShouldShowEolNotification(profile))
+    CheckEolStatus(profile);
 }
 
 void UserSessionManager::RespectLocalePreferenceWrapper(

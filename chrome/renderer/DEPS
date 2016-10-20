@@ -1,11 +1,9 @@
 include_rules = [
   "+chrome/grit",
   "+components/autofill/content/common",
-  "+components/autofill/content/public/interfaces",
   "+components/autofill/content/renderer",
   "+components/autofill/core/common",
   "+components/cdm/renderer",
-  "+components/content_settings/content/common",
   "+components/content_settings/core/common",
   "+components/contextual_search/renderer",
   "+components/crx_file",
@@ -26,6 +24,7 @@ include_rules = [
   "+components/plugins/renderer",
   "+components/printing/common",
   "+components/printing/renderer",
+  "+components/rappor/public/interfaces",
   "+components/signin/core/common",
   "+components/spellcheck/common",
   "+components/spellcheck/renderer",
@@ -49,7 +48,7 @@ include_rules = [
   "+media/base",
   "+ppapi/c",
   "+ppapi/shared_impl",
-  "+services/shell/public/cpp",
+  "+services/service_manager/public/cpp",
   "+skia",
   "+storage/common",
 ]

@@ -62,11 +62,11 @@ class MojoRendererTest : public ::testing::Test {
     mock_renderer_ = mock_renderer.get();
 
     mojom::RendererPtr remote_renderer;
-    renderer_binding_ =
-        mojo::MakeStrongBinding(base::MakeUnique<MojoRendererService>(
-                                    mojo_cdm_service_context_.GetWeakPtr(),
-                                    nullptr, nullptr, std::move(mock_renderer)),
-                                mojo::GetProxy(&remote_renderer));
+    renderer_binding_ = MojoRendererService::Create(
+        mojo_cdm_service_context_.GetWeakPtr(), nullptr, nullptr,
+        std::move(mock_renderer),
+        MojoRendererService::InitiateSurfaceRequestCB(),
+        mojo::GetProxy(&remote_renderer));
 
     mojo_renderer_.reset(
         new MojoRenderer(message_loop_.task_runner(),
@@ -370,6 +370,21 @@ TEST_F(MojoRendererTest, GetMediaTime) {
   WaitFor(kSleepTime);
   EXPECT_EQ(pause_time, mojo_renderer_->GetMediaTime());
   Destroy();
+}
+
+TEST_F(MojoRendererTest, OnBufferingStateChange) {
+  Initialize();
+  Play();
+
+  EXPECT_CALL(renderer_client_, OnBufferingStateChange(BUFFERING_HAVE_ENOUGH))
+      .Times(1);
+  remote_renderer_client_->OnBufferingStateChange(BUFFERING_HAVE_ENOUGH);
+
+  EXPECT_CALL(renderer_client_, OnBufferingStateChange(BUFFERING_HAVE_NOTHING))
+      .Times(1);
+  remote_renderer_client_->OnBufferingStateChange(BUFFERING_HAVE_NOTHING);
+
+  base::RunLoop().RunUntilIdle();
 }
 
 TEST_F(MojoRendererTest, OnEnded) {

@@ -2,7 +2,8 @@
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2001 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2004, 2005, 2006, 2007, 2008, 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006, 2007, 2008, 2010 Apple Inc. All rights
+ * reserved.
  *           (C) 2006 Alexey Proskuryakov (ap@nypop.com)
  * Copyright (C) 2007 Samuel Weinig (sam@webkit.org)
  *
@@ -176,8 +177,9 @@ void HTMLTextAreaElement::parseAttribute(const QualifiedName& name,
             LayoutInvalidationReason::AttributeChanged);
     }
   } else if (name == wrapAttr) {
-    // The virtual/physical values were a Netscape extension of HTML 3.0, now deprecated.
-    // The soft/hard /off values are a recommendation for HTML 4 extension by IE and NS 4.
+    // The virtual/physical values were a Netscape extension of HTML 3.0, now
+    // deprecated.  The soft/hard /off values are a recommendation for HTML 4
+    // extension by IE and NS 4.
     WrapMethod wrap;
     if (equalIgnoringCase(value, "physical") ||
         equalIgnoringCase(value, "hard") || equalIgnoringCase(value, "on"))
@@ -233,7 +235,8 @@ bool HTMLTextAreaElement::hasCustomFocusLogic() const {
 }
 
 bool HTMLTextAreaElement::isKeyboardFocusable() const {
-  // If a given text area can be focused at all, then it will always be keyboard focusable.
+  // If a given text area can be focused at all, then it will always be keyboard
+  // focusable.
   return isFocusable();
 }
 
@@ -251,13 +254,8 @@ void HTMLTextAreaElement::updateFocusAppearance(
     case SelectionBehaviorOnFocus::None:
       return;
   }
-  if (document().frame()) {
-    // TODO(xiaochengh): The use of updateStyleAndLayoutIgnorePendingStylesheets
-    // needs to be audited.  See http://crbug.com/590369 for more details.
-    document().updateStyleAndLayoutIgnorePendingStylesheets();
-
+  if (document().frame())
     document().frame()->selection().revealSelection();
-  }
 }
 
 void HTMLTextAreaElement::defaultEventHandler(Event* event) {
@@ -296,10 +294,11 @@ void HTMLTextAreaElement::subtreeHasChanged() {
   setAutofilled(false);
   updatePlaceholderVisibility();
 
-  if (!focused())
+  if (!isFocused())
     return;
 
-  // When typing in a textarea, childrenChanged is not called, so we need to force the directionality check.
+  // When typing in a textarea, childrenChanged is not called, so we need to
+  // force the directionality check.
   calculateAndAdjustDirectionality();
 
   DCHECK(document().isActive());
@@ -327,7 +326,7 @@ void HTMLTextAreaElement::handleBeforeTextInsertedEvent(
   // selection length. The selection is the source of text drag-and-drop in
   // that case, and nothing in the text field will be removed.
   unsigned selectionLength = 0;
-  if (focused()) {
+  if (isFocused()) {
     // TODO(xiaochengh): The use of updateStyleAndLayoutIgnorePendingStylesheets
     // needs to be audited.  See http://crbug.com/590369 for more details.
     document().updateStyleAndLayoutIgnorePendingStylesheets();
@@ -398,8 +397,8 @@ void HTMLTextAreaElement::setNonDirtyValue(const String& value) {
 void HTMLTextAreaElement::setValueCommon(const String& newValue,
                                          TextFieldEventBehavior eventBehavior,
                                          SetValueCommonOption setValueOption) {
-  // Code elsewhere normalizes line endings added by the user via the keyboard or pasting.
-  // We normalize line endings coming from JavaScript here.
+  // Code elsewhere normalizes line endings added by the user via the keyboard
+  // or pasting.  We normalize line endings coming from JavaScript here.
   String normalizedValue = newValue.isNull() ? "" : newValue;
   normalizedValue.replace("\r\n", "\n");
   normalizedValue.replace('\r', '\n');
@@ -463,7 +462,8 @@ String HTMLTextAreaElement::defaultValue() const {
 }
 
 void HTMLTextAreaElement::setDefaultValue(const String& defaultValue) {
-  // To preserve comments, remove only the text nodes, then add a single text node.
+  // To preserve comments, remove only the text nodes, then add a single text
+  // node.
   HeapVector<Member<Node>> textNodes;
   for (Node* n = firstChild(); n; n = n->nextSibling()) {
     if (n->isTextNode())

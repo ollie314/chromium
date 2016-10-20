@@ -24,6 +24,7 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/prefs/pref_service.h"
+#include "components/security_state/switches.h"
 #include "content/public/browser/interstitial_page.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
@@ -72,17 +73,17 @@ class SecurityStyleTestObserver : public content::WebContentsObserver {
  public:
   explicit SecurityStyleTestObserver(content::WebContents* web_contents)
       : content::WebContentsObserver(web_contents),
-        latest_security_style_(content::SECURITY_STYLE_UNKNOWN) {}
+        latest_security_style_(blink::WebSecurityStyleUnknown) {}
   ~SecurityStyleTestObserver() override {}
 
-  void SecurityStyleChanged(content::SecurityStyle security_style,
+  void SecurityStyleChanged(blink::WebSecurityStyle security_style,
                             const content::SecurityStyleExplanations&
                                 security_style_explanations) override {
     latest_security_style_ = security_style;
     latest_explanations_ = security_style_explanations;
   }
 
-  content::SecurityStyle latest_security_style() const {
+  blink::WebSecurityStyle latest_security_style() const {
     return latest_security_style_;
   }
 
@@ -91,12 +92,12 @@ class SecurityStyleTestObserver : public content::WebContentsObserver {
   }
 
   void ClearLatestSecurityStyleAndExplanations() {
-    latest_security_style_ = content::SECURITY_STYLE_UNKNOWN;
+    latest_security_style_ = blink::WebSecurityStyleUnknown;
     latest_explanations_ = content::SecurityStyleExplanations();
   }
 
  private:
-  content::SecurityStyle latest_security_style_;
+  blink::WebSecurityStyle latest_security_style_;
   content::SecurityStyleExplanations latest_explanations_;
 
   DISALLOW_COPY_AND_ASSIGN(SecurityStyleTestObserver);
@@ -108,7 +109,7 @@ void CheckBrokenSecurityStyle(const SecurityStyleTestObserver& observer,
                               int error,
                               Browser* browser,
                               net::X509Certificate* expected_cert) {
-  EXPECT_EQ(content::SECURITY_STYLE_AUTHENTICATION_BROKEN,
+  EXPECT_EQ(blink::WebSecurityStyleAuthenticationBroken,
             observer.latest_security_style());
 
   const content::SecurityStyleExplanations& expired_explanation =
@@ -176,13 +177,14 @@ void CheckSecureExplanations(
   int ssl_version =
       net::SSLConnectionStatusToVersion(security_info.connection_status);
   net::SSLVersionToString(&protocol, ssl_version);
-  bool is_aead;
+  bool is_aead, is_tls13;
   uint16_t cipher_suite =
       net::SSLConnectionStatusToCipherSuite(security_info.connection_status);
   net::SSLCipherSuiteToStrings(&key_exchange, &cipher, &mac, &is_aead,
-                               cipher_suite);
+                               &is_tls13, cipher_suite);
   EXPECT_TRUE(is_aead);
-  EXPECT_EQ(NULL, mac);  // The default secure cipher does not have a MAC.
+  EXPECT_EQ(nullptr, mac);  // The default secure cipher does not have a MAC.
+  EXPECT_FALSE(is_tls13);   // The default secure cipher is not TLS 1.3.
 
   base::string16 key_exchange_name = base::ASCIIToUTF16(key_exchange);
   if (security_info.key_exchange_group != 0) {
@@ -300,6 +302,38 @@ class ChromeSecurityStateModelClientTest : public CertVerifierBrowserTest {
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ChromeSecurityStateModelClientTest);
+};
+
+GURL GetURLWithNonLocalHostname(net::EmbeddedTestServer* server,
+                                const std::string& path) {
+  GURL::Replacements replace_host;
+  replace_host.SetHostStr("example.test");
+  return server->GetURL(path).ReplaceComponents(replace_host);
+}
+
+class ChromeSecurityStateModelClientTestWithPasswordCcSwitch
+    : public ChromeSecurityStateModelClientTest {
+ public:
+  ChromeSecurityStateModelClientTestWithPasswordCcSwitch()
+      : ChromeSecurityStateModelClientTest() {}
+
+  void SetUpOnMainThread() override {
+    ASSERT_TRUE(embedded_test_server()->Start());
+    ASSERT_TRUE(https_server_.Start());
+    host_resolver()->AddRule("*", embedded_test_server()->GetURL("/").host());
+    SetUpMockCertVerifierForHttpsServer(0, net::OK);
+  }
+
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    ChromeSecurityStateModelClientTest::SetUpCommandLine(command_line);
+    command_line->AppendSwitchASCII(
+        security_state::switches::kMarkHttpAs,
+        security_state::switches::kMarkHttpWithPasswordsOrCcWithChip);
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(
+      ChromeSecurityStateModelClientTestWithPasswordCcSwitch);
 };
 
 class SecurityStyleChangedTest : public InProcessBrowserTest {
@@ -904,6 +938,474 @@ IN_PROC_BROWSER_TEST_F(ChromeSecurityStateModelClientTest,
                   .displayed_credit_card_field_on_http);
 }
 
+// Tests that when a visible password field is detected on an HTTP page
+// load, and when the command-line flag is set, the security level is
+// downgraded to HTTP_SHOW_WARNING.
+IN_PROC_BROWSER_TEST_F(ChromeSecurityStateModelClientTestWithPasswordCcSwitch,
+                       PasswordSecurityLevelDowngraded) {
+  content::WebContents* contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  ASSERT_TRUE(contents);
+
+  ChromeSecurityStateModelClient* model_client =
+      ChromeSecurityStateModelClient::FromWebContents(contents);
+  ASSERT_TRUE(model_client);
+
+  ui_test_utils::NavigateToURL(
+      browser(), GetURLWithNonLocalHostname(embedded_test_server(),
+                                            "/password/simple_password.html"));
+  security_state::SecurityStateModel::SecurityInfo security_info;
+  model_client->GetSecurityInfo(&security_info);
+  EXPECT_EQ(security_state::SecurityStateModel::HTTP_SHOW_WARNING,
+            security_info.security_level);
+
+  content::NavigationEntry* entry = contents->GetController().GetVisibleEntry();
+  ASSERT_TRUE(entry);
+  EXPECT_TRUE(entry->GetSSL().content_status &
+              content::SSLStatus::DISPLAYED_PASSWORD_FIELD_ON_HTTP);
+}
+
+// Tests that when an invisible password field is present on an HTTP page
+// load, and when the command-line flag is set, the security level is
+// *not* downgraded to HTTP_SHOW_WARNING.
+IN_PROC_BROWSER_TEST_F(ChromeSecurityStateModelClientTestWithPasswordCcSwitch,
+                       PasswordSecurityLevelNotDowngradedForInvisibleInput) {
+  content::WebContents* contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  ASSERT_TRUE(contents);
+
+  ChromeSecurityStateModelClient* model_client =
+      ChromeSecurityStateModelClient::FromWebContents(contents);
+  ASSERT_TRUE(model_client);
+
+  ui_test_utils::NavigateToURL(
+      browser(),
+      GetURLWithNonLocalHostname(embedded_test_server(),
+                                 "/password/invisible_password.html"));
+  security_state::SecurityStateModel::SecurityInfo security_info;
+  model_client->GetSecurityInfo(&security_info);
+  EXPECT_EQ(security_state::SecurityStateModel::NONE,
+            security_info.security_level);
+
+  content::NavigationEntry* entry = contents->GetController().GetVisibleEntry();
+  ASSERT_TRUE(entry);
+  EXPECT_FALSE(entry->GetSSL().content_status &
+               content::SSLStatus::DISPLAYED_PASSWORD_FIELD_ON_HTTP);
+}
+
+// Tests that when a visible password field is detected inside an iframe
+// on an HTTP page load, and when the command-line flag is set, the
+// security level is downgraded to HTTP_SHOW_WARNING.
+IN_PROC_BROWSER_TEST_F(ChromeSecurityStateModelClientTestWithPasswordCcSwitch,
+                       PasswordSecurityLevelDowngradedFromIframe) {
+  content::WebContents* contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  ASSERT_TRUE(contents);
+
+  ChromeSecurityStateModelClient* model_client =
+      ChromeSecurityStateModelClient::FromWebContents(contents);
+  ASSERT_TRUE(model_client);
+
+  ui_test_utils::NavigateToURL(
+      browser(),
+      GetURLWithNonLocalHostname(embedded_test_server(),
+                                 "/password/simple_password_in_iframe.html"));
+  security_state::SecurityStateModel::SecurityInfo security_info;
+  model_client->GetSecurityInfo(&security_info);
+  EXPECT_EQ(security_state::SecurityStateModel::HTTP_SHOW_WARNING,
+            security_info.security_level);
+
+  content::NavigationEntry* entry = contents->GetController().GetVisibleEntry();
+  ASSERT_TRUE(entry);
+  EXPECT_TRUE(entry->GetSSL().content_status &
+              content::SSLStatus::DISPLAYED_PASSWORD_FIELD_ON_HTTP);
+}
+
+// Tests that when a visible password field is detected inside an iframe
+// on an HTTP page load, and when the command-line flag is set, the
+// security level is downgraded to HTTP_SHOW_WARNING, even if the iframe
+// itself was loaded over HTTPS.
+IN_PROC_BROWSER_TEST_F(ChromeSecurityStateModelClientTestWithPasswordCcSwitch,
+                       PasswordSecurityLevelDowngradedFromHttpsIframe) {
+  content::WebContents* contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  ASSERT_TRUE(contents);
+
+  ChromeSecurityStateModelClient* model_client =
+      ChromeSecurityStateModelClient::FromWebContents(contents);
+  ASSERT_TRUE(model_client);
+
+  // Navigate to an HTTP URL, which loads an iframe using the host and port of
+  // |https_server_|.
+  std::string replacement_path;
+  GetFilePathWithHostAndPortReplacement(
+      "/password/simple_password_in_https_iframe.html",
+      https_server_.host_port_pair(), &replacement_path);
+  ui_test_utils::NavigateToURL(
+      browser(),
+      GetURLWithNonLocalHostname(embedded_test_server(), replacement_path));
+  security_state::SecurityStateModel::SecurityInfo security_info;
+  model_client->GetSecurityInfo(&security_info);
+  EXPECT_EQ(security_state::SecurityStateModel::HTTP_SHOW_WARNING,
+            security_info.security_level);
+
+  content::NavigationEntry* entry = contents->GetController().GetVisibleEntry();
+  ASSERT_TRUE(entry);
+  EXPECT_TRUE(entry->GetSSL().content_status &
+              content::SSLStatus::DISPLAYED_PASSWORD_FIELD_ON_HTTP);
+}
+
+// Tests that when a visible password field is detected on an HTTP page
+// load, and when the command-line flag is *not* set, the security level is
+// *not* downgraded to HTTP_SHOW_WARNING.
+IN_PROC_BROWSER_TEST_F(ChromeSecurityStateModelClientTest,
+                       PasswordSecurityLevelNotDowngradedWithoutSwitch) {
+  ASSERT_TRUE(embedded_test_server()->Start());
+  host_resolver()->AddRule("*", embedded_test_server()->GetURL("/").host());
+
+  content::WebContents* contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  ASSERT_TRUE(contents);
+
+  ChromeSecurityStateModelClient* model_client =
+      ChromeSecurityStateModelClient::FromWebContents(contents);
+  ASSERT_TRUE(model_client);
+
+  ui_test_utils::NavigateToURL(
+      browser(), GetURLWithNonLocalHostname(embedded_test_server(),
+                                            "/password/simple_password.html"));
+  // The security level should not be HTTP_SHOW_WARNING, because the
+  // command-line switch was not set.
+  security_state::SecurityStateModel::SecurityInfo security_info;
+  model_client->GetSecurityInfo(&security_info);
+  EXPECT_EQ(security_state::SecurityStateModel::NONE,
+            security_info.security_level);
+
+  // The appropriate SSLStatus flags should be set, however.
+  content::NavigationEntry* entry = contents->GetController().GetVisibleEntry();
+  ASSERT_TRUE(entry);
+  EXPECT_TRUE(entry->GetSSL().content_status &
+              content::SSLStatus::DISPLAYED_PASSWORD_FIELD_ON_HTTP);
+}
+
+// Tests that when a visible password field is detected on an HTTPS page
+// load, and when the command-line flag is set, the security level is
+// *not* downgraded to HTTP_SHOW_WARNING.
+IN_PROC_BROWSER_TEST_F(ChromeSecurityStateModelClientTestWithPasswordCcSwitch,
+                       PasswordSecurityLevelNotDowngradedOnHttps) {
+  content::WebContents* contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  ASSERT_TRUE(contents);
+
+  ChromeSecurityStateModelClient* model_client =
+      ChromeSecurityStateModelClient::FromWebContents(contents);
+  ASSERT_TRUE(model_client);
+
+  GURL url = GetURLWithNonLocalHostname(&https_server_,
+                                        "/password/simple_password.html");
+  ui_test_utils::NavigateToURL(browser(), url);
+  // The security level should not be HTTP_SHOW_WARNING, because the page was
+  // HTTPS instead of HTTP.
+  security_state::SecurityStateModel::SecurityInfo security_info;
+  model_client->GetSecurityInfo(&security_info);
+  EXPECT_EQ(security_state::SecurityStateModel::SECURE,
+            security_info.security_level);
+
+  // The SSLStatus flags should only be set if the top-level page load was HTTP,
+  // which it was not in this case.
+  content::NavigationEntry* entry = contents->GetController().GetVisibleEntry();
+  ASSERT_TRUE(entry);
+  EXPECT_FALSE(entry->GetSSL().content_status &
+               content::SSLStatus::DISPLAYED_PASSWORD_FIELD_ON_HTTP);
+}
+
+// A Browser subclass that keeps track of messages that have been
+// added to the console. Messages can be retrieved or cleared with
+// console_messages() and ClearConsoleMessages(). The user of this class
+// can set a callback to run when the next console message notification
+// arrives.
+class ConsoleWebContentsDelegate : public Browser {
+ public:
+  explicit ConsoleWebContentsDelegate(const Browser::CreateParams& params)
+      : Browser(params) {}
+  ~ConsoleWebContentsDelegate() override {}
+
+  const std::vector<base::string16>& console_messages() const {
+    return console_messages_;
+  }
+
+  void set_console_message_callback(const base::Closure& callback) {
+    console_message_callback_ = callback;
+  }
+
+  void ClearConsoleMessages() { console_messages_.clear(); }
+
+  // content::WebContentsDelegate
+  bool AddMessageToConsole(content::WebContents* source,
+                           int32_t level,
+                           const base::string16& message,
+                           int32_t line_no,
+                           const base::string16& source_id) override {
+    console_messages_.push_back(message);
+    if (!console_message_callback_.is_null()) {
+      console_message_callback_.Run();
+      console_message_callback_.Reset();
+    }
+    return true;
+  }
+
+ private:
+  std::vector<base::string16> console_messages_;
+  base::Closure console_message_callback_;
+
+  DISALLOW_COPY_AND_ASSIGN(ConsoleWebContentsDelegate);
+};
+
+// Checks that |delegate| has observed exactly one console message for
+// HTTP_SHOW_WARNING. This does not check for the exact string (for fear
+// of being too brittle) but rather just a keyword ("not secure").
+void CheckForOneHttpWarningConsoleMessage(
+    ConsoleWebContentsDelegate* delegate) {
+  const std::vector<base::string16>& messages = delegate->console_messages();
+  ASSERT_EQ(1u, messages.size());
+  EXPECT_NE(base::string16::npos,
+            messages[0].find(base::ASCIIToUTF16("not secure")));
+}
+
+// Tests that console messages are printed upon a call to
+// GetSecurityInfo() on an HTTP_SHOW_WARNING page, exactly once per
+// main-frame navigation.
+IN_PROC_BROWSER_TEST_F(ChromeSecurityStateModelClientTestWithPasswordCcSwitch,
+                       ConsoleMessage) {
+  ConsoleWebContentsDelegate* delegate = new ConsoleWebContentsDelegate(
+      Browser::CreateParams(browser()->profile()));
+  content::WebContents* original_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  content::WebContents* contents =
+      content::WebContents::Create(content::WebContents::CreateParams(
+          original_contents->GetBrowserContext()));
+  ASSERT_TRUE(contents);
+  contents->SetDelegate(delegate);
+  delegate->tab_strip_model()->AppendWebContents(contents, true);
+  int index = delegate->tab_strip_model()->GetIndexOfWebContents(contents);
+  delegate->tab_strip_model()->ActivateTabAt(index, true);
+  ASSERT_EQ(contents, delegate->tab_strip_model()->GetActiveWebContents());
+
+  // Navigate to an HTTP page. Use a non-local hostname so that is it
+  // not considered secure.
+  GURL http_url =
+      GetURLWithNonLocalHostname(embedded_test_server(), "/title1.html");
+  ui_test_utils::NavigateToURL(delegate, http_url);
+  content::NavigationEntry* entry = contents->GetController().GetVisibleEntry();
+  ASSERT_TRUE(entry);
+  EXPECT_EQ(http_url, entry->GetURL());
+  EXPECT_TRUE(delegate->console_messages().empty());
+
+  // Trigger the HTTP_SHOW_WARNING state.
+  base::RunLoop first_message;
+  delegate->set_console_message_callback(first_message.QuitClosure());
+  contents->OnPasswordInputShownOnHttp();
+  first_message.Run();
+
+  // Check that the HTTP_SHOW_WARNING state was actually triggered.
+  ChromeSecurityStateModelClient* client =
+      ChromeSecurityStateModelClient::FromWebContents(contents);
+  ASSERT_TRUE(client);
+  security_state::SecurityStateModel::SecurityInfo security_info;
+  client->GetSecurityInfo(&security_info);
+  EXPECT_EQ(security_state::SecurityStateModel::HTTP_SHOW_WARNING,
+            security_info.security_level);
+
+  // Check that the expected console message is present.
+  ASSERT_NO_FATAL_FAILURE(CheckForOneHttpWarningConsoleMessage(delegate));
+  delegate->ClearConsoleMessages();
+
+  // Two subsequent triggers of VisibleSSLStateChanged -- one on the
+  // same navigation and one on another navigation -- should only result
+  // in one additional console message.
+  contents->OnCreditCardInputShownOnHttp();
+  GURL second_http_url =
+      GetURLWithNonLocalHostname(embedded_test_server(), "/title2.html");
+  ui_test_utils::NavigateToURL(delegate, second_http_url);
+  entry = contents->GetController().GetVisibleEntry();
+  ASSERT_TRUE(entry);
+  EXPECT_EQ(second_http_url, entry->GetURL());
+
+  base::RunLoop second_message;
+  delegate->set_console_message_callback(second_message.QuitClosure());
+  contents->OnPasswordInputShownOnHttp();
+  second_message.Run();
+
+  client->GetSecurityInfo(&security_info);
+  EXPECT_EQ(security_state::SecurityStateModel::HTTP_SHOW_WARNING,
+            security_info.security_level);
+
+  ASSERT_NO_FATAL_FAILURE(CheckForOneHttpWarningConsoleMessage(delegate));
+}
+
+// Tests that additional HTTP_SHOW_WARNING console messages are not
+// printed after subframe navigations.
+IN_PROC_BROWSER_TEST_F(ChromeSecurityStateModelClientTestWithPasswordCcSwitch,
+                       ConsoleMessageNotPrintedForFrameNavigation) {
+  ConsoleWebContentsDelegate* delegate = new ConsoleWebContentsDelegate(
+      Browser::CreateParams(browser()->profile()));
+  content::WebContents* original_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  content::WebContents* contents =
+      content::WebContents::Create(content::WebContents::CreateParams(
+          original_contents->GetBrowserContext()));
+  ASSERT_TRUE(contents);
+  contents->SetDelegate(delegate);
+  delegate->tab_strip_model()->AppendWebContents(contents, true);
+  int index = delegate->tab_strip_model()->GetIndexOfWebContents(contents);
+  delegate->tab_strip_model()->ActivateTabAt(index, true);
+  ASSERT_EQ(contents, delegate->tab_strip_model()->GetActiveWebContents());
+
+  // Navigate to an HTTP page. Use a non-local hostname so that is it
+  // not considered secure.
+  GURL http_url = GetURLWithNonLocalHostname(embedded_test_server(),
+                                             "/ssl/page_with_frame.html");
+  ui_test_utils::NavigateToURL(delegate, http_url);
+  content::NavigationEntry* entry = contents->GetController().GetVisibleEntry();
+  ASSERT_TRUE(entry);
+  EXPECT_EQ(http_url, entry->GetURL());
+  EXPECT_TRUE(delegate->console_messages().empty());
+
+  // Trigger the HTTP_SHOW_WARNING state.
+  base::RunLoop first_message;
+  delegate->set_console_message_callback(first_message.QuitClosure());
+  contents->OnPasswordInputShownOnHttp();
+  first_message.Run();
+
+  // Check that the HTTP_SHOW_WARNING state was actually triggered.
+  ChromeSecurityStateModelClient* client =
+      ChromeSecurityStateModelClient::FromWebContents(contents);
+  ASSERT_TRUE(client);
+  security_state::SecurityStateModel::SecurityInfo security_info;
+  client->GetSecurityInfo(&security_info);
+  EXPECT_EQ(security_state::SecurityStateModel::HTTP_SHOW_WARNING,
+            security_info.security_level);
+
+  // Check that the expected console message is present.
+  ASSERT_NO_FATAL_FAILURE(CheckForOneHttpWarningConsoleMessage(delegate));
+  delegate->ClearConsoleMessages();
+
+  // Navigate the subframe and trigger VisibleSSLStateChanged
+  // again. While the security level is still HTTP_SHOW_WARNING, an
+  // additional console message should not be logged because there was
+  // already a console message logged for the current main-frame
+  // navigation.
+  content::WindowedNotificationObserver subframe_observer(
+      content::NOTIFICATION_LOAD_STOP,
+      content::Source<content::NavigationController>(
+          &contents->GetController()));
+  EXPECT_TRUE(content::ExecuteScript(
+      contents, "document.getElementById('navFrame').src = '/title2.html';"));
+  subframe_observer.Wait();
+  contents->OnCreditCardInputShownOnHttp();
+  EXPECT_EQ(security_state::SecurityStateModel::HTTP_SHOW_WARNING,
+            security_info.security_level);
+
+  // Do a main frame navigation and then trigger HTTP_SHOW_WARNING
+  // again. From the above subframe navigation and this main-frame
+  // navigation, exactly one console message is expected.
+  GURL second_http_url =
+      GetURLWithNonLocalHostname(embedded_test_server(), "/title2.html");
+  ui_test_utils::NavigateToURL(delegate, second_http_url);
+  entry = contents->GetController().GetVisibleEntry();
+  ASSERT_TRUE(entry);
+  EXPECT_EQ(second_http_url, entry->GetURL());
+
+  base::RunLoop second_message;
+  delegate->set_console_message_callback(second_message.QuitClosure());
+  contents->OnPasswordInputShownOnHttp();
+  second_message.Run();
+
+  client->GetSecurityInfo(&security_info);
+  EXPECT_EQ(security_state::SecurityStateModel::HTTP_SHOW_WARNING,
+            security_info.security_level);
+  ASSERT_NO_FATAL_FAILURE(CheckForOneHttpWarningConsoleMessage(delegate));
+}
+
+// Tests that additional HTTP_SHOW_WARNING console messages are not
+// printed after pushState navigations.
+IN_PROC_BROWSER_TEST_F(ChromeSecurityStateModelClientTestWithPasswordCcSwitch,
+                       ConsoleMessageNotPrintedForPushStateNavigation) {
+  ConsoleWebContentsDelegate* delegate = new ConsoleWebContentsDelegate(
+      Browser::CreateParams(browser()->profile()));
+  content::WebContents* original_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  content::WebContents* contents =
+      content::WebContents::Create(content::WebContents::CreateParams(
+          original_contents->GetBrowserContext()));
+  ASSERT_TRUE(contents);
+  contents->SetDelegate(delegate);
+  delegate->tab_strip_model()->AppendWebContents(contents, true);
+  int index = delegate->tab_strip_model()->GetIndexOfWebContents(contents);
+  delegate->tab_strip_model()->ActivateTabAt(index, true);
+  ASSERT_EQ(contents, delegate->tab_strip_model()->GetActiveWebContents());
+
+  // Navigate to an HTTP page. Use a non-local hostname so that is it
+  // not considered secure.
+  GURL http_url =
+      GetURLWithNonLocalHostname(embedded_test_server(), "/title1.html");
+  ui_test_utils::NavigateToURL(delegate, http_url);
+  content::NavigationEntry* entry = contents->GetController().GetVisibleEntry();
+  ASSERT_TRUE(entry);
+  EXPECT_EQ(http_url, entry->GetURL());
+  EXPECT_TRUE(delegate->console_messages().empty());
+
+  // Trigger the HTTP_SHOW_WARNING state.
+  base::RunLoop first_message;
+  delegate->set_console_message_callback(first_message.QuitClosure());
+  contents->OnPasswordInputShownOnHttp();
+  first_message.Run();
+
+  // Check that the HTTP_SHOW_WARNING state was actually triggered.
+  ChromeSecurityStateModelClient* client =
+      ChromeSecurityStateModelClient::FromWebContents(contents);
+  ASSERT_TRUE(client);
+  security_state::SecurityStateModel::SecurityInfo security_info;
+  client->GetSecurityInfo(&security_info);
+  EXPECT_EQ(security_state::SecurityStateModel::HTTP_SHOW_WARNING,
+            security_info.security_level);
+
+  // Check that the expected console message is present.
+  ASSERT_NO_FATAL_FAILURE(CheckForOneHttpWarningConsoleMessage(delegate));
+  delegate->ClearConsoleMessages();
+
+  // Navigate with pushState and trigger VisibleSSLStateChanged
+  // again. While the security level is still HTTP_SHOW_WARNING, an
+  // additional console message should not be logged because there was
+  // already a console message logged for the current main-frame
+  // navigation.
+  EXPECT_TRUE(content::ExecuteScript(
+      contents, "history.pushState({ foo: 'bar' }, 'foo', 'bar');"));
+  contents->OnCreditCardInputShownOnHttp();
+  EXPECT_EQ(security_state::SecurityStateModel::HTTP_SHOW_WARNING,
+            security_info.security_level);
+
+  // Do a main frame navigation and then trigger HTTP_SHOW_WARNING
+  // again. From the above pushState navigation and this main-frame
+  // navigation, exactly one console message is expected.
+  GURL second_http_url =
+      GetURLWithNonLocalHostname(embedded_test_server(), "/title2.html");
+  ui_test_utils::NavigateToURL(delegate, second_http_url);
+  entry = contents->GetController().GetVisibleEntry();
+  ASSERT_TRUE(entry);
+  EXPECT_EQ(second_http_url, entry->GetURL());
+
+  base::RunLoop second_message;
+  delegate->set_console_message_callback(second_message.QuitClosure());
+  contents->OnPasswordInputShownOnHttp();
+  second_message.Run();
+
+  client->GetSecurityInfo(&security_info);
+  EXPECT_EQ(security_state::SecurityStateModel::HTTP_SHOW_WARNING,
+            security_info.security_level);
+  ASSERT_NO_FATAL_FAILURE(CheckForOneHttpWarningConsoleMessage(delegate));
+}
+
 // Tests that the SecurityStateModel for a WebContents is up to date
 // when the WebContents is inserted into a Browser's TabStripModel.
 IN_PROC_BROWSER_TEST_F(ChromeSecurityStateModelClientTest, AddedTab) {
@@ -955,7 +1457,7 @@ IN_PROC_BROWSER_TEST_F(SecurityStyleChangedTest, SecurityStyleChangedObserver) {
   // Visit an HTTP url.
   GURL http_url(embedded_test_server()->GetURL("/title1.html"));
   ui_test_utils::NavigateToURL(browser(), http_url);
-  EXPECT_EQ(content::SECURITY_STYLE_UNAUTHENTICATED,
+  EXPECT_EQ(blink::WebSecurityStyleUnauthenticated,
             observer.latest_security_style());
   EXPECT_EQ(0u,
             observer.latest_explanations().unauthenticated_explanations.size());
@@ -975,7 +1477,7 @@ IN_PROC_BROWSER_TEST_F(SecurityStyleChangedTest, SecurityStyleChangedObserver) {
 
   GURL mixed_content_url(https_server_.GetURL(replacement_path));
   ui_test_utils::NavigateToURL(browser(), mixed_content_url);
-  EXPECT_EQ(content::SECURITY_STYLE_UNAUTHENTICATED,
+  EXPECT_EQ(blink::WebSecurityStyleUnauthenticated,
             observer.latest_security_style());
 
   const content::SecurityStyleExplanations& mixed_content_explanation =
@@ -990,9 +1492,9 @@ IN_PROC_BROWSER_TEST_F(SecurityStyleChangedTest, SecurityStyleChangedObserver) {
   EXPECT_TRUE(observer.latest_explanations().info_explanations.empty());
   EXPECT_TRUE(mixed_content_explanation.displayed_mixed_content);
   EXPECT_FALSE(mixed_content_explanation.ran_mixed_content);
-  EXPECT_EQ(content::SECURITY_STYLE_UNAUTHENTICATED,
+  EXPECT_EQ(blink::WebSecurityStyleUnauthenticated,
             mixed_content_explanation.displayed_insecure_content_style);
-  EXPECT_EQ(content::SECURITY_STYLE_AUTHENTICATION_BROKEN,
+  EXPECT_EQ(blink::WebSecurityStyleAuthenticationBroken,
             mixed_content_explanation.ran_insecure_content_style);
 
   // Visit a broken HTTPS url.
@@ -1018,7 +1520,7 @@ IN_PROC_BROWSER_TEST_F(SecurityStyleChangedTest, SecurityStyleChangedObserver) {
   // back to the interstitial.
   GURL valid_https_url(https_server_.GetURL("/title1.html"));
   ui_test_utils::NavigateToURL(browser(), valid_https_url);
-  EXPECT_EQ(content::SECURITY_STYLE_AUTHENTICATED,
+  EXPECT_EQ(blink::WebSecurityStyleAuthenticated,
             observer.latest_security_style());
   EXPECT_EQ(0u,
             observer.latest_explanations().unauthenticated_explanations.size());
@@ -1097,7 +1599,7 @@ IN_PROC_BROWSER_TEST_F(SecurityStyleChangedTest,
   // Visit a valid HTTPS url.
   GURL valid_https_url(https_server_.GetURL("/title1.html"));
   ui_test_utils::NavigateToURL(browser(), valid_https_url);
-  EXPECT_EQ(content::SECURITY_STYLE_AUTHENTICATED,
+  EXPECT_EQ(blink::WebSecurityStyleAuthenticated,
             observer.latest_security_style());
   EXPECT_EQ(0u,
             observer.latest_explanations().unauthenticated_explanations.size());
@@ -1147,7 +1649,7 @@ IN_PROC_BROWSER_TEST_F(SecurityStyleChangedTest,
   chrome::GoBack(browser(), WindowOpenDisposition::CURRENT_TAB);
   back_nav_load_observer.Wait();
 
-  EXPECT_EQ(content::SECURITY_STYLE_AUTHENTICATED,
+  EXPECT_EQ(blink::WebSecurityStyleAuthenticated,
             observer.latest_security_style());
   EXPECT_EQ(0u,
             observer.latest_explanations().unauthenticated_explanations.size());
@@ -1288,8 +1790,8 @@ IN_PROC_BROWSER_TEST_F(BrowserTestNonsecureURLRequest,
       browser(), GURL(std::string("https://") + kMockNonsecureHostname));
 
   // The security style of the page doesn't get downgraded for obsolete
-  // TLS settings, so it should remain at SECURITY_STYLE_AUTHENTICATED.
-  EXPECT_EQ(content::SECURITY_STYLE_AUTHENTICATED,
+  // TLS settings, so it should remain at WebSecurityStyleAuthenticated.
+  EXPECT_EQ(blink::WebSecurityStyleAuthenticated,
             observer.latest_security_style());
 
   // The messages explaining the security style do, however, get

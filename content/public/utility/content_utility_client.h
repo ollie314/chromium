@@ -10,11 +10,11 @@
 
 #include "base/callback_forward.h"
 #include "content/public/common/content_client.h"
-#include "content/public/common/mojo_application_info.h"
+#include "content/public/common/service_info.h"
 
 class GURL;
 
-namespace shell {
+namespace service_manager {
 class InterfaceRegistry;
 class Service;
 }
@@ -24,7 +24,7 @@ namespace content {
 // Embedder API for participating in renderer logic.
 class CONTENT_EXPORT ContentUtilityClient {
  public:
-  using StaticMojoApplicationMap = std::map<std::string, MojoApplicationInfo>;
+  using StaticServiceMap = std::map<std::string, ServiceInfo>;
 
   virtual ~ContentUtilityClient() {}
 
@@ -36,10 +36,10 @@ class CONTENT_EXPORT ContentUtilityClient {
 
   // Allows the client to expose interfaces from this utility process to the
   // browser process via |registry|.
-  virtual void ExposeInterfacesToBrowser(shell::InterfaceRegistry* registry) {}
+  virtual void ExposeInterfacesToBrowser(
+      service_manager::InterfaceRegistry* registry) {}
 
-  // Registers Mojo applications.
-  virtual void RegisterMojoApplications(StaticMojoApplicationMap* apps) {}
+  virtual void RegisterServices(StaticServiceMap* services) {}
 };
 
 }  // namespace content

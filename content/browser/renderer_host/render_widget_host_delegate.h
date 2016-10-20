@@ -11,6 +11,7 @@
 
 #include "build/build_config.h"
 #include "content/common/content_export.h"
+#include "content/public/browser/renderer_unresponsive_type.h"
 #include "third_party/WebKit/public/platform/WebDisplayMode.h"
 #include "third_party/WebKit/public/web/WebInputEvent.h"
 #include "ui/gfx/native_widget_types.h"
@@ -140,20 +141,6 @@ class CONTENT_EXPORT RenderWidgetHostDelegate {
   virtual RenderWidgetHostImpl* GetFocusedRenderWidgetHost(
       RenderWidgetHostImpl* receiving_widget);
 
-  // Used in histograms to differentiate between the different types of
-  // renderer hang reported by RenderWidgetHostDelegate::RendererUnresponsive.
-  // Only add values at the end, do not delete values.
-  enum RendererUnresponsiveType {
-    RENDERER_UNRESPONSIVE_UNKNOWN = 0,
-    RENDERER_UNRESPONSIVE_IN_FLIGHT_EVENTS = 1,
-    RENDERER_UNRESPONSIVE_DIALOG_CLOSED = 2,
-    RENDERER_UNRESPONSIVE_DIALOG_SUPPRESSED = 3,
-    RENDERER_UNRESPONSIVE_BEFORE_UNLOAD = 4,
-    RENDERER_UNRESPONSIVE_UNLOAD = 5,
-    RENDERER_UNRESPONSIVE_CLOSE_PAGE = 6,
-    RENDERER_UNRESPONSIVE_MAX = RENDERER_UNRESPONSIVE_CLOSE_PAGE,
-  };
-
   // Notification that the renderer has become unresponsive. The
   // delegate can use this notification to show a warning to the user.
   virtual void RendererUnresponsive(RenderWidgetHostImpl* render_widget_host,
@@ -172,11 +159,6 @@ class CONTENT_EXPORT RenderWidgetHostDelegate {
                                   bool user_gesture,
                                   bool last_unlocked_by_target,
                                   bool privileged) {}
-
-  // Return the rect where to display the resize corner, if any, otherwise
-  // an empty rect.
-  virtual gfx::Rect GetRootWindowResizerRect(
-      RenderWidgetHostImpl* render_widget_host) const;
 
   // Returns whether the associated tab is in fullscreen mode.
   virtual bool IsFullscreenForCurrentTab() const;

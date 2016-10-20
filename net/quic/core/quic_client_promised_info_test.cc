@@ -7,36 +7,17 @@
 #include <memory>
 
 #include "base/macros.h"
-#include "base/scoped_ptr.h"
-#include "net/gfe2/balsa_headers.h"
-#include "net/quic/core/quic_client.h"
-#include "net/quic/core/quic_client_session.h"
-#include "net/quic/core/quic_spdy_client_stream.h"
-#include "net/quic/core/quic_utils.h"
-#include "net/quic/core/spdy_balsa_utils.h"
 #include "net/quic/core/spdy_utils.h"
 #include "net/quic/test_tools/crypto_test_utils.h"
-#include "net/quic/test_tools/quic_test_utils.h"
-#include "net/util/ipaddress.h"
-#include "testing/base/public/gunit.h"
+#include "net/quic/test_tools/quic_client_promised_info_peer.h"
+#include "net/test/gtest_util.h"
+#include "net/tools/quic/quic_client_session.h"
 
-using SpdyHeaderBlock;
-using BalsaHeaders;
+using std::string;
 using testing::StrictMock;
 
 namespace net {
 namespace test {
-
-class QuicClientPromisedInfoPeer {
- public:
-  static QuicAlarm* GetAlarm(QuicClientPromisedInfo* promised_stream) {
-    return promised_stream->cleanup_alarm_.get();
-  }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(QuicClientPromisedInfoPeer);
-};
-
 namespace {
 
 class MockQuicClientSession : public QuicClientSession {
@@ -77,15 +58,15 @@ class QuicClientPromisedInfoTest : public ::testing::Test {
                                                        Perspective::IS_CLIENT)),
         session_(connection_, &push_promise_index_),
         body_("hello world"),
-        promise_id_(gfe_quic::test::kServerDataStreamId1) {
+        promise_id_(kServerDataStreamId1) {
     session_.Initialize();
 
-    headers_.SetResponseFirstline("HTTP/1.1", 200, "Ok");
-    headers_.ReplaceOrAppendHeader("content-length", "11");
-    headers_string_ = SpdyBalsaUtils::SerializeResponseHeaders(headers_);
+    headers_[":status"] = "200";
+    headers_["content-length"] = "11";
 
-    stream_.reset(new QuicSpdyClientStream(gfe_quic::test::kClientDataStreamId1,
-                                           &session_));
+    headers_string_ = SpdyUtils::SerializeUncompressedHeaders(headers_);
+
+    stream_.reset(new QuicSpdyClientStream(kClientDataStreamId1, &session_));
     stream_visitor_.reset(new StreamVisitor());
     stream_->set_visitor(stream_visitor_.get());
 
@@ -122,18 +103,18 @@ class QuicClientPromisedInfoTest : public ::testing::Test {
       return match_;
     }
 
-    void OnRendezvousResult(QuicSpdyClientStream* stream) override {
+    void OnRendezvousResult(QuicSpdyStream* stream) override {
       rendezvous_fired_ = true;
       rendezvous_stream_ = stream;
     }
 
-    QuicSpdyClientStream* rendezvous_stream() { return rendezvous_stream_; }
+    QuicSpdyStream* rendezvous_stream() { return rendezvous_stream_; }
     bool rendezvous_fired() { return rendezvous_fired_; }
 
    private:
     bool match_;
     bool rendezvous_fired_;
-    QuicSpdyClientStream* rendezvous_stream_;
+    QuicSpdyStream* rendezvous_stream_;
   };
 
   void ReceivePromise(QuicStreamId id) {
@@ -151,7 +132,7 @@ class QuicClientPromisedInfoTest : public ::testing::Test {
   std::unique_ptr<QuicSpdyClientStream> stream_;
   std::unique_ptr<StreamVisitor> stream_visitor_;
   std::unique_ptr<QuicSpdyClientStream> promised_stream_;
-  BalsaHeaders headers_;
+  SpdyHeaderBlock headers_;
   string headers_string_;
   string body_;
   SpdyHeaderBlock push_promise_;
@@ -176,8 +157,13 @@ TEST_F(QuicClientPromisedInfoTest, PushPromiseCleanupAlarm) {
   ASSERT_NE(promised, nullptr);
 
   // Fire the alarm that will cancel the promised stream.
-  EXPECT_CALL(*connection_,
-              SendRstStream(promise_id_, QUIC_STREAM_CANCELLED, 0));
+  if (FLAGS_quic_send_push_stream_timed_out_error) {
+    EXPECT_CALL(*connection_,
+                SendRstStream(promise_id_, QUIC_PUSH_STREAM_TIMED_OUT, 0));
+  } else {
+    EXPECT_CALL(*connection_,
+                SendRstStream(promise_id_, QUIC_STREAM_CANCELLED, 0));
+  }
   alarm_factory_.FireAlarm(QuicClientPromisedInfoPeer::GetAlarm(promised));
 
   // Verify that the promise is gone after the alarm fires.
@@ -208,21 +194,6 @@ TEST_F(QuicClientPromisedInfoTest, PushPromiseInvalidUrl) {
 
   EXPECT_CALL(*connection_,
               SendRstStream(promise_id_, QUIC_INVALID_PROMISE_URL, 0));
-  ReceivePromise(promise_id_);
-
-  // Verify that the promise headers were ignored
-  EXPECT_EQ(session_.GetPromisedById(promise_id_), nullptr);
-  EXPECT_EQ(session_.GetPromisedByUrl(promise_url_), nullptr);
-}
-
-TEST_F(QuicClientPromisedInfoTest, PushPromiseInvalidUrl) {
-  // Promise with an unsafe method
-  push_promise_[":method"] = "PUT";
-  serialized_push_promise_ =
-      SpdyUtils::SerializeUncompressedHeaders(push_promise_);
-
-  EXPECT_CALL(*connection_,
-              SendRstStream(promise_id_, QUIC_INVALID_PROMISE_METHOD, 0));
   ReceivePromise(promise_id_);
 
   // Verify that the promise headers were ignored
@@ -329,7 +300,7 @@ TEST_F(QuicClientPromisedInfoTest, PushPromiseWaitCancels) {
   // Create response stream, but no data yet.
   session_.GetOrCreateStream(promise_id_);
 
-  // Fire the alarm that will cancel the promised stream.
+  // Cancel the promised stream.
   EXPECT_CALL(session_, CloseStream(promise_id_));
   EXPECT_CALL(*connection_,
               SendRstStream(promise_id_, QUIC_STREAM_CANCELLED, 0));

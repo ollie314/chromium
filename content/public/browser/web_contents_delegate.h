@@ -17,10 +17,10 @@
 #include "content/public/browser/bluetooth_chooser.h"
 #include "content/public/browser/invalidate_type.h"
 #include "content/public/common/media_stream_request.h"
-#include "content/public/common/security_style.h"
 #include "content/public/common/window_container_type.h"
 #include "third_party/WebKit/public/platform/WebDisplayMode.h"
 #include "third_party/WebKit/public/platform/WebDragOperation.h"
+#include "third_party/WebKit/public/platform/WebSecurityStyle.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/window_open_disposition.h"
 #include "ui/gfx/geometry/rect_f.h"
@@ -44,7 +44,6 @@ class DownloadItem;
 class JavaScriptDialogManager;
 class PageState;
 class RenderFrameHost;
-class RenderViewHost;
 class SessionStorageNamespace;
 class WebContents;
 class WebContentsImpl;
@@ -56,7 +55,7 @@ struct NativeWebKeyboardEvent;
 struct Referrer;
 struct SecurityStyleExplanations;
 struct SSLStatus;
-}
+}  // namespace content
 
 namespace gfx {
 class Point;
@@ -80,6 +79,7 @@ namespace content {
 class RenderWidgetHost;
 
 struct OpenURLParams;
+struct WebContentsUnresponsiveState;
 
 // Objects implement this interface to get notified about changes in the
 // WebContents and to provide necessary functionality.
@@ -112,7 +112,7 @@ class CONTENT_EXPORT WebContentsDelegate {
 
   // Called to inform the delegate that the WebContent's visible SSL state (as
   // defined by SSLStatus) changed.
-  virtual void VisibleSSLStateChanged(const WebContents* source) {}
+  virtual void VisibleSSLStateChanged(WebContents* source) {}
 
   // Creates a new tab with the already-created WebContents 'new_contents'.
   // The window for the added contents should be reparented correctly when this
@@ -182,10 +182,6 @@ class CONTENT_EXPORT WebContentsDelegate {
 
   // Invoked when a vertical overscroll completes.
   virtual void OverscrollComplete() {}
-
-  // Return the rect where to display the resize corner, if any, otherwise
-  // an empty rect.
-  virtual gfx::Rect GetRootWindowResizerRect() const;
 
   // Invoked prior to showing before unload handler confirmation dialog.
   virtual void WillRunBeforeUnloadConfirm() {}
@@ -326,7 +322,9 @@ class CONTENT_EXPORT WebContentsDelegate {
                                   WebContents* new_contents) {}
 
   // Notification that the tab is hung.
-  virtual void RendererUnresponsive(WebContents* source) {}
+  virtual void RendererUnresponsive(
+      WebContents* source,
+      const WebContentsUnresponsiveState& unresponsive_state) {}
 
   // Notification that the tab is no longer hung.
   virtual void RendererResponsive(WebContents* source) {}
@@ -525,8 +523,8 @@ class CONTENT_EXPORT WebContentsDelegate {
   // Can be overridden by a delegate to return the security style of the
   // given |web_contents|, populating |security_style_explanations| to
   // explain why the SecurityStyle was downgraded. Returns
-  // SECURITY_STYLE_UNKNOWN if not overriden.
-  virtual SecurityStyle GetSecurityStyle(
+  // WebSecurityStyleUnknown if not overriden.
+  virtual blink::WebSecurityStyle GetSecurityStyle(
       WebContents* web_contents,
       SecurityStyleExplanations* security_style_explanations);
 

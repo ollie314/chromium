@@ -119,7 +119,6 @@ class ClientSession : public base::NonThreadSafe,
   void CreateMediaStreams() override;
   void OnConnectionChannelsConnected() override;
   void OnConnectionClosed(protocol::ErrorCode error) override;
-  void OnInputEventReceived(int64_t timestamp) override;
   void OnRouteChange(const std::string& channel_name,
                      const protocol::TransportRoute& route) override;
 
@@ -140,6 +139,10 @@ class ClientSession : public base::NonThreadSafe,
   const std::string* client_capabilities() const {
     return client_capabilities_.get();
   }
+
+  void SetEventTimestampsSourceForTests(
+      scoped_refptr<protocol::InputEventTimestampsSource>
+          event_timestamp_source);
 
  private:
   // Creates a proxy for sending clipboard events to the client.
@@ -237,6 +240,9 @@ class ClientSession : public base::NonThreadSafe,
   // VideoLayout is sent only after the control channel is connected. Until
   // then it's stored in |pending_video_layout_message_|.
   std::unique_ptr<protocol::VideoLayout> pending_video_layout_message_;
+
+  scoped_refptr<protocol::InputEventTimestampsSource>
+      event_timestamp_source_for_tests_;
 
   // Used to disable callbacks to |this| once DisconnectSession() has been
   // called.

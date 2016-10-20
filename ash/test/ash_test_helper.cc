@@ -7,6 +7,8 @@
 #include "ash/accelerators/accelerator_controller_delegate_aura.h"
 #include "ash/common/material_design/material_design_controller.h"
 #include "ash/common/test/material_design_controller_test_api.h"
+#include "ash/common/test/test_session_state_delegate.h"
+#include "ash/common/test/test_system_tray_delegate.h"
 #include "ash/common/wm_shell.h"
 #include "ash/shell.h"
 #include "ash/shell_init_params.h"
@@ -15,9 +17,7 @@
 #include "ash/test/display_manager_test_api.h"
 #include "ash/test/shell_test_api.h"
 #include "ash/test/test_screenshot_delegate.h"
-#include "ash/test/test_session_state_delegate.h"
 #include "ash/test/test_shell_delegate.h"
-#include "ash/test/test_system_tray_delegate.h"
 #include "base/run_loop.h"
 #include "ui/aura/env.h"
 #include "ui/aura/input_state_lookup.h"
@@ -34,6 +34,7 @@
 #include "ui/wm/core/cursor_manager.h"
 
 #if defined(OS_CHROMEOS)
+#include "ash/system/chromeos/screen_layout_observer.h"
 #include "chromeos/audio/cras_audio_handler.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "device/bluetooth/bluetooth_adapter_factory.h"
@@ -137,7 +138,14 @@ void AshTestHelper::SetUp(bool start_session,
     GetTestSessionStateDelegate()->SetHasActiveUser(true);
   }
 
-  test::DisplayManagerTestApi().DisableChangeDisplayUponHostResize();
+#if defined(OS_CHROMEOS)
+  // Tests that change the display configuration generally don't care about the
+  // notifications and the popup UI can interfere with things like cursors.
+  shell->screen_layout_observer()->set_show_notifications_for_testing(false);
+#endif
+
+  test::DisplayManagerTestApi(Shell::GetInstance()->display_manager())
+      .DisableChangeDisplayUponHostResize();
   ShellTestApi(shell).DisableDisplayAnimator();
 
   test_screenshot_delegate_ = new TestScreenshotDelegate();
@@ -172,8 +180,6 @@ void AshTestHelper::TearDown() {
 
   ui::TerminateContextFactoryForTests();
 
-  // Need to reset the initial login status.
-  TestSystemTrayDelegate::SetInitialLoginStatus(LoginStatus::USER);
   TestSystemTrayDelegate::SetSystemUpdateRequired(false);
 
   ui::ShutdownInputMethodForTesting();

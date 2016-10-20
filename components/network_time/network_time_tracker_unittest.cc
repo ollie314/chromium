@@ -4,26 +4,20 @@
 
 #include "components/network_time/network_time_tracker.h"
 
-#include <map>
 #include <memory>
 #include <string>
 #include <utility>
 
 #include "base/compiler_specific.h"
-#include "base/feature_list.h"
 #include "base/memory/ptr_util.h"
-#include "base/metrics/field_trial.h"
-#include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/test/histogram_tester.h"
-#include "base/test/mock_entropy_provider.h"
-#include "base/test/scoped_feature_list.h"
 #include "base/test/simple_test_clock.h"
 #include "base/test/simple_test_tick_clock.h"
 #include "components/client_update_protocol/ecdsa.h"
 #include "components/network_time/network_time_pref_names.h"
+#include "components/network_time/network_time_test_utils.h"
 #include "components/prefs/testing_pref_service.h"
-#include "components/variations/variations_associated_data.h"
 #include "net/http/http_response_headers.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/embedded_test_server/http_response.h"
@@ -45,7 +39,7 @@ const char kWallClockBackwardsHistogram[] =
     "NetworkTimeTracker.WallClockRanBackwards";
 }  // namespace
 
-class NetworkTimeTrackerTest : public testing::Test {
+class NetworkTimeTrackerTest : public FieldTrialTest {
  public:
   ~NetworkTimeTrackerTest() override {}
 
@@ -180,50 +174,6 @@ class NetworkTimeTrackerTest : public testing::Test {
   }
 
  protected:
-  void SetNetworkQueriesWithVariationsService(bool enable,
-                                              float query_probability) {
-    const std::string kTrialName = "Trial";
-    const std::string kGroupName = "group";
-    const base::Feature kFeature{"NetworkTimeServiceQuerying",
-                                 base::FEATURE_DISABLED_BY_DEFAULT};
-
-    // Clear all the things.
-    variations::testing::ClearAllVariationParams();
-
-    std::map<std::string, std::string> params;
-    params["RandomQueryProbability"] = base::DoubleToString(query_probability);
-    params["CheckTimeIntervalSeconds"] = base::Int64ToString(360);
-
-    // There are 3 things here: a FieldTrial, a FieldTrialList, and a
-    // FeatureList.  Don't get confused!  The FieldTrial is reference-counted,
-    // and a reference is held by the FieldTrialList.  The FieldTrialList and
-    // FeatureList are both singletons.  The authorized way to reset the former
-    // for testing is to destruct it (above).  The latter, by contrast, should
-    // should already start in a clean state and can be manipulated via the
-    // ScopedFeatureList helper class. If this comment was useful to you
-    // please send me a postcard.
-
-    field_trial_list_.reset();  // Averts a CHECK fail in constructor below.
-    field_trial_list_.reset(
-        new base::FieldTrialList(
-            base::MakeUnique<base::MockEntropyProvider>()));
-    // refcounted, and reference held by field_trial_list_.
-    base::FieldTrial* trial = base::FieldTrialList::FactoryGetFieldTrial(
-        kTrialName, 100, kGroupName, 1971, 1, 1,
-        base::FieldTrial::SESSION_RANDOMIZED,
-        nullptr /* default_group_number */);
-    ASSERT_TRUE(
-        variations::AssociateVariationParams(kTrialName, kGroupName, params));
-
-    std::unique_ptr<base::FeatureList> feature_list(new base::FeatureList);
-    feature_list->RegisterFieldTrialOverride(
-        kFeature.name, enable ? base::FeatureList::OVERRIDE_ENABLE_FEATURE
-                              : base::FeatureList::OVERRIDE_DISABLE_FEATURE,
-        trial);
-    scoped_feature_list_.reset(new base::test::ScopedFeatureList);
-    scoped_feature_list_->InitWithFeatureList(std::move(feature_list));
-  }
-
   base::Thread io_thread_;
   base::MessageLoop message_loop_;
   base::TimeDelta resolution_;
@@ -232,16 +182,14 @@ class NetworkTimeTrackerTest : public testing::Test {
   base::SimpleTestClock* clock_;
   base::SimpleTestTickClock* tick_clock_;
   TestingPrefServiceSimple pref_service_;
-  std::unique_ptr<base::FieldTrialList> field_trial_list_;
   std::unique_ptr<NetworkTimeTracker> tracker_;
   std::unique_ptr<net::EmbeddedTestServer> test_server_;
-  std::unique_ptr<base::test::ScopedFeatureList> scoped_feature_list_;
 };
 
 TEST_F(NetworkTimeTrackerTest, Uninitialized) {
   base::Time network_time;
   base::TimeDelta uncertainty;
-  EXPECT_EQ(NetworkTimeTracker::NETWORK_TIME_NO_SYNC,
+  EXPECT_EQ(NetworkTimeTracker::NETWORK_TIME_NO_SYNC_ATTEMPT,
             tracker_->GetNetworkTime(&network_time, &uncertainty));
 }
 
@@ -472,7 +420,7 @@ TEST_F(NetworkTimeTrackerTest, DeserializeOldFormat) {
   prefs.SetDouble("network", network);
   pref_service_.Set(prefs::kNetworkTimeMapping, prefs);
   Reset();
-  EXPECT_EQ(NetworkTimeTracker::NETWORK_TIME_NO_SYNC,
+  EXPECT_EQ(NetworkTimeTracker::NETWORK_TIME_NO_SYNC_ATTEMPT,
             tracker_->GetNetworkTime(&out_network_time, nullptr));
 }
 
@@ -487,7 +435,7 @@ TEST_F(NetworkTimeTrackerTest, SerializeWithLongDelay) {
             tracker_->GetNetworkTime(&out_network_time, nullptr));
   AdvanceBoth(base::TimeDelta::FromDays(8));
   Reset();
-  EXPECT_EQ(NetworkTimeTracker::NETWORK_TIME_NO_SYNC,
+  EXPECT_EQ(NetworkTimeTracker::NETWORK_TIME_NO_SYNC_ATTEMPT,
             tracker_->GetNetworkTime(&out_network_time, nullptr));
 }
 
@@ -528,7 +476,7 @@ TEST_F(NetworkTimeTrackerTest, UpdateFromNetwork) {
   histograms.ExpectTotalCount(kFetchValidHistogram, 0);
 
   base::Time out_network_time;
-  EXPECT_EQ(NetworkTimeTracker::NETWORK_TIME_NO_SYNC,
+  EXPECT_EQ(NetworkTimeTracker::NETWORK_TIME_NO_SYNC_ATTEMPT,
             tracker_->GetNetworkTime(&out_network_time, nullptr));
   // First query should happen soon.
   EXPECT_EQ(base::TimeDelta::FromMinutes(0),
@@ -605,7 +553,7 @@ TEST_F(NetworkTimeTrackerTest, UpdateFromNetworkBadSignature) {
   tracker_->WaitForFetchForTesting(123123123);
 
   base::Time out_network_time;
-  EXPECT_EQ(NetworkTimeTracker::NETWORK_TIME_NO_SYNC,
+  EXPECT_EQ(NetworkTimeTracker::NETWORK_TIME_NO_SUCCESSFUL_SYNC,
             tracker_->GetNetworkTime(&out_network_time, nullptr));
   EXPECT_EQ(base::TimeDelta::FromMinutes(120),
             tracker_->GetTimerDelayForTesting());
@@ -640,7 +588,7 @@ TEST_F(NetworkTimeTrackerTest, UpdateFromNetworkBadData) {
   EXPECT_TRUE(tracker_->QueryTimeServiceForTesting());
   tracker_->WaitForFetchForTesting(123123123);
   base::Time out_network_time;
-  EXPECT_EQ(NetworkTimeTracker::NETWORK_TIME_NO_SYNC,
+  EXPECT_EQ(NetworkTimeTracker::NETWORK_TIME_NO_SUCCESSFUL_SYNC,
             tracker_->GetNetworkTime(&out_network_time, nullptr));
   EXPECT_EQ(base::TimeDelta::FromMinutes(120),
             tracker_->GetTimerDelayForTesting());
@@ -663,7 +611,7 @@ TEST_F(NetworkTimeTrackerTest, UpdateFromNetworkServerError) {
   tracker_->WaitForFetchForTesting(123123123);
 
   base::Time out_network_time;
-  EXPECT_EQ(NetworkTimeTracker::NETWORK_TIME_NO_SYNC,
+  EXPECT_EQ(NetworkTimeTracker::NETWORK_TIME_NO_SUCCESSFUL_SYNC,
             tracker_->GetNetworkTime(&out_network_time, nullptr));
   // Should see backoff in the error case.
   EXPECT_EQ(base::TimeDelta::FromMinutes(120),
@@ -690,7 +638,7 @@ TEST_F(NetworkTimeTrackerTest, UpdateFromNetworkNetworkError) {
   tracker_->WaitForFetchForTesting(123123123);
 
   base::Time out_network_time;
-  EXPECT_EQ(NetworkTimeTracker::NETWORK_TIME_NO_SYNC,
+  EXPECT_EQ(NetworkTimeTracker::NETWORK_TIME_NO_SUCCESSFUL_SYNC,
             tracker_->GetNetworkTime(&out_network_time, nullptr));
   // Should see backoff in the error case.
   EXPECT_EQ(base::TimeDelta::FromMinutes(120),
@@ -717,7 +665,7 @@ TEST_F(NetworkTimeTrackerTest, UpdateFromNetworkLargeResponse) {
   tracker_->SetMaxResponseSizeForTesting(3);
   EXPECT_TRUE(tracker_->QueryTimeServiceForTesting());
   tracker_->WaitForFetchForTesting(123123123);
-  EXPECT_EQ(NetworkTimeTracker::NETWORK_TIME_NO_SYNC,
+  EXPECT_EQ(NetworkTimeTracker::NETWORK_TIME_NO_SUCCESSFUL_SYNC,
             tracker_->GetNetworkTime(&out_network_time, nullptr));
 
   histograms.ExpectTotalCount(kFetchFailedHistogram, 1);
@@ -732,6 +680,62 @@ TEST_F(NetworkTimeTrackerTest, UpdateFromNetworkLargeResponse) {
   histograms.ExpectTotalCount(kFetchFailedHistogram, 1);
   histograms.ExpectTotalCount(kFetchValidHistogram, 1);
   histograms.ExpectBucketCount(kFetchValidHistogram, true, 1);
+}
+
+TEST_F(NetworkTimeTrackerTest, UpdateFromNetworkFirstSyncPending) {
+  base::HistogramTester histograms;
+  histograms.ExpectTotalCount(kFetchFailedHistogram, 0);
+  histograms.ExpectTotalCount(kFetchValidHistogram, 0);
+
+  test_server_->RegisterRequestHandler(
+      base::Bind(&NetworkTimeTrackerTest::BadDataResponseHandler));
+  EXPECT_TRUE(test_server_->Start());
+  base::StringPiece key = {reinterpret_cast<const char*>(kDevKeyPubBytes),
+                           sizeof(kDevKeyPubBytes)};
+  tracker_->SetPublicKeyForTesting(key);
+  tracker_->SetTimeServerURLForTesting(test_server_->GetURL("/"));
+  EXPECT_TRUE(tracker_->QueryTimeServiceForTesting());
+
+  // Do not wait for the fetch to complete; ask for the network time
+  // immediately while the request is still pending.
+  base::Time out_network_time;
+  EXPECT_EQ(NetworkTimeTracker::NETWORK_TIME_FIRST_SYNC_PENDING,
+            tracker_->GetNetworkTime(&out_network_time, nullptr));
+  histograms.ExpectTotalCount(kFetchFailedHistogram, 0);
+  histograms.ExpectTotalCount(kFetchValidHistogram, 0);
+
+  tracker_->WaitForFetchForTesting(123123123);
+}
+
+TEST_F(NetworkTimeTrackerTest, UpdateFromNetworkSubseqeuntSyncPending) {
+  base::HistogramTester histograms;
+  histograms.ExpectTotalCount(kFetchFailedHistogram, 0);
+  histograms.ExpectTotalCount(kFetchValidHistogram, 0);
+
+  test_server_->RegisterRequestHandler(
+      base::Bind(&NetworkTimeTrackerTest::BadDataResponseHandler));
+  EXPECT_TRUE(test_server_->Start());
+  base::StringPiece key = {reinterpret_cast<const char*>(kDevKeyPubBytes),
+                           sizeof(kDevKeyPubBytes)};
+  tracker_->SetPublicKeyForTesting(key);
+  tracker_->SetTimeServerURLForTesting(test_server_->GetURL("/"));
+  EXPECT_TRUE(tracker_->QueryTimeServiceForTesting());
+  tracker_->WaitForFetchForTesting(123123123);
+
+  base::Time out_network_time;
+  EXPECT_EQ(NetworkTimeTracker::NETWORK_TIME_NO_SUCCESSFUL_SYNC,
+            tracker_->GetNetworkTime(&out_network_time, nullptr));
+
+  // After one sync attempt failed, kick off another one, and ask for
+  // the network time while it is still pending.
+  EXPECT_TRUE(tracker_->QueryTimeServiceForTesting());
+  EXPECT_EQ(NetworkTimeTracker::NETWORK_TIME_SUBSEQUENT_SYNC_PENDING,
+            tracker_->GetNetworkTime(&out_network_time, nullptr));
+  histograms.ExpectTotalCount(kFetchFailedHistogram, 0);
+  histograms.ExpectTotalCount(kFetchValidHistogram, 1);
+  histograms.ExpectBucketCount(kFetchValidHistogram, false, 1);
+
+  tracker_->WaitForFetchForTesting(123123123);
 }
 
 }  // namespace network_time

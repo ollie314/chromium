@@ -128,6 +128,10 @@ class WebLocalFrame : public WebFrame {
   // Returns true if the current frame's load event has not completed.
   virtual bool isLoading() const = 0;
 
+  // Returns true if the current frame is detaching/detached. crbug.com/654654
+  virtual bool isFrameDetachedForSpecialOneOffStopTheCrashingHackBug561873()
+      const = 0;
+
   // Returns true if there is a pending redirect or location change
   // within specified interval (in seconds). This could be caused by:
   // * an HTTP Refresh header
@@ -184,10 +188,20 @@ class WebLocalFrame : public WebFrame {
   // Executes script in the context of the current page and returns the value
   // that the script evaluated to with callback. Script execution can be
   // suspend.
+  // DEPRECATED: Prefer requestExecuteScriptInIsolatedWorld().
   virtual void requestExecuteScriptAndReturnValue(
       const WebScriptSource&,
       bool userGesture,
       WebScriptExecutionCallback*) = 0;
+
+  // Requests execution of the given function, but allowing for script
+  // suspension and asynchronous execution.
+  virtual void requestExecuteV8Function(v8::Local<v8::Context>,
+                                        v8::Local<v8::Function>,
+                                        v8::Local<v8::Value> receiver,
+                                        int argc,
+                                        v8::Local<v8::Value> argv[],
+                                        WebScriptExecutionCallback*) = 0;
 
   // worldID must be > 0 (as 0 represents the main world).
   // worldID must be < EmbedderWorldIdLimit, high number used internally.
@@ -282,6 +296,9 @@ class WebLocalFrame : public WebFrame {
   virtual void moveRangeSelectionExtent(const WebPoint&) = 0;
   // Replaces the selection with the input string.
   virtual void replaceSelection(const WebString&) = 0;
+  // Deletes text before and after the current cursor position, excluding the
+  // selection.
+  virtual void deleteSurroundingText(int before, int after) = 0;
 
   // Spell-checking support -------------------------------------------------
   virtual void replaceMisspelledRange(const WebString&) = 0;

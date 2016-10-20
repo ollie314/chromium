@@ -40,8 +40,8 @@
 #include "media/mojo/clients/mojo_renderer.h"
 #include "media/mojo/interfaces/renderer.mojom.h"
 #include "media/mojo/interfaces/service_factory.mojom.h"
-#include "services/shell/public/cpp/connect.h"
-#include "services/shell/public/cpp/service_test.h"
+#include "services/service_manager/public/cpp/connect.h"
+#include "services/service_manager/public/cpp/service_test.h"
 
 // TODO(dalecurtis): The mojo renderer is in another process, so we have no way
 // currently to get hashes for video and audio samples.  This also means that
@@ -675,11 +675,12 @@ class MockMediaSource {
 //               preferably by eliminating multiple inheritance here which is
 //               banned by Google C++ style.
 #if defined(MOJO_RENDERER) && defined(ENABLE_MOJO_PIPELINE_INTEGRATION_TEST)
-class PipelineIntegrationTestHost : public shell::test::ServiceTest,
+class PipelineIntegrationTestHost : public service_manager::test::ServiceTest,
                                     public PipelineIntegrationTestBase {
  public:
   PipelineIntegrationTestHost()
-      : shell::test::ServiceTest("exe:media_pipeline_integration_shelltests") {}
+      : service_manager::test::ServiceTest(
+            "exe:media_pipeline_integration_shelltests") {}
 
   void SetUp() override {
     ServiceTest::SetUp();
@@ -688,7 +689,7 @@ class PipelineIntegrationTestHost : public shell::test::ServiceTest,
 
  protected:
   std::unique_ptr<Renderer> CreateRenderer() override {
-    connector()->ConnectToInterface("mojo:media", &media_service_factory_);
+    connector()->ConnectToInterface("service:media", &media_service_factory_);
 
     mojom::RendererPtr mojo_renderer;
     media_service_factory_->CreateRenderer(std::string(),
@@ -2017,6 +2018,28 @@ TEST_F(PipelineIntegrationTest,
        MAYBE_EME(EncryptedPlayback_MP4_CENC_SENC_Video)) {
   MockMediaSource source("bear-640x360-v_frag-cenc-senc.mp4", kMP4Video,
                          kAppendWholeFile);
+  FakeEncryptedMedia encrypted_media(new KeyProvidingApp());
+  EXPECT_EQ(PIPELINE_OK,
+            StartPipelineWithEncryptedMedia(&source, &encrypted_media));
+
+  source.EndOfStream();
+
+  Play();
+
+  ASSERT_TRUE(WaitUntilOnEnded());
+  source.Shutdown();
+  Stop();
+}
+
+// 'SAIZ' and 'SAIO' boxes contain redundant information which is already
+// available in 'SENC' box. Although 'SAIZ' and 'SAIO' boxes are required per
+// CENC spec for backward compatibility reasons, but we do not use the two
+// boxes if 'SENC' box is present, so the code should work even if the two
+// boxes are not present.
+TEST_F(PipelineIntegrationTest,
+       MAYBE_EME(EncryptedPlayback_MP4_CENC_SENC_NO_SAIZ_SAIO_Video)) {
+  MockMediaSource source("bear-640x360-v_frag-cenc-senc-no-saiz-saio.mp4",
+                         kMP4Video, kAppendWholeFile);
   FakeEncryptedMedia encrypted_media(new KeyProvidingApp());
   EXPECT_EQ(PIPELINE_OK,
             StartPipelineWithEncryptedMedia(&source, &encrypted_media));

@@ -289,16 +289,17 @@ void SingleThreadProxy::Stop() {
     DebugScopedSetMainThreadBlocked main_thread_blocked(task_runner_provider_);
     DebugScopedSetImplThread impl(task_runner_provider_);
 
+    // Prevent the scheduler from performing actions while we're in an
+    // inconsistent state.
+    if (scheduler_on_impl_thread_)
+      scheduler_on_impl_thread_->Stop();
     // Take away the CompositorFrameSink before destroying things so it doesn't
     // try to call into its client mid-shutdown.
     layer_tree_host_impl_->ReleaseCompositorFrameSink();
-
-    BlockingTaskRunner::CapturePostTasks blocked(
-        task_runner_provider_->blocking_main_thread_task_runner());
     scheduler_on_impl_thread_ = nullptr;
     layer_tree_host_impl_ = nullptr;
   }
-  layer_tree_host_ = NULL;
+  layer_tree_host_ = nullptr;
 }
 
 void SingleThreadProxy::SetMutator(std::unique_ptr<LayerTreeMutator> mutator) {
@@ -419,12 +420,12 @@ void SingleThreadProxy::SetBeginFrameSource(BeginFrameSource* source) {
     scheduler_on_impl_thread_->SetBeginFrameSource(source);
 }
 
-void SingleThreadProxy::DidSwapBuffersCompleteOnImplThread() {
+void SingleThreadProxy::DidReceiveCompositorFrameAckOnImplThread() {
   TRACE_EVENT0("cc,benchmark",
-               "SingleThreadProxy::DidSwapBuffersCompleteOnImplThread");
+               "SingleThreadProxy::DidReceiveCompositorFrameAckOnImplThread");
   if (scheduler_on_impl_thread_)
-    scheduler_on_impl_thread_->DidSwapBuffersComplete();
-  layer_tree_host_->DidCompleteSwapBuffers();
+    scheduler_on_impl_thread_->DidReceiveCompositorFrameAck();
+  layer_tree_host_->DidReceiveCompositorFrameAck();
 }
 
 void SingleThreadProxy::OnDrawForCompositorFrameSink(
@@ -549,7 +550,8 @@ DrawResult SingleThreadProxy::DoComposite(LayerTreeHostImpl::FrameData* frame) {
     if (draw_frame) {
       if (layer_tree_host_impl_->DrawLayers(frame)) {
         if (scheduler_on_impl_thread_)
-          scheduler_on_impl_thread_->DidSwapBuffers();
+          // Drawing implies we submitted a frame to the CompositorFrameSink.
+          scheduler_on_impl_thread_->DidSubmitCompositorFrame();
         client_->DidPostSwapBuffers();
       }
     }
@@ -687,13 +689,13 @@ void SingleThreadProxy::BeginMainFrameAbortedOnImplThread(
   scheduler_on_impl_thread_->BeginMainFrameAborted(reason);
 }
 
-DrawResult SingleThreadProxy::ScheduledActionDrawAndSwapIfPossible() {
+DrawResult SingleThreadProxy::ScheduledActionDrawIfPossible() {
   DebugScopedSetImplThread impl(task_runner_provider_);
   LayerTreeHostImpl::FrameData frame;
   return DoComposite(&frame);
 }
 
-DrawResult SingleThreadProxy::ScheduledActionDrawAndSwapForced() {
+DrawResult SingleThreadProxy::ScheduledActionDrawForced() {
   NOTREACHED();
   return INVALID_RESULT;
 }

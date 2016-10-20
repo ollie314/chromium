@@ -35,7 +35,7 @@
 #include "ipc/ipc_logging.h"
 #include "ipc/message_filter.h"
 #include "mojo/edk/embedder/embedder.h"
-#include "services/shell/public/cpp/interface_provider.h"
+#include "services/service_manager/public/cpp/interface_provider.h"
 
 #if defined(OS_LINUX)
 #include "base/linux_util.h"
@@ -131,7 +131,8 @@ void ChildProcessHostImpl::AddFilter(IPC::MessageFilter* filter) {
     filter->OnFilterAdded(channel_.get());
 }
 
-shell::InterfaceProvider* ChildProcessHostImpl::GetRemoteInterfaces() {
+service_manager::InterfaceProvider*
+ChildProcessHostImpl::GetRemoteInterfaces() {
   return delegate_->GetRemoteInterfaces();
 }
 
@@ -160,7 +161,7 @@ void ChildProcessHostImpl::CreateChannelMojo() {
   DCHECK(channel_id_.empty());
   channel_id_ = "ChannelMojo";
 
-  shell::InterfaceProvider* remote_interfaces = GetRemoteInterfaces();
+  service_manager::InterfaceProvider* remote_interfaces = GetRemoteInterfaces();
   DCHECK(remote_interfaces);
 
   IPC::mojom::ChannelBootstrapPtr bootstrap;
@@ -171,16 +172,6 @@ void ChildProcessHostImpl::CreateChannelMojo() {
 
   bool initialized = InitChannel();
   DCHECK(initialized);
-}
-
-std::string ChildProcessHostImpl::CreateChannel() {
-  DCHECK(channel_id_.empty());
-  channel_id_ = IPC::Channel::GenerateVerifiedChannelID(std::string());
-  channel_ = IPC::Channel::CreateServer(channel_id_, this);
-  if (!channel_ || !InitChannel())
-    return std::string();
-
-  return channel_id_;
 }
 
 bool ChildProcessHostImpl::InitChannel() {

@@ -82,7 +82,7 @@ void EditCommand::setEndingSelection(const VisibleSelection& selection) {
 }
 
 void EditCommand::setEndingSelection(const VisiblePosition& position) {
-  setEndingSelection(createVisibleSelectionDeprecated(position));
+  setEndingSelection(createVisibleSelection(position));
 }
 
 bool EditCommand::isRenderedCharacter(const Position& position) {
@@ -102,9 +102,7 @@ bool EditCommand::isRenderedCharacter(const Position& position) {
 
 void EditCommand::setParent(CompositeEditCommand* parent) {
   DCHECK((parent && !m_parent) || (!parent && m_parent));
-  // Currently only allow merging |InsertFromDrop| and |DeleteByDrag| with |DragAndDropCommand| after applied.
-  DCHECK(!parent || parent->isCommandGroupWrapper() ||
-         !isCompositeEditCommand() ||
+  DCHECK(!parent || !isCompositeEditCommand() ||
          !toCompositeEditCommand(this)->composition());
   m_parent = parent;
   if (parent) {

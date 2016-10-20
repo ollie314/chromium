@@ -26,11 +26,13 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/crash_keys.h"
+#include "chrome/common/features.h"
 #include "chrome/common/pepper_permission_util.h"
 #include "chrome/common/prerender_types.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/secure_origin_whitelist.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/grit/locale_settings.h"
 #include "chrome/grit/renderer_resources.h"
@@ -96,7 +98,7 @@
 #include "net/base/net_errors.h"
 #include "ppapi/c/private/ppb_pdf.h"
 #include "ppapi/shared_impl/ppapi_switches.h"
-#include "services/shell/public/cpp/interface_provider.h"
+#include "services/service_manager/public/cpp/interface_provider.h"
 #include "third_party/WebKit/public/platform/URLConversion.h"
 #include "third_party/WebKit/public/platform/WebCachePolicy.h"
 #include "third_party/WebKit/public/platform/WebSecurityOrigin.h"
@@ -565,9 +567,8 @@ bool ChromeContentRendererClient::OverrideCreatePlugin(
   GURL url(params.url);
 #if defined(ENABLE_PLUGINS)
   ChromeViewHostMsg_GetPluginInfo_Output output;
-  WebString top_origin = frame->top()->getSecurityOrigin().toString();
   render_frame->Send(new ChromeViewHostMsg_GetPluginInfo(
-      render_frame->GetRoutingID(), url, blink::WebStringToGURL(top_origin),
+      render_frame->GetRoutingID(), url, frame->top()->getSecurityOrigin(),
       orig_mime_type, &output));
   *plugin = CreatePlugin(render_frame, frame, params, output);
 #else  // !defined(ENABLE_PLUGINS)
@@ -817,7 +818,7 @@ WebPlugin* ChromeContentRendererClient::CreatePlugin(
         break;
       }
       case ChromeViewHostMsg_GetPluginInfo_Status::kOutdatedBlocked: {
-#if defined(ENABLE_PLUGIN_INSTALLATION)
+#if BUILDFLAG(ENABLE_PLUGIN_INSTALLATION)
         placeholder = create_blocked_plugin(
             IDR_BLOCKED_PLUGIN_HTML,
             l10n_util::GetStringFUTF16(IDS_PLUGIN_OUTDATED, group_name));
@@ -873,6 +874,13 @@ WebPlugin* ChromeContentRendererClient::CreatePlugin(
         render_frame->Send(new ChromeViewHostMsg_BlockedComponentUpdatedPlugin(
             render_frame->GetRoutingID(), placeholder->CreateRoutingId(),
             identifier));
+        break;
+      }
+      case ChromeViewHostMsg_GetPluginInfo_Status::kRestartRequired: {
+        placeholder = create_blocked_plugin(
+            IDR_BLOCKED_PLUGIN_HTML,
+            l10n_util::GetStringFUTF16(IDS_PLUGIN_RESTART_REQUIRED,
+                                       group_name));
         break;
       }
     }
@@ -1329,12 +1337,16 @@ ChromeContentRendererClient::CreateBrowserPluginDelegate(
 
 void ChromeContentRendererClient::RecordRappor(const std::string& metric,
                                                const std::string& sample) {
-  RenderThread::Get()->Send(new ChromeViewHostMsg_RecordRappor(metric, sample));
+  if (!rappor_recorder_)
+    RenderThread::Get()->GetRemoteInterfaces()->GetInterface(&rappor_recorder_);
+  rappor_recorder_->RecordRappor(metric, sample);
 }
 
 void ChromeContentRendererClient::RecordRapporURL(const std::string& metric,
                                                   const GURL& url) {
-  RenderThread::Get()->Send(new ChromeViewHostMsg_RecordRapporURL(metric, url));
+  if (!rappor_recorder_)
+    RenderThread::Get()->GetRemoteInterfaces()->GetInterface(&rappor_recorder_);
+  rappor_recorder_->RecordRapporURL(metric, url);
 }
 
 std::unique_ptr<blink::WebAppBannerClient>
@@ -1351,11 +1363,11 @@ void ChromeContentRendererClient::AddImageContextMenuProperties(
   WebString header_key(ASCIIToUTF16(
       data_reduction_proxy::chrome_proxy_header()));
   if (!response.httpHeaderField(header_key).isNull() &&
-      response.httpHeaderField(header_key).utf8().find(
-          data_reduction_proxy::chrome_proxy_lo_fi_directive()) !=
-              std::string::npos) {
-    (*properties)[data_reduction_proxy::chrome_proxy_header()] =
-        data_reduction_proxy::chrome_proxy_lo_fi_directive();
+      data_reduction_proxy::IsEmptyImagePreview(
+          response.httpHeaderField(header_key).utf8())) {
+    (*properties)[
+        data_reduction_proxy::chrome_proxy_content_transform_header()] =
+            data_reduction_proxy::empty_image_directive();
   }
 }
 
@@ -1380,23 +1392,23 @@ void ChromeContentRendererClient::RunScriptsAtDocumentEnd(
 void ChromeContentRendererClient::
     DidInitializeServiceWorkerContextOnWorkerThread(
         v8::Local<v8::Context> context,
-        int embedded_worker_id,
+        int64_t service_worker_version_id,
         const GURL& url) {
 #if defined(ENABLE_EXTENSIONS)
   ChromeExtensionsRendererClient::GetInstance()
       ->extension_dispatcher()
       ->DidInitializeServiceWorkerContextOnWorkerThread(
-          context, embedded_worker_id, url);
+          context, service_worker_version_id, url);
 #endif
 }
 
 void ChromeContentRendererClient::WillDestroyServiceWorkerContextOnWorkerThread(
     v8::Local<v8::Context> context,
-    int embedded_worker_id,
+    int64_t service_worker_version_id,
     const GURL& url) {
 #if defined(ENABLE_EXTENSIONS)
   extensions::Dispatcher::WillDestroyServiceWorkerContextOnWorkerThread(
-      context, embedded_worker_id, url);
+      context, service_worker_version_id, url);
 #endif
 }
 

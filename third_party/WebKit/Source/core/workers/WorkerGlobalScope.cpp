@@ -114,7 +114,6 @@ KURL WorkerGlobalScope::completeURL(const String& url) const {
 
 void WorkerGlobalScope::dispose() {
   DCHECK(thread()->isCurrentThread());
-  stopActiveDOMObjects();
 
   // Event listeners would keep DOMWrapperWorld objects alive for too long.
   // Also, they have references to JS objects, which become dangling once Heap
@@ -189,7 +188,8 @@ void WorkerGlobalScope::importScripts(const Vector<String>& urls,
           SyntaxError, "The URL '" + urlString + "' is invalid.");
       return;
     }
-    if (!contentSecurityPolicy()->allowScriptFromSource(url, AtomicString())) {
+    if (!contentSecurityPolicy()->allowScriptFromSource(url, AtomicString(),
+                                                        NotParserInserted)) {
       exceptionState.throwDOMException(
           NetworkError,
           "The script at '" + url.elidedString() + "' failed to load.");

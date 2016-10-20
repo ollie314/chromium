@@ -35,6 +35,7 @@
 #include "chrome/browser/chromeos/policy/display_rotation_default_handler.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/chromeos/system/input_device_settings.h"
+#include "chrome/browser/chromeos/ui/accessibility_focus_ring_controller.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -73,7 +74,7 @@
 #include "components/user_manager/user_manager.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/user_metrics.h"
-#include "content/public/common/mojo_shell_connection.h"
+#include "content/public/common/service_manager_connection.h"
 #include "ui/app_list/presenter/app_list_presenter.h"
 #include "ui/aura/window.h"
 #include "ui/base/ime/chromeos/input_method_manager.h"
@@ -259,6 +260,12 @@ class AccessibilityDelegateImpl : public ash::AccessibilityDelegate {
     TtsController::GetInstance()->Stop();
   }
 
+  void ClearFocusHighlight() const override {
+    chromeos::AccessibilityFocusRingController::GetInstance()->SetFocusRing(
+        std::vector<gfx::Rect>(),
+        chromeos::AccessibilityFocusRingController::PERSIST_FOCUS_RING);
+  }
+
   void SaveScreenMagnifierScale(double scale) override {
     if (chromeos::MagnificationManager::Get())
       chromeos::MagnificationManager::Get()->SaveScreenMagnifierScale(scale);
@@ -325,8 +332,8 @@ ChromeShellDelegate::ChromeShellDelegate()
 ChromeShellDelegate::~ChromeShellDelegate() {
 }
 
-shell::Connector* ChromeShellDelegate::GetShellConnector() const {
-  return content::MojoShellConnection::GetForProcess()->GetConnector();
+service_manager::Connector* ChromeShellDelegate::GetShellConnector() const {
+  return content::ServiceManagerConnection::GetForProcess()->GetConnector();
 }
 
 bool ChromeShellDelegate::IsFirstRunAfterBoot() const {
@@ -351,7 +358,7 @@ bool ChromeShellDelegate::IsMultiProfilesEnabled() const {
     // in. For special cases like Kiosk mode and / or guest mode this isn't a
     // problem since either the browser gets restarted and / or the flag is not
     // allowed, but for an "ephermal" user (see crbug.com/312324) it is not
-    // decided yet if he could add other users to his session or not.
+    // decided yet if they could add other users to their session or not.
     // TODO(skuhne): As soon as the issue above needs to be resolved, this logic
     // should change.
     logged_in_users = 1;
@@ -427,8 +434,7 @@ app_list::AppListPresenter* ChromeShellDelegate::GetAppListPresenter() {
 ash::ShelfDelegate* ChromeShellDelegate::CreateShelfDelegate(
     ash::ShelfModel* model) {
   if (!shelf_delegate_) {
-    shelf_delegate_ =
-        ChromeLauncherControllerImpl::CreateInstance(nullptr, model);
+    shelf_delegate_ = new ChromeLauncherControllerImpl(nullptr, model);
     shelf_delegate_->Init();
   }
   return shelf_delegate_;
@@ -543,7 +549,7 @@ void ChromeShellDelegate::Observe(int type,
       // start.
       if (user_manager::UserManager::Get()->GetLoggedInUsers().size() < 2)
         InitAfterFirstSessionStart();
-      ash::Shell::GetInstance()->ShowShelf();
+      ash::WmShell::Get()->ShowShelf();
       break;
     default:
       NOTREACHED() << "Unexpected notification " << type;

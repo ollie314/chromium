@@ -57,12 +57,12 @@ class DirectOutputSurfaceOzone : public cc::OutputSurface {
   void EnsureBackbuffer() override;
   void DiscardBackbuffer() override;
   void BindFramebuffer() override;
-  void SwapBuffers(cc::CompositorFrame frame) override;
-  uint32_t GetFramebufferCopyTextureFormat() override;
   void Reshape(const gfx::Size& size,
-               float scale_factor,
+               float device_scale_factor,
                const gfx::ColorSpace& color_space,
-               bool alpha) override;
+               bool has_alpha) override;
+  void SwapBuffers(cc::OutputSurfaceFrame frame) override;
+  uint32_t GetFramebufferCopyTextureFormat() override;
   cc::OverlayCandidateValidator* GetOverlayCandidateValidator() const override;
   bool IsDisplayedAsOverlayPlane() const override;
   unsigned GetOverlayTextureId() const override;
@@ -80,6 +80,9 @@ class DirectOutputSurfaceOzone : public cc::OutputSurface {
   display_compositor::GLHelper gl_helper_;
   std::unique_ptr<display_compositor::BufferQueue> buffer_queue_;
   cc::SyntheticBeginFrameSource* const synthetic_begin_frame_source_;
+
+  gfx::Size reshape_size_;
+  gfx::Size swap_size_;
 
   base::WeakPtrFactory<DirectOutputSurfaceOzone> weak_ptr_factory_;
 };

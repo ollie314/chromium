@@ -27,6 +27,7 @@
 #include "media/cdm/cdm_file_io.h"
 #include "media/cdm/external_clear_key_test_helper.h"
 #include "media/cdm/simple_cdm_allocator.h"
+#include "ppapi/features/features.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest-param-test.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -334,7 +335,6 @@ class AesDecryptorTest : public testing::TestWithParam<std::string> {
   // Closes the session specified by |session_id|.
   void CloseSession(const std::string& session_id) {
     EXPECT_CALL(*this, OnSessionClosed(session_id));
-    EXPECT_CALL(*this, OnSessionKeysChangeCalled(session_id, false));
     cdm_->CloseSession(session_id, CreatePromise(RESOLVED));
   }
 
@@ -1021,7 +1021,7 @@ INSTANTIATE_TEST_CASE_P(AesDecryptor,
                         AesDecryptorTest,
                         testing::Values("AesDecryptor"));
 
-#if defined(ENABLE_PEPPER_CDMS)
+#if BUILDFLAG(ENABLE_PEPPER_CDMS)
 INSTANTIATE_TEST_CASE_P(CdmAdapter,
                         AesDecryptorTest,
                         testing::Values("CdmAdapter"));

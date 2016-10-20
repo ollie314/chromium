@@ -10,9 +10,9 @@
 #include "ash/common/session/session_state_delegate.h"
 #include "ash/common/shelf/wm_shelf.h"
 #include "ash/common/shelf/wm_shelf_util.h"
-#include "ash/common/shell_window_ids.h"
 #include "ash/common/system/cast/tray_cast.h"
 #include "ash/common/system/date/tray_date.h"
+#include "ash/common/system/tiles/tray_tiles.h"
 #include "ash/common/system/tray/system_tray_controller.h"
 #include "ash/common/system/tray/system_tray_delegate.h"
 #include "ash/common/system/tray/system_tray_item.h"
@@ -29,6 +29,7 @@
 #include "ash/common/wm_root_window_controller.h"
 #include "ash/common/wm_shell.h"
 #include "ash/common/wm_window.h"
+#include "ash/public/cpp/shell_window_ids.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
 #include "base/strings/utf_string_conversions.h"
@@ -210,11 +211,11 @@ void SystemTray::Shutdown() {
 }
 
 void SystemTray::CreateItems(SystemTrayDelegate* delegate) {
-  WmShell* wm_shell = WmShell::Get();
 #if !defined(OS_WIN)
   // Create user items for each possible user.
-  int maximum_user_profiles =
-      wm_shell->GetSessionStateDelegate()->GetMaximumNumberOfLoggedInUsers();
+  int maximum_user_profiles = WmShell::Get()
+                                  ->GetSessionStateDelegate()
+                                  ->GetMaximumNumberOfLoggedInUsers();
   for (int i = 0; i < maximum_user_profiles; i++)
     AddTrayItem(new TrayUser(this, i));
 
@@ -260,14 +261,15 @@ void SystemTray::CreateItems(SystemTrayDelegate* delegate) {
     AddTrayItem(tray_rotation_lock.release());
   AddTrayItem(new TraySettings(this));
   AddTrayItem(tray_update_);
+  if (MaterialDesignController::IsSystemTrayMenuMaterial())
+    AddTrayItem(new TrayTiles(this));
+  // TODO(tdanderson): Do not add |tray_date_| in material design.
   AddTrayItem(tray_date_);
 #elif defined(OS_WIN)
   AddTrayItem(tray_accessibility_);
   AddTrayItem(tray_update_);
   AddTrayItem(tray_date_);
 #endif
-
-  SetVisible(wm_shell->system_tray_delegate()->GetTrayVisibilityOnStartup());
 }
 
 void SystemTray::AddTrayItem(SystemTrayItem* item) {
@@ -419,6 +421,7 @@ bool SystemTray::IsMouseInNotificationBubble() const {
 bool SystemTray::CloseSystemBubble() const {
   if (!system_bubble_)
     return false;
+  CHECK(!activating_);
   system_bubble_->bubble()->Close();
   return true;
 }
@@ -563,7 +566,7 @@ void SystemTray::ShowItems(const std::vector<SystemTrayItem*>& items,
     // they are shown in a bubble by themselves.
     init_params.arrow_paint_type = views::BubbleBorder::PAINT_NORMAL;
     if (items.size() == 1 && items[0]->ShouldHideArrow())
-      init_params.arrow_paint_type = views::BubbleBorder::PAINT_TRANSPARENT;
+      init_params.arrow_paint_type = views::BubbleBorder::PAINT_NONE;
     SystemTrayBubble* bubble = new SystemTrayBubble(this, items, bubble_type);
 
     system_bubble_.reset(new SystemBubbleWrapper(bubble));
@@ -793,7 +796,13 @@ void SystemTray::CloseBubble(const ui::KeyEvent& key_event) {
 void SystemTray::ActivateAndStartNavigation(const ui::KeyEvent& key_event) {
   if (!system_bubble_)
     return;
+  activating_ = true;
   ActivateBubble();
+  activating_ = false;
+  // TODO(oshima): This is to troubleshoot the issue crbug.com/651242. Remove
+  // once the root cause is fixed.
+  CHECK(system_bubble_) << " the bubble was deleted while activaing it";
+
   views::Widget* widget = GetSystemBubble()->bubble_view()->GetWidget();
   widget->GetFocusManager()->OnKeyEvent(key_event);
 }
@@ -839,13 +848,14 @@ bool SystemTray::PerformAction(const ui::Event& event) {
       }
     }
     ShowDefaultViewWithOffset(BUBBLE_CREATE_NEW, arrow_offset, false);
-    if (event.IsKeyEvent())
+    if (event.IsKeyEvent() || (event.flags() & ui::EF_TOUCH_ACCESSIBILITY))
       ActivateBubble();
   }
   return true;
 }
 
 void SystemTray::CloseSystemBubbleAndDeactivateSystemTray() {
+  CHECK(!activating_);
   activation_observer_.reset();
   key_event_watcher_.reset();
   system_bubble_.reset();

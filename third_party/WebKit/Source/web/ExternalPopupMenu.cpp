@@ -206,7 +206,7 @@ void ExternalPopupMenu::didAcceptIndices(const WebVector<int>& indices) {
 
   if (indices.size() == 0) {
     ownerElement->selectOptionByPopup(-1);
-  } else if (!ownerElement->multiple()) {
+  } else if (!ownerElement->isMultiple()) {
     ownerElement->selectOptionByPopup(
         toPopupMenuItemIndex(indices[indices.size() - 1], *ownerElement));
   } else {
@@ -258,13 +258,15 @@ void ExternalPopupMenu::getPopupMenuInfo(WebPopupMenuInfo& info,
   const ComputedStyle& menuStyle = ownerElement.computedStyle()
                                        ? *ownerElement.computedStyle()
                                        : *ownerElement.ensureComputedStyle();
-  info.itemHeight = menuStyle.font().getFontMetrics().height();
+  const SimpleFontData* fontData = menuStyle.font().primaryFont();
+  DCHECK(fontData);
+  info.itemHeight = fontData ? fontData->getFontMetrics().height() : 0;
   info.itemFontSize =
       static_cast<int>(menuStyle.font().getFontDescription().computedSize());
   info.selectedIndex = toExternalPopupMenuItemIndex(
       ownerElement.selectedListIndex(), ownerElement);
   info.rightAligned = menuStyle.direction() == RTL;
-  info.allowMultipleSelection = ownerElement.multiple();
+  info.allowMultipleSelection = ownerElement.isMultiple();
   if (count < itemCount)
     items.shrink(count);
   info.items = items;

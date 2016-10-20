@@ -50,6 +50,7 @@
 /** @const */ var ACCELERATOR_APP_LAUNCH_BAILOUT = 'app_launch_bailout';
 /** @const */ var ACCELERATOR_APP_LAUNCH_NETWORK_CONFIG =
     'app_launch_network_config';
+/** @const */ var ACCELERATOR_BOOTSTRAPPING_SLAVE = "bootstrapping_slave";
 
 /* Signin UI state constants. Used to control header bar UI. */
 /** @const */ var SIGNIN_UI_STATE = {
@@ -384,6 +385,8 @@ cr.define('cr.ui.login', function() {
       } else if (name == ACCELERATOR_TOGGLE_EASY_BOOTSTRAP) {
         if (currentStepId == SCREEN_GAIA_SIGNIN)
           chrome.send('toggleEasyBootstrap');
+      } else if (name == ACCELERATOR_BOOTSTRAPPING_SLAVE) {
+          chrome.send('setOobeBootstrappingSlave');
       }
     },
 
@@ -610,7 +613,8 @@ cr.define('cr.ui.login', function() {
 
 
       // Show sign-in screen instead of account picker if pod row is empty.
-      if (screenId == SCREEN_ACCOUNT_PICKER && $('pod-row').pods.length == 0) {
+      if (screenId == SCREEN_ACCOUNT_PICKER && $('pod-row').pods.length == 0 &&
+          cr.isChromeOS) {
         // Manually hide 'add-user' header bar, because of the case when
         // 'Cancel' button is used on the offline login page.
         $('add-user-header-bar-item').hidden = true;

@@ -3,7 +3,8 @@
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2000 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2004, 2005, 2006, 2007, 2009, 2010, 2011 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006, 2007, 2009, 2010, 2011 Apple Inc. All rights
+ * reserved.
  * Copyright (C) 2010 Google Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
@@ -73,7 +74,7 @@ class CORE_EXPORT HTMLSelectElement final
 
   unsigned size() const { return m_size; }
   void setSize(unsigned);
-  bool multiple() const { return m_multiple; }
+  bool isMultiple() const { return m_isMultiple; }
 
   bool usesMenuList() const;
 
@@ -293,7 +294,7 @@ class CORE_EXPORT HTMLSelectElement final
   Member<HTMLOptionElement> m_activeSelectionEnd;
   Member<HTMLOptionElement> m_optionToScrollTo;
   Member<HTMLOptionElement> m_suggestedOption;
-  bool m_multiple;
+  bool m_isMultiple;
   bool m_activeSelectionState;
   mutable bool m_shouldRecalcListItems;
   bool m_isAutofilledByPreview;

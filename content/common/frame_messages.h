@@ -51,6 +51,7 @@
 #include "ui/gfx/geometry/rect_f.h"
 #include "ui/gfx/ipc/gfx_param_traits.h"
 #include "ui/gfx/ipc/skia/gfx_skia_param_traits.h"
+#include "ui/gfx/range/range.h"
 #include "url/gurl.h"
 #include "url/origin.h"
 
@@ -171,6 +172,7 @@ IPC_STRUCT_TRAITS_BEGIN(content::FrameOwnerProperties)
   IPC_STRUCT_TRAITS_MEMBER(margin_width)
   IPC_STRUCT_TRAITS_MEMBER(margin_height)
   IPC_STRUCT_TRAITS_MEMBER(allow_fullscreen)
+  IPC_STRUCT_TRAITS_MEMBER(required_csp)
   IPC_STRUCT_TRAITS_MEMBER(delegated_permissions)
 IPC_STRUCT_TRAITS_END()
 
@@ -200,7 +202,6 @@ IPC_STRUCT_BEGIN(FrameHostMsg_DidFailProvisionalLoadWithError_Params)
 IPC_STRUCT_END()
 
 IPC_STRUCT_TRAITS_BEGIN(content::FrameNavigateParams)
-  IPC_STRUCT_TRAITS_MEMBER(page_id)
   IPC_STRUCT_TRAITS_MEMBER(nav_entry_id)
   IPC_STRUCT_TRAITS_MEMBER(frame_unique_name)
   IPC_STRUCT_TRAITS_MEMBER(item_sequence_number)
@@ -370,7 +371,6 @@ IPC_STRUCT_TRAITS_BEGIN(content::RequestNavigationParams)
   IPC_STRUCT_TRAITS_MEMBER(can_load_local_resources)
   IPC_STRUCT_TRAITS_MEMBER(request_time)
   IPC_STRUCT_TRAITS_MEMBER(page_state)
-  IPC_STRUCT_TRAITS_MEMBER(page_id)
   IPC_STRUCT_TRAITS_MEMBER(nav_entry_id)
   IPC_STRUCT_TRAITS_MEMBER(is_same_document_history_load)
   IPC_STRUCT_TRAITS_MEMBER(is_history_navigation_in_new_child)
@@ -410,6 +410,7 @@ IPC_STRUCT_BEGIN(FrameHostMsg_OpenURL_Params)
   IPC_STRUCT_MEMBER(bool, uses_post)
   IPC_STRUCT_MEMBER(scoped_refptr<content::ResourceRequestBodyImpl>,
                     resource_request_body)
+  IPC_STRUCT_MEMBER(std::string, extra_headers)
   IPC_STRUCT_MEMBER(content::Referrer, referrer)
   IPC_STRUCT_MEMBER(WindowOpenDisposition, disposition)
   IPC_STRUCT_MEMBER(bool, should_replace_current_entry)
@@ -1065,9 +1066,6 @@ IPC_MESSAGE_ROUTED0(FrameHostMsg_DidAccessInitialDocument)
 // window.
 IPC_MESSAGE_ROUTED1(FrameHostMsg_DidChangeOpener, int /* opener_routing_id */)
 
-// Notifies the browser that a page id was assigned.
-IPC_MESSAGE_ROUTED1(FrameHostMsg_DidAssignPageId, int32_t /* page_id */)
-
 // Notifies the browser that sandbox flags have changed for a subframe of this
 // frame.
 IPC_MESSAGE_ROUTED2(FrameHostMsg_DidChangeSandboxFlags,
@@ -1168,7 +1166,7 @@ IPC_SYNC_MESSAGE_CONTROL2_1(FrameHostMsg_GetPlugins,
 IPC_SYNC_MESSAGE_CONTROL4_3(FrameHostMsg_GetPluginInfo,
                             int /* render_frame_id */,
                             GURL /* url */,
-                            GURL /* page_url */,
+                            url::Origin /* main_frame_origin */,
                             std::string /* mime_type */,
                             bool /* found */,
                             content::WebPluginInfo /* plugin info */,
@@ -1292,6 +1290,14 @@ IPC_MESSAGE_ROUTED1(FrameHostMsg_VisibilityChanged, bool /* visible */)
 // object contains information about the node(s) that were selected when the
 // user right clicked.
 IPC_MESSAGE_ROUTED1(FrameHostMsg_ContextMenu, content::ContextMenuParams)
+
+// Notification that the text selection has changed.
+// Note: The second parameter is the character based offset of the
+// base::string16 text in the document.
+IPC_MESSAGE_ROUTED3(FrameHostMsg_SelectionChanged,
+                    base::string16 /* text covers the selection range */,
+                    uint32_t /* the offset of the text in the document */,
+                    gfx::Range /* selection range in the document */)
 
 // Response for FrameMsg_JavaScriptExecuteRequest, sent when a reply was
 // requested. The ID is the parameter supplied to

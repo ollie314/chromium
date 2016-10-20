@@ -81,8 +81,9 @@ void HTMLIFrameElement::collectStyleForPresentationAttribute(
   } else if (name == alignAttr) {
     applyAlignmentAttributeToStyle(value, style);
   } else if (name == frameborderAttr) {
-    // LocalFrame border doesn't really match the HTML4 spec definition for iframes. It simply adds
-    // a presentational hint that the border should be off if set to zero.
+    // LocalFrame border doesn't really match the HTML4 spec definition for
+    // iframes. It simply adds a presentational hint that the border should be
+    // off if set to zero.
     if (!value.toInt()) {
       // Add a rule that nulls out our border width.
       addPropertyToPresentationAttributeStyle(
@@ -123,6 +124,14 @@ void HTMLIFrameElement::parseAttribute(const QualifiedName& name,
       m_permissions->setValue(value);
   } else if (RuntimeEnabledFeatures::embedderCSPEnforcementEnabled() &&
              name == cspAttr) {
+    // TODO(amalika): add more robust validation of the value
+    if (!value.getString().containsOnlyASCII()) {
+      m_csp = nullAtom;
+      document().addConsoleMessage(ConsoleMessage::create(
+          OtherMessageSource, ErrorMessageLevel,
+          "'csp' attribute contains non-ASCII characters: " + value));
+      return;
+    }
     AtomicString oldCSP = m_csp;
     m_csp = value;
     if (m_csp != oldCSP)

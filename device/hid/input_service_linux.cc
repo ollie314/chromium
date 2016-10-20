@@ -14,7 +14,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/threading/thread_restrictions.h"
-#include "device/core/device_monitor_linux.h"
+#include "device/base/device_monitor_linux.h"
 #include "device/udev_linux/udev.h"
 
 namespace device {
@@ -241,12 +241,14 @@ bool InputServiceLinux::GetDeviceInfo(const std::string& id,
 
 void InputServiceLinux::AddDevice(const InputDeviceInfo& info) {
   devices_[info.id] = info;
-  FOR_EACH_OBSERVER(Observer, observers_, OnInputDeviceAdded(info));
+  for (auto& observer : observers_)
+    observer.OnInputDeviceAdded(info);
 }
 
 void InputServiceLinux::RemoveDevice(const std::string& id) {
   devices_.erase(id);
-  FOR_EACH_OBSERVER(Observer, observers_, OnInputDeviceRemoved(id));
+  for (auto& observer : observers_)
+    observer.OnInputDeviceRemoved(id);
 }
 
 bool InputServiceLinux::CalledOnValidThread() const {

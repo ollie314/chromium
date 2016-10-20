@@ -135,10 +135,12 @@ TEST_F(ChangeRequestsStateTaskTest, UpdateMultipleItems) {
   EXPECT_EQ(ItemActionStatus::SUCCESS,
             last_result()->item_statuses.at(1).second);
   EXPECT_EQ(2UL, last_result()->updated_items.size());
+  EXPECT_EQ(kRequestId1, last_result()->updated_items.at(0).request_id());
   EXPECT_EQ(SavePageRequest::RequestState::PAUSED,
             last_result()->updated_items.at(0).request_state());
+  EXPECT_EQ(kRequestId2, last_result()->updated_items.at(1).request_id());
   EXPECT_EQ(SavePageRequest::RequestState::PAUSED,
-            last_result()->updated_items.at(0).request_state());
+            last_result()->updated_items.at(1).request_state());
 }
 
 TEST_F(ChangeRequestsStateTaskTest, EmptyRequestsList) {

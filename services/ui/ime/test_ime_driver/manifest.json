@@ -1,12 +1,10 @@
 {
   "manifest_version":  1,
-  "name": "mojo:test_ime_driver",
+  "name": "service:test_ime_driver",
   "display_name": "Test IME Driver",
   "capabilities": {
     "required": {
-      "mojo:ui": {
-        "interfaces": [ "ui::mojom::IMERegistrar" ]
-      }
+      "service:ui": [ "ui:ime_registrar" ]
     }
   }
 }

@@ -95,6 +95,10 @@ class CORE_EXPORT InputType : public GarbageCollectedFinalized<InputType> {
   // is called.
   virtual String defaultValue() const;
 
+  // https://html.spec.whatwg.org/multipage/forms.html#dom-input-value
+  enum class ValueMode { kValue, kDefault, kDefaultOn, kFilename };
+  virtual ValueMode valueMode() const = 0;
+
   virtual double valueAsDate() const;
   virtual void setValueAsDate(double, ExceptionState&) const;
   virtual double valueAsDouble() const;
@@ -176,7 +180,6 @@ class CORE_EXPORT InputType : public GarbageCollectedFinalized<InputType> {
   virtual bool canSetSuggestedValue();
   virtual bool shouldSendChangeEventAfterCheckedChanged();
   virtual bool canSetValue(const String&);
-  virtual bool storesValueSeparateFromAttribute();
   virtual void setValue(const String&,
                         bool valueChanged,
                         TextFieldEventBehavior);
@@ -195,6 +198,7 @@ class CORE_EXPORT InputType : public GarbageCollectedFinalized<InputType> {
   virtual const QualifiedName& subResourceAttributeName() const;
   virtual bool supportsAutocapitalize() const;
   virtual const AtomicString& defaultAutocapitalize() const;
+  virtual void copyNonAttributeProperties(const HTMLInputElement&);
 
   // Parses the specified string for the type, and return
   // the Decimal value for the parsing result if the parsing

@@ -93,11 +93,13 @@
 <if expr="chromeos">
           <div class="middle two-line" on-tap="onPictureTap_" actionable>
 </if>
-            <span class="flex" id="profile-name">
-              [[profileName_]]
-            </span>
-            <button class="icon-arrow-right" is="paper-icon-button-light">
-            </button>
+            <div class="flex">
+              <span id="profile-name">[[profileName_]]</span>
+              <div class="secondary" hidden="[[!syncStatus.signedIn]]">
+                [[syncStatus.signedInUsername]]
+              </div>
+            </div>
+            <button class="subpage-arrow" is="paper-icon-button-light"></button>
           </div>
 <if expr="not chromeos">
           <template is="dom-if" if="[[showSignin_(syncStatus)]]">
@@ -160,7 +162,7 @@
                 [[syncStatus.statusText]]
               </div>
             </div>
-            <button class="icon-arrow-right" is="paper-icon-button-light"></button>
+            <button class="subpage-arrow" is="paper-icon-button-light"></button>
           </div>
         </template>
 
@@ -249,7 +251,7 @@
             $i18n{manageOtherPeople}
             <div class="secondary">$i18n{manageOtherPeopleDescription}</div>
           </div>
-          <button class="icon-external" is="paper-icon-button-light"></button>
+          <button class="subpage-arrow" is="paper-icon-button-light"></button>
         </div>
 
         <template is="dom-if" if=[[profileManagesSupervisedUsers_]]>

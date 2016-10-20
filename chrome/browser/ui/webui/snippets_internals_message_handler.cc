@@ -86,7 +86,7 @@ SnippetsInternalsMessageHandler::SnippetsInternalsMessageHandler()
 SnippetsInternalsMessageHandler::~SnippetsInternalsMessageHandler() {}
 
 void SnippetsInternalsMessageHandler::RegisterMessages() {
-  // additional initialization (web_ui() does not work from the constructor)
+  // Additional initialization (web_ui() does not work from the constructor).
   Profile* profile = Profile::FromWebUI(web_ui());
 
   content_suggestions_service_ =
@@ -178,6 +178,9 @@ void SnippetsInternalsMessageHandler::HandleDownload(
 
   SendString("hosts-status", std::string());
 
+  if (!ntp_snippets_service_)
+    return;
+
   std::string hosts_string;
   if (!args->GetString(0, &hosts_string))
     return;
@@ -186,7 +189,8 @@ void SnippetsInternalsMessageHandler::HandleDownload(
       hosts_string, " ", base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY);
   std::set<std::string> hosts(hosts_vector.begin(), hosts_vector.end());
 
-  ntp_snippets_service_->FetchSnippetsFromHosts(hosts, /*force_requests=*/true);
+  ntp_snippets_service_->FetchSnippetsFromHosts(hosts,
+                                                /*interactive_request=*/true);
 }
 
 void SnippetsInternalsMessageHandler::HandleClearCachedSuggestions(
@@ -260,10 +264,11 @@ void SnippetsInternalsMessageHandler::ClearClassification(
 }
 
 void SnippetsInternalsMessageHandler::SendAllContent() {
-  SendHosts();
-
   SendBoolean("flag-snippets", base::FeatureList::IsEnabled(
                                    ntp_snippets::kContentSuggestionsFeature));
+  SendBoolean(
+      "flag-article-suggestions",
+      base::FeatureList::IsEnabled(ntp_snippets::kArticleSuggestionsFeature));
   SendBoolean("flag-recent-offline-tab-suggestions",
               base::FeatureList::IsEnabled(
                   ntp_snippets::kRecentOfflineTabSuggestionsFeature));
@@ -280,30 +285,27 @@ void SnippetsInternalsMessageHandler::SendAllContent() {
 
   SendClassification();
 
-  web_ui()->CallJavascriptFunctionUnsafe(
-      "chrome.SnippetsInternals.setHostRestricted",
-      base::FundamentalValue(
-          ntp_snippets_service_->snippets_fetcher()->UsesHostRestrictions()));
+  if (ntp_snippets_service_) {
+    switch (ntp_snippets_service_->snippets_fetcher()->personalization()) {
+      case ntp_snippets::NTPSnippetsFetcher::Personalization::kPersonal:
+        SendString("switch-personalized", "Only personalized");
+        break;
+      case ntp_snippets::NTPSnippetsFetcher::Personalization::kBoth:
+        SendString("switch-personalized",
+                   "Both personalized and non-personalized");
+        break;
+      case ntp_snippets::NTPSnippetsFetcher::Personalization::kNonPersonal:
+        SendString("switch-personalized", "Only non-personalized");
+        break;
+    }
 
-  switch (ntp_snippets_service_->snippets_fetcher()->personalization()) {
-    case ntp_snippets::NTPSnippetsFetcher::Personalization::kPersonal:
-      SendString("switch-personalized", "Only personalized");
-      break;
-    case ntp_snippets::NTPSnippetsFetcher::Personalization::kBoth:
-      SendString("switch-personalized",
-                 "Both personalized and non-personalized");
-      break;
-    case ntp_snippets::NTPSnippetsFetcher::Personalization::kNonPersonal:
-      SendString("switch-personalized", "Only non-personalized");
-      break;
+    SendString("switch-fetch-url",
+               ntp_snippets_service_->snippets_fetcher()->fetch_url().spec());
+    web_ui()->CallJavascriptFunctionUnsafe(
+        "chrome.SnippetsInternals.receiveJson",
+        base::StringValue(
+            ntp_snippets_service_->snippets_fetcher()->last_json()));
   }
-
-  SendString("switch-fetch-url",
-             ntp_snippets_service_->snippets_fetcher()->fetch_url().spec());
-  web_ui()->CallJavascriptFunctionUnsafe(
-      "chrome.SnippetsInternals.receiveJson",
-      base::StringValue(
-          ntp_snippets_service_->snippets_fetcher()->last_json()));
 
   SendContentSuggestions();
 }
@@ -322,24 +324,6 @@ void SnippetsInternalsMessageHandler::SendClassification() {
       base::FundamentalValue(
           content_suggestions_service_->user_classifier()->GetEstimatedAvgTime(
               UserClassifier::Metric::SUGGESTIONS_USED)));
-}
-
-void SnippetsInternalsMessageHandler::SendHosts() {
-  std::unique_ptr<base::ListValue> hosts_list(new base::ListValue);
-
-  std::set<std::string> hosts = ntp_snippets_service_->GetSuggestionsHosts();
-
-  for (const std::string& host : hosts) {
-    std::unique_ptr<base::DictionaryValue> entry(new base::DictionaryValue);
-    entry->SetString("url", host);
-
-    hosts_list->Append(std::move(entry));
-  }
-
-  base::DictionaryValue result;
-  result.Set("list", std::move(hosts_list));
-  web_ui()->CallJavascriptFunctionUnsafe(
-      "chrome.SnippetsInternals.receiveHosts", result);
 }
 
 void SnippetsInternalsMessageHandler::SendContentSuggestions() {
@@ -379,10 +363,12 @@ void SnippetsInternalsMessageHandler::SendContentSuggestions() {
     categories_list->Append(std::move(category_entry));
   }
 
-  const std::string& status =
-      ntp_snippets_service_->snippets_fetcher()->last_status();
-  if (!status.empty())
-    SendString("hosts-status", "Finished: " + status);
+  if (ntp_snippets_service_) {
+    const std::string& status =
+        ntp_snippets_service_->snippets_fetcher()->last_status();
+    if (!status.empty())
+      SendString("hosts-status", "Finished: " + status);
+  }
 
   base::DictionaryValue result;
   result.Set("list", std::move(categories_list));

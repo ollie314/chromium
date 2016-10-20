@@ -22,6 +22,7 @@
 #ifndef ElementRareData_h
 #define ElementRareData_h
 
+#include "bindings/core/v8/ScriptWrappableVisitor.h"
 #include "core/animation/ElementAnimations.h"
 #include "core/css/cssom/InlineStylePropertyMap.h"
 #include "core/dom/Attr.h"
@@ -82,14 +83,17 @@ class ElementRareData : public NodeRareData {
   void clearShadow() { m_shadow = nullptr; }
   ElementShadow* shadow() const { return m_shadow.get(); }
   ElementShadow& ensureShadow() {
-    if (!m_shadow)
+    if (!m_shadow) {
       m_shadow = ElementShadow::create();
+      ScriptWrappableVisitor::writeBarrier(this, m_shadow);
+    }
     return *m_shadow;
   }
 
   NamedNodeMap* attributeMap() const { return m_attributeMap.get(); }
   void setAttributeMap(NamedNodeMap* attributeMap) {
     m_attributeMap = attributeMap;
+    ScriptWrappableVisitor::writeBarrier(this, m_attributeMap);
   }
 
   ComputedStyle* computedStyle() const { return m_computedStyle.get(); }
@@ -99,7 +103,10 @@ class ElementRareData : public NodeRareData {
   void clearComputedStyle() { m_computedStyle = nullptr; }
 
   ClassList* classList() const { return m_classList.get(); }
-  void setClassList(ClassList* classList) { m_classList = classList; }
+  void setClassList(ClassList* classList) {
+    m_classList = classList;
+    ScriptWrappableVisitor::writeBarrier(this, m_classList);
+  }
   void clearClassListValueForQuirksMode() {
     if (!m_classList)
       return;
@@ -107,16 +114,21 @@ class ElementRareData : public NodeRareData {
   }
 
   DatasetDOMStringMap* dataset() const { return m_dataset.get(); }
-  void setDataset(DatasetDOMStringMap* dataset) { m_dataset = dataset; }
+  void setDataset(DatasetDOMStringMap* dataset) {
+    m_dataset = dataset;
+    ScriptWrappableVisitor::writeBarrier(this, m_dataset);
+  }
 
   LayoutSize minimumSizeForResizing() const { return m_minimumSizeForResizing; }
   void setMinimumSizeForResizing(LayoutSize size) {
     m_minimumSizeForResizing = size;
   }
 
-  IntSize savedLayerScrollOffset() const { return m_savedLayerScrollOffset; }
-  void setSavedLayerScrollOffset(IntSize size) {
-    m_savedLayerScrollOffset = size;
+  ScrollOffset savedLayerScrollOffset() const {
+    return m_savedLayerScrollOffset;
+  }
+  void setSavedLayerScrollOffset(ScrollOffset offset) {
+    m_savedLayerScrollOffset = offset;
   }
 
   ElementAnimations* elementAnimations() { return m_elementAnimations.get(); }
@@ -155,8 +167,10 @@ class ElementRareData : public NodeRareData {
     return m_intersectionObserverData.get();
   }
   NodeIntersectionObserverData& ensureIntersectionObserverData() {
-    if (!m_intersectionObserverData)
+    if (!m_intersectionObserverData) {
       m_intersectionObserverData = new NodeIntersectionObserverData();
+      ScriptWrappableVisitor::writeBarrier(this, m_intersectionObserverData);
+    }
     return *m_intersectionObserverData;
   }
 
@@ -179,7 +193,7 @@ class ElementRareData : public NodeRareData {
   short m_tabindex;
 
   LayoutSize m_minimumSizeForResizing;
-  IntSize m_savedLayerScrollOffset;
+  ScrollOffset m_savedLayerScrollOffset;
 
   Member<DatasetDOMStringMap> m_dataset;
   Member<ElementShadow> m_shadow;

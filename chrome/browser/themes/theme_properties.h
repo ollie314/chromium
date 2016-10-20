@@ -146,8 +146,6 @@ class ThemeProperties {
     // The color of a toolbar button's border.
     COLOR_TOOLBAR_BUTTON_STROKE,
     COLOR_TOOLBAR_BUTTON_STROKE_INACTIVE,
-    GRADIENT_FRAME_INCOGNITO,
-    GRADIENT_FRAME_INCOGNITO_INACTIVE,
     GRADIENT_TOOLBAR,
     GRADIENT_TOOLBAR_INACTIVE,
     GRADIENT_TOOLBAR_BUTTON,
@@ -155,6 +153,11 @@ class ThemeProperties {
     GRADIENT_TOOLBAR_BUTTON_PRESSED,
     GRADIENT_TOOLBAR_BUTTON_PRESSED_INACTIVE,
 #endif  // OS_MACOSX
+
+#if defined(OS_WIN)
+    // The color of the 1px border around the window on Windows 10.
+    COLOR_ACCENT_BORDER,
+#endif  // OS_WIN
   };
 
   // Used by the browser theme pack to parse alignments from something like

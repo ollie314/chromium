@@ -158,7 +158,6 @@
 #include "modules/app_banner/AppBannerController.h"
 #include "modules/screen_orientation/ScreenOrientationController.h"
 #include "platform/ScriptForbiddenScope.h"
-#include "platform/TraceEvent.h"
 #include "platform/UserGestureIndicator.h"
 #include "platform/clipboard/ClipboardUtilities.h"
 #include "platform/fonts/FontCache.h"
@@ -173,6 +172,7 @@
 #include "platform/network/ResourceRequest.h"
 #include "platform/scroll/ScrollTypes.h"
 #include "platform/scroll/ScrollbarTheme.h"
+#include "platform/tracing/TraceEvent.h"
 #include "platform/weborigin/KURL.h"
 #include "platform/weborigin/SchemeRegistry.h"
 #include "platform/weborigin/SecurityPolicy.h"
@@ -605,14 +605,15 @@ bool WebLocalFrameImpl::isFocused() const {
 
 WebSize WebLocalFrameImpl::scrollOffset() const {
   if (ScrollableArea* scrollableArea = layoutViewportScrollableArea())
-    return toIntSize(scrollableArea->scrollPosition());
+    return scrollableArea->scrollOffsetInt();
   return WebSize();
 }
 
 void WebLocalFrameImpl::setScrollOffset(const WebSize& offset) {
-  if (ScrollableArea* scrollableArea = layoutViewportScrollableArea())
-    scrollableArea->setScrollPosition(IntPoint(offset.width, offset.height),
-                                      ProgrammaticScroll);
+  if (ScrollableArea* scrollableArea = layoutViewportScrollableArea()) {
+    scrollableArea->setScrollOffset(ScrollOffset(offset.width, offset.height),
+                                    ProgrammaticScroll);
+  }
 }
 
 WebSize WebLocalFrameImpl::contentsSize() const {
@@ -772,6 +773,19 @@ void WebLocalFrameImpl::requestExecuteScriptAndReturnValue(
 
   SuspendableScriptExecutor::createAndRun(
       frame(), 0, createSourcesVector(&source, 1), 0, userGesture, callback);
+}
+
+void WebLocalFrameImpl::requestExecuteV8Function(
+    v8::Local<v8::Context> context,
+    v8::Local<v8::Function> function,
+    v8::Local<v8::Value> receiver,
+    int argc,
+    v8::Local<v8::Value> argv[],
+    WebScriptExecutionCallback* callback) {
+  DCHECK(frame());
+  SuspendableScriptExecutor::createAndRun(frame(), toIsolate(frame()), context,
+                                          function, receiver, argc, argv,
+                                          callback);
 }
 
 void WebLocalFrameImpl::executeScriptInIsolatedWorld(
@@ -1099,6 +1113,11 @@ void WebLocalFrameImpl::replaceMisspelledRange(const WebString& text) {
   // does.
   if (pluginContainerFromFrame(frame()))
     return;
+
+  // TODO(xiaochengh): The use of updateStyleAndLayoutIgnorePendingStylesheets
+  // needs to be audited.  see http://crbug.com/590369 for more details.
+  frame()->document()->updateStyleAndLayoutIgnorePendingStylesheets();
+
   frame()->spellChecker().replaceMisspelledRange(text);
 }
 
@@ -1116,6 +1135,10 @@ bool WebLocalFrameImpl::hasSelection() const {
 }
 
 WebRange WebLocalFrameImpl::selectionRange() const {
+  // TODO(xiaochengh): The use of updateStyleAndLayoutIgnorePendingStylesheets
+  // needs to be audited.  See http://crbug.com/590369 for more details.
+  frame()->document()->updateStyleAndLayoutIgnorePendingStylesheets();
+
   return frame()->selection().selection().toNormalizedEphemeralRange();
 }
 
@@ -1141,6 +1164,11 @@ WebString WebLocalFrameImpl::selectionAsMarkup() const {
   WebPluginContainerImpl* pluginContainer = pluginContainerFromFrame(frame());
   if (pluginContainer)
     return pluginContainer->plugin()->selectionAsMarkup();
+
+  // TODO(xiaochengh): The use of updateStyleAndLayoutIgnorePendingStylesheets
+  // needs to be audited.  See http://crbug.com/590369 for more details.
+  // Selection normalization and markup generation require clean layout.
+  frame()->document()->updateStyleAndLayoutIgnorePendingStylesheets();
 
   return frame()->selection().selectedHTMLForClipboard();
 }
@@ -1181,9 +1209,6 @@ void WebLocalFrameImpl::selectRange(const WebRange& webRange) {
   // TODO(dglazkov): The use of updateStyleAndLayoutIgnorePendingStylesheets
   // needs to be audited.  see http://crbug.com/590369 for more details.
   frame()->document()->updateStyleAndLayoutIgnorePendingStylesheets();
-
-  DocumentLifecycle::DisallowTransitionScope disallowTransition(
-      frame()->document()->lifecycle());
 
   frame()->selection().setSelectedRange(
       webRange.createEphemeralRange(frame()), VP_DEFAULT_AFFINITY,
@@ -1233,6 +1258,11 @@ void WebLocalFrameImpl::moveRangeSelection(
 
 void WebLocalFrameImpl::moveCaretSelection(const WebPoint& pointInViewport) {
   TRACE_EVENT0("blink", "WebLocalFrameImpl::moveCaretSelection");
+
+  // TODO(editing-dev): The use of updateStyleAndLayoutIgnorePendingStylesheets
+  // needs to be audited.  see http://crbug.com/590369 for more details.
+  frame()->document()->updateStyleAndLayoutIgnorePendingStylesheets();
+
   Element* editable = frame()->selection().rootEditableElement();
   if (!editable)
     return;
@@ -1290,6 +1320,20 @@ void WebLocalFrameImpl::extendSelectionAndDelete(int before, int after) {
   frame()->document()->updateStyleAndLayoutIgnorePendingStylesheets();
 
   frame()->inputMethodController().extendSelectionAndDelete(before, after);
+}
+
+void WebLocalFrameImpl::deleteSurroundingText(int before, int after) {
+  TRACE_EVENT0("blink", "WebLocalFrameImpl::deleteSurroundingText");
+  if (WebPlugin* plugin = focusedPluginIfInputMethodSupported()) {
+    plugin->deleteSurroundingText(before, after);
+    return;
+  }
+
+  // TODO(editing-dev): The use of updateStyleAndLayoutIgnorePendingStylesheets
+  // needs to be audited.  See http://crbug.com/590369 for more details.
+  frame()->document()->updateStyleAndLayoutIgnorePendingStylesheets();
+
+  frame()->inputMethodController().deleteSurroundingText(before, after);
 }
 
 void WebLocalFrameImpl::setCaretVisible(bool visible) {
@@ -1492,7 +1536,8 @@ WebLocalFrameImpl* WebLocalFrameImpl::createProvisional(
   // reuse it here.
   LocalFrame* frame = LocalFrame::create(
       webFrame->m_frameLoaderClientImpl.get(), oldFrame->host(), tempOwner,
-      client ? client->interfaceProvider() : nullptr);
+      client ? client->interfaceProvider() : nullptr,
+      client ? client->interfaceRegistry() : nullptr);
   // Set the name and unique name directly, bypassing any of the normal logic
   // to calculate unique name.
   frame->tree().setPrecalculatedName(
@@ -1564,7 +1609,8 @@ void WebLocalFrameImpl::initializeCoreFrame(FrameHost* host,
                                             const AtomicString& uniqueName) {
   setCoreFrame(
       LocalFrame::create(m_frameLoaderClientImpl.get(), host, owner,
-                         client() ? client()->interfaceProvider() : nullptr));
+                         client() ? client()->interfaceProvider() : nullptr,
+                         client() ? client()->interfaceRegistry() : nullptr));
   frame()->tree().setPrecalculatedName(name, uniqueName);
   // We must call init() after m_frame is assigned because it is referenced
   // during init(). Note that this may dispatch JS events; the frame may be
@@ -1589,7 +1635,7 @@ LocalFrame* WebLocalFrameImpl::createChildFrame(
   WebFrameOwnerProperties ownerProperties(
       ownerElement->scrollingMode(), ownerElement->marginWidth(),
       ownerElement->marginHeight(), ownerElement->allowFullscreen(),
-      ownerElement->delegatedPermissions());
+      ownerElement->csp(), ownerElement->delegatedPermissions());
   // FIXME: Using subResourceAttributeName as fallback is not a perfect
   // solution. subResourceAttributeName returns just one attribute name. The
   // element might not have the attribute, and there might be other attributes
@@ -1848,7 +1894,8 @@ void WebLocalFrameImpl::loadJavaScriptURL(const KURL& url) {
 
   String script = decodeURLEscapeSequences(
       url.getString().substring(strlen("javascript:")));
-  UserGestureIndicator gestureIndicator(DefinitelyProcessingNewUserGesture);
+  UserGestureIndicator gestureIndicator(
+      UserGestureToken::create(UserGestureToken::NewGesture));
   v8::HandleScope handleScope(toIsolate(frame()));
   v8::Local<v8::Value> result =
       frame()->script().executeScriptInMainWorldAndReturnValue(
@@ -2011,6 +2058,11 @@ bool WebLocalFrameImpl::isLoading() const {
   return frame()->loader().stateMachine()->isDisplayingInitialEmptyDocument() ||
          frame()->loader().provisionalDocumentLoader() ||
          !frame()->document()->loadEventFinished();
+}
+
+bool WebLocalFrameImpl::
+    isFrameDetachedForSpecialOneOffStopTheCrashingHackBug561873() const {
+  return !frame() || frame()->isDetaching();
 }
 
 bool WebLocalFrameImpl::isNavigationScheduledWithin(

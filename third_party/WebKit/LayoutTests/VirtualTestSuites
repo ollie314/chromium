@@ -173,11 +173,6 @@
     "args": ["--enable-smooth-scrolling"]
   },
   {
-    "prefix": "mediasession",
-    "base": "media/mediasession",
-    "args": ["--enable-blink-features=MediaSession"]
-  },
-  {
     "prefix": "mse-1mb-buffers",
     "base": "http/tests/media/media-source/stream_memory_tests",
     "args": ["--mse-audio-buffer-size-limit=1048576",
@@ -292,7 +287,7 @@
   {
     "prefix": "enable_wasm",
     "base": "http/tests/wasm",
-    "args": ["--enable-wasm"]
+    "args": ["--enable-features=WebAssembly"]
   },
   {
     "prefix": "mojo-service-worker",

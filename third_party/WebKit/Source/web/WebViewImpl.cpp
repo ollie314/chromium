@@ -32,7 +32,6 @@
 
 #include "core/CSSValueKeywords.h"
 #include "core/HTMLNames.h"
-#include "core/InputTypeNames.h"
 #include "core/clipboard/DataObject.h"
 #include "core/dom/Document.h"
 #include "core/dom/Fullscreen.h"
@@ -61,7 +60,6 @@
 #include "core/frame/TopControls.h"
 #include "core/frame/UseCounter.h"
 #include "core/frame/VisualViewport.h"
-#include "core/html/HTMLInputElement.h"
 #include "core/html/HTMLMediaElement.h"
 #include "core/html/HTMLPlugInElement.h"
 #include "core/html/HTMLTextAreaElement.h"
@@ -105,7 +103,6 @@
 #include "platform/PlatformGestureEvent.h"
 #include "platform/PlatformMouseEvent.h"
 #include "platform/RuntimeEnabledFeatures.h"
-#include "platform/TraceEvent.h"
 #include "platform/UserGestureIndicator.h"
 #include "platform/exported/WebActiveGestureAnimation.h"
 #include "platform/fonts/FontCache.h"
@@ -120,6 +117,7 @@
 #include "platform/graphics/paint/DrawingRecorder.h"
 #include "platform/image-decoders/ImageDecoder.h"
 #include "platform/scroll/ScrollbarTheme.h"
+#include "platform/tracing/TraceEvent.h"
 #include "platform/weborigin/SchemeRegistry.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebCompositeAndReadbackAsyncCallback.h"
@@ -130,6 +128,7 @@
 #include "public/platform/WebImage.h"
 #include "public/platform/WebLayerTreeView.h"
 #include "public/platform/WebScheduler.h"
+#include "public/platform/WebTextInputInfo.h"
 #include "public/platform/WebURLRequest.h"
 #include "public/platform/WebVector.h"
 #include "public/platform/WebViewScheduler.h"
@@ -151,7 +150,6 @@
 #include "public/web/WebRange.h"
 #include "public/web/WebScopedUserGesture.h"
 #include "public/web/WebSelection.h"
-#include "public/web/WebTextInputInfo.h"
 #include "public/web/WebViewClient.h"
 #include "public/web/WebWindowFeatures.h"
 #include "web/CompositionUnderlineVectorBuilder.h"
@@ -882,7 +880,7 @@ WebInputEventResult WebViewImpl::handleGestureEvent(
         // TODO(bokan): We shouldn't pass details of the VisualViewport offset
         // to render_view_impl.  crbug.com/459591
         WebSize visualViewportOffset =
-            flooredIntSize(visualViewport.location());
+            flooredIntSize(visualViewport.scrollOffset());
 
         if (m_webSettings->multiTargetTapNotificationEnabled()) {
           Vector<IntRect> goodTargets;
@@ -1029,9 +1027,10 @@ bool WebViewImpl::startPageScaleAnimation(const IntPoint& targetPosition,
       setPageScaleFactor(newScale);
 
       FrameView* view = mainFrameImpl()->frameView();
-      if (view && view->getScrollableArea())
-        view->getScrollableArea()->setScrollPosition(
-            DoublePoint(clampedPoint.x, clampedPoint.y), ProgrammaticScroll);
+      if (view && view->getScrollableArea()) {
+        view->getScrollableArea()->setScrollOffset(
+            ScrollOffset(clampedPoint.x, clampedPoint.y), ProgrammaticScroll);
+      }
 
       return false;
     }
@@ -1677,6 +1676,7 @@ bool WebViewImpl::keyEventDefault(const WebKeyboardEvent& event) {
         return scrollViewWithKeyboard(keyCode, event.modifiers);
       }
       break;
+    case WebInputEvent::KeyDown:
     case WebInputEvent::RawKeyDown:
       if (event.modifiers == WebInputEvent::ControlKey) {
         switch (event.windowsKeyCode) {
@@ -2293,8 +2293,8 @@ WebInputEventResult WebViewImpl::handleInputEvent(
         break;
       case WebInputEvent::MouseDown:
         eventType = EventTypeNames::mousedown;
-        gestureIndicator = wrapUnique(
-            new UserGestureIndicator(DefinitelyProcessingNewUserGesture));
+        gestureIndicator = wrapUnique(new UserGestureIndicator(
+            UserGestureToken::create(UserGestureToken::NewGesture)));
         m_mouseCaptureGestureToken = gestureIndicator->currentToken();
         break;
       case WebInputEvent::MouseUp:
@@ -2467,7 +2467,8 @@ bool WebViewImpl::setComposition(
   if (m_suppressNextKeypressEvent && !inputMethodController.hasComposition())
     return text.isEmpty();
 
-  UserGestureIndicator gestureIndicator(DefinitelyProcessingNewUserGesture);
+  UserGestureIndicator gestureIndicator(
+      UserGestureToken::create(UserGestureToken::NewGesture));
 
   // When the range of composition underlines overlap with the range between
   // selectionStart and selectionEnd, WebKit somehow won't paint the selection
@@ -2498,7 +2499,8 @@ bool WebViewImpl::finishComposingText(
 }
 
 bool WebViewImpl::commitText(const WebString& text, int relativeCaretPosition) {
-  UserGestureIndicator gestureIndicator(DefinitelyProcessingNewUserGesture);
+  UserGestureIndicator gestureIndicator(
+      UserGestureToken::create(UserGestureToken::NewGesture));
 
   LocalFrame* focused = focusedLocalFrameAvailableForIme();
   if (!focused)
@@ -2538,215 +2540,18 @@ WebRange WebViewImpl::compositionRange() {
   return PlainTextRange::create(*editable, range);
 }
 
-// TODO(ekaramad):This method is almost duplicated in WebFrameWidgetImpl as
-// well. This code needs to be refactored  (http://crbug.com/629721).
 WebTextInputInfo WebViewImpl::textInputInfo() {
-  WebTextInputInfo info;
-
   LocalFrame* focused = focusedLocalFrameInWidget();
   if (!focused)
-    return info;
-
-  FrameSelection& selection = focused->selection();
-  if (!selection.isAvailable()) {
-    // plugins/mouse-capture-inside-shadow.html reaches here.
-    return info;
-  }
-  Element* element = selection.selection().rootEditableElement();
-  if (!element)
-    return info;
-
-  info.inputMode = inputModeOfFocusedElement();
-
-  info.type = textInputType();
-  info.flags = textInputFlags();
-  if (info.type == WebTextInputTypeNone)
-    return info;
-
-  if (!focused->editor().canEdit())
-    return info;
-
-  // TODO(dglazkov): The use of updateStyleAndLayoutIgnorePendingStylesheets
-  // needs to be audited.  see http://crbug.com/590369 for more details.
-  focused->document()->updateStyleAndLayoutIgnorePendingStylesheets();
-
-  DocumentLifecycle::DisallowTransitionScope disallowTransition(
-      focused->document()->lifecycle());
-
-  // Emits an object replacement character for each replaced element so that
-  // it is exposed to IME and thus could be deleted by IME on android.
-  info.value = plainText(EphemeralRange::rangeOfContents(*element),
-                         TextIteratorEmitsObjectReplacementCharacter);
-
-  if (info.value.isEmpty())
-    return info;
-
-  EphemeralRange firstRange = firstEphemeralRangeOf(selection.selection());
-  if (firstRange.isNotNull()) {
-    PlainTextRange plainTextRange(PlainTextRange::create(*element, firstRange));
-    if (plainTextRange.isNotNull()) {
-      info.selectionStart = plainTextRange.start();
-      info.selectionEnd = plainTextRange.end();
-    }
-  }
-
-  EphemeralRange range =
-      focused->inputMethodController().compositionEphemeralRange();
-  if (range.isNotNull()) {
-    PlainTextRange plainTextRange(PlainTextRange::create(*element, range));
-    if (plainTextRange.isNotNull()) {
-      info.compositionStart = plainTextRange.start();
-      info.compositionEnd = plainTextRange.end();
-    }
-  }
-
-  return info;
+    return WebTextInputInfo();
+  return focused->inputMethodController().textInputInfo();
 }
 
-// TODO(ekaramad):This method is almost duplicated in WebFrameWidgetImpl as
-// well. This code needs to be refactored  (http://crbug.com/629721).
 WebTextInputType WebViewImpl::textInputType() {
-  LocalFrame* focusedFrame = focusedLocalFrameInWidget();
-  if (!focusedFrame)
+  LocalFrame* focused = focusedLocalFrameInWidget();
+  if (!focused)
     return WebTextInputTypeNone;
-
-  if (!focusedFrame->selection().isAvailable()) {
-    // "mouse-capture-inside-shadow.html" reaches here.
-    return WebTextInputTypeNone;
-  }
-
-  // It's important to preserve the equivalence of textInputInfo().type and
-  // textInputType(), so perform the same rootEditableElement() existence check
-  // here for consistency.
-  if (!focusedFrame->selection().selection().rootEditableElement())
-    return WebTextInputTypeNone;
-
-  Document* document = focusedFrame->document();
-  if (!document)
-    return WebTextInputTypeNone;
-
-  Element* element = document->focusedElement();
-  if (!element)
-    return WebTextInputTypeNone;
-
-  if (isHTMLInputElement(*element)) {
-    HTMLInputElement& input = toHTMLInputElement(*element);
-    const AtomicString& type = input.type();
-
-    if (input.isDisabledOrReadOnly())
-      return WebTextInputTypeNone;
-
-    if (type == InputTypeNames::password)
-      return WebTextInputTypePassword;
-    if (type == InputTypeNames::search)
-      return WebTextInputTypeSearch;
-    if (type == InputTypeNames::email)
-      return WebTextInputTypeEmail;
-    if (type == InputTypeNames::number)
-      return WebTextInputTypeNumber;
-    if (type == InputTypeNames::tel)
-      return WebTextInputTypeTelephone;
-    if (type == InputTypeNames::url)
-      return WebTextInputTypeURL;
-    if (type == InputTypeNames::text)
-      return WebTextInputTypeText;
-
-    return WebTextInputTypeNone;
-  }
-
-  if (isHTMLTextAreaElement(*element)) {
-    if (toHTMLTextAreaElement(*element).isDisabledOrReadOnly())
-      return WebTextInputTypeNone;
-    return WebTextInputTypeTextArea;
-  }
-
-  if (element->isHTMLElement()) {
-    if (toHTMLElement(element)->isDateTimeFieldElement())
-      return WebTextInputTypeDateTimeField;
-  }
-
-  document->updateStyleAndLayoutTree();
-  if (hasEditableStyle(*element))
-    return WebTextInputTypeContentEditable;
-
-  return WebTextInputTypeNone;
-}
-
-// TODO(ekaramad):This method is almost duplicated in WebFrameWidgetImpl as
-// well. This code needs to be refactored  (http://crbug.com/629721).
-int WebViewImpl::textInputFlags() {
-  Element* element = focusedElement();
-  if (!element)
-    return WebTextInputFlagNone;
-
-  DEFINE_STATIC_LOCAL(AtomicString, autocompleteString, ("autocomplete"));
-  DEFINE_STATIC_LOCAL(AtomicString, autocorrectString, ("autocorrect"));
-  int flags = 0;
-
-  const AtomicString& autocomplete = element->getAttribute(autocompleteString);
-  if (autocomplete == "on")
-    flags |= WebTextInputFlagAutocompleteOn;
-  else if (autocomplete == "off")
-    flags |= WebTextInputFlagAutocompleteOff;
-
-  const AtomicString& autocorrect = element->getAttribute(autocorrectString);
-  if (autocorrect == "on")
-    flags |= WebTextInputFlagAutocorrectOn;
-  else if (autocorrect == "off")
-    flags |= WebTextInputFlagAutocorrectOff;
-
-  SpellcheckAttributeState spellcheck = element->spellcheckAttributeState();
-  if (spellcheck == SpellcheckAttributeTrue)
-    flags |= WebTextInputFlagSpellcheckOn;
-  else if (spellcheck == SpellcheckAttributeFalse)
-    flags |= WebTextInputFlagSpellcheckOff;
-
-  if (isHTMLTextFormControlElement(element)) {
-    HTMLTextFormControlElement* formElement =
-        static_cast<HTMLTextFormControlElement*>(element);
-    if (formElement->supportsAutocapitalize()) {
-      DEFINE_STATIC_LOCAL(const AtomicString, none, ("none"));
-      DEFINE_STATIC_LOCAL(const AtomicString, characters, ("characters"));
-      DEFINE_STATIC_LOCAL(const AtomicString, words, ("words"));
-      DEFINE_STATIC_LOCAL(const AtomicString, sentences, ("sentences"));
-
-      const AtomicString& autocapitalize = formElement->autocapitalize();
-      if (autocapitalize == none)
-        flags |= WebTextInputFlagAutocapitalizeNone;
-      else if (autocapitalize == characters)
-        flags |= WebTextInputFlagAutocapitalizeCharacters;
-      else if (autocapitalize == words)
-        flags |= WebTextInputFlagAutocapitalizeWords;
-      else if (autocapitalize == sentences)
-        flags |= WebTextInputFlagAutocapitalizeSentences;
-      else
-        NOTREACHED();
-    }
-  }
-
-  return flags;
-}
-
-WebString WebViewImpl::inputModeOfFocusedElement() {
-  if (!RuntimeEnabledFeatures::inputModeAttributeEnabled())
-    return WebString();
-
-  Element* element = focusedElement();
-  if (!element)
-    return WebString();
-
-  if (isHTMLInputElement(*element)) {
-    const HTMLInputElement& input = toHTMLInputElement(*element);
-    if (input.supportsInputModeAttribute())
-      return input.fastGetAttribute(HTMLNames::inputmodeAttr).lower();
-    return WebString();
-  }
-  if (isHTMLTextAreaElement(*element)) {
-    const HTMLTextAreaElement& textarea = toHTMLTextAreaElement(*element);
-    return textarea.fastGetAttribute(HTMLNames::inputmodeAttr).lower();
-  }
-
-  return WebString();
+  return focused->inputMethodController().textInputType();
 }
 
 // TODO(ekaramad):This method is almost duplicated in WebFrameWidgetImpl as
@@ -2816,6 +2621,11 @@ bool WebViewImpl::selectionTextDirection(WebTextDirection& start,
     // plugins/mouse-capture-inside-shadow.html reaches here.
     return false;
   }
+
+  // TODO(xiaochengh): The use of updateStyleAndLayoutIgnorePendingStylesheets
+  // needs to be audited.  See http://crbug.com/590369 for more details.
+  frame->document()->updateStyleAndLayoutIgnorePendingStylesheets();
+
   if (selection.selection().toNormalizedEphemeralRange().isNull())
     return false;
   start =
@@ -2938,11 +2748,6 @@ void WebViewImpl::didLosePointerLock() {
   m_pointerLockGestureToken.clear();
   if (page())
     page()->pointerLockController().didLosePointerLock();
-}
-
-void WebViewImpl::didChangeWindowResizerRect() {
-  if (mainFrameImpl()->frameView())
-    mainFrameImpl()->frameView()->windowResizerRectChanged();
 }
 
 // TODO(ekaramad):This method is almost duplicated in WebFrameWidgetImpl as
@@ -3391,7 +3196,7 @@ void WebViewImpl::scrollAndRescaleViewports(
   // Order is important: visual viewport location is clamped based on
   // main frame scroll position and visual viewport scale.
 
-  view->setScrollPosition(mainFrameOrigin, ProgrammaticScroll);
+  view->setScrollOffset(toScrollOffset(mainFrameOrigin), ProgrammaticScroll);
 
   setPageScaleFactor(scaleFactor);
 
@@ -3703,9 +3508,8 @@ void WebViewImpl::resetScrollAndScaleState() {
   if (FrameView* frameView = toLocalFrame(page()->mainFrame())->view()) {
     ScrollableArea* scrollableArea = frameView->layoutViewportScrollableArea();
 
-    if (scrollableArea->scrollPositionDouble() != DoublePoint::zero())
-      scrollableArea->setScrollPosition(DoublePoint::zero(),
-                                        ProgrammaticScroll);
+    if (!scrollableArea->scrollOffset().isZero())
+      scrollableArea->setScrollOffset(ScrollOffset(), ProgrammaticScroll);
   }
 
   pageScaleConstraintsSet().setNeedsReset(true);
@@ -3782,11 +3586,14 @@ HitTestResult WebViewImpl::coreHitTestResultAt(
   return hitTestResultForRootFramePos(pointInRootFrame);
 }
 
-void WebViewImpl::dragSourceEndedAt(const WebPoint& clientPoint,
+void WebViewImpl::dragSourceEndedAt(const WebPoint& pointInViewport,
                                     const WebPoint& screenPoint,
                                     WebDragOperation operation) {
+  WebPoint pointInRootFrame(
+      page()->frameHost().visualViewport().viewportToRootFrame(
+          pointInViewport));
   PlatformMouseEvent pme(
-      clientPoint, screenPoint, WebPointerProperties::Button::Left,
+      pointInRootFrame, screenPoint, WebPointerProperties::Button::Left,
       PlatformEvent::MouseMoved, 0, PlatformEvent::NoModifiers,
       PlatformMouseEvent::RealOrIndistinguishable,
       WTF::monotonicallyIncreasingTime());
@@ -3805,7 +3612,7 @@ void WebViewImpl::dragSourceSystemDragEnded() {
 
 WebDragOperation WebViewImpl::dragTargetDragEnter(
     const WebDragData& webDragData,
-    const WebPoint& clientPoint,
+    const WebPoint& pointInViewport,
     const WebPoint& screenPoint,
     WebDragOperationsMask operationsAllowed,
     int modifiers) {
@@ -3814,18 +3621,18 @@ WebDragOperation WebViewImpl::dragTargetDragEnter(
   m_currentDragData = DataObject::create(webDragData);
   m_operationsAllowed = operationsAllowed;
 
-  return dragTargetDragEnterOrOver(clientPoint, screenPoint, DragEnter,
+  return dragTargetDragEnterOrOver(pointInViewport, screenPoint, DragEnter,
                                    modifiers);
 }
 
 WebDragOperation WebViewImpl::dragTargetDragOver(
-    const WebPoint& clientPoint,
+    const WebPoint& pointInViewport,
     const WebPoint& screenPoint,
     WebDragOperationsMask operationsAllowed,
     int modifiers) {
   m_operationsAllowed = operationsAllowed;
 
-  return dragTargetDragEnterOrOver(clientPoint, screenPoint, DragOver,
+  return dragTargetDragEnterOrOver(pointInViewport, screenPoint, DragOver,
                                    modifiers);
 }
 
@@ -3844,9 +3651,13 @@ void WebViewImpl::dragTargetDragLeave() {
 }
 
 void WebViewImpl::dragTargetDrop(const WebDragData& webDragData,
-                                 const WebPoint& clientPoint,
+                                 const WebPoint& pointInViewport,
                                  const WebPoint& screenPoint,
                                  int modifiers) {
+  WebPoint pointInRootFrame(
+      page()->frameHost().visualViewport().viewportToRootFrame(
+          pointInViewport));
+
   DCHECK(m_currentDragData);
   m_currentDragData = DataObject::create(webDragData);
 
@@ -3868,10 +3679,11 @@ void WebViewImpl::dragTargetDrop(const WebDragData& webDragData,
   }
 
   m_currentDragData->setModifiers(modifiers);
-  DragData dragData(m_currentDragData.get(), clientPoint, screenPoint,
+  DragData dragData(m_currentDragData.get(), pointInRootFrame, screenPoint,
                     static_cast<DragOperation>(m_operationsAllowed));
 
-  UserGestureIndicator gesture(DefinitelyProcessingNewUserGesture);
+  UserGestureIndicator gesture(
+      UserGestureToken::create(UserGestureToken::NewGesture));
   m_page->dragController().performDrag(&dragData);
 
   m_dragOperation = WebDragOperationNone;
@@ -3905,14 +3717,18 @@ void WebViewImpl::removeSpellingMarkersUnderWords(
 }
 
 WebDragOperation WebViewImpl::dragTargetDragEnterOrOver(
-    const WebPoint& clientPoint,
+    const WebPoint& pointInViewport,
     const WebPoint& screenPoint,
     DragAction dragAction,
     int modifiers) {
   DCHECK(m_currentDragData);
 
+  WebPoint pointInRootFrame(
+      page()->frameHost().visualViewport().viewportToRootFrame(
+          pointInViewport));
+
   m_currentDragData->setModifiers(modifiers);
-  DragData dragData(m_currentDragData.get(), clientPoint, screenPoint,
+  DragData dragData(m_currentDragData.get(), pointInRootFrame, screenPoint,
                     static_cast<DragOperation>(m_operationsAllowed));
 
   DragSession dragSession;
@@ -4663,8 +4479,8 @@ void WebViewImpl::pointerLockMouseEvent(const WebInputEvent& event) {
   switch (event.type) {
     case WebInputEvent::MouseDown:
       eventType = EventTypeNames::mousedown;
-      gestureIndicator = wrapUnique(
-          new UserGestureIndicator(DefinitelyProcessingNewUserGesture));
+      gestureIndicator = wrapUnique(new UserGestureIndicator(
+          UserGestureToken::create(UserGestureToken::NewGesture)));
       m_pointerLockGestureToken = gestureIndicator->currentToken();
       break;
     case WebInputEvent::MouseUp:

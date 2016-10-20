@@ -21,7 +21,7 @@
 #ifndef StyleSheetList_h
 #define StyleSheetList_h
 
-#include "bindings/core/v8/ScriptWrappable.h"
+#include "bindings/core/v8/TraceWrapperMember.h"
 #include "core/css/CSSStyleSheet.h"
 #include "core/dom/TreeScope.h"
 #include "platform/heap/Handle.h"
@@ -57,7 +57,7 @@ class StyleSheetList final : public GarbageCollected<StyleSheetList>,
 
  private:
   explicit StyleSheetList(TreeScope*);
-  const HeapVector<Member<StyleSheet>>& styleSheets() const;
+  const HeapVector<TraceWrapperMember<StyleSheet>>& styleSheets() const;
 
   Member<TreeScope> m_treeScope;
 };

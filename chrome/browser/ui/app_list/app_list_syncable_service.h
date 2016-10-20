@@ -16,11 +16,11 @@
 #include "chrome/browser/apps/drive/drive_app_uninstall_sync_service.h"
 #include "chrome/browser/sync/glue/sync_start_util.h"
 #include "components/keyed_service/core/keyed_service.h"
-#include "components/sync/api/string_ordinal.h"
-#include "components/sync/api/sync_change.h"
-#include "components/sync/api/sync_change_processor.h"
-#include "components/sync/api/sync_error_factory.h"
-#include "components/sync/api/syncable_service.h"
+#include "components/sync/model/string_ordinal.h"
+#include "components/sync/model/sync_change.h"
+#include "components/sync/model/sync_change_processor.h"
+#include "components/sync/model/sync_error_factory.h"
+#include "components/sync/model/syncable_service.h"
 #include "components/sync/protocol/app_list_specifics.pb.h"
 
 #if defined(OS_CHROMEOS)
@@ -44,7 +44,6 @@ namespace app_list {
 class AppListFolderItem;
 class AppListItem;
 class AppListModel;
-class ModelPrefUpdater;
 
 // Keyed Service that owns, stores, and syncs an AppListModel for a profile.
 class AppListSyncableService : public syncer::SyncableService,
@@ -237,7 +236,6 @@ class AppListSyncableService : public syncer::SyncableService,
   extensions::ExtensionSystem* extension_system_;
   std::unique_ptr<AppListModel> model_;
   std::unique_ptr<ModelObserver> model_observer_;
-  std::unique_ptr<ModelPrefUpdater> model_pref_updater_;
   std::unique_ptr<ExtensionAppModelBuilder> apps_builder_;
 #if defined(OS_CHROMEOS)
   std::unique_ptr<ArcAppModelBuilder> arc_apps_builder_;

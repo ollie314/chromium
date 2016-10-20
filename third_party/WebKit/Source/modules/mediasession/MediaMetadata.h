@@ -8,13 +8,12 @@
 #include "bindings/core/v8/ScriptWrappable.h"
 #include "modules/ModulesExport.h"
 #include "platform/heap/Handle.h"
-#include "public/platform/modules/mediasession/WebMediaMetadata.h"
 #include "wtf/text/WTFString.h"
 
 namespace blink {
 
 class ExecutionContext;
-class MediaArtwork;
+class MediaImage;
 class MediaMetadataInit;
 
 // Implementation of MediaMetadata interface from the Media Session API.
@@ -29,9 +28,7 @@ class MODULES_EXPORT MediaMetadata final
   String title() const;
   String artist() const;
   String album() const;
-  const HeapVector<Member<MediaArtwork>>& artwork() const;
-
-  explicit operator WebMediaMetadata() const;
+  const HeapVector<Member<MediaImage>>& artwork() const;
 
   DECLARE_VIRTUAL_TRACE();
 
@@ -41,7 +38,7 @@ class MODULES_EXPORT MediaMetadata final
   String m_title;
   String m_artist;
   String m_album;
-  HeapVector<Member<MediaArtwork>> m_artwork;
+  HeapVector<Member<MediaImage>> m_artwork;
 };
 
 }  // namespace blink

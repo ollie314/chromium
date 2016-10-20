@@ -1,12 +1,18 @@
 {
   "manifest_version": 1,
-  "name": "mojo:mash_init",
+  "name": "service:mash_init",
   "display_name": "Root Controller",
   "capabilities": {
+    "provided": {
+      "mash_init:init": [ "mash::init::mojom::Init" ]
+    },
     "required": {
-      "*": { },
-      "mojo:login": { "interfaces": [ "mash::login::mojom::Login" ] },
-      "mojo:shell": { "classes": ["shell:user_id", "shell:all_users"] }
+      "*": [],
+      "service:login": [ "login:login" ],
+      "service:service_manager": [
+        "service_manager:user_id",
+        "service_manager:all_users"
+      ]
     }
   }
 }

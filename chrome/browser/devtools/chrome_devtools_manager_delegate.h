@@ -10,13 +10,16 @@
 
 #include "base/compiler_specific.h"
 #include "base/macros.h"
-#include "chrome/browser/devtools/device/devtools_android_bridge.h"
+#include "chrome/browser/devtools/device/devtools_device_discovery.h"
+#include "content/public/browser/devtools_agent_host_observer.h"
 #include "content/public/browser/devtools_manager_delegate.h"
 #include "net/base/host_port_pair.h"
 
 class DevToolsNetworkProtocolHandler;
 
-class ChromeDevToolsManagerDelegate : public content::DevToolsManagerDelegate {
+class ChromeDevToolsManagerDelegate :
+    public content::DevToolsManagerDelegate,
+    public content::DevToolsAgentHostObserver {
  public:
   static char kTypeApp[];
   static char kTypeBackgroundPage[];
@@ -25,10 +28,9 @@ class ChromeDevToolsManagerDelegate : public content::DevToolsManagerDelegate {
   ChromeDevToolsManagerDelegate();
   ~ChromeDevToolsManagerDelegate() override;
 
+ private:
   // content::DevToolsManagerDelegate implementation.
   void Inspect(content::DevToolsAgentHost* agent_host) override;
-  void DevToolsAgentStateChanged(content::DevToolsAgentHost* agent_host,
-                                 bool attached) override;
   bool DiscoverTargets(
       const content::DevToolsAgentHost::DiscoveryCallback& callback) override;
   base::DictionaryValue* HandleCommand(
@@ -41,10 +43,15 @@ class ChromeDevToolsManagerDelegate : public content::DevToolsManagerDelegate {
   std::string GetDiscoveryPageHTML() override;
   std::string GetFrontendResource(const std::string& path) override;
 
- private:
+  // content::DevToolsAgentHostObserver overrides.
+  void DevToolsAgentHostAttached(
+      content::DevToolsAgentHost* agent_host) override;
+  void DevToolsAgentHostDetached(
+      content::DevToolsAgentHost* agent_host) override;
+
   void DevicesAvailable(
     const content::DevToolsAgentHost::DiscoveryCallback& callback,
-    const DevToolsAndroidBridge::CompleteDevices& devices);
+    const DevToolsDeviceDiscovery::CompleteDevices& devices);
 
   std::unique_ptr<base::DictionaryValue> SetRemoteLocations(
       content::DevToolsAgentHost* agent_host,

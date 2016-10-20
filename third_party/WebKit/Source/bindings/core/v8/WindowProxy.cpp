@@ -57,8 +57,8 @@
 #include "platform/Histogram.h"
 #include "platform/RuntimeEnabledFeatures.h"
 #include "platform/ScriptForbiddenScope.h"
-#include "platform/TraceEvent.h"
 #include "platform/heap/Handle.h"
+#include "platform/tracing/TraceEvent.h"
 #include "platform/weborigin/SecurityOrigin.h"
 #include "public/platform/Platform.h"
 #include "wtf/Assertions.h"
@@ -219,7 +219,6 @@ bool WindowProxy::initializeIfNeeded() {
 
 bool WindowProxy::initialize() {
   TRACE_EVENT0("v8", "WindowProxy::initialize");
-  TRACE_EVENT_SCOPED_SAMPLING_STATE("blink", "InitializeWindow");
   SCOPED_BLINK_UMA_HISTOGRAM_TIMER("Blink.Binding.InitializeWindowProxy");
 
   ScriptForbiddenScope::AllowUserAgentScript allowScript;

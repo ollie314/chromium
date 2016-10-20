@@ -10,10 +10,10 @@
 #include "base/threading/thread_checker.h"
 #include "content/common/content_export.h"
 #include "media/mojo/interfaces/service_factory.mojom.h"
-#include "services/shell/public/interfaces/interface_provider.mojom.h"
+#include "services/service_manager/public/interfaces/interface_provider.mojom.h"
 #include "url/gurl.h"
 
-namespace shell {
+namespace service_manager {
 class InterfaceProvider;
 }
 
@@ -23,9 +23,10 @@ namespace content {
 // provides media related services and handles disconnection automatically.
 // This class is single threaded.
 class CONTENT_EXPORT MediaInterfaceProvider
-    : public shell::mojom::InterfaceProvider {
+    : public service_manager::mojom::InterfaceProvider {
  public:
-  explicit MediaInterfaceProvider(shell::InterfaceProvider* remote_interfaces);
+  explicit MediaInterfaceProvider(
+      service_manager::InterfaceProvider* remote_interfaces);
   ~MediaInterfaceProvider() final;
 
   // InterfaceProvider implementation.
@@ -37,7 +38,7 @@ class CONTENT_EXPORT MediaInterfaceProvider
   void OnConnectionError();
 
   base::ThreadChecker thread_checker_;
-  shell::InterfaceProvider* remote_interfaces_;
+  service_manager::InterfaceProvider* remote_interfaces_;
   media::mojom::ServiceFactoryPtr media_service_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(MediaInterfaceProvider);

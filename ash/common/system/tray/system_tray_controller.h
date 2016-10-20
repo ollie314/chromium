@@ -5,12 +5,14 @@
 #ifndef ASH_COMMON_SYSTEM_TRAY_SYSTEM_TRAY_CONTROLLER_H_
 #define ASH_COMMON_SYSTEM_TRAY_SYSTEM_TRAY_CONTROLLER_H_
 
+#include "ash/ash_export.h"
 #include "ash/public/interfaces/system_tray.mojom.h"
+#include "base/compiler_specific.h"
 #include "base/i18n/time_formatting.h"
 #include "base/macros.h"
 #include "mojo/public/cpp/bindings/binding_set.h"
 
-namespace shell {
+namespace service_manager {
 class Connector;
 }
 
@@ -29,9 +31,10 @@ namespace ash {
 //
 // TODO: Consider renaming this to SystemTrayClient or renaming the current
 // SystemTray to SystemTrayView and making this class SystemTray.
-class SystemTrayController : public mojom::SystemTray {
+class ASH_EXPORT SystemTrayController
+    : NON_EXPORTED_BASE(public mojom::SystemTray) {
  public:
-  explicit SystemTrayController(shell::Connector* connector);
+  explicit SystemTrayController(service_manager::Connector* connector);
   ~SystemTrayController() override;
 
   base::HourClockType hour_clock_type() const { return hour_clock_type_; }
@@ -49,6 +52,8 @@ class SystemTrayController : public mojom::SystemTray {
   void ShowPaletteHelp();
   void ShowPaletteSettings();
   void ShowPublicAccountInfo();
+  void ShowNetworkConfigure(const std::string& network_id);
+  void ShowNetworkSettings(const std::string& network_id);
   void ShowProxySettings();
 
   // Binds the mojom::SystemTray interface to this object.
@@ -66,7 +71,7 @@ class SystemTrayController : public mojom::SystemTray {
   void SetUse24HourClock(bool use_24_hour) override;
 
   // May be null in unit tests.
-  shell::Connector* connector_;
+  service_manager::Connector* connector_;
 
   // Client interface in chrome browser. Only bound on Chrome OS.
   mojom::SystemTrayClientPtr system_tray_client_;

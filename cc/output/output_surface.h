@@ -10,9 +10,7 @@
 
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/weak_ptr.h"
 #include "base/threading/thread_checker.h"
-#include "base/trace_event/memory_dump_provider.h"
 #include "cc/base/cc_export.h"
 #include "cc/output/context_provider.h"
 #include "cc/output/overlay_candidate_validator.h"
@@ -35,9 +33,9 @@ class Transform;
 
 namespace cc {
 
-class CompositorFrame;
 struct ManagedMemoryPolicy;
 class OutputSurfaceClient;
+class OutputSurfaceFrame;
 
 // Represents the output surface for a compositor. The compositor owns
 // and manages its destruction. Its lifetime is:
@@ -46,7 +44,7 @@ class OutputSurfaceClient;
 //      From here on, it will only be used on the compositor thread.
 //   3. If the 3D context is lost, then the compositor will delete the output
 //      surface (on the compositor thread) and go back to step 1.
-class CC_EXPORT OutputSurface : public base::trace_event::MemoryDumpProvider {
+class CC_EXPORT OutputSurface {
  public:
   struct Capabilities {
     Capabilities() = default;
@@ -67,15 +65,12 @@ class CC_EXPORT OutputSurface : public base::trace_event::MemoryDumpProvider {
   explicit OutputSurface(
       scoped_refptr<VulkanContextProvider> vulkan_context_provider);
 
-  ~OutputSurface() override;
+  virtual ~OutputSurface();
 
   // Called by the compositor on the compositor thread. This is a place where
-  // thread-specific data for the output surface can be initialized, since from
-  // this point to when DetachFromClient() is called the output surface will
-  // only be used on the compositor thread.
-  // The caller should call DetachFromClient() on the same thread before
-  // destroying the OutputSurface, even if this fails. And BindToClient should
-  // not be called twice for a given OutputSurface.
+  // thread-specific data for the output surface can be initialized. The
+  // OutputSurface will be destroyed on the same thread that BoundToClient is
+  // called on.
   virtual bool BindToClient(OutputSurfaceClient* client);
 
   const Capabilities& capabilities() const { return capabilities_; }
@@ -99,10 +94,6 @@ class CC_EXPORT OutputSurface : public base::trace_event::MemoryDumpProvider {
   // OutputSurfaces.
   virtual void BindFramebuffer() = 0;
 
-  const gfx::ColorSpace& device_color_space() const {
-    return device_color_space_;
-  }
-
   // Get the class capable of informing cc of hardware overlay capability.
   virtual OverlayCandidateValidator* GetOverlayCandidateValidator() const = 0;
 
@@ -116,10 +107,9 @@ class CC_EXPORT OutputSurface : public base::trace_event::MemoryDumpProvider {
   virtual bool SurfaceIsSuspendForRecycle() const = 0;
 
   virtual void Reshape(const gfx::Size& size,
-                       float scale_factor,
+                       float device_scale_factor,
                        const gfx::ColorSpace& color_space,
-                       bool alpha);
-  gfx::Size SurfaceSize() const { return surface_size_; }
+                       bool has_alpha) = 0;
 
   virtual bool HasExternalStencilTest() const = 0;
   virtual void ApplyExternalStencil() = 0;
@@ -128,19 +118,12 @@ class CC_EXPORT OutputSurface : public base::trace_event::MemoryDumpProvider {
   // when the framebuffer is bound via BindFramebuffer().
   virtual uint32_t GetFramebufferCopyTextureFormat() = 0;
 
-  // The implementation may destroy or steal the contents of the CompositorFrame
-  // passed in (though it will not take ownership of the CompositorFrame
-  // itself). For successful swaps, the implementation must call
-  // OutputSurfaceClient::DidSwapBuffersComplete() eventually.
-  virtual void SwapBuffers(CompositorFrame frame) = 0;
-
-  // base::trace_event::MemoryDumpProvider implementation.
-  bool OnMemoryDump(const base::trace_event::MemoryDumpArgs& args,
-                    base::trace_event::ProcessMemoryDump* pmd) override;
+  // Swaps the current backbuffer to the screen. For successful swaps, the
+  // implementation must call OutputSurfaceClient::DidReceiveSwapBuffersAck()
+  // after returning from this method in order to unblock the next frame.
+  virtual void SwapBuffers(OutputSurfaceFrame frame) = 0;
 
  protected:
-  void PostSwapBuffersComplete();
-
   // Used internally for the context provider to inform the client about loss,
   // and can be overridden to change behaviour instead of informing the client.
   virtual void DidLoseOutputSurface();
@@ -151,18 +134,9 @@ class CC_EXPORT OutputSurface : public base::trace_event::MemoryDumpProvider {
   scoped_refptr<ContextProvider> context_provider_;
   scoped_refptr<VulkanContextProvider> vulkan_context_provider_;
   std::unique_ptr<SoftwareOutputDevice> software_device_;
-  gfx::Size surface_size_;
-  float device_scale_factor_ = -1;
-  gfx::ColorSpace device_color_space_;
-  bool has_alpha_ = true;
-  gfx::ColorSpace color_space_;
   base::ThreadChecker thread_checker_;
 
  private:
-  void OnSwapBuffersComplete();
-
-  base::WeakPtrFactory<OutputSurface> weak_ptr_factory_;
-
   DISALLOW_COPY_AND_ASSIGN(OutputSurface);
 };
 

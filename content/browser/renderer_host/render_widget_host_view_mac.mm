@@ -4,6 +4,7 @@
 
 #include "content/browser/renderer_host/render_widget_host_view_mac.h"
 
+#import <Carbon/Carbon.h>
 #import <objc/runtime.h>
 #include <OpenGL/gl.h>
 #include <QuartzCore/QuartzCore.h>
@@ -415,6 +416,9 @@ void RenderWidgetHostViewMac::BrowserCompositorMacOnLostCompositorResources() {
 
 void RenderWidgetHostViewMac::BrowserCompositorMacSendBeginFrame(
     const cc::BeginFrameArgs& args) {
+  needs_flush_input_ = false;
+  render_widget_host_->FlushInput();
+  UpdateNeedsBeginFramesInternal();
   render_widget_host_->Send(
       new ViewMsg_BeginFrame(render_widget_host_->GetRoutingID(), args));
 }
@@ -451,6 +455,8 @@ RenderWidgetHostViewMac::RenderWidgetHostViewMac(RenderWidgetHost* widget,
       allow_pause_for_resize_or_repaint_(true),
       is_guest_view_hack_(is_guest_view_hack),
       fullscreen_parent_host_view_(nullptr),
+      needs_begin_frames_(false),
+      needs_flush_input_(false),
       weak_factory_(this) {
   // |cocoa_view_| owns us and we will be deleted when |cocoa_view_|
   // goes away.  Since we autorelease it, our caller must put
@@ -879,13 +885,25 @@ void RenderWidgetHostViewMac::OnUpdateTextInputStateCalled(
   if (!did_update_state)
     return;
 
+  // |updated_view| is the last view to change its TextInputState which can be
+  // used to start/stop monitoring composition info when it has a focused
+  // editable text input field.
+  RenderWidgetHost* widgetHost = updated_view->GetRenderWidgetHost();
+
+  // We might end up here when |updated_view| has had active TextInputState and
+  // then got destroyed. In that case, |updated_view->GetRenderWidgetHost()|
+  // returns nullptr.
+  if (!widgetHost)
+    return;
+
   // Set the monitor state based on the text input focus state.
   const bool has_focus = HasFocus();
   const TextInputState* state = text_input_manager->GetTextInputState();
   bool need_monitor_composition =
       has_focus && state && state->type != ui::TEXT_INPUT_TYPE_NONE;
-  Send(new InputMsg_RequestCompositionUpdate(
-      render_widget_host_->GetRoutingID(), false /* immediate request */,
+
+  widgetHost->Send(new InputMsg_RequestCompositionUpdate(
+      widgetHost->GetRoutingID(), false /* immediate request */,
       need_monitor_composition));
 
   if (has_focus) {
@@ -1187,7 +1205,18 @@ void RenderWidgetHostViewMac::ForwardMouseEvent(const WebMouseEvent& event) {
 }
 
 void RenderWidgetHostViewMac::SetNeedsBeginFrames(bool needs_begin_frames) {
-  browser_compositor_->SetNeedsBeginFrames(needs_begin_frames);
+  needs_begin_frames_ = needs_begin_frames;
+  UpdateNeedsBeginFramesInternal();
+}
+
+void RenderWidgetHostViewMac::OnSetNeedsFlushInput() {
+  needs_flush_input_ = true;
+  UpdateNeedsBeginFramesInternal();
+}
+
+void RenderWidgetHostViewMac::UpdateNeedsBeginFramesInternal() {
+  browser_compositor_->SetNeedsBeginFrames(needs_begin_frames_ ||
+                                           needs_flush_input_);
 }
 
 void RenderWidgetHostViewMac::KillSelf() {
@@ -1530,27 +1559,31 @@ void RenderWidgetHostViewMac::ProcessGestureEvent(
   render_widget_host_->ForwardGestureEventWithLatencyInfo(event, latency);
 }
 
-gfx::Point RenderWidgetHostViewMac::TransformPointToLocalCoordSpace(
+bool RenderWidgetHostViewMac::TransformPointToLocalCoordSpace(
     const gfx::Point& point,
-    const cc::SurfaceId& original_surface) {
-  gfx::Point transformed_point;
+    const cc::SurfaceId& original_surface,
+    gfx::Point* transformed_point) {
   // Transformations use physical pixels rather than DIP, so conversion
   // is necessary.
   float scale_factor = display::Screen::GetScreen()
                            ->GetDisplayNearestWindow(cocoa_view_)
                            .device_scale_factor();
   gfx::Point point_in_pixels = gfx::ConvertPointToPixel(scale_factor, point);
-  transformed_point =
-      browser_compositor_->GetDelegatedFrameHost()
-          ->TransformPointToLocalCoordSpace(point_in_pixels, original_surface);
-  return gfx::ConvertPointToDIP(scale_factor, transformed_point);
+  if (!browser_compositor_->GetDelegatedFrameHost()
+           ->TransformPointToLocalCoordSpace(point_in_pixels, original_surface,
+                                             transformed_point))
+    return false;
+  *transformed_point = gfx::ConvertPointToDIP(scale_factor, *transformed_point);
+  return true;
 }
 
-gfx::Point RenderWidgetHostViewMac::TransformPointToCoordSpaceForView(
+bool RenderWidgetHostViewMac::TransformPointToCoordSpaceForView(
     const gfx::Point& point,
-    RenderWidgetHostViewBase* target_view) {
+    RenderWidgetHostViewBase* target_view,
+    gfx::Point* transformed_point) {
   return browser_compositor_->GetDelegatedFrameHost()
-      ->TransformPointToCoordSpaceForView(point, target_view);
+      ->TransformPointToCoordSpaceForView(point, target_view,
+                                          transformed_point);
 }
 
 bool RenderWidgetHostViewMac::Send(IPC::Message* message) {
@@ -2340,14 +2373,34 @@ void RenderWidgetHostViewMac::OnDisplayMetricsChanged(
 
 - (void)showLookUpDictionaryOverlayFromRange:(NSRange)range
                                   targetView:(NSView*)targetView {
+  RenderWidgetHostImpl* widgetHost = renderWidgetHostView_->render_widget_host_;
+  if (!widgetHost || !widgetHost->delegate())
+    return;
+  widgetHost = widgetHost->delegate()->GetFocusedRenderWidgetHost(widgetHost);
+
+  if (!widgetHost)
+    return;
+
+  // TODO(ekaramad): The position reported by the renderer is with respect to
+  // |widgetHost|'s coordinate space with y-axis inverted to conform to AppKit
+  // coordinate system. The point will need to be transformed into root view's
+  // coordinate system (RenderWidgetHostViewMac in this case). However, since
+  // the callback is invoked on IO thread it will require some thread hopping to
+  // do so. For this reason, for now, we accept this non-ideal way of fixing the
+  // point offset manually from the view bounds. This should be revisited when
+  // fixing issues in TextInputClientMac (https://crbug.com/643233).
+  gfx::Rect root_box = renderWidgetHostView_->GetViewBounds();
+  gfx::Rect view_box = widgetHost->GetView()->GetViewBounds();
+
   TextInputClientMac::GetInstance()->GetStringFromRange(
-      renderWidgetHostView_->render_widget_host_, range,
-      ^(NSAttributedString* string, NSPoint baselinePoint) {
+      widgetHost, range, ^(NSAttributedString* string, NSPoint baselinePoint) {
+        baselinePoint.x += view_box.origin().x() - root_box.origin().x();
+        baselinePoint.y +=
+            root_box.bottom_left().y() - view_box.bottom_left().y();
         [self showLookUpDictionaryOverlayInternal:string
                                     baselinePoint:baselinePoint
                                        targetView:targetView];
-      }
-  );
+      });
 }
 
 - (void)showLookUpDictionaryOverlayAtPoint:(NSPoint)point {
@@ -3272,17 +3325,8 @@ extern NSString *NSTextInputReplacementRangeAttributeName;
   if (!hasMarkedText_)
     return;
 
-  // Cancel the ongoing composition. [NSInputManager markedTextAbandoned:]
-  // doesn't call any NSTextInput functions, such as setMarkedText or
-  // insertText. So, we need to send an IPC message to a renderer so it can
-  // delete the composition node.
-  // TODO(erikchen): NSInputManager is deprecated since OSX 10.6. Switch to
-  // NSTextInputContext. http://www.crbug.com/479010.
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-  NSInputManager *currentInputManager = [NSInputManager currentInputManager];
-  [currentInputManager markedTextAbandoned:self];
-#pragma clang diagnostic pop
+  NSTextInputContext* inputContext = [self inputContext];
+  [inputContext discardMarkedText];
 
   hasMarkedText_ = NO;
   // Should not call [self unmarkText] here, because it'll send unnecessary

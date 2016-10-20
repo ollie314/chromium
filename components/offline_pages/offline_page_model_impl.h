@@ -44,8 +44,6 @@ class TimeTicks;
 
 namespace offline_pages {
 
-static const int64_t kInvalidOfflineId = 0;
-
 struct ClientId;
 struct OfflinePageItem;
 
@@ -94,11 +92,6 @@ class OfflinePageModelImpl : public OfflinePageModel, public KeyedService {
       const SingleOfflinePageItemCallback& callback) override;
   const OfflinePageItem* MaybeGetPageByOfflineId(
       int64_t offline_id) const override;
-  void GetPageByOfflineURL(
-      const GURL& offline_url,
-      const SingleOfflinePageItemCallback& callback) override;
-  const OfflinePageItem* MaybeGetPageByOfflineURL(
-      const GURL& offline_url) const override;
   void GetPagesByOnlineURL(
       const GURL& online_url,
       const MultipleOfflinePageItemCallback& callback) override;
@@ -150,11 +143,8 @@ class OfflinePageModelImpl : public OfflinePageModel, public KeyedService {
       int64_t offline_id,
       const SingleOfflinePageItemCallback& callback) const;
   void GetPagesByOnlineURLWhenLoadDone(
-      const GURL& offline_url,
+      const GURL& online_url,
       const MultipleOfflinePageItemCallback& callback) const;
-  void GetPageByOfflineURLWhenLoadDone(
-      const GURL& offline_url,
-      const SingleOfflinePageItemCallback& callback) const;
   void MarkPageAccessedWhenLoadDone(int64_t offline_id);
 
   void CheckMetadataConsistency();
@@ -247,8 +237,8 @@ class OfflinePageModelImpl : public OfflinePageModel, public KeyedService {
   // Post task to clear storage.
   void PostClearStorageIfNeededTask();
 
-  // Check if |offline_page| is user-requested.
-  bool IsUserRequestedPage(const OfflinePageItem& offline_page) const;
+  // Check if |offline_page| should be removed on cache reset by user.
+  bool IsRemovedOnCacheReset(const OfflinePageItem& offline_page) const;
 
   void RunWhenLoaded(const base::Closure& job);
 

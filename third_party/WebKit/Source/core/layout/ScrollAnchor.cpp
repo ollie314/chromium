@@ -9,6 +9,7 @@
 #include "core/layout/LayoutBlockFlow.h"
 #include "core/layout/api/LayoutBoxItem.h"
 #include "core/layout/line/InlineTextBox.h"
+#include "core/paint/PaintLayer.h"
 #include "core/paint/PaintLayerScrollableArea.h"
 #include "platform/Histogram.h"
 
@@ -34,11 +35,11 @@ void ScrollAnchor::setScroller(ScrollableArea* scroller) {
   DCHECK(scroller->isRootFrameViewport() || scroller->isFrameView() ||
          scroller->isPaintLayerScrollableArea());
   m_scroller = scroller;
-  clear();
+  clearSelf();
 }
 
-// TODO(pilgrim) replace all instances of scrollerLayoutBox with scrollerLayoutBoxItem
-// https://crbug.com/499321
+// TODO(pilgrim): Replace all instances of scrollerLayoutBox with
+// scrollerLayoutBoxItem, https://crbug.com/499321
 static LayoutBox* scrollerLayoutBox(const ScrollableArea* scroller) {
   LayoutBox* box = scroller->layoutBox();
   DCHECK(box);
@@ -112,7 +113,7 @@ static LayoutRect relativeBounds(const LayoutObject* layoutObject,
   // LayoutBox::scrolledContentOffset.
   if (!RuntimeEnabledFeatures::rootLayerScrollingEnabled() &&
       scrollerBox->isLayoutView())
-    relativeBounds.moveBy(-flooredIntPoint(scroller->scrollPositionDouble()));
+    relativeBounds.moveBy(IntPoint(-scroller->scrollOffsetInt()));
   return relativeBounds;
 }
 
@@ -216,13 +217,13 @@ void ScrollAnchor::save() {
     return;
   m_saved = true;
   DCHECK(m_scroller);
-
-  ScrollbarOrientation blockLayoutAxis =
+  ScrollOffset scrollOffset = m_scroller->scrollOffset();
+  float blockDirectionScrollOffset =
       scrollerLayoutBox(m_scroller)->isHorizontalWritingMode()
-          ? VerticalScrollbar
-          : HorizontalScrollbar;
-  if (m_scroller->scrollPosition(blockLayoutAxis) == 0) {
-    clear();
+          ? scrollOffset.height()
+          : scrollOffset.width();
+  if (blockDirectionScrollOffset == 0) {
+    clearSelf();
     return;
   }
 
@@ -278,7 +279,7 @@ void ScrollAnchor::restore() {
     // Note that we only clear if the adjustment would have been non-zero.
     // This minimizes redundant calls to findAnchor.
     // TODO(skobes): add UMA metric for this.
-    clear();
+    clearSelf();
 
     DEFINE_STATIC_LOCAL(EnumerationHistogram, suppressedBySanaclapHistogram,
                         ("Layout.ScrollAnchor.SuppressedBySanaclap", 2));
@@ -287,8 +288,8 @@ void ScrollAnchor::restore() {
     return;
   }
 
-  m_scroller->setScrollPosition(m_scroller->scrollPositionDouble() + adjustment,
-                                AnchoringScroll);
+  m_scroller->setScrollOffset(
+      m_scroller->scrollOffset() + FloatSize(adjustment), AnchoringScroll);
 
   // Update UMA metric.
   DEFINE_STATIC_LOCAL(EnumerationHistogram, adjustedOffsetHistogram,
@@ -298,12 +299,40 @@ void ScrollAnchor::restore() {
                     UseCounter::ScrollAnchored);
 }
 
-void ScrollAnchor::clear() {
+void ScrollAnchor::clearSelf(bool unconditionally) {
   LayoutObject* anchorObject = m_anchorObject;
   m_anchorObject = nullptr;
 
   if (anchorObject)
-    anchorObject->maybeClearIsScrollAnchorObject();
+    anchorObject->clearIsScrollAnchorObject(unconditionally);
+}
+
+void ScrollAnchor::clearSelf() {
+  clearSelf(false);
+}
+
+void ScrollAnchor::clear() {
+  LayoutObject* layoutObject =
+      m_anchorObject ? m_anchorObject : scrollerLayoutBox(m_scroller);
+  PaintLayer* layer = nullptr;
+  if (LayoutObject* parent = layoutObject->parent())
+    layer = parent->enclosingLayer();
+
+  // Walk up the layer tree to clear any scroll anchors.
+  while (layer) {
+    if (PaintLayerScrollableArea* scrollableArea = layer->getScrollableArea()) {
+      ScrollAnchor* anchor = scrollableArea->scrollAnchor();
+      DCHECK(anchor);
+      anchor->clearSelf(true);
+    }
+    layer = layer->parent();
+  }
+
+  if (FrameView* view = layoutObject->frameView()) {
+    ScrollAnchor* anchor = view->scrollAnchor();
+    DCHECK(anchor);
+    anchor->clearSelf(true);
+  }
 }
 
 bool ScrollAnchor::refersTo(const LayoutObject* layoutObject) const {
@@ -312,7 +341,7 @@ bool ScrollAnchor::refersTo(const LayoutObject* layoutObject) const {
 
 void ScrollAnchor::notifyRemoved(LayoutObject* layoutObject) {
   if (m_anchorObject == layoutObject)
-    clear();
+    clearSelf();
 }
 
 }  // namespace blink

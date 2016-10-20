@@ -66,13 +66,18 @@ void InsertLineBreakCommand::doApply(EditingState* editingState) {
   deleteSelection(editingState);
   if (editingState->isAborted())
     return;
+
+  document().updateStyleAndLayoutIgnorePendingStylesheets();
+
   VisibleSelection selection = endingSelection();
   if (!selection.isNonOrphanedCaretOrRange())
     return;
 
-  VisiblePosition caret(selection.visibleStartDeprecated());
-  // FIXME: If the node is hidden, we should still be able to insert text.
-  // For now, we return to avoid a crash.  https://bugs.webkit.org/show_bug.cgi?id=40342
+  // TODO(xiaochengh): Stop storing VisiblePositions through mutations.
+  VisiblePosition caret(selection.visibleStart());
+  // FIXME: If the node is hidden, we should still be able to insert text. For
+  // now, we return to avoid a crash.
+  // https://bugs.webkit.org/show_bug.cgi?id=40342
   if (caret.isNull())
     return;
 
@@ -90,9 +95,11 @@ void InsertLineBreakCommand::doApply(EditingState* editingState) {
   else
     nodeToInsert = document().createTextNode("\n");
 
+  document().updateStyleAndLayoutIgnorePendingStylesheets();
+
   // FIXME: Need to merge text nodes when inserting just after or before text.
 
-  if (isEndOfParagraphDeprecated(caret) &&
+  if (isEndOfParagraph(createVisiblePosition(caret.toPositionWithAffinity())) &&
       !lineBreakExistsAtVisiblePosition(caret)) {
     bool needExtraLineBreak = !isHTMLHRElement(*pos.anchorNode()) &&
                               !isHTMLTableElement(*pos.anchorNode());
@@ -119,35 +126,38 @@ void InsertLineBreakCommand::doApply(EditingState* editingState) {
       nodeToInsert = extraNode;
     }
 
+    document().updateStyleAndLayoutIgnorePendingStylesheets();
     VisiblePosition endingPosition = VisiblePosition::beforeNode(nodeToInsert);
-    setEndingSelection(createVisibleSelectionDeprecated(
+    setEndingSelection(createVisibleSelection(
         endingPosition, endingSelection().isDirectional()));
   } else if (pos.computeEditingOffset() <= caretMinOffset(pos.anchorNode())) {
     insertNodeAt(nodeToInsert, pos, editingState);
     if (editingState->isAborted())
       return;
+    document().updateStyleAndLayoutIgnorePendingStylesheets();
 
     // Insert an extra br or '\n' if the just inserted one collapsed.
-    if (!isStartOfParagraphDeprecated(
-            VisiblePosition::beforeNode(nodeToInsert))) {
+    if (!isStartOfParagraph(VisiblePosition::beforeNode(nodeToInsert))) {
       insertNodeBefore(nodeToInsert->cloneNode(false), nodeToInsert,
                        editingState);
       if (editingState->isAborted())
         return;
+      document().updateStyleAndLayoutIgnorePendingStylesheets();
     }
 
-    setEndingSelection(createVisibleSelectionDeprecated(
+    setEndingSelection(createVisibleSelection(
         Position::inParentAfterNode(*nodeToInsert), TextAffinity::Downstream,
         endingSelection().isDirectional()));
-    // If we're inserting after all of the rendered text in a text node, or into a non-text node,
-    // a simple insertion is sufficient.
+    // If we're inserting after all of the rendered text in a text node, or into
+    // a non-text node, a simple insertion is sufficient.
   } else if (!pos.anchorNode()->isTextNode() ||
              pos.computeOffsetInContainerNode() >=
                  caretMaxOffset(pos.anchorNode())) {
     insertNodeAt(nodeToInsert, pos, editingState);
     if (editingState->isAborted())
       return;
-    setEndingSelection(createVisibleSelectionDeprecated(
+    document().updateStyleAndLayoutIgnorePendingStylesheets();
+    setEndingSelection(createVisibleSelection(
         Position::inParentAfterNode(*nodeToInsert), TextAffinity::Downstream,
         endingSelection().isDirectional()));
   } else if (pos.anchorNode()->isTextNode()) {
@@ -169,7 +179,8 @@ void InsertLineBreakCommand::doApply(EditingState* editingState) {
       deleteInsignificantTextDownstream(endingPosition);
       DCHECK(!textNode->layoutObject() ||
              textNode->layoutObject()->style()->collapseWhiteSpace());
-      // Deleting insignificant whitespace will remove textNode if it contains nothing but insignificant whitespace.
+      // Deleting insignificant whitespace will remove textNode if it contains
+      // nothing but insignificant whitespace.
       if (textNode->isConnected()) {
         insertTextIntoNode(textNode, 0, nonBreakingSpaceString());
       } else {
@@ -181,9 +192,10 @@ void InsertLineBreakCommand::doApply(EditingState* editingState) {
       }
     }
 
-    setEndingSelection(createVisibleSelectionDeprecated(
-        endingPosition, TextAffinity::Downstream,
-        endingSelection().isDirectional()));
+    document().updateStyleAndLayoutIgnorePendingStylesheets();
+    setEndingSelection(
+        createVisibleSelection(endingPosition, TextAffinity::Downstream,
+                               endingSelection().isDirectional()));
   }
 
   // Handle the case where there is a typing style.
@@ -191,21 +203,26 @@ void InsertLineBreakCommand::doApply(EditingState* editingState) {
   EditingStyle* typingStyle = document().frame()->selection().typingStyle();
 
   if (typingStyle && !typingStyle->isEmpty()) {
-    // Apply the typing style to the inserted line break, so that if the selection
-    // leaves and then comes back, new input will have the right style.
+    // Apply the typing style to the inserted line break, so that if the
+    // selection leaves and then comes back, new input will have the right
+    // style.
     // FIXME: We shouldn't always apply the typing style to the line break here,
     // see <rdar://problem/5794462>.
     applyStyle(typingStyle, firstPositionInOrBeforeNode(nodeToInsert),
                lastPositionInOrAfterNode(nodeToInsert), editingState);
     if (editingState->isAborted())
       return;
-    // Even though this applyStyle operates on a Range, it still sets an endingSelection().
-    // It tries to set a VisibleSelection around the content it operated on. So, that VisibleSelection
-    // will either (a) select the line break we inserted, or it will (b) be a caret just
-    // before the line break (if the line break is at the end of a block it isn't selectable).
-    // So, this next call sets the endingSelection() to a caret just after the line break
-    // that we inserted, or just before it if it's at the end of a block.
-    setEndingSelection(endingSelection().visibleEndDeprecated());
+    // Even though this applyStyle operates on a Range, it still sets an
+    // endingSelection(). It tries to set a VisibleSelection around the content
+    // it operated on. So, that VisibleSelection will either
+    //   (a) select the line break we inserted, or it will
+    //   (b) be a caret just before the line break (if the line break is at the
+    //       end of a block it isn't selectable).
+    // So, this next call sets the endingSelection() to a caret just after the
+    // line break that we inserted, or just before it if it's at the end of a
+    // block.
+    document().updateStyleAndLayoutIgnorePendingStylesheets();
+    setEndingSelection(endingSelection().visibleEnd());
   }
 
   rebalanceWhitespace();

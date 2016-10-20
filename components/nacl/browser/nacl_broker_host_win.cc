@@ -19,7 +19,6 @@
 #include "content/public/common/content_switches.h"
 #include "content/public/common/mojo_channel_switches.h"
 #include "content/public/common/sandboxed_process_launcher_delegate.h"
-#include "ipc/ipc_switches.h"
 #include "mojo/edk/embedder/embedder.h"
 
 namespace {
@@ -74,9 +73,8 @@ bool NaClBrokerHost::Init() {
   if (NaClBrowser::GetDelegate()->DialogsAreSuppressed())
     cmd_line->AppendSwitch(switches::kNoErrorDialogs);
 
-  process_->Launch(new NaClBrokerSandboxedProcessLauncherDelegate,
-                   cmd_line,
-                   true);
+  process_->Launch(new NaClBrokerSandboxedProcessLauncherDelegate, cmd_line,
+                   nullptr, true);
   return true;
 }
 

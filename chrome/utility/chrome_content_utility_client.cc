@@ -26,7 +26,7 @@
 #include "courgette/third_party/bsdiff/bsdiff.h"
 #include "ipc/ipc_channel.h"
 #include "mojo/public/cpp/bindings/strong_binding.h"
-#include "services/shell/public/cpp/interface_registry.h"
+#include "services/service_manager/public/cpp/interface_registry.h"
 #include "third_party/zlib/google/zip.h"
 #include "ui/gfx/geometry/size.h"
 
@@ -190,11 +190,11 @@ bool ChromeContentUtilityClient::OnMessageReceived(
 }
 
 void ChromeContentUtilityClient::ExposeInterfacesToBrowser(
-    shell::InterfaceRegistry* registry) {
+    service_manager::InterfaceRegistry* registry) {
   // When the utility process is running with elevated privileges, we need to
   // filter messages so that only a whitelist of IPCs can run. In Mojo, there's
   // no way of filtering individual messages. Instead, we can avoid adding
-  // non-whitelisted Mojo services to the shell::InterfaceRegistry.
+  // non-whitelisted Mojo services to the service_manager::InterfaceRegistry.
   // TODO(amistry): Use a whitelist once the whistlisted IPCs have been
   // converted to Mojo.
   if (filter_messages_)

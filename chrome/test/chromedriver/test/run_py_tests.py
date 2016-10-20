@@ -858,7 +858,9 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
 
   def testGetLogOnClosedWindow(self):
     self._driver.Load(self.GetHttpUrlForFile('/chromedriver/page_test.html'))
+    old_handles = self._driver.GetWindowHandles()
     self._driver.FindElement('id', 'link').Click()
+    self.WaitForNewWindow(self._driver, old_handles)
     self._driver.CloseWindow()
     try:
       self._driver.GetLog('browser')
@@ -1315,6 +1317,15 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
     self.assertRaisesRegexp(
         chromedriver.UnknownError, "some error",
         self._driver.ExecuteScript, 'throw new Error("some error")')
+
+  def testDoesntCrashWhenScriptLogsUndefinedValue(self):
+    # https://bugs.chromium.org/p/chromedriver/issues/detail?id=1547
+    self._driver.ExecuteScript('var b; console.log(b);')
+
+  def testDoesntThrowWhenPageLogsUndefinedValue(self):
+    # https://bugs.chromium.org/p/chromedriver/issues/detail?id=1547
+    self._driver.Load(self.GetHttpUrlForFile(
+        '/chromedriver/log_undefined_value.html'))
 
 
 class ChromeDriverPageLoadTimeoutTest(ChromeDriverBaseTestWithWebServer):

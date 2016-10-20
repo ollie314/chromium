@@ -6,11 +6,14 @@ found in the LICENSE file.
 
 <!--
 This file is a comprehensive list of Chrome user actions along with the owner
-and description for each user action. A user action should be tied to an actual
-action taken by a user. It should be logged immediately after a user takes the
-action, and should only be logged once per actual event. If an action is not
-user triggered, specify it using not_user_triggered="true" as an attribute to
-the <action> tag.
+and description for each user action.
+
+For best practices on writing user action descriptions, see
+https://chromium.googlesource.com/chromium/src.git/+/HEAD/tools/metrics/actions/README.md
+For details on how to modify this file to add your description, keep reading.
+
+If an action is not user triggered, specify it using not_user_triggered="true"
+as an attribute to the <action> tag.
 
 Please run extract_actions.py to add new actions and pretty-print this file.
 
@@ -3306,6 +3309,7 @@ should be able to be added at any place in this file.
 <action name="CustomTabsMenuReadItLater">
   <owner>ianwen@chromium.org</owner>
   <description>User hit &quot;read it later&quot; menu item.</description>
+  <obsolete>Deprecated as of 10/2016, this feature was removed.</obsolete>
 </action>
 
 <action name="CustomTabsRemoteViewsShown">
@@ -3570,11 +3574,13 @@ should be able to be added at any place in this file.
 <action name="Destination_MostVisited">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
+  <obsolete>No longer recorded.</obsolete>
 </action>
 
 <action name="Destination_MostVisited_OpenURL">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
+  <obsolete>No longer recorded.</obsolete>
 </action>
 
 <action name="Destination_Sessions">
@@ -9946,86 +9952,103 @@ should be able to be added at any place in this file.
 <action name="MostVisited0">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
+  <obsolete>No longer recorded.</obsolete>
 </action>
 
 <action name="MostVisited1">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
+  <obsolete>No longer recorded.</obsolete>
 </action>
 
 <action name="MostVisited2">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
+  <obsolete>No longer recorded.</obsolete>
 </action>
 
 <action name="MostVisited3">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
+  <obsolete>No longer recorded.</obsolete>
 </action>
 
 <action name="MostVisited4">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
+  <obsolete>No longer recorded.</obsolete>
 </action>
 
 <action name="MostVisited5">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
+  <obsolete>No longer recorded.</obsolete>
 </action>
 
 <action name="MostVisited6">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
+  <obsolete>No longer recorded.</obsolete>
 </action>
 
 <action name="MostVisited7">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
+  <obsolete>No longer recorded.</obsolete>
 </action>
 
 <action name="MostVisited8">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
+  <obsolete>No longer recorded.</obsolete>
 </action>
 
 <action name="MostVisited9">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
+  <obsolete>No longer recorded.</obsolete>
 </action>
 
 <action name="MostVisitedReordered">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
+  <obsolete>No longer recorded.</obsolete>
 </action>
 
 <action name="MostVisited_BlacklistCleared">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
+  <obsolete>No longer recorded.</obsolete>
 </action>
 
 <action name="MostVisited_Clicked">
-  <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
-  <description>Please enter the description of this user action.</description>
+  <owner>sfiera@chromium.org</owner>
+  <owner>treib@chromium.org</owner>
+  <description>An NTP tile was clicked. Desktop only.</description>
 </action>
 
 <action name="MostVisited_UrlBlacklisted">
-  <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
-  <description>Please enter the description of this user action.</description>
+  <owner>sfiera@chromium.org</owner>
+  <owner>treib@chromium.org</owner>
+  <description>An NTP tile was blacklisted. iOS only.</description>
 </action>
 
 <action name="MostVisited_UrlPinned">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
+  <obsolete>No longer recorded.</obsolete>
 </action>
 
 <action name="MostVisited_UrlRemoved">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
+  <obsolete>No longer recorded.</obsolete>
 </action>
 
 <action name="MostVisited_UrlUnpinned">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
+  <obsolete>No longer recorded.</obsolete>
 </action>
 
 <action name="Mouse_Down">
@@ -13547,6 +13570,16 @@ should be able to be added at any place in this file.
   </description>
 </action>
 
+<action name="SearchEngine_ManualChange">
+  <owner>ianwen@chromium.org</owner>
+  <description>
+    Recorded when the user has manually switched default search engine, which
+    disables search engine auto switch feature in special locale. This is
+    recorded on Android for every locale, but is currently only meaningful for
+    studying special locales.
+  </description>
+</action>
+
 <action name="SearchWithRLZ">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
@@ -15241,6 +15274,14 @@ should be able to be added at any place in this file.
     Records when the user presses the overview mode button in the Ash system
     tray. Overview mode is a feature of Ash that shows thumbnails of all
     currently-open windows.
+  </description>
+</action>
+
+<action name="Tray_Settings">
+  <owner>bruthig@chromium.org</owner>
+  <owner>tdanderson@chromium.org</owner>
+  <description>
+    Records when the Settings button on the Ash system menu is clicked.
   </description>
 </action>
 

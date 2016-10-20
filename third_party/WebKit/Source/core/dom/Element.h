@@ -38,6 +38,7 @@
 #include "core/dom/SpaceSplitString.h"
 #include "core/html/CollectionType.h"
 #include "platform/heap/Handle.h"
+#include "platform/scroll/ScrollTypes.h"
 #include "public/platform/WebFocusType.h"
 
 namespace blink {
@@ -87,9 +88,10 @@ enum ElementFlags {
   ContainsFullScreenElement = 1 << 3,
   IsInTopLayer = 1 << 4,
   HasPendingResources = 1 << 5,
+  AlreadySpellChecked = 1 << 6,
 
   NumberOfElementFlags =
-      6,  // Required size of bitfield used to store the flags.
+      7,  // Required size of bitfield used to store the flags.
 };
 
 enum class ShadowRootType;
@@ -398,7 +400,8 @@ class CORE_EXPORT Element : public ContainerNode {
 
   virtual LayoutObject* createLayoutObject(const ComputedStyle&);
   virtual bool layoutObjectIsNeeded(const ComputedStyle&);
-  void recalcStyle(StyleRecalcChange, Text* nextTextSibling = nullptr);
+  void recalcStyle(StyleRecalcChange);
+  StyleRecalcChange rebuildLayoutTree();
   void pseudoStateChanged(CSSSelector::PseudoType);
   void setAnimationStyleChange(bool);
   void clearAnimationStyleChange();
@@ -532,7 +535,7 @@ class CORE_EXPORT Element : public ContainerNode {
       Element* newFocusedElement,
       InputDeviceCapabilities* sourceCapabilities = nullptr);
 
-  String innerText();
+  virtual String innerText();
   String outerText();
   String innerHTML() const;
   String outerHTML() const;
@@ -637,6 +640,13 @@ class CORE_EXPORT Element : public ContainerNode {
   void clearHasPendingResources() { clearElementFlag(HasPendingResources); }
   virtual void buildPendingResource() {}
 
+  bool isAlreadySpellChecked() const {
+    return hasElementFlag(AlreadySpellChecked);
+  }
+  void setAlreadySpellChecked(bool value) {
+    setElementFlag(AlreadySpellChecked, value);
+  }
+
   void v0SetCustomElementDefinition(V0CustomElementDefinition*);
   V0CustomElementDefinition* v0CustomElementDefinition() const;
 
@@ -663,8 +673,8 @@ class CORE_EXPORT Element : public ContainerNode {
   bool hasClass() const;
   const SpaceSplitString& classNames() const;
 
-  IntSize savedLayerScrollOffset() const;
-  void setSavedLayerScrollOffset(const IntSize&);
+  ScrollOffset savedLayerScrollOffset() const;
+  void setSavedLayerScrollOffset(const ScrollOffset&);
 
   ElementAnimations* elementAnimations() const;
   ElementAnimations& ensureElementAnimations();
@@ -814,9 +824,6 @@ class CORE_EXPORT Element : public ContainerNode {
   PassRefPtr<ComputedStyle> propagateInheritedProperties(StyleRecalcChange);
 
   StyleRecalcChange recalcOwnStyle(StyleRecalcChange);
-  // TODO(nainar): Make this const ComputedStyle&.
-  StyleRecalcChange rebuildLayoutTree(ComputedStyle&);
-
   inline void checkForEmptyStyleChange();
 
   void updatePseudoElement(PseudoId, StyleRecalcChange);
@@ -939,22 +946,22 @@ inline bool isElementOfType<const Element>(const Element&) {
 // Type casting.
 template <typename T>
 inline T& toElement(Node& node) {
-  ASSERT_WITH_SECURITY_IMPLICATION(isElementOfType<const T>(node));
+  SECURITY_DCHECK(isElementOfType<const T>(node));
   return static_cast<T&>(node);
 }
 template <typename T>
 inline T* toElement(Node* node) {
-  ASSERT_WITH_SECURITY_IMPLICATION(!node || isElementOfType<const T>(*node));
+  SECURITY_DCHECK(!node || isElementOfType<const T>(*node));
   return static_cast<T*>(node);
 }
 template <typename T>
 inline const T& toElement(const Node& node) {
-  ASSERT_WITH_SECURITY_IMPLICATION(isElementOfType<const T>(node));
+  SECURITY_DCHECK(isElementOfType<const T>(node));
   return static_cast<const T&>(node);
 }
 template <typename T>
 inline const T* toElement(const Node* node) {
-  ASSERT_WITH_SECURITY_IMPLICATION(!node || isElementOfType<const T>(*node));
+  SECURITY_DCHECK(!node || isElementOfType<const T>(*node));
   return static_cast<const T*>(node);
 }
 

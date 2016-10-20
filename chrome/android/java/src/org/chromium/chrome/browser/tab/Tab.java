@@ -876,6 +876,7 @@ public class Tab implements ViewGroup.OnHierarchyChangeListener,
      *         {@link TabModel}.
      */
     ChromeActivity getActivity() {
+        if (getWindowAndroid() == null) return null;
         Activity activity = WindowAndroid.activityFromContext(
                 getWindowAndroid().getContext().get());
         if (activity instanceof ChromeActivity) return (ChromeActivity) activity;
@@ -1519,12 +1520,11 @@ public class Tab implements ViewGroup.OnHierarchyChangeListener,
      * @param startActivityOptions Options to pass to {@link Activity#startActivity(Intent, Bundle)}
      * @param finalizeCallback A callback that will be called after the tab is attached to the new
      *                         host activity in {@link #attachAndFinishReparenting}.
-     * @param stayInChrome Whether the user should stay in Chrome after the tab is reparented.
      * @return Whether reparenting succeeded. If false, the tab was not removed and the intent was
      *         not fired.
      */
     public boolean detachAndStartReparenting(Intent intent, Bundle startActivityOptions,
-            Runnable finalizeCallback, boolean stayInChrome) {
+            Runnable finalizeCallback) {
         ChromeActivity activity = getActivity();
         if (activity == null) return false;
 
@@ -1546,11 +1546,14 @@ public class Tab implements ViewGroup.OnHierarchyChangeListener,
             // ensure the global count of tabs is correct. See crbug.com/611806.
             intent.putExtra(IntentHandler.EXTRA_TAB_ID, mId);
             AsyncTabParamsManager.add(mId,
-                    new TabReparentingParams(this, intent, finalizeCallback, stayInChrome));
+                    new TabReparentingParams(this, intent, finalizeCallback));
 
             tabModelSelector.getModel(mIncognito).removeTab(this);
 
-            updateWindowAndroid(null);
+            // TODO(yusufo): We can't call updateWindowAndroid here and set mWindowAndroid to null
+            // because many code paths (including navigation) expect the tab to always be associated
+            // with an activity, and will crash. crbug.com/657007
+            if (mContentViewCore != null) mContentViewCore.updateWindowAndroid(null);
             attachTabContentManager(null);
         }
 
@@ -1588,12 +1591,13 @@ public class Tab implements ViewGroup.OnHierarchyChangeListener,
         setInterceptNavigationDelegate(mDelegateFactory.createInterceptNavigationDelegate(this));
         getAppBannerManager().setIsEnabledForTab(mDelegateFactory.canShowAppBanners(this));
 
+        reparentingParams.finalizeTabReparenting();
+        mIsDetachedForReparenting = false;
+
         // Reload the NativePage (if any), since the old NativePage has a reference to the old
         // activity.
         maybeShowNativePage(getUrl(), true);
 
-        reparentingParams.finalizeTabReparenting();
-        mIsDetachedForReparenting = false;
         mIsTabStateDirty = true;
 
         for (TabObserver observer : mObservers) {
@@ -1837,8 +1841,7 @@ public class Tab implements ViewGroup.OnHierarchyChangeListener,
             }
             mInfoBarContainer.setContentViewCore(mContentViewCore);
 
-            mSwipeRefreshHandler = new SwipeRefreshHandler(mThemedApplicationContext);
-            mSwipeRefreshHandler.setContentViewCore(mContentViewCore);
+            mSwipeRefreshHandler = new SwipeRefreshHandler(mThemedApplicationContext, this);
 
             updateThemeColorIfNeeded(false);
             notifyContentChanged();
@@ -1868,6 +1871,10 @@ public class Tab implements ViewGroup.OnHierarchyChangeListener,
      * @return True, if a native page was displayed for url.
      */
     boolean maybeShowNativePage(String url, boolean forceReload) {
+        // While detached for reparenting we don't have an owning Activity, or TabModelSelector,
+        // so we can't create the native page. The native page will be created once reparenting is
+        // completed.
+        if (mIsDetachedForReparenting) return false;
         NativePage candidateForReuse = forceReload ? null : getNativePage();
         NativePage nativePage = NativePageFactory.createNativePageForURL(url, candidateForReuse,
                 this, getTabModelSelector(), getActivity());
@@ -2351,7 +2358,7 @@ public class Tab implements ViewGroup.OnHierarchyChangeListener,
             mInfoBarContainer.setContentViewCore(null);
         }
         if (mSwipeRefreshHandler != null) {
-            mSwipeRefreshHandler.setContentViewCore(null);
+            mSwipeRefreshHandler.destroy();
             mSwipeRefreshHandler = null;
         }
         mContentViewParent = null;

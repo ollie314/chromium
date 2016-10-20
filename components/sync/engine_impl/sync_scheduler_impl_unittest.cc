@@ -11,6 +11,7 @@
 
 #include "base/bind.h"
 #include "base/location.h"
+#include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/test/test_timeouts.h"
@@ -56,7 +57,7 @@ class MockSyncer : public Syncer {
   MOCK_METHOD2(PollSyncShare, bool(ModelTypeSet, SyncCycle*));
 };
 
-MockSyncer::MockSyncer() : Syncer(NULL) {}
+MockSyncer::MockSyncer() : Syncer(nullptr) {}
 
 typedef std::vector<TimeTicks> SyncShareTimes;
 
@@ -110,7 +111,7 @@ static const size_t kMinNumSamples = 5;
 class SyncSchedulerImplTest : public testing::Test {
  public:
   SyncSchedulerImplTest()
-      : syncer_(NULL), delay_(NULL), weak_ptr_factory_(this) {}
+      : syncer_(nullptr), delay_(nullptr), weak_ptr_factory_(this) {}
 
   class MockDelayProvider : public BackoffDelayProvider {
    public:
@@ -125,7 +126,7 @@ class SyncSchedulerImplTest : public testing::Test {
   void SetUp() override {
     dir_maker_.SetUp();
     syncer_ = new testing::StrictMock<MockSyncer>();
-    delay_ = NULL;
+    delay_ = nullptr;
     extensions_activity_ = new ExtensionsActivity();
 
     routing_info_[THEMES] = GROUP_UI;
@@ -138,26 +139,26 @@ class SyncSchedulerImplTest : public testing::Test {
     workers_.push_back(make_scoped_refptr(new FakeModelWorker(GROUP_DB)));
     workers_.push_back(make_scoped_refptr(new FakeModelWorker(GROUP_PASSIVE)));
 
-    connection_.reset(
-        new MockConnectionManager(directory(), &cancelation_signal_));
+    connection_ = base::MakeUnique<MockConnectionManager>(directory(),
+                                                          &cancelation_signal_);
     connection_->SetServerReachable();
 
-    model_type_registry_.reset(
-        new ModelTypeRegistry(workers_, directory(), &mock_nudge_handler_));
+    model_type_registry_ = base::MakeUnique<ModelTypeRegistry>(
+        workers_, directory(), &mock_nudge_handler_);
 
-    context_.reset(new SyncCycleContext(
+    context_ = base::MakeUnique<SyncCycleContext>(
         connection_.get(), directory(), extensions_activity_.get(),
-        std::vector<SyncEngineEventListener*>(), NULL,
+        std::vector<SyncEngineEventListener*>(), nullptr,
         model_type_registry_.get(),
         true,   // enable keystore encryption
         false,  // force enable pre-commit GU avoidance
-        "fake_invalidator_client_id"));
+        "fake_invalidator_client_id");
     context_->SetRoutingInfo(routing_info_);
     context_->set_notifications_enabled(true);
     context_->set_account_name("Test");
-    scheduler_.reset(new SyncSchedulerImpl("TestSyncScheduler",
-                                           BackoffDelayProvider::FromDefaults(),
-                                           context(), syncer_));
+    scheduler_ = base::MakeUnique<SyncSchedulerImpl>(
+        "TestSyncScheduler", BackoffDelayProvider::FromDefaults(), context(),
+        syncer_);
     scheduler_->SetDefaultNudgeDelay(default_delay());
   }
 

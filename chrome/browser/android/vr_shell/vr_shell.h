@@ -6,21 +6,19 @@
 #define CHROME_BROWSER_ANDROID_VR_SHELL_VR_SHELL_H_
 
 #include <jni.h>
+
 #include <memory>
-#include <vector>
 
 #include "base/android/jni_weak_ref.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/synchronization/lock.h"
-#include "chrome/browser/android/vr_shell/ui_elements.h"
-#include "chrome/browser/android/vr_shell/ui_scene.h"
+#include "chrome/browser/android/vr_shell/vr_math.h"
 #include "device/vr/android/gvr/gvr_delegate.h"
 #include "third_party/gvr-android-sdk/src/ndk/include/vr/gvr/capi/include/gvr.h"
 #include "third_party/gvr-android-sdk/src/ndk/include/vr/gvr/capi/include/gvr_types.h"
 
 namespace content {
-class ContentViewCore;
 class WebContents;
 }
 
@@ -30,20 +28,29 @@ class WindowAndroid;
 
 namespace vr_shell {
 
+class UiScene;
 class VrCompositor;
 class VrController;
 class VrInputManager;
 class VrShellDelegate;
 class VrShellRenderer;
+struct ContentRectangle;
 struct VrGesture;
 
+enum UiAction {
+  HISTORY_BACK = 0,
+  HISTORY_FORWARD,
+  RELOAD,
+  ZOOM_OUT,
+  ZOOM_IN
+};
 
 class VrShell : public device::GvrDelegate {
  public:
   VrShell(JNIEnv* env, jobject obj,
-          content::ContentViewCore* content_cvc,
+          content::WebContents* main_contents,
           ui::WindowAndroid* content_window,
-          content::ContentViewCore* ui_cvc,
+          content::WebContents* ui_contents,
           ui::WindowAndroid* ui_window);
 
   void UpdateCompositorLayers(JNIEnv* env,
@@ -60,6 +67,8 @@ class VrShell : public device::GvrDelegate {
                     jint content_texture_handle,
                     jint ui_texture_handle);
   void DrawFrame(JNIEnv* env, const base::android::JavaParamRef<jobject>& obj);
+  void OnTriggerEvent(JNIEnv* env,
+                      const base::android::JavaParamRef<jobject>& obj);
   void OnPause(JNIEnv* env, const base::android::JavaParamRef<jobject>& obj);
   void OnResume(JNIEnv* env, const base::android::JavaParamRef<jobject>& obj);
   void SetWebVrMode(JNIEnv* env,
@@ -71,7 +80,6 @@ class VrShell : public device::GvrDelegate {
       const content::WebContents* web_contents);
   UiScene* GetScene();
   void OnDomContentsLoaded();
-  void SetUiTextureSize(int width, int height);
 
   // device::GvrDelegate implementation
   void SetWebVRSecureOrigin(bool secure_origin) override;
@@ -79,6 +87,7 @@ class VrShell : public device::GvrDelegate {
   void UpdateWebVRTextureBounds(
       int eye, float left, float top, float width, float height) override;
   gvr::GvrApi* gvr_api() override;
+  void SetGvrPoseForWebVr(const gvr::Mat4f& pose, uint32_t pose_num) override;
 
   void ContentSurfaceChanged(
       JNIEnv* env,
@@ -96,6 +105,9 @@ class VrShell : public device::GvrDelegate {
   // Called from non-render thread to queue a callback onto the render thread.
   // The render thread checks for callbacks and processes them between frames.
   void QueueTask(base::Callback<void()>& callback);
+
+  // Perform a UI action triggered by the javascript API.
+  void DoUiAction(const UiAction action);
 
  private:
   virtual ~VrShell();
@@ -128,9 +140,7 @@ class VrShell : public device::GvrDelegate {
   float desktop_screen_tilt_;
   float desktop_height_;
 
-  ContentRectangle* desktop_plane_;
-
-  UiScene scene_;
+  std::unique_ptr<UiScene> scene_;
 
   std::unique_ptr<gvr::GvrApi> gvr_api_;
   std::unique_ptr<gvr::BufferViewportList> buffer_viewport_list_;
@@ -143,14 +153,15 @@ class VrShell : public device::GvrDelegate {
   base::Lock task_queue_lock_;
 
   std::unique_ptr<VrCompositor> content_compositor_;
-  content::ContentViewCore* content_cvc_;
+  content::WebContents* main_contents_;
   std::unique_ptr<VrCompositor> ui_compositor_;
-  content::ContentViewCore* ui_cvc_;
+  content::WebContents* ui_contents_;
 
-  VrShellDelegate* delegate_;
+  VrShellDelegate* delegate_ = nullptr;
   std::unique_ptr<VrShellRenderer> vr_shell_renderer_;
   base::android::ScopedJavaGlobalRef<jobject> j_vr_shell_;
 
+  bool touch_pending_ = false;
   gvr::Quatf controller_quat_;
 
   gvr::Vec3f target_point_;
@@ -162,6 +173,11 @@ class VrShell : public device::GvrDelegate {
   bool webvr_mode_ = false;
   bool webvr_secure_origin_ = false;
   int64_t webvr_warning_end_nanos_ = 0;
+  // The pose ring buffer size must be a power of two to avoid glitches when
+  // the pose index wraps around. It should be large enough to handle the
+  // current backlog of poses which is 2-3 frames.
+  static constexpr int kPoseRingBufferSize = 8;
+  std::vector<gvr::Mat4f> webvr_head_pose_;
 
   std::unique_ptr<VrController> controller_;
   scoped_refptr<VrInputManager> content_input_manager_;

@@ -37,7 +37,8 @@ RequestPicker::~RequestPicker() {}
 void RequestPicker::ChooseNextRequest(
     RequestCoordinator::RequestPickedCallback picked_callback,
     RequestCoordinator::RequestNotPickedCallback not_picked_callback,
-    DeviceConditions* device_conditions) {
+    DeviceConditions* device_conditions,
+    const std::set<int64_t>& disabled_requests) {
   picked_callback_ = picked_callback;
   not_picked_callback_ = not_picked_callback;
   fewer_retries_better_ = policy_->ShouldPreferUntriedRequests();
@@ -45,12 +46,14 @@ void RequestPicker::ChooseNextRequest(
   current_conditions_.reset(new DeviceConditions(*device_conditions));
   // Get all requests from queue (there is no filtering mechanism).
   queue_->GetRequests(base::Bind(&RequestPicker::GetRequestResultCallback,
-                                 weak_ptr_factory_.GetWeakPtr()));
+                                 weak_ptr_factory_.GetWeakPtr(),
+                                 disabled_requests));
 }
 
 // When we get contents from the queue, use them to pick the next
 // request to operate on (if any).
 void RequestPicker::GetRequestResultCallback(
+    const std::set<int64_t>& disabled_requests,
     RequestQueue::GetRequestsResult,
     std::vector<std::unique_ptr<SavePageRequest>> requests) {
   // If there is nothing to do, return right away.
@@ -86,6 +89,11 @@ void RequestPicker::GetRequestResultCallback(
   // Iterate once through the requests, keeping track of best candidate.
   bool non_user_requested_tasks_remaining = false;
   for (unsigned i = 0; i < valid_requests.size(); ++i) {
+    // If the  request is on the disabled list, skip it.
+    auto search = disabled_requests.find(valid_requests[i]->request_id());
+    if (search != disabled_requests.end()) {
+      continue;
+    }
     if (!valid_requests[i]->user_requested())
       non_user_requested_tasks_remaining = true;
     if (!RequestConditionsSatisfied(valid_requests[i].get()))
@@ -255,15 +263,13 @@ void RequestPicker::SplitRequests(
 // Callback used after expired requests are deleted from the queue and notifies
 // the coordinator.
 void RequestPicker::OnRequestExpired(
-    const RequestQueue::UpdateMultipleRequestResults& results,
-    const std::vector<std::unique_ptr<SavePageRequest>> requests) {
-    for (const auto& request : requests) {
-    const RequestCoordinator::BackgroundSavePageResult result(
-        RequestCoordinator::BackgroundSavePageResult::EXPIRED);
+    std::unique_ptr<UpdateRequestsResult> result) {
+  const RequestCoordinator::BackgroundSavePageResult save_page_result(
+      RequestCoordinator::BackgroundSavePageResult::EXPIRED);
+  for (const auto& request : result->updated_items) {
     event_logger_->RecordDroppedSavePageRequest(
-        request->client_id().name_space, result,
-        request->request_id());
-    notifier_->NotifyCompleted(*request, result);
+        request.client_id().name_space, save_page_result, request.request_id());
+    notifier_->NotifyCompleted(request, save_page_result);
   }
 }
 

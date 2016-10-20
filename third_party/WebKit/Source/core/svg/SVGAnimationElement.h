@@ -69,8 +69,6 @@ class CORE_EXPORT SVGAnimationElement : public SVGSMILElement {
   DEFINE_MAPPED_ATTRIBUTE_EVENT_LISTENER(end, endEvent);
   DEFINE_MAPPED_ATTRIBUTE_EVENT_LISTENER(repeat, repeatEvent);
 
-  static bool isTargetAttributeCSSProperty(SVGElement*, const QualifiedName&);
-
   virtual bool isAdditive();
   bool isAccumulated() const;
   AnimationMode getAnimationMode() const { return m_animationMode; }
@@ -118,9 +116,6 @@ class CORE_EXPORT SVGAnimationElement : public SVGSMILElement {
                       const AtomicString&) override;
   void svgAttributeChanged(const QualifiedName&) override;
 
-  enum AttributeType { AttributeTypeCSS, AttributeTypeXML, AttributeTypeAuto };
-  AttributeType getAttributeType() const { return m_attributeType; }
-
   String toValue() const;
   String byValue() const;
   String fromValue() const;
@@ -130,13 +125,6 @@ class CORE_EXPORT SVGAnimationElement : public SVGSMILElement {
   void updateAnimation(float percent,
                        unsigned repeat,
                        SVGSMILElement* resultElement) override;
-
-  void setTargetElement(SVGElement*) override;
-  void setAttributeName(const QualifiedName&) override;
-
-  bool hasInvalidCSSAttributeType() const {
-    return m_hasInvalidCSSAttributeType;
-  }
 
   virtual void updateAnimationMode();
   void setAnimationMode(AnimationMode animationMode) {
@@ -151,13 +139,10 @@ class CORE_EXPORT SVGAnimationElement : public SVGSMILElement {
   // http://www.w3.org/TR/SVG/animate.html#ValuesAttribute .
   static bool parseValues(const String&, Vector<String>& result);
 
+  void animationAttributeChanged() override;
+
  private:
   bool isValid() const final { return SVGTests::isValid(); }
-
-  void animationAttributeChanged() override;
-  void setAttributeType(const AtomicString&);
-
-  void checkInvalidCSSAttributeType();
 
   virtual bool calculateToAtEndOfDurationValue(
       const String& toAtEndOfDurationString) = 0;
@@ -191,7 +176,6 @@ class CORE_EXPORT SVGAnimationElement : public SVGSMILElement {
 
   bool m_animationValid;
 
-  AttributeType m_attributeType;
   Vector<String> m_values;
   // FIXME: We should probably use doubles for this, but there's no point
   // making such a change unless all SVG logic for sampling animations is
@@ -201,7 +185,6 @@ class CORE_EXPORT SVGAnimationElement : public SVGSMILElement {
   Vector<gfx::CubicBezier> m_keySplines;
   String m_lastValuesAnimationFrom;
   String m_lastValuesAnimationTo;
-  bool m_hasInvalidCSSAttributeType;
   CalcMode m_calcMode;
   AnimationMode m_animationMode;
 };

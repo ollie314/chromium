@@ -38,7 +38,8 @@
 #include "wtf/Allocator.h"
 #include "wtf/Vector.h"
 
-// Mac OS X 10.6 SDK defines check() macro that interfares with our check() method
+// Mac OS X 10.6 SDK defines check() macro that interferes with our check()
+// method
 #ifdef check
 #undef check
 #endif
@@ -102,7 +103,7 @@ class FontFaceSet final : public EventTargetWithInlineData,
   // ActiveDOMObject
   void suspend() override;
   void resume() override;
-  void stop() override;
+  void contextDestroyed() override;
 
   static FontFaceSet* from(Document&);
   static void didLayout(Document&);

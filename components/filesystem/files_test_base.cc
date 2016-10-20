@@ -8,7 +8,7 @@
 
 #include "components/filesystem/public/interfaces/directory.mojom.h"
 #include "components/filesystem/public/interfaces/types.mojom.h"
-#include "services/shell/public/cpp/connector.h"
+#include "services/service_manager/public/cpp/connector.h"
 
 namespace filesystem {
 
@@ -21,7 +21,7 @@ FilesTestBase::~FilesTestBase() {
 
 void FilesTestBase::SetUp() {
   ServiceTest::SetUp();
-  connector()->ConnectToInterface("mojo:filesystem", &files_);
+  connector()->ConnectToInterface("service:filesystem", &files_);
 }
 
 void FilesTestBase::GetTemporaryRoot(mojom::DirectoryPtr* directory) {

@@ -27,7 +27,7 @@
 #include "core/dom/Element.h"
 #include "core/frame/Deprecation.h"
 #include "core/frame/UseCounter.h"
-#include "platform/TraceEvent.h"
+#include "platform/tracing/TraceEvent.h"
 #include "wtf/PtrUtil.h"
 #include <bitset>
 #include <memory>
@@ -49,6 +49,8 @@ bool CSSParserImpl::parseValue(MutableStylePropertySet* declaration,
   StyleRule::RuleType ruleType = StyleRule::Style;
   if (declaration->cssParserMode() == CSSViewportRuleMode)
     ruleType = StyleRule::Viewport;
+  else if (declaration->cssParserMode() == CSSFontFaceRuleMode)
+    ruleType = StyleRule::FontFace;
   CSSTokenizer::Scope scope(string);
   parser.consumeDeclarationValue(scope.tokenRange(), unresolvedProperty,
                                  important, ruleType);
@@ -61,10 +63,12 @@ bool CSSParserImpl::parseVariableValue(MutableStylePropertySet* declaration,
                                        const AtomicString& propertyName,
                                        const String& value,
                                        bool important,
-                                       const CSSParserContext& context) {
+                                       const CSSParserContext& context,
+                                       bool isAnimationTainted) {
   CSSParserImpl parser(context);
   CSSTokenizer::Scope scope(value);
-  parser.consumeVariableValue(scope.tokenRange(), propertyName, important);
+  parser.consumeVariableValue(scope.tokenRange(), propertyName, important,
+                              isAnimationTainted);
   if (parser.m_parsedProperties.isEmpty())
     return false;
   return declaration->addParsedProperties(parser.m_parsedProperties);
@@ -77,7 +81,8 @@ static inline void filterProperties(
     size_t& unusedEntries,
     std::bitset<numCSSProperties>& seenProperties,
     HashSet<AtomicString>& seenCustomProperties) {
-  // Add properties in reverse order so that highest priority definitions are reached first. Duplicate definitions can then be ignored when found.
+  // Add properties in reverse order so that highest priority definitions are
+  // reached first. Duplicate definitions can then be ignored when found.
   for (size_t i = input.size(); i--;) {
     const CSSProperty& property = input[i];
     if (property.isImportant() != important)
@@ -427,7 +432,8 @@ StyleRuleBase* CSSParserImpl::consumeAtRule(CSSParserTokenRange& range,
   if (allowedRules == KeyframeRules)
     return nullptr;  // Parse error, no at-rules supported inside @keyframes
   if (allowedRules == NoRules || allowedRules == ApplyRules)
-    return nullptr;  // Parse error, no at-rules with blocks supported inside declaration lists
+    return nullptr;  // Parse error, no at-rules with blocks supported inside
+                     // declaration lists
 
   ASSERT(allowedRules <= RegularRules);
 
@@ -608,6 +614,9 @@ StyleRuleViewport* CSSParserImpl::consumeViewportRule(
     m_observerWrapper->observer().endRuleBody(endOffset);
   }
 
+  if (m_styleSheet)
+    m_styleSheet->setHasViewportRule();
+
   consumeDeclarationList(block, StyleRule::Viewport);
   return StyleRuleViewport::create(
       createStylePropertySet(m_parsedProperties, CSSViewportRuleMode));
@@ -633,7 +642,7 @@ StyleRuleFontFace* CSSParserImpl::consumeFontFaceRule(
 
   consumeDeclarationList(block, StyleRule::FontFace);
   return StyleRuleFontFace::create(
-      createStylePropertySet(m_parsedProperties, m_context.mode()));
+      createStylePropertySet(m_parsedProperties, CSSFontFaceRuleMode));
 }
 
 StyleRuleKeyframes* CSSParserImpl::consumeKeyframesRule(
@@ -643,7 +652,8 @@ StyleRuleKeyframes* CSSParserImpl::consumeKeyframesRule(
   CSSParserTokenRange rangeCopy = prelude;  // For inspector callbacks
   const CSSParserToken& nameToken = prelude.consumeIncludingWhitespace();
   if (!prelude.atEnd())
-    return nullptr;  // Parse error; expected single non-whitespace token in @keyframes header
+    return nullptr;  // Parse error; expected single non-whitespace token in
+                     // @keyframes header
 
   String name;
   if (nameToken.type() == IdentToken) {
@@ -809,7 +819,7 @@ void CSSParserImpl::consumeDeclarationList(CSSParserTokenRange range,
                 ? ApplyRules
                 : NoRules;
         StyleRuleBase* rule = consumeAtRule(range, allowedRules);
-        ASSERT_UNUSED(rule, !rule);
+        DCHECK(!rule);
         break;
       }
       default:  // Parse error, unexpected token in declaration list
@@ -854,13 +864,17 @@ void CSSParserImpl::consumeDeclaration(CSSParserTokenRange range,
   }
 
   size_t propertiesCount = m_parsedProperties.size();
-  // TODO(timloh): This only be for StyleRule::Style, crbug.com/641873.
+  // TODO(timloh): This should only be for StyleRule::Style/Keyframe,
+  // crbug.com/641873.
   if (unresolvedProperty == CSSPropertyVariable) {
     AtomicString variableName = token.value().toAtomicString();
+    bool isAnimationTainted = ruleType == StyleRule::Keyframe;
     consumeVariableValue(range.makeSubRange(&range.peek(), declarationValueEnd),
-                         variableName, important);
+                         variableName, important, isAnimationTainted);
   }
 
+  // TODO(timloh): Should this check occur before the call to
+  // consumeVariableValue()?
   if (important &&
       (ruleType == StyleRule::FontFace || ruleType == StyleRule::Keyframe))
     return;
@@ -886,9 +900,11 @@ void CSSParserImpl::consumeDeclaration(CSSParserTokenRange range,
 
 void CSSParserImpl::consumeVariableValue(CSSParserTokenRange range,
                                          const AtomicString& variableName,
-                                         bool important) {
+                                         bool important,
+                                         bool isAnimationTainted) {
   if (CSSCustomPropertyDeclaration* value =
-          CSSVariableParser::parseDeclarationValue(variableName, range))
+          CSSVariableParser::parseDeclarationValue(variableName, range,
+                                                   isAnimationTainted))
     m_parsedProperties.append(
         CSSProperty(CSSPropertyVariable, *value, important));
 }

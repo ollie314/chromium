@@ -132,7 +132,8 @@ bool LayoutSVGInlineText::characterStartsNewTextChunk(int position) const {
   ASSERT(position >= 0);
   ASSERT(position < static_cast<int>(textLength()));
 
-  // Each <textPath> element starts a new text chunk, regardless of any x/y values.
+  // Each <textPath> element starts a new text chunk, regardless of any x/y
+  // values.
   if (!position && parent()->isSVGTextPath() && !previousSibling())
     return true;
 
@@ -150,13 +151,17 @@ PositionWithAffinity LayoutSVGInlineText::positionForPoint(
     return createPositionWithAffinity(0);
 
   ASSERT(m_scalingFactor);
+
+  const SimpleFontData* fontData = m_scaledFont.primaryFont();
+  DCHECK(fontData);
   float baseline =
-      m_scaledFont.getFontMetrics().floatAscent() / m_scalingFactor;
+      fontData ? fontData->getFontMetrics().floatAscent() / m_scalingFactor : 0;
 
   LayoutBlock* containingBlock = this->containingBlock();
   ASSERT(containingBlock);
 
-  // Map local point to absolute point, as the character origins stored in the text fragments use absolute coordinates.
+  // Map local point to absolute point, as the character origins stored in the
+  // text fragments use absolute coordinates.
   FloatPoint absolutePoint(point);
   absolutePoint.moveBy(containingBlock->location());
 
@@ -214,15 +219,11 @@ TextRun constructTextRun(LayoutSVGInlineText& text,
   const ComputedStyle& style = text.styleRef();
 
   TextRun run(
-      static_cast<const LChar*>(
-          nullptr)  // characters, will be set below if non-zero.
-      ,
-      0  // length, will be set below if non-zero.
-      ,
-      0  // xPos, only relevant with allowTabs=true
-      ,
-      0  // padding, only relevant for justified text, not relevant for SVG
-      ,
+      // characters, will be set below if non-zero.
+      static_cast<const LChar*>(nullptr),
+      0,  // length, will be set below if non-zero.
+      0,  // xPos, only relevant with allowTabs=true
+      0,  // padding, only relevant for justified text, not relevant for SVG
       TextRun::AllowTrailingExpansion, textDirection,
       isOverride(style.unicodeBidi()) /* directionalOverride */);
 
@@ -236,7 +237,8 @@ TextRun constructTextRun(LayoutSVGInlineText& text,
   // We handle letter & word spacing ourselves.
   run.disableSpacing();
 
-  // Propagate the maximum length of the characters buffer to the TextRun, even when we're only processing a substring.
+  // Propagate the maximum length of the characters buffer to the TextRun, even
+  // when we're only processing a substring.
   run.setCharactersLength(text.textLength() - position);
   ASSERT(run.charactersLength() >= run.length());
   return run;
@@ -288,8 +290,13 @@ void LayoutSVGInlineText::addMetricsFromRun(const TextRun& run,
       scaledFont().individualCharacterRanges(run);
   synthesizeGraphemeWidths(run, charRanges);
 
+  const SimpleFontData* fontData = scaledFont().primaryFont();
+  DCHECK(fontData);
+  if (!fontData)
+    return;
+
   const float cachedFontHeight =
-      scaledFont().getFontMetrics().floatHeight() / m_scalingFactor;
+      fontData->getFontMetrics().floatHeight() / m_scalingFactor;
   const bool preserveWhiteSpace = styleRef().whiteSpace() == PRE;
   const unsigned runLength = run.length();
 
@@ -368,7 +375,8 @@ void LayoutSVGInlineText::computeNewScaledFontForStyle(
   ASSERT(style);
   ASSERT(layoutObject);
 
-  // Alter font-size to the right on-screen value to avoid scaling the glyphs themselves, except when GeometricPrecision is specified.
+  // Alter font-size to the right on-screen value to avoid scaling the glyphs
+  // themselves, except when GeometricPrecision is specified.
   scalingFactor =
       SVGLayoutSupport::calculateScreenFontSizeScalingFactor(layoutObject);
   if (style->effectiveZoom() == 1 && (scalingFactor == 1 || !scalingFactor)) {
@@ -383,7 +391,8 @@ void LayoutSVGInlineText::computeNewScaledFontForStyle(
   FontDescription fontDescription(style->getFontDescription());
 
   Document& document = layoutObject->document();
-  // FIXME: We need to better handle the case when we compute very small fonts below (below 1pt).
+  // FIXME: We need to better handle the case when we compute very small fonts
+  // below (below 1pt).
   fontDescription.setComputedSize(FontSize::getComputedSizeFromSpecifiedSize(
       &document, scalingFactor, fontDescription.isAbsoluteSize(),
       fontDescription.specifiedSize(), DoNotUseSmartMinimumForFontSize));

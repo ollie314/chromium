@@ -24,6 +24,10 @@ class ThreeDAPIInfoBarDelegate;
 #if defined(OS_ANDROID)
 class MediaStreamInfoBarDelegateAndroid;
 class MediaThrottleInfoBarDelegate;
+
+namespace offline_pages {
+class OfflinePageInfoBarDelegate;
+}
 #endif
 
 namespace translate {
@@ -103,7 +107,7 @@ class InfoBarDelegate {
     RELOAD_PLUGIN_INFOBAR_DELEGATE = 33,
     PLUGIN_OBSERVER = 34,
     SSL_ADD_CERTIFICATE = 35,
-    SSL_ADD_CERTIFICATE_INFOBAR_DELEGATE = 36,
+    // Removed: SSL_ADD_CERTIFICATE_INFOBAR_DELEGATE = 36,
     POPUP_BLOCKED_INFOBAR_DELEGATE = 37,
     CHROME_SELECT_FILE_POLICY = 38,
     KEYSTONE_PROMOTION_INFOBAR_DELEGATE = 39,
@@ -138,6 +142,7 @@ class InfoBarDelegate {
     DATA_REDUCTION_PROXY_PREVIEW_INFOBAR_DELEGATE = 68,
     SCREEN_CAPTURE_INFOBAR_DELEGATE_ANDROID = 69,
     GROUPED_PERMISSION_INFOBAR_DELEGATE_ANDROID = 70,
+    OFFLINE_PAGE_INFOBAR_DELEGATE = 71,
   };
 
   // Describes navigation events, used to decide whether infobars should be
@@ -222,6 +227,8 @@ class InfoBarDelegate {
   virtual MediaStreamInfoBarDelegateAndroid*
   AsMediaStreamInfoBarDelegateAndroid();
   virtual MediaThrottleInfoBarDelegate* AsMediaThrottleInfoBarDelegate();
+  virtual offline_pages::OfflinePageInfoBarDelegate*
+  AsOfflinePageInfoBarDelegate();
 #endif
 
   void set_infobar(InfoBar* infobar) { infobar_ = infobar; }

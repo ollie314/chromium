@@ -21,10 +21,18 @@
 #include "device/bluetooth/dbus/fake_bluetooth_gatt_characteristic_client.h"
 #include "device/bluetooth/dbus/fake_bluetooth_gatt_descriptor_client.h"
 #include "device/bluetooth/dbus/fake_bluetooth_gatt_service_client.h"
+#include "device/bluetooth/dbus/fake_bluetooth_le_advertising_manager_client.h"
 #include "mojo/public/cpp/bindings/array.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+namespace {
+constexpr int16_t kTestRssi = -50;
+constexpr int16_t kTestRssi2 = -70;
+}
+
 namespace arc {
+
+constexpr int kFailureAdvHandle = -1;
 
 class ArcBluetoothBridgeTest : public testing::Test {
  protected:
@@ -47,6 +55,18 @@ class ArcBluetoothBridgeTest : public testing::Test {
         dbus::ObjectPath(bluez::FakeBluetoothDeviceClient::kLowEnergyPath));
     fake_bluetooth_gatt_characteristic_client->ExposeHeartRateCharacteristics(
         fake_bluetooth_gatt_service_client->GetHeartRateServicePath());
+
+    ChangeTestDeviceRssi(kTestRssi);
+  }
+
+  void ChangeTestDeviceRssi(uint16_t rssi) {
+    bluez::BluezDBusManager* dbus_manager = bluez::BluezDBusManager::Get();
+    auto* fake_bluetooth_device_client =
+        static_cast<bluez::FakeBluetoothDeviceClient*>(
+            dbus_manager->GetBluetoothDeviceClient());
+    fake_bluetooth_device_client->UpdateDeviceRSSI(
+        dbus::ObjectPath(bluez::FakeBluetoothDeviceClient::kLowEnergyPath),
+        rssi);
   }
 
   void OnAdapterInitialized(scoped_refptr<device::BluetoothAdapter> adapter) {
@@ -82,6 +102,70 @@ class ArcBluetoothBridgeTest : public testing::Test {
     get_adapter_run_loop_.Run();
   }
 
+  // Helper methods for multi advertisement tests.
+  int32_t ReserveAdvertisementHandle() {
+    constexpr int kSentinelHandle = -2;
+    last_adv_handle_ = kSentinelHandle;
+    arc_bluetooth_bridge_->ReserveAdvertisementHandle(
+        base::Bind(&ArcBluetoothBridgeTest::ReserveAdvertisementHandleCallback,
+                   base::Unretained(this)));
+
+    base::RunLoop().RunUntilIdle();
+    // Make sure the callback was called.
+    EXPECT_NE(kSentinelHandle, last_adv_handle_);
+    return last_adv_handle_;
+  }
+
+  mojom::BluetoothGattStatus BroadcastAdvertisement(
+      int adv_handle,
+      std::unique_ptr<device::BluetoothAdvertisement::Data> data) {
+    last_status_ = mojom::BluetoothGattStatus::GATT_REQUEST_NOT_SUPPORTED;
+    arc_bluetooth_bridge_->BroadcastAdvertisement(
+        adv_handle, std::move(data),
+        base::Bind(&ArcBluetoothBridgeTest::StatusSetterCallback,
+                   base::Unretained(this)));
+
+    base::RunLoop().RunUntilIdle();
+    EXPECT_NE(mojom::BluetoothGattStatus::GATT_REQUEST_NOT_SUPPORTED,
+              last_status_);
+    return last_status_;
+  }
+
+  mojom::BluetoothGattStatus ReleaseAdvertisementHandle(int adv_handle) {
+    last_status_ = mojom::BluetoothGattStatus::GATT_REQUEST_NOT_SUPPORTED;
+    arc_bluetooth_bridge_->ReleaseAdvertisementHandle(
+        adv_handle, base::Bind(&ArcBluetoothBridgeTest::StatusSetterCallback,
+                               base::Unretained(this)));
+
+    base::RunLoop().RunUntilIdle();
+    EXPECT_NE(mojom::BluetoothGattStatus::GATT_REQUEST_NOT_SUPPORTED,
+              last_status_);
+    return last_status_;
+  }
+
+  void ReserveAdvertisementHandleCallback(mojom::BluetoothGattStatus status,
+                                          int32_t adv_handle) {
+    if (status == mojom::BluetoothGattStatus::GATT_FAILURE)
+      last_adv_handle_ = kFailureAdvHandle;
+    else
+      last_adv_handle_ = adv_handle;
+  }
+
+  void StatusSetterCallback(mojom::BluetoothGattStatus status) {
+    last_status_ = status;
+  }
+
+  int NumActiveAdvertisements() {
+    bluez::FakeBluetoothLEAdvertisingManagerClient* adv_client =
+        static_cast<bluez::FakeBluetoothLEAdvertisingManagerClient*>(
+            bluez::BluezDBusManager::Get()
+                ->GetBluetoothLEAdvertisingManagerClient());
+    return adv_client->currently_registered();
+  }
+
+  int last_adv_handle_;
+  mojom::BluetoothGattStatus last_status_;
+
   std::unique_ptr<FakeArcBridgeService> fake_arc_bridge_service_;
   std::unique_ptr<FakeBluetoothInstance> fake_bluetooth_instance_;
   std::unique_ptr<ArcBluetoothBridge> arc_bluetooth_bridge_;
@@ -96,7 +180,7 @@ class ArcBluetoothBridgeTest : public testing::Test {
 TEST_F(ArcBluetoothBridgeTest, DeviceFound) {
   EXPECT_EQ(0u, fake_bluetooth_instance_->device_found_data().size());
   AddTestDevice();
-  EXPECT_EQ(1u, fake_bluetooth_instance_->device_found_data().size());
+  EXPECT_EQ(2u, fake_bluetooth_instance_->device_found_data().size());
   const mojo::Array<mojom::BluetoothPropertyPtr>& prop =
       fake_bluetooth_instance_->device_found_data().back();
 
@@ -120,19 +204,29 @@ TEST_F(ArcBluetoothBridgeTest, DeviceFound) {
   EXPECT_EQ(std::string(bluez::FakeBluetoothDeviceClient::kLowEnergyName),
             prop[5]->get_remote_friendly_name());
   EXPECT_TRUE(prop[6]->is_remote_rssi());
+  EXPECT_EQ(kTestRssi, prop[6]->get_remote_rssi());
+
+  ChangeTestDeviceRssi(kTestRssi2);
+  EXPECT_EQ(3u, fake_bluetooth_instance_->device_found_data().size());
+  const mojo::Array<mojom::BluetoothPropertyPtr>& prop2 =
+      fake_bluetooth_instance_->device_found_data().back();
+  EXPECT_EQ(7u, prop2.size());
+  EXPECT_TRUE(prop2[6]->is_remote_rssi());
+  EXPECT_EQ(kTestRssi2, prop2[6]->get_remote_rssi());
 }
 
 // Invoke OnDiscoveryStarted to send cached device to BT instance,
 // and check correctness of the Advertising data sent via arc bridge.
 TEST_F(ArcBluetoothBridgeTest, LEDeviceFound) {
-  EXPECT_EQ(0u, fake_bluetooth_instance_->device_found_data().size());
+  EXPECT_EQ(0u, fake_bluetooth_instance_->le_device_found_data().size());
   AddTestDevice();
   EXPECT_EQ(1u, fake_bluetooth_instance_->le_device_found_data().size());
 
-  const mojom::BluetoothAddressPtr& addr =
-      fake_bluetooth_instance_->le_device_found_data().back()->addr();
+  const auto& le_device_found_data =
+      fake_bluetooth_instance_->le_device_found_data().back();
+  const mojom::BluetoothAddressPtr& addr = le_device_found_data->addr();
   const mojo::Array<mojom::BluetoothAdvertisingDataPtr>& adv_data =
-      fake_bluetooth_instance_->le_device_found_data().back()->adv_data();
+      le_device_found_data->adv_data();
 
   EXPECT_EQ(std::string(bluez::FakeBluetoothDeviceClient::kLowEnergyAddress),
             addr->To<std::string>());
@@ -142,13 +236,17 @@ TEST_F(ArcBluetoothBridgeTest, LEDeviceFound) {
   EXPECT_EQ(std::string(bluez::FakeBluetoothDeviceClient::kLowEnergyName),
             adv_data[0]->get_local_name().To<std::string>());
 
-  EXPECT_TRUE(adv_data[1]->is_service_uuids_16());
-  EXPECT_EQ(1u, adv_data[1]->get_service_uuids_16().size());
-
-  std::string uuid16_str =
-      base::StringPrintf("%04x", adv_data[1]->get_service_uuids_16()[0]);
+  EXPECT_TRUE(adv_data[1]->is_service_uuids());
+  EXPECT_EQ(1u, adv_data[1]->get_service_uuids().size());
   EXPECT_EQ(bluez::FakeBluetoothGattServiceClient::kHeartRateServiceUUID,
-            device::BluetoothUUID(uuid16_str).canonical_value());
+            adv_data[1]->get_service_uuids()[0].canonical_value());
+
+  EXPECT_EQ(kTestRssi, le_device_found_data->rssi());
+
+  ChangeTestDeviceRssi(kTestRssi2);
+  EXPECT_EQ(2u, fake_bluetooth_instance_->le_device_found_data().size());
+  EXPECT_EQ(kTestRssi2,
+            fake_bluetooth_instance_->le_device_found_data().back()->rssi());
 }
 
 // Invoke GetGattDB and check correctness of the GattDB sent via arc bridge.
@@ -209,6 +307,80 @@ TEST_F(ArcBluetoothBridgeTest, GetGattDB) {
             db[4]->type);
   EXPECT_EQ(device::BluetoothGattCharacteristic::PROPERTY_WRITE,
             db[4]->properties);
+}
+
+// Invoke multi advertisement methods and make sure they are going down to the
+// D-Bus clients.
+TEST_F(ArcBluetoothBridgeTest, SingleAdvertisement) {
+  int32_t handle = ReserveAdvertisementHandle();
+  EXPECT_NE(kFailureAdvHandle, handle);
+  EXPECT_EQ(0, NumActiveAdvertisements());
+
+  auto adv_data = base::MakeUnique<device::BluetoothAdvertisement::Data>(
+      device::BluetoothAdvertisement::ADVERTISEMENT_TYPE_BROADCAST);
+  mojom::BluetoothGattStatus status =
+      BroadcastAdvertisement(handle, std::move(adv_data));
+  EXPECT_EQ(mojom::BluetoothGattStatus::GATT_SUCCESS, status);
+  EXPECT_EQ(1, NumActiveAdvertisements());
+
+  status = ReleaseAdvertisementHandle(handle);
+  EXPECT_EQ(mojom::BluetoothGattStatus::GATT_SUCCESS, status);
+  EXPECT_EQ(0, NumActiveAdvertisements());
+}
+
+// Invoke multi advertisement methods and make sure they are going down to the
+// D-Bus clients.
+TEST_F(ArcBluetoothBridgeTest, MultiAdvertisement) {
+  int32_t handle = ReserveAdvertisementHandle();
+  EXPECT_NE(kFailureAdvHandle, handle);
+  EXPECT_EQ(0, NumActiveAdvertisements());
+
+  auto adv_data = base::MakeUnique<device::BluetoothAdvertisement::Data>(
+      device::BluetoothAdvertisement::ADVERTISEMENT_TYPE_BROADCAST);
+  mojom::BluetoothGattStatus status =
+      BroadcastAdvertisement(handle, std::move(adv_data));
+  EXPECT_EQ(mojom::BluetoothGattStatus::GATT_SUCCESS, status);
+  EXPECT_EQ(1, NumActiveAdvertisements());
+
+  int32_t handle2 = ReserveAdvertisementHandle();
+  EXPECT_NE(kFailureAdvHandle, handle2);
+  auto adv_data2 = base::MakeUnique<device::BluetoothAdvertisement::Data>(
+      device::BluetoothAdvertisement::ADVERTISEMENT_TYPE_PERIPHERAL);
+  status = BroadcastAdvertisement(handle2, std::move(adv_data2));
+  EXPECT_EQ(mojom::BluetoothGattStatus::GATT_SUCCESS, status);
+  EXPECT_EQ(2, NumActiveAdvertisements());
+
+  status = ReleaseAdvertisementHandle(handle);
+  EXPECT_EQ(mojom::BluetoothGattStatus::GATT_SUCCESS, status);
+  EXPECT_EQ(1, NumActiveAdvertisements());
+
+  status = ReleaseAdvertisementHandle(handle2);
+  EXPECT_EQ(mojom::BluetoothGattStatus::GATT_SUCCESS, status);
+  EXPECT_EQ(0, NumActiveAdvertisements());
+}
+
+// This tests that we support releasing reserved but unused handles.
+// TODO(ejcaruso): When Chrome supports more handles, make sure we
+// will stop reserving handles before we use all of Chrome's.
+TEST_F(ArcBluetoothBridgeTest, ReleaseUnusedHandles) {
+  constexpr size_t kMaxBluezAdvertisements =
+      bluez::FakeBluetoothLEAdvertisingManagerClient::kMaxBluezAdvertisements;
+  std::vector<int32_t> reserved_handles;
+
+  for (size_t i = 0; i < kMaxBluezAdvertisements; i++) {
+    int32_t handle = ReserveAdvertisementHandle();
+    if (handle == kFailureAdvHandle)
+      break;
+    reserved_handles.push_back(handle);
+  }
+  EXPECT_GT(reserved_handles.size(), 1Ul);
+  EXPECT_LE(reserved_handles.size(), kMaxBluezAdvertisements);
+  EXPECT_EQ(0, NumActiveAdvertisements());
+
+  for (int32_t handle : reserved_handles) {
+    EXPECT_EQ(ReleaseAdvertisementHandle(handle),
+              mojom::BluetoothGattStatus::GATT_SUCCESS);
+  }
 }
 
 }  // namespace arc

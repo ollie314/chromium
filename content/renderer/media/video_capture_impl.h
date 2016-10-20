@@ -15,9 +15,11 @@
 #include "base/threading/thread_checker.h"
 #include "content/common/content_export.h"
 #include "content/common/media/video_capture.h"
+#include "content/common/video_capture.mojom.h"
 #include "content/public/renderer/media_stream_video_sink.h"
 #include "content/renderer/media/video_capture_message_filter.h"
 #include "media/base/video_capture_types.h"
+#include "mojo/public/cpp/bindings/binding.h"
 
 namespace base {
 class SingleThreadTaskRunner;
@@ -44,14 +46,14 @@ namespace content {
 // This is an internal class used by VideoCaptureImplManager only. Do not access
 // this directly.
 class CONTENT_EXPORT VideoCaptureImpl
-    : public VideoCaptureMessageFilter::Delegate {
+    : public VideoCaptureMessageFilter::Delegate,
+      public mojom::VideoCaptureObserver {
  public:
-  ~VideoCaptureImpl() override;
-
   VideoCaptureImpl(
       media::VideoCaptureSessionId session_id,
       VideoCaptureMessageFilter* filter,
       scoped_refptr<base::SingleThreadTaskRunner> io_task_runner);
+  ~VideoCaptureImpl() override;
 
   // Stop/resume delivering video frames to clients, based on flag |suspend|.
   void SuspendCapture(bool suspend);
@@ -83,6 +85,10 @@ class CONTENT_EXPORT VideoCaptureImpl
 
   media::VideoCaptureSessionId session_id() const { return session_id_; }
 
+  void SetVideoCaptureHostForTesting(mojom::VideoCaptureHost* service) {
+    video_capture_host_for_testing_ = service;
+  }
+
  protected:
   // Note: Overridden only by unit test subclasses.
   virtual void Send(IPC::Message* message);
@@ -94,7 +100,6 @@ class CONTENT_EXPORT VideoCaptureImpl
   // Carries a shared memory for transferring video frames from browser to
   // renderer.
   class ClientBuffer;
-  class ClientBuffer2;
 
   // Contains information for a video capture client. Including parameters
   // for capturing and callbacks to the client.
@@ -106,33 +111,22 @@ class CONTENT_EXPORT VideoCaptureImpl
     VideoCaptureStateUpdateCB state_update_cb;
     VideoCaptureDeliverFrameCB deliver_frame_cb;
   };
-  typedef std::map<int, ClientInfo> ClientInfoMap;
+  using ClientInfoMap = std::map<int, ClientInfo>;
 
-  typedef base::Callback<void(const gpu::SyncToken& sync_token,
-                              double consumer_resource_utilization)>
-      BufferFinishedCallback;
+  using BufferFinishedCallback =
+      base::Callback<void(const gpu::SyncToken& sync_token,
+                          double consumer_resource_utilization)>;
 
-  // VideoCaptureMessageFilter::Delegate interface.
+  // VideoCaptureMessageFilter::Delegate interface implementation.
   void OnBufferCreated(base::SharedMemoryHandle handle,
                        int length,
                        int buffer_id) override;
-  void OnBufferCreated2(const std::vector<gfx::GpuMemoryBufferHandle>& handles,
-                        const gfx::Size& size,
-                        int buffer_id) override;
-  void OnBufferDestroyed(int buffer_id) override;
-  void OnBufferReceived(int buffer_id,
-                        base::TimeDelta timestamp,
-                        const base::DictionaryValue& metadata,
-                        media::VideoPixelFormat pixel_format,
-                        media::VideoFrame::StorageType storage_type,
-                        const gfx::Size& coded_size,
-                        const gfx::Rect& visible_rect) override;
-  void OnStateChanged(VideoCaptureState state) override;
-  void OnDeviceSupportedFormatsEnumerated(
-      const media::VideoCaptureFormats& supported_formats) override;
-  void OnDeviceFormatsInUseReceived(
-      const media::VideoCaptureFormats& formats_in_use) override;
   void OnDelegateAdded(int32_t device_id) override;
+
+  // mojom::VideoCaptureObserver implementation.
+  void OnStateChanged(mojom::VideoCaptureState state) override;
+  void OnBufferReady(int32_t buffer_id, mojom::VideoFrameInfoPtr info) override;
+  void OnBufferDestroyed(int32_t buffer_id) override;
 
   // Sends an IPC message to browser process when all clients are done with the
   // buffer.
@@ -140,17 +134,22 @@ class CONTENT_EXPORT VideoCaptureImpl
                               const scoped_refptr<ClientBuffer>& buffer,
                               const gpu::SyncToken& release_sync_token,
                               double consumer_resource_utilization);
-  void OnClientBufferFinished2(int buffer_id,
-                               const scoped_refptr<ClientBuffer2>& buffer,
-                               const gpu::SyncToken& release_sync_token,
-                               double consumer_resource_utilization);
 
   void StopDevice();
   void RestartCapture();
   void StartCaptureInternal();
 
-  // Helpers.
+  void OnDeviceSupportedFormats(
+      const VideoCaptureDeviceFormatsCB& callback,
+      const media::VideoCaptureFormats& supported_formats);
+  void OnDeviceFormatsInUse(
+      const VideoCaptureDeviceFormatsCB& callback,
+      const media::VideoCaptureFormats& formats_in_use);
+
+  // Tries to remove |client_id| from |clients|, returning false if not found.
   bool RemoveClient(int client_id, ClientInfoMap* clients);
+
+  mojom::VideoCaptureHost* GetVideoCaptureHost();
 
   // Called (by an unknown thread) when all consumers are done with a VideoFrame
   // and its ref-count has gone to zero.  This helper function grabs the
@@ -165,18 +164,14 @@ class CONTENT_EXPORT VideoCaptureImpl
   int device_id_;
   const int session_id_;
 
-  // Vector of callbacks to be notified of device format enumerations, used only
-  // on IO Thread.
-  std::vector<VideoCaptureDeviceFormatsCB> device_formats_cb_queue_;
-  // Vector of callbacks to be notified of a device's in use capture format(s),
-  // used only on IO Thread.
-  std::vector<VideoCaptureDeviceFormatsCB> device_formats_in_use_cb_queue_;
+  mojom::VideoCaptureHostAssociatedPtr video_capture_host_;
+  mojom::VideoCaptureHost* video_capture_host_for_testing_;
+
+  mojo::Binding<mojom::VideoCaptureObserver> observer_binding_;
 
   // Buffers available for sending to the client.
   typedef std::map<int32_t, scoped_refptr<ClientBuffer>> ClientBufferMap;
   ClientBufferMap client_buffers_;
-  typedef std::map<int32_t, scoped_refptr<ClientBuffer2>> ClientBuffer2Map;
-  ClientBuffer2Map client_buffer2s_;
 
   ClientInfoMap clients_;
   ClientInfoMap clients_pending_on_filter_;
@@ -186,11 +181,10 @@ class CONTENT_EXPORT VideoCaptureImpl
   // client to this class via StartCapture().
   media::VideoCaptureParams params_;
 
-  // The device's first captured frame referecne time sent from browser process
+  // The device's first captured frame reference time sent from browser process
   // side.
   base::TimeTicks first_frame_ref_time_;
 
-  bool suspended_;
   VideoCaptureState state_;
 
   // IO message loop reference for checking correct class operation.

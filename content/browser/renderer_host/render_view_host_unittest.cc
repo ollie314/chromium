@@ -70,7 +70,7 @@ class RenderViewHostTest : public RenderViewHostImplTestHarness {
 // See RenderViewHost::OnNavigate for a discussion.
 TEST_F(RenderViewHostTest, FilterAbout) {
   main_test_rfh()->NavigateAndCommitRendererInitiated(
-      1, true, GURL("about:cache"));
+      true, GURL("about:cache"));
   ASSERT_TRUE(controller().GetVisibleEntry());
   EXPECT_EQ(GURL(url::kAboutBlankURL),
             controller().GetVisibleEntry()->GetURL());
@@ -195,12 +195,12 @@ TEST_F(RenderViewHostTest, MessageWithBadHistoryItemFiles) {
   EXPECT_TRUE(PathService::Get(base::DIR_TEMP, &file_path));
   file_path = file_path.AppendASCII("foo");
   EXPECT_EQ(0, process()->bad_msg_count());
-  test_rvh()->TestOnUpdateStateWithFile(-1, file_path);
+  test_rvh()->TestOnUpdateStateWithFile(file_path);
   EXPECT_EQ(1, process()->bad_msg_count());
 
   ChildProcessSecurityPolicyImpl::GetInstance()->GrantReadFile(
       process()->GetID(), file_path);
-  test_rvh()->TestOnUpdateStateWithFile(-1, file_path);
+  test_rvh()->TestOnUpdateStateWithFile(file_path);
   EXPECT_EQ(1, process()->bad_msg_count());
 }
 
@@ -224,7 +224,7 @@ TEST_F(RenderViewHostTest, NavigationWithBadHistoryItemFiles) {
   main_test_rfh()->SendRendererInitiatedNavigationRequest(url, false);
   main_test_rfh()->PrepareForCommit();
   contents()->GetMainFrame()->SendNavigateWithModificationCallback(
-      1, 1, true, url, set_bad_file_path_callback);
+      1, true, url, set_bad_file_path_callback);
   EXPECT_EQ(1, process()->bad_msg_count());
 
   ChildProcessSecurityPolicyImpl::GetInstance()->GrantReadFile(
@@ -232,7 +232,7 @@ TEST_F(RenderViewHostTest, NavigationWithBadHistoryItemFiles) {
   main_test_rfh()->SendRendererInitiatedNavigationRequest(url, false);
   main_test_rfh()->PrepareForCommit();
   contents()->GetMainFrame()->SendNavigateWithModificationCallback(
-      2, 2, true, url, set_bad_file_path_callback);
+      2, true, url, set_bad_file_path_callback);
   EXPECT_EQ(1, process()->bad_msg_count());
 }
 

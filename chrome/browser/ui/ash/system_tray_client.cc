@@ -4,6 +4,10 @@
 
 #include "chrome/browser/ui/ash/system_tray_client.h"
 
+#include "ash/common/login_status.h"
+#include "ash/common/session/session_state_delegate.h"
+#include "ash/common/wm_shell.h"
+#include "ash/public/cpp/shell_window_ids.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/logging.h"
@@ -11,6 +15,7 @@
 #include "chrome/browser/browser_process_platform_part.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_util.h"
 #include "chrome/browser/chromeos/login/ui/login_display_host.h"
+#include "chrome/browser/chromeos/options/network_config_view.h"
 #include "chrome/browser/chromeos/system/system_clock.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/ash/ash_util.h"
@@ -19,16 +24,21 @@
 #include "chrome/browser/ui/singleton_tabs.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
+#include "chromeos/dbus/dbus_thread_manager.h"
+#include "chromeos/dbus/session_manager_client.h"
 #include "chromeos/login/login_state.h"
 #include "content/public/browser/user_metrics.h"
-#include "content/public/common/mojo_shell_connection.h"
-#include "services/shell/public/cpp/connector.h"
+#include "content/public/common/service_manager_connection.h"
+#include "net/base/escape.h"
+#include "services/service_manager/public/cpp/connector.h"
 #include "ui/base/l10n/l10n_util.h"
 
+using chromeos::DBusThreadManager;
 using chromeos::LoginState;
 
 namespace {
 
+const char kDisplaySettingsSubPageName[] = "display";
 const char kPaletteSettingsSubPageName[] = "stylus-overlay";
 
 SystemTrayClient* g_instance = nullptr;
@@ -39,11 +49,6 @@ void ShowSettingsSubPageForActiveUser(const std::string& sub_page) {
 }
 
 }  // namespace
-
-// static
-const char SystemTrayClient::kDisplaySettingsSubPageName[] = "display";
-const char SystemTrayClient::kDisplayOverscanSettingsSubPageName[] =
-    "displayOverscan";
 
 SystemTrayClient::SystemTrayClient() {
   // If this observes clock setting changes before ash comes up the IPCs will
@@ -66,26 +71,55 @@ SystemTrayClient* SystemTrayClient::Get() {
   return g_instance;
 }
 
-void SystemTrayClient::ConnectToSystemTray() {
-  if (system_tray_.is_bound())
-    return;
+// static
+ash::LoginStatus SystemTrayClient::GetUserLoginStatus() {
+  if (!LoginState::Get()->IsUserLoggedIn())
+    return ash::LoginStatus::NOT_LOGGED_IN;
 
-  shell::Connector* connector =
-      content::MojoShellConnection::GetForProcess()->GetConnector();
-  // Under mash the SystemTray interface is in the ash process. In classic ash
-  // we provide it to ourself.
-  if (chrome::IsRunningInMash())
-    connector->ConnectToInterface("mojo:ash", &system_tray_);
-  else
-    connector->ConnectToInterface("exe:content_browser", &system_tray_);
+  // Session manager client owns screen lock status.
+  if (DBusThreadManager::Get()->GetSessionManagerClient()->IsScreenLocked())
+    return ash::LoginStatus::LOCKED;
 
-  // Tolerate ash crashing and coming back up.
-  system_tray_.set_connection_error_handler(base::Bind(
-      &SystemTrayClient::OnClientConnectionError, base::Unretained(this)));
+  LoginState::LoggedInUserType user_type =
+      LoginState::Get()->GetLoggedInUserType();
+  switch (user_type) {
+    case LoginState::LOGGED_IN_USER_NONE:
+      return ash::LoginStatus::NOT_LOGGED_IN;
+    case LoginState::LOGGED_IN_USER_REGULAR:
+      return ash::LoginStatus::USER;
+    case LoginState::LOGGED_IN_USER_OWNER:
+      return ash::LoginStatus::OWNER;
+    case LoginState::LOGGED_IN_USER_GUEST:
+      return ash::LoginStatus::GUEST;
+    case LoginState::LOGGED_IN_USER_PUBLIC_ACCOUNT:
+      return ash::LoginStatus::PUBLIC;
+    case LoginState::LOGGED_IN_USER_SUPERVISED:
+      return ash::LoginStatus::SUPERVISED;
+    case LoginState::LOGGED_IN_USER_KIOSK_APP:
+      return ash::LoginStatus::KIOSK_APP;
+  }
+  NOTREACHED();
+  return ash::LoginStatus::NOT_LOGGED_IN;
 }
 
-void SystemTrayClient::OnClientConnectionError() {
-  system_tray_.reset();
+// static
+int SystemTrayClient::GetDialogParentContainerId() {
+  // TODO(mash): Need replacement for SessionStateDelegate. crbug.com/648964
+  if (chrome::IsRunningInMash())
+    return ash::kShellWindowId_SystemModalContainer;
+
+  ash::WmShell* wm_shell = ash::WmShell::Get();
+  const bool session_started =
+      wm_shell->GetSessionStateDelegate()->IsActiveUserSessionStarted();
+  const ash::LoginStatus login_status = GetUserLoginStatus();
+  const bool is_in_secondary_login_screen =
+      wm_shell->GetSessionStateDelegate()->IsInSecondaryLoginScreen();
+
+  if (!session_started || login_status == ash::LoginStatus::NOT_LOGGED_IN ||
+      login_status == ash::LoginStatus::LOCKED || is_in_secondary_login_screen)
+    return ash::kShellWindowId_LockSystemModalContainer;
+
+  return ash::kShellWindowId_SystemModalContainer;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -163,6 +197,32 @@ void SystemTrayClient::ShowPublicAccountInfo() {
   chrome::ShowPolicy(displayer.browser());
 }
 
+void SystemTrayClient::ShowNetworkConfigure(const std::string& service_path) {
+  // TODO(jamescook): Consolidate this with the classic ash version from
+  // NetworkConnectDelegateChromeOS. This will require moving the window
+  // container calculation to this class, then plumbing a container ID through
+  // the dialog code.
+  CHECK(chrome::IsRunningInMash());
+  chromeos::NetworkConfigView::Show(service_path, nullptr /* parent */);
+}
+
+void SystemTrayClient::ShowNetworkSettings(const std::string& network_id) {
+  if (!chrome::IsRunningInMash()) {
+    // TODO(mash): Need replacement for SessionStateDelegate. crbug.com/648964
+    if (!LoginState::Get()->IsUserLoggedIn() ||
+        ash::WmShell::Get()
+            ->GetSessionStateDelegate()
+            ->IsInSecondaryLoginScreen())
+      return;
+  }
+
+  std::string page = chrome::kInternetOptionsSubPage;
+  if (!network_id.empty())
+    page += "?guid=" + net::EscapeUrlEncodedData(network_id, true);
+  content::RecordAction(base::UserMetricsAction("OpenInternetOptionsDialog"));
+  ShowSettingsSubPageForActiveUser(page);
+}
+
 void SystemTrayClient::ShowProxySettings() {
   LoginState* login_state = LoginState::Get();
   // User is not logged in.
@@ -178,4 +238,26 @@ void SystemTrayClient::OnSystemClockChanged(
     chromeos::system::SystemClock* clock) {
   ConnectToSystemTray();
   system_tray_->SetUse24HourClock(clock->ShouldUse24HourClock());
+}
+
+void SystemTrayClient::ConnectToSystemTray() {
+  if (system_tray_.is_bound())
+    return;
+
+  service_manager::Connector* connector =
+      content::ServiceManagerConnection::GetForProcess()->GetConnector();
+  // Under mash the SystemTray interface is in the ash process. In classic ash
+  // we provide it to ourself.
+  if (chrome::IsRunningInMash())
+    connector->ConnectToInterface("service:ash", &system_tray_);
+  else
+    connector->ConnectToInterface("service:content_browser", &system_tray_);
+
+  // Tolerate ash crashing and coming back up.
+  system_tray_.set_connection_error_handler(base::Bind(
+      &SystemTrayClient::OnClientConnectionError, base::Unretained(this)));
+}
+
+void SystemTrayClient::OnClientConnectionError() {
+  system_tray_.reset();
 }

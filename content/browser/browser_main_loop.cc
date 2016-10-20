@@ -56,10 +56,11 @@
 #include "content/browser/loader/resource_dispatcher_host_impl.h"
 #include "content/browser/loader_delegate_impl.h"
 #include "content/browser/media/media_internals.h"
-#include "content/browser/mojo/mojo_shell_context.h"
+#include "content/browser/memory/memory_coordinator.h"
 #include "content/browser/net/browser_online_state_observer.h"
 #include "content/browser/renderer_host/media/media_stream_manager.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
+#include "content/browser/service_manager/service_manager_context.h"
 #include "content/browser/speech/speech_recognition_manager_impl.h"
 #include "content/browser/startup_task_runner.h"
 #include "content/browser/utility_process_host_impl.h"
@@ -68,13 +69,14 @@
 #include "content/common/content_switches_internal.h"
 #include "content/common/host_discardable_shared_memory_manager.h"
 #include "content/common/host_shared_bitmap_manager.h"
-#include "content/common/mojo/mojo_shell_connection_impl.h"
+#include "content/common/service_manager/service_manager_connection_impl.h"
 #include "content/public/browser/browser_main_parts.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/gpu_data_manager_observer.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/tracing_controller.h"
 #include "content/public/common/content_client.h"
+#include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/main_function_params.h"
 #include "content/public/common/result_codes.h"
@@ -88,7 +90,8 @@
 #include "net/base/network_change_notifier.h"
 #include "net/socket/client_socket_factory.h"
 #include "net/ssl/ssl_config_service.h"
-#include "services/shell/runner/common/client_util.h"
+#include "ppapi/features/features.h"
+#include "services/service_manager/runner/common/client_util.h"
 #include "skia/ext/event_tracer_impl.h"
 #include "skia/ext/skia_memory_dump_provider.h"
 #include "sql/sql_memory_dump_provider.h"
@@ -177,7 +180,7 @@
 #include "content/browser/plugin_service_impl.h"
 #endif
 
-#if defined(ENABLE_MOJO_CDM) && defined(ENABLE_PEPPER_CDMS)
+#if defined(ENABLE_MOJO_CDM) && BUILDFLAG(ENABLE_PEPPER_CDMS)
 #include "content/browser/media/cdm_service_impl.h"
 #endif
 
@@ -207,6 +210,11 @@ namespace {
 #if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_ANDROID)
 void SetupSandbox(const base::CommandLine& parsed_command_line) {
   TRACE_EVENT0("startup", "SetupSandbox");
+  if (parsed_command_line.HasSwitch(switches::kNoZygote)) {
+    CHECK(parsed_command_line.HasSwitch(switches::kNoSandbox))
+        << "--no-sandbox should be used together with --no--zygote";
+    return;
+  }
 
   // Tickle the sandbox host and zygote host so they fork now.
   RenderSandboxHostLinux::GetInstance()->Init();
@@ -506,17 +514,16 @@ void BrowserMainLoop::EarlyInitialization() {
   if (parts_)
     parts_->PreEarlyInitialization();
 
-#if defined(OS_MACOSX)
-  // We use quite a few file descriptors for our IPC, and the default limit on
-  // the Mac is low (256), so bump it up.
-  base::SetFdLimit(1024);
-#elif defined(OS_LINUX)
+#if defined(OS_MACOSX) || defined(OS_LINUX)
+  // We use quite a few file descriptors for our IPC as well as disk the disk
+  // cache,and the default limit on the Mac is low (256), so bump it up.
+
   // Same for Linux. The default various per distro, but it is 1024 on Fedora.
   // Low soft limits combined with liberal use of file descriptors means power
   // users can easily hit this limit with many open tabs. Bump up the limit to
   // an arbitrarily high number. See https://crbug.com/539567
   base::SetFdLimit(8192);
-#endif  // default(OS_MACOSX)
+#endif  // defined(OS_MACOSX) || defined(OS_LINUX)
 
 #if defined(OS_WIN)
   net::EnsureWinsockInit();
@@ -741,19 +748,10 @@ int BrowserMainLoop::PreCreateThreads() {
       command_line->GetSwitchValueASCII(switches::kEnableFeatures),
       command_line->GetSwitchValueASCII(switches::kDisableFeatures));
 
-  // TODO(chrisha): Abstract away this construction mess to a helper function,
-  // once MemoryPressureMonitor is made a concrete class.
-#if defined(OS_CHROMEOS)
-  if (chromeos::switches::MemoryPressureHandlingEnabled()) {
-    memory_pressure_monitor_.reset(new base::chromeos::MemoryPressureMonitor(
-        chromeos::switches::GetMemoryPressureThresholds()));
-  }
-#elif defined(OS_MACOSX)
-  memory_pressure_monitor_.reset(new base::mac::MemoryPressureMonitor());
-#elif defined(OS_WIN)
-  memory_pressure_monitor_.reset(CreateWinMemoryPressureMonitor(
-      parsed_command_line_));
-#endif
+  InitializeMemoryManagementComponent();
+
+  if (base::FeatureList::IsEnabled(features::kMemoryCoordinator))
+    MemoryCoordinator::GetInstance()->Start();
 
 #if defined(ENABLE_PLUGINS)
   // Prior to any processing happening on the IO thread, we create the
@@ -766,7 +764,7 @@ int BrowserMainLoop::PreCreateThreads() {
   }
 #endif
 
-#if defined(ENABLE_MOJO_CDM) && defined(ENABLE_PEPPER_CDMS)
+#if defined(ENABLE_MOJO_CDM) && BUILDFLAG(ENABLE_PEPPER_CDMS)
   // Prior to any processing happening on the IO thread, we create the
   // CDM service as it is predominantly used from the IO thread. This must
   // be called on the main thread since it involves file path checks.
@@ -1061,8 +1059,8 @@ void BrowserMainLoop::ShutdownThreadsAndCleanUp() {
   device_monitor_mac_.reset();
 #endif
 
-  // Shutdown Mojo shell and IPC.
-  mojo_shell_context_.reset();
+  // Shutdown the Service Manager and IPC.
+  service_manager_context_.reset();
   mojo_ipc_support_.reset();
 
   // Must be size_t so we can subtract from it.
@@ -1200,13 +1198,13 @@ void BrowserMainLoop::InitializeMainThread() {
 int BrowserMainLoop::BrowserThreadsStarted() {
   TRACE_EVENT0("startup", "BrowserMainLoop::BrowserThreadsStarted");
 
-  // Bring up Mojo IPC and shell as early as possible. Initializaing mojo
-  // requires the IO thread to have been initialized first. So this cannot
-  // happen any earlier than this.
+  // Bring up Mojo IPC and the embedded Service Manager as early as possible.
+  // Initializaing mojo requires the IO thread to have been initialized first,
+  // so this cannot happen any earlier than now.
   InitializeMojo();
 
 #if defined(USE_AURA)
-  if (shell::ShellIsRemote()) {
+  if (service_manager::ServiceManagerIsRemote()) {
     base::CommandLine::ForCurrentProcess()->AppendSwitch(
         switches::kIsRunningInMash);
   }
@@ -1243,7 +1241,7 @@ int BrowserMainLoop::BrowserThreadsStarted() {
   established_gpu_channel = true;
   if (!GpuDataManagerImpl::GetInstance()->CanUseGpuBrowserCompositor() ||
       parsed_command_line_.HasSwitch(switches::kDisableGpuEarlyInit) ||
-      shell::ShellIsRemote()) {
+      service_manager::ServiceManagerIsRemote()) {
     established_gpu_channel = always_uses_gpu = false;
   }
   gpu::GpuChannelEstablishFactory* factory =
@@ -1283,7 +1281,7 @@ int BrowserMainLoop::BrowserThreadsStarted() {
 
   {
     TRACE_EVENT0("startup", "BrowserThreadsStarted::Subsystem:MidiManager");
-    midi_manager_.reset(media::midi::MidiManager::Create());
+    midi_manager_.reset(midi::MidiManager::Create());
   }
 
 #if defined(OS_WIN)
@@ -1293,11 +1291,6 @@ int BrowserMainLoop::BrowserThreadsStarted() {
       new media::DeviceMonitorLinux(io_thread_->task_runner()));
 #elif defined(OS_MACOSX)
   device_monitor_mac_.reset(new media::DeviceMonitorMac());
-#endif
-
-#if defined(OS_WIN)
-  UMA_HISTOGRAM_BOOLEAN("Windows.Win32kRendererLockdown",
-                        IsWin32kRendererLockdownEnabled());
 #endif
 
   // RDH needs the IO thread to be created
@@ -1369,7 +1362,7 @@ int BrowserMainLoop::BrowserThreadsStarted() {
   // ChildProcess instance which is created by the renderer thread.
   if (GpuDataManagerImpl::GetInstance()->GpuAccessAllowed(NULL) &&
       !established_gpu_channel && always_uses_gpu && !UsingInProcessGpu() &&
-      !shell::ShellIsRemote()) {
+      !service_manager::ServiceManagerIsRemote()) {
     TRACE_EVENT_INSTANT0("gpu", "Post task to launch GPU process",
                          TRACE_EVENT_SCOPE_THREAD);
     BrowserThread::PostTask(
@@ -1394,6 +1387,28 @@ int BrowserMainLoop::BrowserThreadsStarted() {
 bool BrowserMainLoop::UsingInProcessGpu() const {
   return parsed_command_line_.HasSwitch(switches::kSingleProcess) ||
          parsed_command_line_.HasSwitch(switches::kInProcessGPU);
+}
+
+void BrowserMainLoop::InitializeMemoryManagementComponent() {
+  if (base::FeatureList::IsEnabled(features::kMemoryCoordinator)) {
+    // Disable MemoryPressureListener when memory coordinator is enabled.
+    base::MemoryPressureListener::SetNotificationsSuppressed(true);
+    return;
+  }
+
+  // TODO(chrisha): Abstract away this construction mess to a helper function,
+  // once MemoryPressureMonitor is made a concrete class.
+#if defined(OS_CHROMEOS)
+  if (chromeos::switches::MemoryPressureHandlingEnabled()) {
+    memory_pressure_monitor_.reset(new base::chromeos::MemoryPressureMonitor(
+        chromeos::switches::GetMemoryPressureThresholds()));
+  }
+#elif defined(OS_MACOSX)
+  memory_pressure_monitor_.reset(new base::mac::MemoryPressureMonitor());
+#elif defined(OS_WIN)
+  memory_pressure_monitor_.reset(CreateWinMemoryPressureMonitor(
+      parsed_command_line_));
+#endif
 }
 
 bool BrowserMainLoop::InitializeToolkit() {
@@ -1466,12 +1481,14 @@ void BrowserMainLoop::InitializeMojo() {
       BrowserThread::UnsafeGetMessageLoopForThread(BrowserThread::IO)
           ->task_runner()));
 
-  mojo_shell_context_.reset(new MojoShellContext);
+  service_manager_context_.reset(new ServiceManagerContext);
 #if defined(OS_MACOSX)
   mojo::edk::SetMachPortProvider(MachBroker::GetInstance());
 #endif  // defined(OS_MACOSX)
-  if (parts_)
-    parts_->MojoShellConnectionStarted(MojoShellConnection::GetForProcess());
+  if (parts_) {
+    parts_->ServiceManagerConnectionStarted(
+        ServiceManagerConnection::GetForProcess());
+  }
 }
 
 base::FilePath BrowserMainLoop::GetStartupTraceFileName(

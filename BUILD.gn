@@ -14,6 +14,7 @@ import("//build/config/sanitizers/sanitizers.gni")
 import("//build/config/ui.gni")
 import("//build_overrides/v8.gni")
 import("//media/media_options.gni")
+import("//remoting/remoting_enable.gni")
 import("//third_party/openh264/openh264_args.gni")
 import("//tools/ipc_fuzzer/ipc_fuzzer.gni")
 import("//v8/gni/v8.gni")
@@ -122,9 +123,9 @@ if (is_win) {
       } else {
         deps += [ "//courgette(//build/toolchain/win:x64)" ]
       }
-      if (is_chrome_branded) {
-        deps += [ "//remoting/host:remoting_host_installation" ]
-      }
+    }
+    if (is_chrome_branded) {
+      deps += [ "//remoting/host:remoting_host_installation" ]
     }
   }
 
@@ -150,9 +151,8 @@ if (is_win) {
     ]
   }
 
-  # TODO(sebmarchand): Remove this once we stop supporting Syzygy (M54+).
   group("All_syzygy") {
-    if (is_syzyasan || syzygy_optimize) {
+    if (is_syzyasan) {
       deps = [
         "//chrome/installer/mini_installer:mini_installer",
         "//chrome/installer/mini_installer:mini_installer_syzygy",
@@ -301,13 +301,14 @@ group("both_gn_and_gyp") {
       "//mojo/edk/test:mojo_public_bindings_unittests",
       "//mojo/edk/test:mojo_public_system_unittests",
       "//net:net_perftests",
-      "//services/shell/public/cpp",
-      "//third_party/angle/src/tests:angle_end2end_tests",
-      "//third_party/angle/src/tests:angle_unittests",
+      "//services/service_manager/public/cpp",
+      "//storage//browser:storage_unittests",
       "//third_party/WebKit/Source/platform:blink_platform_unittests",
       "//third_party/WebKit/Source/platform/heap:blink_heap_unittests",
       "//third_party/WebKit/Source/web:webkit_unit_tests",
       "//third_party/WebKit/Source/wtf:wtf_unittests",
+      "//third_party/angle/src/tests:angle_end2end_tests",
+      "//third_party/angle/src/tests:angle_unittests",
       "//third_party/catapult/telemetry:bitmaptools($host_toolchain)",
       "//third_party/smhasher:pmurhash",
       "//tools/imagediff($host_toolchain)",
@@ -603,7 +604,7 @@ group("both_gn_and_gyp") {
       "//content/public/app:browser",
       "//content/public/app:child",
       "//mojo/edk/test:mojo_public_system_perftests",
-      "//services/shell/public/cpp",
+      "//services/service_manager/public/cpp",
       "//testing/gmock:gmock_main",
       "//third_party/codesighs:nm2tsv",
     ]
@@ -631,10 +632,6 @@ group("both_gn_and_gyp") {
       }
     }
 
-    if (enable_app_list) {
-      deps += [ "//ui/app_list:app_list_demo" ]
-    }
-
     if (use_x11) {
       if (target_cpu != "arm") {
         deps += [ "//gpu/tools/compositor_model_bench" ]
@@ -646,6 +643,11 @@ group("both_gn_and_gyp") {
     deps += [
       "//breakpad:crash_inspector",
       "//breakpad:dump_syms",
+
+      # XPC service is in developement and guarded against the
+      # enable_xpc_notifications, in the meantime however we still
+      # need compile coverage in the bots.
+      "//chrome/browser/ui/cocoa/notifications:alert_notification_xpc_service",
       "//third_party/apple_sample_code",
       "//third_party/molokocacao",
     ]
@@ -726,7 +728,10 @@ group("gn_only") {
   }
 
   if (!is_android && !is_ios && !is_chromeos) {
-    deps += [ "//components/proximity_auth:proximity_auth_unittests" ]
+    deps += [
+      "//components/proximity_auth:proximity_auth_unittests",
+      "//media/remoting:media_remoting_unittests",
+    ]
   }
 
   if (is_win || is_linux) {
@@ -785,7 +790,6 @@ group("gn_only") {
       "//third_party/libsrtp:replay_driver",
       "//third_party/libsrtp:roc_driver",
       "//third_party/libsrtp:rtpw",
-      "//third_party/libsrtp:srtp_driver",
       "//third_party/libsrtp:srtp_driver",
       "//third_party/libsrtp:srtp_test_aes_calc",
       "//third_party/libsrtp:srtp_test_cipher_driver",
@@ -1133,6 +1137,7 @@ if (is_win) {
       "//remoting:remoting_unittests",
       "//skia:skia_unittests",
       "//sql:sql_unittests",
+      "//storage//browser:storage_unittests",
       "//third_party/WebKit/Source/platform:blink_platform_unittests",
       "//third_party/WebKit/Source/platform/heap:blink_heap_unittests",
       "//third_party/angle/src/tests:angle_unittests",

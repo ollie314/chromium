@@ -4,7 +4,7 @@
 
 #include "chrome/browser/chromeos/login/ui/simple_web_view_dialog.h"
 
-#include "ash/common/shell_window_ids.h"
+#include "ash/public/cpp/shell_window_ids.h"
 #include "ash/shell.h"
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
@@ -246,10 +246,6 @@ void SimpleWebViewDialog::Init() {
 
 void SimpleWebViewDialog::Layout() {
   views::WidgetDelegateView::Layout();
-}
-
-views::View* SimpleWebViewDialog::GetContentsView() {
-  return this;
 }
 
 views::View* SimpleWebViewDialog::GetInitiallyFocusedView() {

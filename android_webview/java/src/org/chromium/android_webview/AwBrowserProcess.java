@@ -5,6 +5,7 @@
 package org.chromium.android_webview;
 
 import android.content.Context;
+import android.os.AsyncTask;
 import android.os.StrictMode;
 
 import org.chromium.android_webview.policy.AwPolicyProvider;
@@ -18,6 +19,7 @@ import org.chromium.base.library_loader.LibraryProcessType;
 import org.chromium.base.library_loader.ProcessInitException;
 import org.chromium.content.browser.BrowserStartupController;
 import org.chromium.content.browser.ChildProcessCreationParams;
+import org.chromium.content.browser.ChildProcessLauncher;
 import org.chromium.policy.CombinedPolicyProvider;
 
 import java.io.File;
@@ -41,8 +43,7 @@ public abstract class AwBrowserProcess {
      * Note: it is up to the caller to ensure this is only called once.
      */
     public static void loadLibrary() {
-        Context appContext = ContextUtils.getApplicationContext();
-        PathUtils.setPrivateDataDirectorySuffix(PRIVATE_DATA_DIRECTORY_SUFFIX, appContext);
+        PathUtils.setPrivateDataDirectorySuffix(PRIVATE_DATA_DIRECTORY_SUFFIX);
         try {
             LibraryLoader libraryLoader = LibraryLoader.get(LibraryProcessType.PROCESS_WEBVIEW);
             libraryLoader.loadNow();
@@ -78,7 +79,19 @@ public abstract class AwBrowserProcess {
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
             public void run() {
-                Context appContext = ContextUtils.getApplicationContext();
+                final Context appContext = ContextUtils.getApplicationContext();
+                boolean multiProcess = CommandLine.getInstance().hasSwitch(
+                        AwSwitches.WEBVIEW_SANDBOXED_RENDERER);
+                if (multiProcess) {
+                    // Have a background thread warm up a renderer process now, so that this can
+                    // proceed in parallel to the browser process initialisation.
+                    AsyncTask.THREAD_POOL_EXECUTOR.execute(new Runnable() {
+                        @Override
+                        public void run() {
+                            ChildProcessLauncher.warmUp(appContext);
+                        }
+                    });
+                }
                 // The policies are used by browser startup, so we need to register the policy
                 // providers before starting the browser process. This only registers java objects
                 // and doesn't need the native library.
@@ -86,8 +99,7 @@ public abstract class AwBrowserProcess {
 
                 try {
                     BrowserStartupController.get(appContext, LibraryProcessType.PROCESS_WEBVIEW)
-                            .startBrowserProcessesSync(!CommandLine.getInstance().hasSwitch(
-                                            AwSwitches.WEBVIEW_SANDBOXED_RENDERER));
+                            .startBrowserProcessesSync(!multiProcess);
                 } catch (ProcessInitException e) {
                     throw new RuntimeException("Cannot initialize WebView", e);
                 }

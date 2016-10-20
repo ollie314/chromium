@@ -8,7 +8,7 @@
 #include <memory>
 
 #include "mojo/public/cpp/bindings/binding_set.h"
-#include "services/shell/public/cpp/service.h"
+#include "services/service_manager/public/cpp/service.h"
 #include "services/video_capture/public/interfaces/video_capture_service.mojom.h"
 
 namespace video_capture {
@@ -16,21 +16,21 @@ namespace video_capture {
 class VideoCaptureDeviceFactoryImpl;
 class FakeVideoCaptureDeviceFactoryConfiguratorImpl;
 
-// Implementation of mojom::VideoCaptureService as a Mojo Shell Service.
+// Implementation of mojom::VideoCaptureService as a Service Manager service.
 class VideoCaptureService
-    : public shell::Service,
-      public shell::InterfaceFactory<mojom::VideoCaptureService>,
+    : public service_manager::Service,
+      public service_manager::InterfaceFactory<mojom::VideoCaptureService>,
       public mojom::VideoCaptureService {
  public:
   VideoCaptureService();
   ~VideoCaptureService() override;
 
-  // shell::Service:
-  bool OnConnect(const shell::Identity& remote_identity,
-                 shell::InterfaceRegistry* registry) override;
+  // service_manager::Service:
+  bool OnConnect(const service_manager::Identity& remote_identity,
+                 service_manager::InterfaceRegistry* registry) override;
 
-  // shell::InterfaceFactory<mojom::VideoCaptureService>:
-  void Create(const shell::Identity& remote_identity,
+  // service_manager::InterfaceFactory<mojom::VideoCaptureService>:
+  void Create(const service_manager::Identity& remote_identity,
               mojom::VideoCaptureServiceRequest request) override;
 
   // mojom::VideoCaptureService

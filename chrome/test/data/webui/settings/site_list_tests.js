@@ -327,7 +327,19 @@ cr.define('site_list', function() {
        */
       function getMenuItems(listContainer, index) {
         return listContainer.children[index].querySelectorAll(
-            'paper-menu-button paper-item:not([hidden])');
+            'iron-dropdown .dropdown-item:not([hidden])');
+      }
+
+      /**
+       * Opens the action menu for a particular element in the list.
+       * @param {number} index The index of the child element (which site) to
+       *     open the action menu for.
+       */
+      function openActionMenu(index) {
+        var item = testElement.$.listContainer.children[index];
+        var dots = item.querySelector('paper-icon-button');
+        MockInteractions.tap(dots);
+        Polymer.dom.flush();
       }
 
       /**
@@ -389,7 +401,6 @@ cr.define('site_list', function() {
 
               assertEquals(
                   settings.PermissionValues.ALLOW, testElement.categorySubtype);
-              assertEquals('Allow - 0', testElement.$.header.innerText.trim());
 
               assertFalse(testElement.$.category.hidden);
               browserProxy.resetResolver('getExceptionList');
@@ -397,8 +408,6 @@ cr.define('site_list', function() {
               return browserProxy.whenCalled('getExceptionList');
             }).then(function(contentType) {
               assertFalse(testElement.$.category.hidden);
-              assertEquals('Exceptions - 0',
-                  testElement.$.header.innerText.trim());
             });
       });
 
@@ -416,8 +425,8 @@ cr.define('site_list', function() {
               assertEquals(
                   settings.PermissionValues.ALLOW, testElement.categorySubtype);
               Polymer.dom.flush();  // Populates action menu.
+              openActionMenu(0);
               assertMenu(['Block', 'Remove'], testElement);
-              assertEquals('Allow - 2', testElement.$.header.innerText.trim());
 
               // Site list should show, no matter what category default is set
               // to.
@@ -427,8 +436,6 @@ cr.define('site_list', function() {
               return browserProxy.whenCalled('getExceptionList');
             }).then(function(contentType) {
               assertFalse(testElement.$.category.hidden);
-              assertEquals('Exceptions - 2',
-                  testElement.$.header.innerText.trim());
             });
       });
 
@@ -447,8 +454,8 @@ cr.define('site_list', function() {
               assertEquals(
                   settings.PermissionValues.BLOCK, testElement.categorySubtype);
               Polymer.dom.flush();  // Populates action menu.
+              openActionMenu(0);
               assertMenu(['Allow', 'Remove'], testElement);
-              assertEquals('Block - 2', testElement.$.header.innerText.trim());
 
               // Site list should only show when category default is enabled.
               assertFalse(testElement.$.category.hidden);
@@ -475,9 +482,8 @@ cr.define('site_list', function() {
               assertEquals(settings.PermissionValues.SESSION_ONLY,
                   testElement.categorySubtype);
               Polymer.dom.flush();  // Populates action menu.
+              openActionMenu(0);
               assertMenu(['Allow', 'Block', 'Remove'], testElement);
-              assertEquals('Clear on exit - 1',
-                  testElement.$.header.innerText.trim());
 
               // Site list should show, no matter what category default is set
               // to.
@@ -487,7 +493,6 @@ cr.define('site_list', function() {
               return browserProxy.whenCalled('getExceptionList');
             }).then(function(contentType) {
               assertFalse(testElement.$.category.hidden);
-              assertEquals('Clear on exit - 1', testElement.$.header.innerText);
             });
       });
 
@@ -505,10 +510,9 @@ cr.define('site_list', function() {
               assertEquals(settings.PermissionValues.BLOCK,
                   testElement.categorySubtype);
               Polymer.dom.flush();  // Populates action menu.
+              openActionMenu(0);
               // 'Clear on exit' is visible as this is not an incognito item.
               assertMenu(['Allow', 'Clear on exit', 'Remove'], testElement);
-              assertEquals('Block - 1',
-                  testElement.$.header.innerText.trim());
 
               // Select 'Remove from menu'.
               var menuItems = getMenuItems(testElement.$.listContainer, 0);
@@ -541,12 +545,12 @@ cr.define('site_list', function() {
               assertEquals(settings.PermissionValues.ALLOW,
                   testElement.categorySubtype);
               Polymer.dom.flush();  // Populates action menu.
+              openActionMenu(0);
               // 'Clear on exit' is hidden for incognito items.
               assertMenu(['Block', 'Remove'], testElement);
-              assertEquals('Allow - 2',
-                  testElement.$.header.innerText.trim());
 
               // Select 'Remove' from menu on 'foo.com'.
+              openActionMenu(1);
               var menuItems = getMenuItems(testElement.$.listContainer, 1);
               assertTrue(!!menuItems);
               MockInteractions.tap(menuItems[1]);
@@ -565,6 +569,7 @@ cr.define('site_list', function() {
             settings.PermissionValues.ALLOW, prefs);
         return browserProxy.whenCalled('getExceptionList').then(
             function(contentType) {
+              testElement.enableSiteSettings_ = true;
               assertEquals(
                   settings.ContentSettingsTypes.GEOLOCATION, contentType);
 
@@ -687,6 +692,7 @@ cr.define('site_list', function() {
               var resolver = new PromiseResolver();
               testElement.async(resolver.resolve);
               return resolver.promise.then(function() {
+                testElement.enableSiteSettings_ = true;
                 // All Sites calls getExceptionList for all categories, starting
                 // with Cookies.
                 assertEquals(
@@ -731,6 +737,7 @@ cr.define('site_list', function() {
               var resolver = new PromiseResolver();
               testElement.async(resolver.resolve);
               return resolver.promise.then(function() {
+                testElement.enableSiteSettings_ = true;
                 // All Sites calls getExceptionList for all categories, starting
                 // with Cookies.
                 assertEquals(
@@ -779,6 +786,7 @@ cr.define('site_list', function() {
         return browserProxy.whenCalled('getExceptionList').then(function(
             contentType) {
           Polymer.dom.flush();
+          openActionMenu(0);
           var menuItems = getMenuItems(testElement.$.listContainer, 0);
           assertTrue(!!menuItems);
           MockInteractions.tap(menuItems[0]);
@@ -792,6 +800,7 @@ cr.define('site_list', function() {
         return browserProxy.whenCalled('getExceptionList').then(function(
             contentType) {
           Polymer.dom.flush();
+          openActionMenu(0);
           assertMenu(['Allow', 'Remove'], testElement);
 
           var menuItems = getMenuItems(testElement.$.listContainer, 0);

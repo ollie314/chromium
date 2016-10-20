@@ -22,8 +22,6 @@
 #include "extensions/browser/extension_navigation_ui_data.h"
 #include "extensions/browser/info_map.h"
 #include "extensions/browser/process_manager.h"
-#include "extensions/common/constants.h"
-#include "extensions/common/permissions/api_permission.h"
 #include "net/url_request/url_request.h"
 
 using content::BrowserThread;
@@ -85,19 +83,6 @@ void ForwardRequestStatus(
   }
 }
 
-extensions::ExtensionNavigationUIData* GetExtensionNavigationUIData(
-    net::URLRequest* request) {
-  const content::ResourceRequestInfo* info =
-      content::ResourceRequestInfo::ForRequest(request);
-  if (!info)
-    return nullptr;
-  ChromeNavigationUIData* navigation_data =
-      static_cast<ChromeNavigationUIData*>(info->GetNavigationUIData());
-  if (!navigation_data)
-    return nullptr;
-  return navigation_data->GetExtensionNavigationUIData();
-}
-
 class ChromeExtensionsNetworkDelegateImpl
     : public ChromeExtensionsNetworkDelegate {
  public:
@@ -107,7 +92,7 @@ class ChromeExtensionsNetworkDelegateImpl
 
  private:
   // ChromeExtensionsNetworkDelegate implementation.
-  void ForwardProxyErrors(net::URLRequest* request) override;
+  void ForwardProxyErrors(net::URLRequest* request, int net_error) override;
   void ForwardStartRequestStatus(net::URLRequest* request) override;
   void ForwardDoneRequestStatus(net::URLRequest* request) override;
   int OnBeforeURLRequest(net::URLRequest* request,
@@ -126,8 +111,10 @@ class ChromeExtensionsNetworkDelegateImpl
       GURL* allowed_unsafe_redirect_url) override;
   void OnBeforeRedirect(net::URLRequest* request,
                         const GURL& new_location) override;
-  void OnResponseStarted(net::URLRequest* request) override;
-  void OnCompleted(net::URLRequest* request, bool started) override;
+  void OnResponseStarted(net::URLRequest* request, int net_error) override;
+  void OnCompleted(net::URLRequest* request,
+                   bool started,
+                   int net_error) override;
   void OnURLRequestDestroyed(net::URLRequest* request) override;
   void OnPACScriptError(int line_number, const base::string16& error) override;
   net::NetworkDelegate::AuthRequiredResponse OnAuthRequired(
@@ -150,14 +137,15 @@ ChromeExtensionsNetworkDelegateImpl::ChromeExtensionsNetworkDelegateImpl(
 ChromeExtensionsNetworkDelegateImpl::~ChromeExtensionsNetworkDelegateImpl() {}
 
 void ChromeExtensionsNetworkDelegateImpl::ForwardProxyErrors(
-    net::URLRequest* request) {
-  if (request->status().status() == net::URLRequestStatus::FAILED) {
-    switch (request->status().error()) {
+    net::URLRequest* request,
+    int net_error) {
+  if (net_error != net::OK) {
+    switch (net_error) {
       case net::ERR_PROXY_AUTH_UNSUPPORTED:
       case net::ERR_PROXY_CONNECTION_FAILED:
       case net::ERR_TUNNEL_CONNECTION_FAILED:
         extensions::ProxyEventRouter::GetInstance()->OnProxyError(
-            event_router_.get(), profile_, request->status().error());
+            event_router_.get(), profile_, net_error);
     }
   }
 }
@@ -176,34 +164,8 @@ int ChromeExtensionsNetworkDelegateImpl::OnBeforeURLRequest(
     net::URLRequest* request,
     const net::CompletionCallback& callback,
     GURL* new_url) {
-  const content::ResourceRequestInfo* info =
-      content::ResourceRequestInfo::ForRequest(request);
-  GURL url(request->url());
-
-  // Block top-level navigations to blob: or filesystem: URLs with extension
-  // origin from non-extension processes.  See https://crbug.com/645028.
-  bool is_nested_url = url.SchemeIsFileSystem() || url.SchemeIsBlob();
-  bool is_navigation =
-      info && content::IsResourceTypeFrame(info->GetResourceType());
-  url::Origin origin(url);
-  if (is_nested_url && is_navigation && info->IsMainFrame() &&
-      origin.scheme() == extensions::kExtensionScheme &&
-      !extension_info_map_->process_map().Contains(info->GetChildID())) {
-    // Relax this restriction for apps that use <webview>.  See
-    // https://crbug.com/652077.
-    const extensions::Extension* extension =
-        extension_info_map_->extensions().GetByID(origin.host());
-    bool has_webview_permission =
-        extension &&
-        extension->permissions_data()->HasAPIPermission(
-            extensions::APIPermission::kWebView);
-    if (!has_webview_permission)
-      return net::ERR_ABORTED;
-  }
-
   return ExtensionWebRequestEventRouter::GetInstance()->OnBeforeRequest(
-      profile_, extension_info_map_.get(),
-      GetExtensionNavigationUIData(request), request, callback, new_url);
+      profile_, extension_info_map_.get(), request, callback, new_url);
 }
 
 int ChromeExtensionsNetworkDelegateImpl::OnBeforeStartTransaction(
@@ -211,16 +173,14 @@ int ChromeExtensionsNetworkDelegateImpl::OnBeforeStartTransaction(
     const net::CompletionCallback& callback,
     net::HttpRequestHeaders* headers) {
   return ExtensionWebRequestEventRouter::GetInstance()->OnBeforeSendHeaders(
-      profile_, extension_info_map_.get(),
-      GetExtensionNavigationUIData(request), request, callback, headers);
+      profile_, extension_info_map_.get(), request, callback, headers);
 }
 
 void ChromeExtensionsNetworkDelegateImpl::OnStartTransaction(
     net::URLRequest* request,
     const net::HttpRequestHeaders& headers) {
   ExtensionWebRequestEventRouter::GetInstance()->OnSendHeaders(
-      profile_, extension_info_map_.get(),
-      GetExtensionNavigationUIData(request), request, headers);
+      profile_, extension_info_map_.get(), request, headers);
 }
 
 int ChromeExtensionsNetworkDelegateImpl::OnHeadersReceived(
@@ -230,8 +190,7 @@ int ChromeExtensionsNetworkDelegateImpl::OnHeadersReceived(
     scoped_refptr<net::HttpResponseHeaders>* override_response_headers,
     GURL* allowed_unsafe_redirect_url) {
   return ExtensionWebRequestEventRouter::GetInstance()->OnHeadersReceived(
-      profile_, extension_info_map_.get(),
-      GetExtensionNavigationUIData(request), request, callback,
+      profile_, extension_info_map_.get(), request, callback,
       original_response_headers, override_response_headers,
       allowed_unsafe_redirect_url);
 }
@@ -240,43 +199,35 @@ void ChromeExtensionsNetworkDelegateImpl::OnBeforeRedirect(
     net::URLRequest* request,
     const GURL& new_location) {
   ExtensionWebRequestEventRouter::GetInstance()->OnBeforeRedirect(
-      profile_, extension_info_map_.get(),
-      GetExtensionNavigationUIData(request), request, new_location);
+      profile_, extension_info_map_.get(), request, new_location);
 }
-
 
 void ChromeExtensionsNetworkDelegateImpl::OnResponseStarted(
-    net::URLRequest* request) {
+    net::URLRequest* request,
+    int net_error) {
   ExtensionWebRequestEventRouter::GetInstance()->OnResponseStarted(
-      profile_, extension_info_map_.get(),
-      GetExtensionNavigationUIData(request), request);
-  ForwardProxyErrors(request);
+      profile_, extension_info_map_.get(), request, net_error);
+  ForwardProxyErrors(request, net_error);
 }
 
-void ChromeExtensionsNetworkDelegateImpl::OnCompleted(
-    net::URLRequest* request,
-    bool started) {
-  if (request->status().status() == net::URLRequestStatus::SUCCESS) {
-    bool is_redirect = request->response_headers() &&
-        net::HttpResponseHeaders::IsRedirectResponseCode(
-            request->response_headers()->response_code());
-    if (!is_redirect) {
-      ExtensionWebRequestEventRouter::GetInstance()->OnCompleted(
-          profile_, extension_info_map_.get(),
-          GetExtensionNavigationUIData(request), request);
-    }
-    return;
-  }
+void ChromeExtensionsNetworkDelegateImpl::OnCompleted(net::URLRequest* request,
+                                                      bool started,
+                                                      int net_error) {
+  DCHECK_NE(net::ERR_IO_PENDING, net_error);
 
-  if (request->status().status() == net::URLRequestStatus::FAILED ||
-      request->status().status() == net::URLRequestStatus::CANCELED) {
+  if (net_error != net::OK) {
     ExtensionWebRequestEventRouter::GetInstance()->OnErrorOccurred(
-        profile_, extension_info_map_.get(),
-        GetExtensionNavigationUIData(request), request, started);
+        profile_, extension_info_map_.get(), request, started, net_error);
     return;
   }
 
-  NOTREACHED();
+  bool is_redirect = request->response_headers() &&
+                     net::HttpResponseHeaders::IsRedirectResponseCode(
+                         request->response_headers()->response_code());
+  if (!is_redirect) {
+    ExtensionWebRequestEventRouter::GetInstance()->OnCompleted(
+        profile_, extension_info_map_.get(), request, net_error);
+  }
 }
 
 void ChromeExtensionsNetworkDelegateImpl::OnURLRequestDestroyed(
@@ -299,8 +250,7 @@ ChromeExtensionsNetworkDelegateImpl::OnAuthRequired(
     const AuthCallback& callback,
     net::AuthCredentials* credentials) {
   return ExtensionWebRequestEventRouter::GetInstance()->OnAuthRequired(
-      profile_, extension_info_map_.get(),
-      GetExtensionNavigationUIData(request), request, auth_info, callback,
+      profile_, extension_info_map_.get(), request, auth_info, callback,
       credentials);
 }
 
@@ -332,8 +282,8 @@ void ChromeExtensionsNetworkDelegate::set_extension_info_map(
 }
 
 void ChromeExtensionsNetworkDelegate::ForwardProxyErrors(
-    net::URLRequest* request) {
-}
+    net::URLRequest* request,
+    int net_error) {}
 
 void ChromeExtensionsNetworkDelegate::ForwardStartRequestStatus(
     net::URLRequest* request) {
@@ -375,15 +325,13 @@ void ChromeExtensionsNetworkDelegate::OnBeforeRedirect(
     const GURL& new_location) {
 }
 
-
 void ChromeExtensionsNetworkDelegate::OnResponseStarted(
-    net::URLRequest* request) {
-}
-
-void ChromeExtensionsNetworkDelegate::OnCompleted(
     net::URLRequest* request,
-    bool started) {
-}
+    int net_error) {}
+
+void ChromeExtensionsNetworkDelegate::OnCompleted(net::URLRequest* request,
+                                                  bool started,
+                                                  int net_error) {}
 
 void ChromeExtensionsNetworkDelegate::OnURLRequestDestroyed(
     net::URLRequest* request) {

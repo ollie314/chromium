@@ -459,6 +459,8 @@ bool H264ConfigChangeDetector::DetectConfig(const uint8_t* stream,
 }
 
 gfx::ColorSpace H264ConfigChangeDetector::current_color_space() const {
+  if (!parser_)
+    return gfx::ColorSpace();
   // TODO(hubbe): Is using last_sps_id_ correct here?
   const H264SPS* sps = parser_->GetSPS(last_sps_id_);
   if (sps)
@@ -1010,11 +1012,14 @@ void DXVAVideoDecodeAccelerator::Reset() {
   DVLOG(1) << "DXVAVideoDecodeAccelerator::Reset";
 
   State state = GetState();
-  RETURN_AND_NOTIFY_ON_FAILURE((state == kNormal || state == kStopped),
-                               "Reset: invalid state: " << state,
-                               ILLEGAL_STATE, );
+  RETURN_AND_NOTIFY_ON_FAILURE(
+      (state == kNormal || state == kStopped || state == kFlushing),
+      "Reset: invalid state: " << state, ILLEGAL_STATE, );
 
   decoder_thread_.Stop();
+
+  if (state == kFlushing)
+    NotifyFlushDone();
 
   SetState(kResetting);
 

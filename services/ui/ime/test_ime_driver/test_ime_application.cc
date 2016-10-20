@@ -5,7 +5,7 @@
 #include "services/ui/ime/test_ime_driver/test_ime_application.h"
 
 #include "mojo/public/cpp/bindings/strong_binding.h"
-#include "services/shell/public/cpp/connector.h"
+#include "services/service_manager/public/cpp/connector.h"
 #include "services/ui/ime/test_ime_driver/test_ime_driver.h"
 #include "services/ui/public/interfaces/ime.mojom.h"
 
@@ -16,18 +16,19 @@ TestIMEApplication::TestIMEApplication() {}
 
 TestIMEApplication::~TestIMEApplication() {}
 
-bool TestIMEApplication::OnConnect(const shell::Identity& remote_identity,
-                                   shell::InterfaceRegistry* registry) {
+bool TestIMEApplication::OnConnect(
+    const service_manager::Identity& remote_identity,
+    service_manager::InterfaceRegistry* registry) {
   return true;
 }
 
-void TestIMEApplication::OnStart(const shell::Identity& identity) {
+void TestIMEApplication::OnStart(const service_manager::Identity& identity) {
   mojom::IMEDriverPtr ime_driver_ptr;
   mojo::MakeStrongBinding(base::MakeUnique<TestIMEDriver>(),
                           GetProxy(&ime_driver_ptr));
 
   ui::mojom::IMERegistrarPtr ime_registrar;
-  connector()->ConnectToInterface("mojo:ui", &ime_registrar);
+  connector()->ConnectToInterface("service:ui", &ime_registrar);
   ime_registrar->RegisterDriver(std::move(ime_driver_ptr));
 }
 

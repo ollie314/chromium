@@ -157,6 +157,10 @@ LayoutObject* FileInputType::createLayoutObject(const ComputedStyle&) const {
   return new LayoutFileUploadControl(&element());
 }
 
+InputType::ValueMode FileInputType::valueMode() const {
+  return ValueMode::kFilename;
+}
+
 bool FileInputType::canSetStringValue() const {
   return false;
 }
@@ -395,6 +399,13 @@ String FileInputType::defaultToolTip(const InputTypeView&) const {
       names.append('\n');
   }
   return names.toString();
+}
+
+void FileInputType::copyNonAttributeProperties(const HTMLInputElement& source) {
+  DCHECK(m_fileList->isEmpty());
+  const FileList* sourceList = source.files();
+  for (unsigned i = 0; i < sourceList->length(); ++i)
+    m_fileList->append(sourceList->item(i)->clone());
 }
 
 }  // namespace blink

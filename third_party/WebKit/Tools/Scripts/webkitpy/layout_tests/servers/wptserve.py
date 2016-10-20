@@ -45,7 +45,8 @@ class WPTServe(server_base.ServerBase):
         self._stdout = self._stderr = self._executive.DEVNULL
         # TODO(burnik): We should stop setting the CWD once WPT can be run without it.
         self._cwd = path_to_wpt_root
-        self._env = {'PYTHONPATH': path_to_thirdparty}
+        self._env = port_obj.host.environ.copy()
+        self._env.update({'PYTHONPATH': path_to_thirdparty})
         self._keep_process_reference = True
         self._start_cmd = start_cmd
 
@@ -56,7 +57,10 @@ class WPTServe(server_base.ServerBase):
             return
 
         # TODO(burnik): Figure out a cleaner way of stopping wptserve.
-        self._executive.interrupt(self._pid)
+        if self._platform.is_win():
+            self._executive.kill_process(self._pid)
+        else:
+            self._executive.interrupt(self._pid)
 
         # According to Popen.wait(), this can deadlock when using stdout=PIPE and/or stderr=PIPE.
         # We're using DEVNULL for both so that should not occur.

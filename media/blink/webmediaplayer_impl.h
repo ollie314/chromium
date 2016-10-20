@@ -21,6 +21,7 @@
 #include "base/timer/elapsed_timer.h"
 #include "base/timer/timer.h"
 #include "build/build_config.h"
+#include "media/base/media_observer.h"
 #include "media/base/media_tracks.h"
 #include "media/base/pipeline_impl.h"
 #include "media/base/renderer_factory.h"
@@ -69,6 +70,7 @@ class GLES2Interface;
 namespace media {
 class ChunkDemuxer;
 class GpuVideoAcceleratorFactories;
+class MediaKeys;
 class MediaLog;
 class UrlIndex;
 class VideoFrameCompositor;
@@ -204,11 +206,17 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerImpl
   gfx::Size GetCanvasSize() const;
   void SetDeviceScaleFactor(float scale_factor);
   void setPoster(const blink::WebURL& poster) override;
+  void SetUseFallbackPath(bool use_fallback_path);
 #endif
 
   // Called from WebMediaPlayerCast.
   // TODO(hubbe): WMPI_CAST make private.
   void OnPipelineSeeked(bool time_updated);
+
+  // Restart the player/pipeline as soon as possible. This will destroy the
+  // current renderer, if any, and create a new one via the RendererFactory; and
+  // then seek to resume playback at the current position.
+  void ScheduleRestart();
 
   // Distinct states that |delegate_| can be in.
   // TODO(sandersd): This should move into WebMediaPlayerDelegate.
@@ -252,9 +260,6 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerImpl
   // Actually seek. Avoids causing |should_notify_time_changed_| to be set when
   // |time_updated| is false.
   void DoSeek(base::TimeDelta time, bool time_updated);
-
-  // Ask for the renderer to be restarted (destructed and recreated).
-  void ScheduleRestart();
 
   // Called after |defer_load_cb_| has decided to allow the load. If
   // |defer_load_cb_| is null this is called immediately.
@@ -306,9 +311,9 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerImpl
   // tracks separately in WebSourceBufferImpl.
   void OnFFmpegMediaTracksUpdated(std::unique_ptr<MediaTracks> tracks);
 
-  // Sets |cdm_context| on the pipeline and fires |cdm_attached_cb| when done.
-  // Parameter order is reversed for easy binding.
-  void SetCdm(const CdmAttachedCB& cdm_attached_cb, CdmContext* cdm_context);
+  // Sets CdmContext from |cdm| on the pipeline and calls OnCdmAttached()
+  // when done.
+  void SetCdm(blink::WebContentDecryptionModule* cdm);
 
   // Called when a CDM has been attached to the |pipeline_|.
   void OnCdmAttached(bool success);
@@ -486,8 +491,13 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerImpl
 
   std::unique_ptr<blink::WebContentDecryptionModuleResult> set_cdm_result_;
 
-  // Whether a CDM has been successfully attached.
-  bool is_cdm_attached_;
+  // If a CDM is attached keep a reference to it, so that it is not destroyed
+  // until after the pipeline is done with it.
+  scoped_refptr<MediaKeys> cdm_;
+
+  // Keep track of the CDM while it is in the process of attaching to the
+  // pipeline.
+  scoped_refptr<MediaKeys> pending_cdm_;
 
 #if defined(OS_ANDROID)  // WMPI_CAST
   WebMediaPlayerCast cast_impl_;
@@ -536,6 +546,11 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerImpl
   enum class CanSuspendState { UNKNOWN, YES, NO };
   CanSuspendState can_suspend_state_;
 
+  // Used for HLS playback and in certain fallback paths (e.g. on older devices
+  // that can't support the unified media pipeline).
+  GURL fallback_url_;
+  bool use_fallback_path_;
+
   // Called some-time after OnHidden() if the media was suspended in a playing
   // state as part of the call to OnHidden().
   base::OneShotTimer background_pause_timer_;
@@ -547,6 +562,9 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerImpl
   // Number of times we've reached BUFFERING_HAVE_NOTHING during playback.
   int underflow_count_;
   std::unique_ptr<base::ElapsedTimer> underflow_timer_;
+
+  // Monitors the player events.
+  base::WeakPtr<MediaObserver> observer_;
 
   DISALLOW_COPY_AND_ASSIGN(WebMediaPlayerImpl);
 };

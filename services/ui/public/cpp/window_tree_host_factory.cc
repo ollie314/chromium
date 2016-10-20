@@ -5,7 +5,7 @@
 #include "services/ui/public/cpp/window_tree_host_factory.h"
 
 #include "base/memory/ptr_util.h"
-#include "services/shell/public/cpp/connector.h"
+#include "services/service_manager/public/cpp/connector.h"
 #include "services/ui/public/cpp/window_tree_client.h"
 #include "services/ui/public/cpp/window_tree_client_delegate.h"
 
@@ -25,12 +25,12 @@ std::unique_ptr<WindowTreeClient> CreateWindowTreeHost(
 }
 
 std::unique_ptr<WindowTreeClient> CreateWindowTreeHost(
-    shell::Connector* connector,
+    service_manager::Connector* connector,
     WindowTreeClientDelegate* delegate,
     mojom::WindowTreeHostPtr* host,
     WindowManagerDelegate* window_manager_delegate) {
   mojom::WindowTreeHostFactoryPtr factory;
-  connector->ConnectToInterface("mojo:ui", &factory);
+  connector->ConnectToInterface("service:ui", &factory);
   return CreateWindowTreeHost(factory.get(), delegate, host,
                               window_manager_delegate);
 }

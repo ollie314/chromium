@@ -52,8 +52,8 @@
 #include "core/inspector/InspectorInstrumentation.h"
 #include "core/page/Page.h"
 #include "core/svg/SVGStyleElement.h"
-#include "platform/TraceEvent.h"
 #include "platform/fonts/FontCache.h"
+#include "platform/tracing/TraceEvent.h"
 
 namespace blink {
 
@@ -64,10 +64,9 @@ StyleEngine::StyleEngine(Document& document)
       m_isMaster(!document.importsController() ||
                  document.importsController()->master() == &document),
       m_documentStyleSheetCollection(
-          DocumentStyleSheetCollection::create(document))
+          DocumentStyleSheetCollection::create(document)),
       // We don't need to create CSSFontSelector for imported document or
       // HTMLTemplateElement's document, because those documents have no frame.
-      ,
       m_fontSelector(document.frame() ? CSSFontSelector::create(&document)
                                       : nullptr) {
   if (m_fontSelector)
@@ -93,7 +92,7 @@ inline Document* StyleEngine::master() {
 TreeScopeStyleSheetCollection* StyleEngine::ensureStyleSheetCollectionFor(
     TreeScope& treeScope) {
   if (treeScope == m_document)
-    return documentStyleSheetCollection();
+    return &documentStyleSheetCollection();
 
   StyleSheetCollectionMap::AddResult result =
       m_styleSheetCollectionMap.add(&treeScope, nullptr);
@@ -106,19 +105,19 @@ TreeScopeStyleSheetCollection* StyleEngine::ensureStyleSheetCollectionFor(
 TreeScopeStyleSheetCollection* StyleEngine::styleSheetCollectionFor(
     TreeScope& treeScope) {
   if (treeScope == m_document)
-    return documentStyleSheetCollection();
+    return &documentStyleSheetCollection();
 
   StyleSheetCollectionMap::iterator it =
       m_styleSheetCollectionMap.find(&treeScope);
   if (it == m_styleSheetCollectionMap.end())
-    return 0;
+    return nullptr;
   return it->value.get();
 }
 
-const HeapVector<Member<StyleSheet>>& StyleEngine::styleSheetsForStyleSheetList(
-    TreeScope& treeScope) {
+const HeapVector<TraceWrapperMember<StyleSheet>>&
+StyleEngine::styleSheetsForStyleSheetList(TreeScope& treeScope) {
   if (treeScope == m_document)
-    return documentStyleSheetCollection()->styleSheetsForStyleSheetList();
+    return documentStyleSheetCollection().styleSheetsForStyleSheetList();
 
   return ensureStyleSheetCollectionFor(treeScope)
       ->styleSheetsForStyleSheetList();
@@ -285,7 +284,7 @@ void StyleEngine::clearMediaQueryRuleSetOnTreeScopeStyleSheets(
 
 void StyleEngine::clearMediaQueryRuleSetStyleSheets() {
   resolverChanged(FullStyleUpdate);
-  documentStyleSheetCollection()->clearMediaQueryRuleSetStyleSheets();
+  documentStyleSheetCollection().clearMediaQueryRuleSetStyleSheets();
   clearMediaQueryRuleSetOnTreeScopeStyleSheets(m_activeTreeScopes);
 }
 
@@ -295,8 +294,8 @@ void StyleEngine::updateStyleSheetsInImport(
   HeapVector<Member<StyleSheet>> sheetsForList;
   ImportedDocumentStyleSheetCollector subcollector(parentCollector,
                                                    sheetsForList);
-  documentStyleSheetCollection()->collectStyleSheets(*this, subcollector);
-  documentStyleSheetCollection()->swapSheetsForSheetList(sheetsForList);
+  documentStyleSheetCollection().collectStyleSheets(*this, subcollector);
+  documentStyleSheetCollection().swapSheetsForSheetList(sheetsForList);
 }
 
 void StyleEngine::updateActiveStyleSheetsInShadow(
@@ -326,7 +325,7 @@ void StyleEngine::updateActiveStyleSheets(StyleResolverUpdateMode updateMode) {
   TRACE_EVENT0("blink,blink_style", "StyleEngine::updateActiveStyleSheets");
 
   if (shouldUpdateDocumentStyleSheetCollection(updateMode))
-    documentStyleSheetCollection()->updateActiveStyleSheets(*this, updateMode);
+    documentStyleSheetCollection().updateActiveStyleSheets(*this, updateMode);
 
   if (shouldUpdateShadowTreeStyleSheetCollection(updateMode)) {
     UnorderedTreeScopeSet treeScopesRemoved;
@@ -353,12 +352,12 @@ void StyleEngine::updateActiveStyleSheets(StyleResolverUpdateMode updateMode) {
 const HeapVector<Member<CSSStyleSheet>>
 StyleEngine::activeStyleSheetsForInspector() const {
   if (m_activeTreeScopes.isEmpty())
-    return documentStyleSheetCollection()->activeAuthorStyleSheets();
+    return documentStyleSheetCollection().activeAuthorStyleSheets();
 
   HeapVector<Member<CSSStyleSheet>> activeStyleSheets;
 
   activeStyleSheets.appendVector(
-      documentStyleSheetCollection()->activeAuthorStyleSheets());
+      documentStyleSheetCollection().activeAuthorStyleSheets());
   for (TreeScope* treeScope : m_activeTreeScopes) {
     if (TreeScopeStyleSheetCollection* collection =
             m_styleSheetCollectionMap.get(treeScope))
@@ -395,7 +394,7 @@ void StyleEngine::appendActiveAuthorStyleSheets() {
   DCHECK(isMaster());
 
   m_resolver->appendAuthorStyleSheets(
-      documentStyleSheetCollection()->activeAuthorStyleSheets());
+      documentStyleSheetCollection().activeAuthorStyleSheets());
   for (TreeScope* treeScope : m_activeTreeScopes) {
     if (TreeScopeStyleSheetCollection* collection =
             m_styleSheetCollectionMap.get(treeScope))
@@ -815,7 +814,7 @@ void StyleEngine::scheduleNthPseudoInvalidations(ContainerNode& nthParent) {
 
 void StyleEngine::scheduleRuleSetInvalidationsForElement(
     Element& element,
-    const HeapVector<Member<const RuleSet>>& ruleSets) {
+    const HeapVector<Member<RuleSet>>& ruleSets) {
   AtomicString id;
   const SpaceSplitString* classNames = nullptr;
 
@@ -858,7 +857,7 @@ void StyleEngine::invalidateSlottedElements(HTMLSlotElement& slot) {
 
 void StyleEngine::scheduleInvalidationsForRuleSets(
     TreeScope& treeScope,
-    const HeapVector<Member<const RuleSet>>& ruleSets) {
+    const HeapVector<Member<RuleSet>>& ruleSets) {
 #if DCHECK_IS_ON()
   // Full scope recalcs should be handled while collecting the ruleSets before
   // calling this method.

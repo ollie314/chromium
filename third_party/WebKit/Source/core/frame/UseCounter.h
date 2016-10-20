@@ -49,10 +49,11 @@ class StyleSheetContents;
 // features are used and thus when it's safe to remove or change them.
 //
 // The Chromium Content layer controls what is done with this data.
-// For instance, in Google Chrome, these counts are submitted
-// anonymously through the Histogram recording system in Chrome
-// for users who opt-in to "Usage Statistics" submission
-// during their install of Google Chrome:
+//
+// For instance, in Google Chrome, these counts are submitted anonymously
+// through the UMA histogram recording system in Chrome for users who have the
+// "Automatically send usage statistics and crash reports to Google" setting
+// enabled:
 // http://www.google.com/chrome/intl/en/privacy.html
 
 class CORE_EXPORT UseCounter {
@@ -476,9 +477,6 @@ class CORE_EXPORT UseCounter {
     MixedContentPlugin = 616,
     MixedContentPrefetch = 617,
     MixedContentVideo = 618,
-    AudioListenerDopplerFactor = 620,
-    AudioListenerSpeedOfSound = 621,
-    AudioListenerSetVelocity = 622,
     CSSSelectorPseudoFullScreenAncestor = 628,
     CSSSelectorPseudoFullScreen = 629,
     WebKitCSSMatrix = 630,
@@ -990,7 +988,6 @@ class CORE_EXPORT UseCounter {
 
     CSSAtRuleApply = 1249,
     CSSSelectorPseudoAny = 1250,
-    PannerNodeSetVelocity = 1251,
     DocumentAllItemNoArguments = 1252,
     DocumentAllItemNamed = 1253,
     DocumentAllItemIndexed = 1254,
@@ -1337,11 +1334,50 @@ class CORE_EXPORT UseCounter {
     DocumentCreateTouchMoreThanSevenArguments = 1612,
     EncryptedMediaCapabilityProvided = 1613,
     EncryptedMediaCapabilityNotProvided = 1614,
+    LongTaskObserver = 1615,
+    CSSMotionInEffect = 1616,
+    CSSOffsetInEffect = 1617,
+    // The above items are available in M55 branch
+
+    VRGetDisplaysInsecureOrigin = 1618,
+    VRRequestPresent = 1619,
+    VRRequestPresentInsecureOrigin = 1620,
+    VRDeprecatedFieldOfView = 1621,
+    VideoInCanvas = 1622,
+    HiddenAutoplayedVideoInCanvas = 1623,
+    OffscreenCanvas = 1624,
+    GamepadPose = 1625,
+    GamepadHand = 1626,
+    GamepadDisplayId = 1627,
+    GamepadButtonTouched = 1628,
+    GamepadPoseHasOrientation = 1629,
+    GamepadPoseHasPosition = 1630,
+    GamepadPosePosition = 1631,
+    GamepadPoseLinearVelocity = 1632,
+    GamepadPoseLinearAcceleration = 1633,
+    GamepadPoseOrientation = 1634,
+    GamepadPoseAngularVelocity = 1635,
+    GamepadPoseAngularAcceleration = 1636,
+    DeprecatedBluetoothDeviceUUIDsAttribute = 1637,
+    V8RTCDataChannel_MaxRetransmitTime_AttributeGetter = 1638,
+    V8RTCDataChannel_MaxRetransmits_AttributeGetter = 1639,
+    V8RTCDataChannel_Reliable_AttributeGetter = 1640,
+    V8RTCPeerConnection_AddStream_Method = 1641,
+    V8RTCPeerConnection_CreateDTMFSender_Method = 1642,
+    V8RTCPeerConnection_GetLocalStreams_Method = 1643,
+    V8RTCPeerConnection_GetRemoteStreams_Method = 1644,
+    V8RTCPeerConnection_GetStreamById_Method = 1645,
+    V8RTCPeerConnection_RemoveStream_Method = 1646,
+    V8RTCPeerConnection_UpdateIce_Method = 1647,
+    RTCPeerConnectionCreateDataChannelMaxRetransmitTime = 1648,
+    RTCPeerConnectionCreateDataChannelMaxRetransmits = 1649,
+    AudioContextCreateConstantSource = 1650,
+    WebAudioConstantSourceNode = 1651,
 
     // Add new features immediately above this line. Don't change assigned
     // numbers of any item, and don't reuse removed slots.
-    // Also, run update_use_counter_feature_enum.py in chromium/src/tools/metrics/histograms/
-    // to update the UMA mapping.
+    // Also, run update_use_counter_feature_enum.py in
+    // chromium/src/tools/metrics/histograms/ to update the UMA mapping.
     NumberOfFeatures,  // This enum value must be last.
   };
 
@@ -1398,11 +1434,13 @@ class CORE_EXPORT UseCounter {
   unsigned m_muteCount;
   Context m_context;
 
-  // Track what features/properties have been reported to the (non-legacy) histograms.
+  // Track what features/properties have been reported to the (non-legacy)
+  // histograms.
   BitVector m_featuresRecorded;
   BitVector m_CSSRecorded;
 
-  // Encapsulates the work to preserve the old "FeatureObserver" histogram with original semantics
+  // Encapsulates the work to preserve the old "FeatureObserver" histogram with
+  // original semantics
   // TODO(rbyers): remove this - http://crbug.com/597963
   class CORE_EXPORT LegacyCounter {
    public:
@@ -1413,7 +1451,8 @@ class CORE_EXPORT UseCounter {
     void updateMeasurements();
 
    private:
-    // Tracks what features/properties need to be reported to the legacy histograms.
+    // Tracks what features/properties need to be reported to the legacy
+    // histograms.
     BitVector m_featureBits;
     BitVector m_CSSBits;
   } m_legacyCounter;

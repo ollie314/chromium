@@ -11,9 +11,9 @@
 #if defined(USE_AURA)
 #include "base/run_loop.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/common/mojo_shell_connection.h"
-#include "services/shell/public/cpp/connector.h"
-#include "services/shell/runner/common/client_util.h"
+#include "content/public/common/service_manager_connection.h"
+#include "services/service_manager/public/cpp/connector.h"
+#include "services/service_manager/runner/common/client_util.h"
 #include "services/ui/public/cpp/gpu_service.h"
 #include "services/ui/public/cpp/input_devices/input_device_client.h"
 #include "services/ui/public/interfaces/input_devices/input_device_server.mojom.h"
@@ -51,11 +51,11 @@ void ChromeBrowserMainExtraPartsViews::PreCreateThreads() {
 #endif
 }
 
-void ChromeBrowserMainExtraPartsViews::MojoShellConnectionStarted(
-    content::MojoShellConnection* connection) {
+void ChromeBrowserMainExtraPartsViews::ServiceManagerConnectionStarted(
+    content::ServiceManagerConnection* connection) {
   DCHECK(connection);
 #if defined(USE_AURA)
-  if (shell::ShellIsRemote()) {
+  if (service_manager::ServiceManagerIsRemote()) {
     // TODO(rockot): Remove the blocking wait for init.
     // http://crbug.com/594852.
     base::RunLoop wait_loop;
@@ -64,7 +64,7 @@ void ChromeBrowserMainExtraPartsViews::MojoShellConnectionStarted(
 
     input_device_client_.reset(new ui::InputDeviceClient());
     ui::mojom::InputDeviceServerPtr server;
-    connection->GetConnector()->ConnectToInterface("mojo:ui", &server);
+    connection->GetConnector()->ConnectToInterface("service:ui", &server);
     input_device_client_->Connect(std::move(server));
 
     window_manager_connection_ = views::WindowManagerConnection::Create(

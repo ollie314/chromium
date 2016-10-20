@@ -54,6 +54,24 @@ bool SectionPredicate(
   }
 }
 
+bool AllInterestingNodesPredicate(
+    BrowserAccessibility* start, BrowserAccessibility* node) {
+  // Focusable nodes should never be skipped. Note that IsFocusable()
+  // already skips over things like iframes and child frames that are
+  // technically focusable but shouldn't be exposed as focusable on Android.
+  BrowserAccessibilityAndroid* android_node =
+      static_cast<BrowserAccessibilityAndroid*>(node);
+  if (android_node->IsFocusable())
+    return true;
+
+  // If it's not focusable but has a control role, then it's interesting.
+  if (android_node->IsControl())
+    return true;
+
+  // Otherwise, the interesting nodes are leaf nodes with text.
+  return node->PlatformIsLeaf() && !node->GetText().empty();
+}
+
 void AddToPredicateMap(const char* search_key_ascii,
                        AccessibilityMatchPredicate predicate) {
   base::string16 search_key_utf16 = base::ASCIIToUTF16(search_key_ascii);
@@ -105,14 +123,9 @@ AccessibilityMatchPredicate PredicateForSearchKey(
   if (iter != g_search_key_to_predicate_map.Get().end())
     return iter->second;
 
-  // If we don't recognize the selector, return any element that's clickable.
-  // We mark all focusable nodes and leaf nodes as clickable because it's
-  // impossible to know whether a web node has a click handler or not, so
-  // to be safe we have to allow accessibility services to click on nearly
-  // anything that could possibly respond to a click.
-  return [](BrowserAccessibility* start, BrowserAccessibility* node) {
-    return static_cast<BrowserAccessibilityAndroid*>(node)->IsClickable();
-  };
+  // If we don't recognize the selector, return any element that a
+  // screen reader should navigate to.
+  return AllInterestingNodesPredicate;
 }
 
 }  // anonymous namespace
@@ -223,14 +236,9 @@ void BrowserAccessibilityManagerAndroid::NotifyAccessibilityEvent(
   }
 
   // Sometimes we get events on nodes in our internal accessibility tree
-  // that aren't exposed on Android. Walk up the ancestors and update |node|
-  // to point to the highest ancestor that's a leaf node.
-  BrowserAccessibility* parent = node->GetParent();
-  while (parent) {
-    if (parent->PlatformIsLeaf())
-      node = parent;
-    parent = parent->GetParent();
-  }
+  // that aren't exposed on Android. Update |node| to point to the highest
+  // ancestor that's a leaf node.
+  node = node->GetClosestPlatformObject();
 
   // Always send AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED to notify
   // the Android system that the accessibility hierarchy rooted at this
@@ -351,8 +359,7 @@ void BrowserAccessibilityManagerAndroid::HitTest(
     const JavaParamRef<jobject>& obj,
     jint x,
     jint y) {
-  if (delegate())
-    delegate()->AccessibilityHitTest(gfx::Point(x, y));
+  BrowserAccessibilityManager::HitTest(gfx::Point(x, y));
 }
 
 jboolean BrowserAccessibilityManagerAndroid::IsEditableText(
@@ -433,7 +440,8 @@ jboolean BrowserAccessibilityManagerAndroid::PopulateAccessibilityNodeInfo(
       node->IsFocusable(),
       node->IsFocused(),
       node->IsCollapsed(),
-      node->IsExpanded());
+      node->IsExpanded(),
+      node->HasNonEmptyValue());
   Java_BrowserAccessibilityManager_setAccessibilityNodeInfoClassName(
       env, obj, info,
       base::android::ConvertUTF8ToJavaString(env, node->GetClassName()));
@@ -685,6 +693,15 @@ jboolean BrowserAccessibilityManagerAndroid::AdjustSlider(
   return false;
 }
 
+void BrowserAccessibilityManagerAndroid::ShowContextMenu(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj,
+    jint id) {
+  BrowserAccessibilityAndroid* node = GetFromUniqueID(id);
+  if (node)
+    node->manager()->ShowContextMenu(*node);
+}
+
 void BrowserAccessibilityManagerAndroid::HandleHoverEvent(
     BrowserAccessibility* node) {
   JNIEnv* env = AttachCurrentThread();
@@ -891,10 +908,7 @@ void BrowserAccessibilityManagerAndroid::SetAccessibilityFocus(
   if (!node)
     return;
 
-  if (node->manager()->delegate()) {
-    node->manager()->delegate()->AccessibilitySetAccessibilityFocus(
-        node->GetId());
-  }
+  node->manager()->SetAccessibilityFocus(*node);
 }
 
 bool BrowserAccessibilityManagerAndroid::IsSlider(

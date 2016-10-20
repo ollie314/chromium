@@ -37,6 +37,10 @@ const double kShortIdlePeriodDurationPercentile = 50;
 // Amount of idle time left in a frame (as a ratio of the vsync interval) above
 // which main thread compositing can be considered fast.
 const double kFastCompositingIdleTimeThreshold = .2;
+constexpr base::TimeDelta kThreadLoadTrackerReportingInterval =
+    base::TimeDelta::FromMinutes(1);
+constexpr base::TimeDelta kThreadLoadTrackerWaitingPeriodBeforeReporting =
+    base::TimeDelta::FromMinutes(2);
 
 void ReportForegroundRendererTaskLoad(base::TimeTicks time, double load) {
   int load_percentage = static_cast<int>(load * 100);
@@ -153,10 +157,14 @@ RendererSchedulerImpl::MainThreadOnly::MainThreadOnly(
                           kShortIdlePeriodDurationPercentile),
       background_main_thread_load_tracker(
           now,
-          base::Bind(&ReportBackgroundRendererTaskLoad)),
+          base::Bind(&ReportBackgroundRendererTaskLoad),
+          kThreadLoadTrackerReportingInterval,
+          kThreadLoadTrackerWaitingPeriodBeforeReporting),
       foreground_main_thread_load_tracker(
           now,
-          base::Bind(&ReportForegroundRendererTaskLoad)),
+          base::Bind(&ReportForegroundRendererTaskLoad),
+          kThreadLoadTrackerReportingInterval,
+          kThreadLoadTrackerWaitingPeriodBeforeReporting),
       current_use_case(UseCase::NONE),
       timer_queue_suspend_count(0),
       navigation_task_expected_count(0),
@@ -482,6 +490,10 @@ void RendererSchedulerImpl::SuspendRenderer() {
   if (helper_.IsShutdown())
     return;
   suspend_timers_when_backgrounded_closure_.Cancel();
+
+  UMA_HISTOGRAM_COUNTS("PurgeAndSuspend.PendingTaskCount",
+                       helper_.GetNumberOfPendingTasks());
+
   // TODO(hajimehoshi): We might need to suspend not only timer queue but also
   // e.g. loading tasks or postMessage.
   MainThreadOnly().renderer_suspended = true;

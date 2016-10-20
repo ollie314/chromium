@@ -4,23 +4,24 @@
 
 #include "chrome/browser/android/vr_shell/vr_shell.h"
 
-#include <thread>
-
+#include "base/metrics/histogram_macros.h"
+#include "chrome/browser/android/vr_shell/ui_elements.h"
 #include "chrome/browser/android/vr_shell/ui_scene.h"
 #include "chrome/browser/android/vr_shell/vr_compositor.h"
 #include "chrome/browser/android/vr_shell/vr_controller.h"
+#include "chrome/browser/android/vr_shell/vr_gesture.h"
 #include "chrome/browser/android/vr_shell/vr_gl_util.h"
 #include "chrome/browser/android/vr_shell/vr_input_manager.h"
-#include "chrome/browser/android/vr_shell/vr_math.h"
 #include "chrome/browser/android/vr_shell/vr_shell_delegate.h"
 #include "chrome/browser/android/vr_shell/vr_shell_renderer.h"
-#include "content/public/browser/android/content_view_core.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/referrer.h"
-#include "jni/VrShell_jni.h"
+#include "content/public/common/screen_info.h"
+#include "jni/VrShellImpl_jni.h"
+#include "third_party/WebKit/public/web/WebInputEvent.h"
 #include "ui/android/view_android.h"
 #include "ui/android/window_android.h"
 #include "ui/base/page_transition_types.h"
@@ -50,11 +51,8 @@ static constexpr float kReticleHeight = 0.025f;
 
 static constexpr float kLaserWidth = 0.01f;
 
-// The neutral direction is fixed in world space, this is the
-// reference angle pointing forward towards the horizon when the
-// controller orientation is reset. This should match the yaw angle
-// where the main screen is placed.
-static constexpr gvr::Vec3f kNeutralPose = {0.0f, 0.0f, -1.0f};
+// Angle (radians) the beam down from the controller axis, for wrist comfort.
+static constexpr float kErgoAngleOffset = 0.26f;
 
 static constexpr gvr::Vec3f kOrigin = {0.0f, 0.0f, 0.0f};
 
@@ -130,20 +128,20 @@ gvr::Quatf GetRotationFromZAxis(gvr::Vec3f vec) {
 
 namespace vr_shell {
 
-VrShell::VrShell(JNIEnv* env,
-                 jobject obj,
-                 content::ContentViewCore* content_cvc,
+VrShell::VrShell(JNIEnv* env, jobject obj,
+                 content::WebContents* main_contents,
                  ui::WindowAndroid* content_window,
-                 content::ContentViewCore* ui_cvc,
+                 content::WebContents* ui_contents,
                  ui::WindowAndroid* ui_window)
     : desktop_screen_tilt_(kDesktopScreenTiltDefault),
       desktop_height_(kDesktopHeightDefault),
-      content_cvc_(content_cvc),
-      ui_cvc_(ui_cvc),
-      delegate_(nullptr),
+      main_contents_(main_contents),
+      ui_contents_(ui_contents),
       weak_ptr_factory_(this) {
+  DCHECK(g_instance == nullptr);
   g_instance = this;
   j_vr_shell_.Reset(env, obj);
+  scene_.reset(new UiScene);
   content_compositor_.reset(new VrCompositor(content_window, false));
   ui_compositor_.reset(new VrCompositor(ui_window, true));
 
@@ -153,17 +151,19 @@ VrShell::VrShell(JNIEnv* env,
   rect->id = kBrowserUiElementId;
   rect->size = {screen_width, screen_height, 1.0f};
   rect->translation = kDesktopPositionDefault;
-  scene_.AddUiElement(rect);
-
-  desktop_plane_ = scene_.GetUiElementById(kBrowserUiElementId);
+  scene_->AddUiElement(rect);
 
   LoadUIContent();
+
+  gvr::Mat4f identity;
+  SetIdentityM(identity);
+  webvr_head_pose_.resize(kPoseRingBufferSize, identity);
 }
 
 void VrShell::UpdateCompositorLayers(JNIEnv* env,
                                      const JavaParamRef<jobject>& obj) {
-  content_compositor_->SetLayer(content_cvc_);
-  ui_compositor_->SetLayer(ui_cvc_);
+  content_compositor_->SetLayer(main_contents_);
+  ui_compositor_->SetLayer(ui_contents_);
 }
 
 void VrShell::Destroy(JNIEnv* env, const JavaParamRef<jobject>& obj) {
@@ -172,7 +172,7 @@ void VrShell::Destroy(JNIEnv* env, const JavaParamRef<jobject>& obj) {
 
 void VrShell::LoadUIContent() {
   GURL url(kVrShellUIURL);
-  ui_cvc_->GetWebContents()->GetController().LoadURL(
+  ui_contents_->GetController().LoadURL(
       url, content::Referrer(),
       ui::PageTransition::PAGE_TRANSITION_AUTO_TOPLEVEL, std::string(""));
 }
@@ -192,6 +192,14 @@ void VrShell::SetDelegate(JNIEnv* env,
   delegate_ = VrShellDelegate::getNativeDelegate(env, delegate);
 }
 
+enum class ViewerType
+{
+  UNKNOWN_TYPE = 0,
+  CARDBOARD = 1,
+  DAYDREAM = 2,
+  VIEWER_TYPE_MAX,
+};
+
 void VrShell::GvrInit(JNIEnv* env,
                       const JavaParamRef<jobject>& obj,
                       jlong native_gvr_api) {
@@ -202,8 +210,25 @@ void VrShell::GvrInit(JNIEnv* env,
     delegate_->OnVrShellReady(this);
   controller_.reset(
       new VrController(reinterpret_cast<gvr_context*>(native_gvr_api)));
-  content_input_manager_ = new VrInputManager(content_cvc_->GetWebContents());
-  ui_input_manager_ = new VrInputManager(ui_cvc_->GetWebContents());
+  content_input_manager_ = new VrInputManager(main_contents_);
+  ui_input_manager_ = new VrInputManager(ui_contents_);
+
+  ViewerType viewerType;
+  switch (gvr_api_->GetViewerType())
+  {
+    case gvr::ViewerType::GVR_VIEWER_TYPE_DAYDREAM:
+      viewerType = ViewerType::DAYDREAM;
+      break;
+    case gvr::ViewerType::GVR_VIEWER_TYPE_CARDBOARD:
+      viewerType = ViewerType::CARDBOARD;
+      break;
+    default:
+      NOTREACHED();
+      viewerType = ViewerType::UNKNOWN_TYPE;
+      break;
+  }
+  UMA_HISTOGRAM_ENUMERATION("VRViewerType", static_cast<int>(viewerType),
+      static_cast<int>(ViewerType::VIEWER_TYPE_MAX));
 }
 
 void VrShell::InitializeGl(JNIEnv* env,
@@ -241,21 +266,27 @@ void VrShell::UpdateController(const gvr::Vec3f& forward_vector) {
   }
 
   WebInputEvent::Type original_type = gesture->type;
+  gvr::Vec3f ergo_neutral_pose;
   if (!controller_->IsConnected()) {
     // No controller detected, set up a gaze cursor that tracks the
     // forward direction.
+    ergo_neutral_pose = {0.0f, 0.0f, -1.0f};
     controller_quat_ = GetRotationFromZAxis(forward_vector);
   } else {
+    ergo_neutral_pose = {0.0f, -sin(kErgoAngleOffset), -cos(kErgoAngleOffset)};
     controller_quat_ = controller_->Orientation();
   }
 
   gvr::Mat4f mat = QuatToMatrix(controller_quat_);
-  gvr::Vec3f forward = MatrixVectorMul(mat, kNeutralPose);
+  gvr::Vec3f forward = MatrixVectorMul(mat, ergo_neutral_pose);
   gvr::Vec3f origin = kHandPosition;
 
   target_element_ = nullptr;
-  float distance = scene_.GetUiElementById(kBrowserUiElementId)
-      ->GetRayDistance(origin, forward);
+
+  ContentRectangle* content_plane =
+      scene_->GetUiElementById(kBrowserUiElementId);
+
+  float distance = content_plane->GetRayDistance(origin, forward);
 
   // If we place the reticle based on elements intersecting the controller beam,
   // we can end up with the reticle hiding behind elements, or jumping laterally
@@ -275,7 +306,7 @@ void VrShell::UpdateController(const gvr::Vec3f& forward_vector) {
   // rather than eye, for simplicity. This will make the sphere slightly
   // off-center.
   gvr::Vec3f corner = {0.5f, 0.5f, 0.0f};
-  corner = MatrixVectorMul(desktop_plane_->transform.to_world, corner);
+  corner = MatrixVectorMul(content_plane->transform.to_world, corner);
   float max_distance = Distance(origin, corner) * kReticleDistanceMultiplier;
   if (distance > max_distance || distance <= 0.0f) {
     distance = max_distance;
@@ -291,17 +322,17 @@ void VrShell::UpdateController(const gvr::Vec3f& forward_vector) {
   int pixel_y = 0;
   VrInputManager* input_target = nullptr;
 
-  for (std::size_t i = 0; i < scene_.GetUiElements().size(); ++i) {
-    const ContentRectangle& plane = *scene_.GetUiElements()[i].get();
-    if (!plane.visible) {
+  for (std::size_t i = 0; i < scene_->GetUiElements().size(); ++i) {
+    const ContentRectangle* plane = scene_->GetUiElements()[i].get();
+    if (!plane->visible) {
       continue;
     }
-    float distance_to_plane = plane.GetRayDistance(kOrigin, eye_to_target);
+    float distance_to_plane = plane->GetRayDistance(kOrigin, eye_to_target);
     gvr::Vec3f plane_intersection_point =
         GetRayPoint(kOrigin, eye_to_target, distance_to_plane);
 
     gvr::Vec3f rect_2d_point =
-        MatrixVectorMul(plane.transform.from_world, plane_intersection_point);
+        MatrixVectorMul(plane->transform.from_world, plane_intersection_point);
     if (distance_to_plane > 0 && distance_to_plane < closest_element_distance) {
       float x = rect_2d_point.x + 0.5f;
       float y = 0.5f - rect_2d_point.y;
@@ -309,13 +340,13 @@ void VrShell::UpdateController(const gvr::Vec3f& forward_vector) {
       if (is_inside) {
         closest_element_distance = distance_to_plane;
         pixel_x =
-            static_cast<int>(plane.copy_rect.width * x + plane.copy_rect.x);
+            static_cast<int>(plane->copy_rect.width * x + plane->copy_rect.x);
         pixel_y =
-            static_cast<int>(plane.copy_rect.height * y + plane.copy_rect.y);
+            static_cast<int>(plane->copy_rect.height * y + plane->copy_rect.y);
 
         target_point_ = plane_intersection_point;
-        target_element_ = &plane;
-        input_target = (plane.id == kBrowserUiElementId)
+        target_element_ = plane;
+        input_target = (plane->id == kBrowserUiElementId)
             ? content_input_manager_.get() : ui_input_manager_.get();
       }
     }
@@ -339,12 +370,30 @@ void VrShell::UpdateController(const gvr::Vec3f& forward_vector) {
   gesture->details.move.delta.y = pixel_y;
   current_input_target_->ProcessUpdatedGesture(*gesture.get());
 
-  if (original_type == WebInputEvent::GestureTap) {
+  if (original_type == WebInputEvent::GestureTap || touch_pending_) {
+    touch_pending_ = false;
     gesture->type = WebInputEvent::GestureTap;
     gesture->details.buttons.pos.x = pixel_x;
     gesture->details.buttons.pos.y = pixel_y;
     current_input_target_->ProcessUpdatedGesture(*gesture.get());
   }
+}
+
+void VrShell::SetGvrPoseForWebVr(const gvr::Mat4f& pose, uint32_t pose_num) {
+  webvr_head_pose_[pose_num % kPoseRingBufferSize] = pose;
+}
+
+uint32_t GetPixelEncodedPoseIndex() {
+  // Read the pose index encoded in a bottom left pixel as color values.
+  // See also third_party/WebKit/Source/modules/vr/VRDisplay.cpp which
+  // encodes the pose index, and device/vr/android/gvr/gvr_device.cc
+  // which tracks poses.
+  uint8_t pixels[4];
+  // Assume we're reading from the frambebuffer we just wrote to.
+  // That's true currently, we may need to use glReadBuffer(GL_BACK)
+  // or equivalent if the rendering setup changes in the future.
+  glReadPixels(0, 0, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+  return pixels[0] | (pixels[1] << 8) | (pixels[2] << 16);
 }
 
 void VrShell::DrawFrame(JNIEnv* env, const JavaParamRef<jobject>& obj) {
@@ -375,6 +424,18 @@ void VrShell::DrawFrame(JNIEnv* env, const JavaParamRef<jobject>& obj) {
     if (!webvr_secure_origin_) {
       DrawWebVrOverlay(target_time.monotonic_system_time_nanos);
     }
+
+    // When using async reprojection, we need to know which pose was used in
+    // the WebVR app for drawing this frame. Due to unknown amounts of
+    // buffering in the compositor and SurfaceTexture, we read the pose number
+    // from a corner pixel. There's no point in doing this for legacy
+    // distortion rendering since that doesn't need a pose, and reading back
+    // pixels is an expensive operation. TODO(klausw): stop doing this once we
+    // have working no-compositor rendering for WebVR.
+    if (gvr_api_->GetAsyncReprojectionEnabled()) {
+      uint32_t webvr_pose_frame = GetPixelEncodedPoseIndex();
+      head_pose = webvr_head_pose_[webvr_pose_frame % kPoseRingBufferSize];
+    }
   } else {
     DrawVrShell(head_pose);
   }
@@ -389,7 +450,7 @@ void VrShell::DrawVrShell(const gvr::Mat4f& head_pose) {
   HandleQueuedTasks();
 
   // Update the render position of all UI elements (including desktop).
-  scene_.UpdateTransforms(screen_tilt, UiScene::TimeInMicroseconds());
+  scene_->UpdateTransforms(screen_tilt, UiScene::TimeInMicroseconds());
 
   UpdateController(GetForwardVector(head_pose));
 
@@ -452,7 +513,7 @@ Rectf VrShell::MakeUiGlCopyRect(Recti pixel_rect) {
 }
 
 void VrShell::DrawUI(const gvr::Mat4f& render_matrix) {
-  for (const auto& rect : scene_.GetUiElements()) {
+  for (const auto& rect : scene_->GetUiElements()) {
     if (!rect->visible) {
       continue;
     }
@@ -510,7 +571,7 @@ void VrShell::DrawCursor(const gvr::Mat4f& render_matrix) {
   // Draw the laser.
 
   // Find the length of the beam (from hand to target).
-  float laser_length = Distance(kHandPosition, target_point_);
+  const float laser_length = Distance(kHandPosition, target_point_);
 
   // Build a beam, originating from the origin.
   SetIdentityM(mat);
@@ -520,18 +581,36 @@ void VrShell::DrawCursor(const gvr::Mat4f& render_matrix) {
   ScaleM(mat, mat, kLaserWidth, laser_length, 1);
 
   // Tip back 90 degrees to flat, pointing at the scene.
-  auto q = QuatFromAxisAngle({1.0f, 0.0f, 0.0f}, -M_PI / 2);
-  auto m = QuatToMatrix(q);
-  mat = MatrixMul(m, mat);
+  const gvr::Quatf q = QuatFromAxisAngle({1.0f, 0.0f, 0.0f}, -M_PI / 2);
+  mat = MatrixMul(QuatToMatrix(q), mat);
 
-  // Orient according to controller position.
-  mat = MatrixMul(QuatToMatrix(controller_quat_), mat);
+  const gvr::Vec3f beam_direction = {
+    target_point_.x - kHandPosition.x,
+    target_point_.y - kHandPosition.y,
+    target_point_.z - kHandPosition.z
+  };
+  const gvr::Mat4f beam_direction_mat =
+      QuatToMatrix(GetRotationFromZAxis(beam_direction));
 
-  // Move the beam origin to the hand.
-  TranslateM(mat, mat, kHandPosition.x, kHandPosition.y, kHandPosition.z);
 
-  transform = MatrixMul(render_matrix, mat);
-  vr_shell_renderer_->GetLaserRenderer()->Draw(transform);
+  // Render multiple faces to make the laser appear cylindrical.
+  const int faces = 4;
+  for (int i = 0; i < faces; i++) {
+    // Rotate around Z.
+    const float angle = M_PI * 2 * i / faces;
+    const gvr::Quatf rot = QuatFromAxisAngle({0.0f, 0.0f, 1.0f}, angle);
+    gvr::Mat4f face_transform = MatrixMul(QuatToMatrix(rot), mat);
+
+    // Orient according to target direction.
+    face_transform = MatrixMul(beam_direction_mat, face_transform);
+
+    // Move the beam origin to the hand.
+    TranslateM(face_transform, face_transform, kHandPosition.x, kHandPosition.y,
+               kHandPosition.z);
+
+    transform = MatrixMul(render_matrix, face_transform);
+    vr_shell_renderer_->GetLaserRenderer()->Draw(transform);
+  }
 }
 
 void VrShell::DrawWebVr() {
@@ -630,6 +709,11 @@ void VrShell::DrawWebVrEye(const gvr::Mat4f& view_matrix,
 
 }
 
+void VrShell::OnTriggerEvent(JNIEnv* env, const JavaParamRef<jobject>& obj) {
+  // Set a flag to handle this on the render thread at the next frame.
+  touch_pending_ = true;
+}
+
 void VrShell::OnPause(JNIEnv* env, const JavaParamRef<jobject>& obj) {
   if (gvr_api_ == nullptr)
     return;
@@ -650,8 +734,7 @@ base::WeakPtr<VrShell> VrShell::GetWeakPtr(
     const content::WebContents* web_contents) {
   // Ensure that the WebContents requesting the VrShell instance is the one
   // we created.
-  if (g_instance != nullptr &&
-      g_instance->ui_cvc_->GetWebContents() == web_contents)
+  if (g_instance != nullptr && g_instance->ui_contents_ == web_contents)
     return g_instance->weak_ptr_factory_.GetWeakPtr();
   return base::WeakPtr<VrShell>(nullptr);
 }
@@ -664,15 +747,8 @@ void VrShell::OnDomContentsLoaded() {
   // background of the renderer to transparent, then we update the page
   // background to be transparent. This is probably a bug in blink that we
   // should fix.
-  ui_cvc_->GetWebContents()->GetRenderWidgetHostView()->SetBackgroundColor(
+  ui_contents_->GetRenderWidgetHostView()->SetBackgroundColor(
       SK_ColorTRANSPARENT);
-}
-
-void VrShell::SetUiTextureSize(int width, int height) {
-  // TODO(bshe): ui_text_width_ and ui_tex_height_ should be only used on render
-  // thread.
-  ui_tex_width_ = width;
-  ui_tex_height_ = height;
 }
 
 void VrShell::SetWebVrMode(JNIEnv* env,
@@ -711,6 +787,12 @@ void VrShell::ContentSurfaceChanged(JNIEnv* env,
                                     jint height,
                                     const JavaParamRef<jobject>& surface) {
   content_compositor_->SurfaceChanged((int)width, (int)height, surface);
+  content::ScreenInfo result;
+  main_contents_->GetRenderWidgetHostView()->GetRenderWidgetHost()->
+      GetScreenInfo(&result);
+  float dpr = result.device_scale_factor;
+  scene_->GetUiElementById(kBrowserUiElementId)->copy_rect =
+      { 0, 0, width / dpr, height / dpr };
 }
 
 void VrShell::UiSurfaceChanged(JNIEnv* env,
@@ -719,10 +801,15 @@ void VrShell::UiSurfaceChanged(JNIEnv* env,
                                jint height,
                                const JavaParamRef<jobject>& surface) {
   ui_compositor_->SurfaceChanged((int)width, (int)height, surface);
+  content::ScreenInfo result;
+  ui_contents_->GetRenderWidgetHostView()->GetRenderWidgetHost()->GetScreenInfo(
+      &result);
+  ui_tex_width_ = width / result.device_scale_factor;
+  ui_tex_height_ = height / result.device_scale_factor;
 }
 
 UiScene* VrShell::GetScene() {
-  return &scene_;
+  return scene_.get();
 }
 
 void VrShell::QueueTask(base::Callback<void()>& callback) {
@@ -747,6 +834,28 @@ void VrShell::HandleQueuedTasks() {
   }
 }
 
+void VrShell::DoUiAction(const UiAction action) {
+  content::NavigationController& controller = main_contents_->GetController();
+  switch (action) {
+    case HISTORY_BACK:
+      if (controller.CanGoBack())
+        controller.GoBack();
+      break;
+    case HISTORY_FORWARD:
+      if (controller.CanGoForward())
+        controller.GoForward();
+      break;
+    case RELOAD:
+      controller.Reload(false);
+      break;
+    case ZOOM_OUT:  // Not handled yet.
+    case ZOOM_IN:  // Not handled yet.
+      break;
+    default:
+      NOTREACHED();
+  }
+}
+
 // ----------------------------------------------------------------------------
 // Native JNI methods
 // ----------------------------------------------------------------------------
@@ -757,13 +866,10 @@ jlong Init(JNIEnv* env,
            jlong content_window_android,
            const JavaParamRef<jobject>& ui_web_contents,
            jlong ui_window_android) {
-  content::ContentViewCore* c_core = content::ContentViewCore::FromWebContents(
-      content::WebContents::FromJavaWebContents(content_web_contents));
-  content::ContentViewCore* ui_core = content::ContentViewCore::FromWebContents(
-      content::WebContents::FromJavaWebContents(ui_web_contents));
   return reinterpret_cast<intptr_t>(new VrShell(
-      env, obj, c_core,
-      reinterpret_cast<ui::WindowAndroid*>(content_window_android), ui_core,
+      env, obj, content::WebContents::FromJavaWebContents(content_web_contents),
+      reinterpret_cast<ui::WindowAndroid*>(content_window_android),
+      content::WebContents::FromJavaWebContents(ui_web_contents),
       reinterpret_cast<ui::WindowAndroid*>(ui_window_android)));
 }
 

@@ -1276,7 +1276,7 @@ bool Browser::CanDragEnter(content::WebContents* source,
   return true;
 }
 
-content::SecurityStyle Browser::GetSecurityStyle(
+blink::WebSecurityStyle Browser::GetSecurityStyle(
     WebContents* web_contents,
     content::SecurityStyleExplanations* security_style_explanations) {
   ChromeSecurityStateModelClient* model_client =
@@ -1424,12 +1424,16 @@ void Browser::NavigationStateChanged(WebContents* source,
     hosted_app_controller_->UpdateLocationBarVisibility(true);
 }
 
-void Browser::VisibleSSLStateChanged(const WebContents* source) {
+void Browser::VisibleSSLStateChanged(WebContents* source) {
   // When the current tab's SSL state changes, we need to update the URL
   // bar to reflect the new state.
   DCHECK(source);
   if (tab_strip_model_->GetActiveWebContents() == source)
     UpdateToolbar(false);
+
+  ChromeSecurityStateModelClient* security_model =
+      ChromeSecurityStateModelClient::FromWebContents(source);
+  security_model->VisibleSSLStateChanged();
 }
 
 void Browser::AddNewContents(WebContents* source,
@@ -1523,10 +1527,6 @@ bool Browser::TakeFocus(content::WebContents* source,
       content::Source<Browser>(this),
       content::NotificationService::NoDetails());
   return false;
-}
-
-gfx::Rect Browser::GetRootWindowResizerRect() const {
-  return window_->GetRootWindowResizerRect();
 }
 
 void Browser::BeforeUnloadFired(WebContents* web_contents,
@@ -1628,14 +1628,17 @@ void Browser::WebContentsCreated(WebContents* source_contents,
       content::Details<RetargetingDetails>(&details));
 }
 
-void Browser::RendererUnresponsive(WebContents* source) {
+void Browser::RendererUnresponsive(
+    WebContents* source,
+    const content::WebContentsUnresponsiveState& unresponsive_state) {
   // Ignore hangs if a tab is blocked.
   int index = tab_strip_model_->GetIndexOfWebContents(source);
   DCHECK_NE(TabStripModel::kNoTab, index);
   if (tab_strip_model_->IsTabBlocked(index))
     return;
 
-  TabDialogs::FromWebContents(source)->ShowHungRendererDialog();
+  TabDialogs::FromWebContents(source)->ShowHungRendererDialog(
+      unresponsive_state);
 }
 
 void Browser::RendererResponsive(WebContents* source) {

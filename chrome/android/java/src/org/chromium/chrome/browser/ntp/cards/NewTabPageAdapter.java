@@ -4,6 +4,7 @@
 
 package org.chromium.chrome.browser.ntp.cards;
 
+import android.annotation.SuppressLint;
 import android.graphics.Canvas;
 import android.support.v7.widget.RecyclerView;
 import android.support.v7.widget.RecyclerView.Adapter;
@@ -12,17 +13,14 @@ import android.support.v7.widget.helper.ItemTouchHelper;
 import android.view.View;
 import android.view.ViewGroup;
 
-import org.chromium.base.Callback;
 import org.chromium.base.Log;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ntp.NewTabPageUma;
 import org.chromium.chrome.browser.ntp.NewTabPageView.NewTabPageManager;
 import org.chromium.chrome.browser.ntp.UiConfig;
 import org.chromium.chrome.browser.ntp.snippets.CategoryInt;
 import org.chromium.chrome.browser.ntp.snippets.CategoryStatus;
 import org.chromium.chrome.browser.ntp.snippets.CategoryStatus.CategoryStatusEnum;
-import org.chromium.chrome.browser.ntp.snippets.SectionHeader;
 import org.chromium.chrome.browser.ntp.snippets.SectionHeaderViewHolder;
 import org.chromium.chrome.browser.ntp.snippets.SnippetArticle;
 import org.chromium.chrome.browser.ntp.snippets.SnippetArticleViewHolder;
@@ -42,8 +40,8 @@ import java.util.Map;
  * the above-the-fold view (containing the logo, search box, and most visited tiles) and subsequent
  * elements will be the cards shown to the user
  */
-public class NewTabPageAdapter extends Adapter<NewTabPageViewHolder>
-        implements SuggestionsSource.Observer, ItemGroup.Observer {
+public class NewTabPageAdapter
+        extends Adapter<NewTabPageViewHolder> implements SuggestionsSource.Observer, NodeParent {
     private static final String TAG = "Ntp";
 
     private final NewTabPageManager mNewTabPageManager;
@@ -53,14 +51,15 @@ public class NewTabPageAdapter extends Adapter<NewTabPageViewHolder>
     private NewTabPageRecyclerView mRecyclerView;
 
     /**
-     * List of all item groups (which can themselves contain multiple items. When flattened, this
-     * will be a list of all items the adapter exposes.
+     * List of all child nodes (which can themselves contain multiple child nodes).
      */
-    private final List<ItemGroup> mGroups = new ArrayList<>();
+    private final List<TreeNode> mChildren = new ArrayList<>();
     private final AboveTheFoldItem mAboveTheFold = new AboveTheFoldItem();
-    private final SigninPromoItem mSigninPromo = new SigninPromoItem();
+    private final SignInPromo mSigninPromo;
+    private final AllDismissedItem mAllDismissed = new AllDismissedItem();
     private final Footer mFooter = new Footer();
     private final SpacingItem mBottomSpacer = new SpacingItem();
+    private final InnerNode mRoot;
 
     /** Maps suggestion categories to sections, with stable iteration ordering. */
     private final Map<Integer, SuggestionsSection> mSections = new LinkedHashMap<>();
@@ -68,7 +67,7 @@ public class NewTabPageAdapter extends Adapter<NewTabPageViewHolder>
     private class ItemTouchCallbacks extends ItemTouchHelper.Callback {
         @Override
         public void onSwiped(ViewHolder viewHolder, int direction) {
-            mRecyclerView.onItemDismissStarted(viewHolder.itemView);
+            mRecyclerView.onItemDismissStarted(viewHolder);
             NewTabPageAdapter.this.dismissItem(viewHolder.getAdapterPosition());
         }
 
@@ -78,7 +77,7 @@ public class NewTabPageAdapter extends Adapter<NewTabPageViewHolder>
             // not mean that the user went all the way and dismissed the item before releasing it.
             // We need to check that the item has been removed.
             if (viewHolder.getAdapterPosition() == RecyclerView.NO_POSITION) {
-                mRecyclerView.onItemDismissFinished(viewHolder.itemView);
+                mRecyclerView.onItemDismissFinished(viewHolder);
             }
 
             super.clearView(recyclerView, viewHolder);
@@ -130,40 +129,26 @@ public class NewTabPageAdapter extends Adapter<NewTabPageViewHolder>
      *                         (logo, search box, most visited tiles)
      * @param uiConfig the NTP UI configuration, to be passed to created views.
      */
-    public static NewTabPageAdapter create(
-            NewTabPageManager manager, View aboveTheFoldView, UiConfig uiConfig) {
-        NewTabPageAdapter adapter = new NewTabPageAdapter(manager, aboveTheFoldView, uiConfig);
-        adapter.finishInitialization();
-        return adapter;
-    }
-
-    /**
-     * Constructor for {@link NewTabPageAdapter}. The object is not completely ready to be used
-     * until {@link #finishInitialization()} is called. Usage reserved for testing, prefer calling
-     * {@link NewTabPageAdapter#create(NewTabPageManager, View, UiConfig)} in production code.
-     */
-    @VisibleForTesting
-    NewTabPageAdapter(NewTabPageManager manager, View aboveTheFoldView, UiConfig uiConfig) {
+    public NewTabPageAdapter(NewTabPageManager manager, View aboveTheFoldView, UiConfig uiConfig) {
         mNewTabPageManager = manager;
         mAboveTheFoldView = aboveTheFoldView;
         mUiConfig = uiConfig;
-    }
+        mRoot = new InnerNode(this) {
+            @Override
+            protected List<TreeNode> getChildren() {
+                return mChildren;
+            }
+        };
 
-    /**
-     * Initialises the sections to be handled by this adapter. Events about categories for which
-     * a section has not been registered at this point will be ignored.
-     */
-    @VisibleForTesting
-    void finishInitialization() {
-        mSigninPromo.setObserver(this);
-        resetSections();
+        mSigninPromo = new SignInPromo(mRoot);
+        resetSections(/*alwaysAllowEmptySections=*/false);
         mNewTabPageManager.getSuggestionsSource().setObserver(this);
 
         mNewTabPageManager.registerSignInStateObserver(new SignInStateObserver() {
             @Override
             public void onSignedIn() {
                 mSigninPromo.hide();
-                resetSections();
+                resetSections(/*alwaysAllowEmptySections=*/false);
             }
 
             @Override
@@ -173,44 +158,60 @@ public class NewTabPageAdapter extends Adapter<NewTabPageViewHolder>
         });
     }
 
-    /** Resets the sections, reloading the whole new tab page content. */
-    private void resetSections() {
+    /**
+     * Resets the sections, reloading the whole new tab page content.
+     * @param alwaysAllowEmptySections Whether sections are always allowed to be displayed when
+     *     they are empty, even when they are normally not.
+     */
+    public void resetSections(boolean alwaysAllowEmptySections) {
         mSections.clear();
 
         SuggestionsSource suggestionsSource = mNewTabPageManager.getSuggestionsSource();
-
         int[] categories = suggestionsSource.getCategories();
         int[] suggestionsPerCategory = new int[categories.length];
         int i = 0;
         for (int category : categories) {
             int categoryStatus = suggestionsSource.getCategoryStatus(category);
-            assert categoryStatus != CategoryStatus.NOT_PROVIDED;
             if (categoryStatus == CategoryStatus.LOADING_ERROR
+                    || categoryStatus == CategoryStatus.NOT_PROVIDED
                     || categoryStatus == CategoryStatus.CATEGORY_EXPLICITLY_DISABLED)
                 continue;
 
-            suggestionsPerCategory[i++] = resetSection(category, categoryStatus);
+            suggestionsPerCategory[i++] =
+                    resetSection(category, categoryStatus, alwaysAllowEmptySections);
         }
 
         mNewTabPageManager.trackSnippetsPageImpression(categories, suggestionsPerCategory);
 
-        updateGroups();
+        updateChildren();
     }
 
-    private int resetSection(@CategoryInt int category, @CategoryStatusEnum int categoryStatus) {
+    /**
+     * Resets the section for {@code category}. Removes the section if there are no suggestions for
+     * it and it is not allowed to be empty. Otherwise, creates the section if it is not present
+     * yet. Sets the available suggestions on the section.
+     * @param category The category for which the section must be reset.
+     * @param categoryStatus The category status.
+     * @param alwaysAllowEmptySections Whether sections are always allowed to be displayed when
+     *     they are empty, even when they are normally not.
+     * @return The number of suggestions for the section.
+     */
+    private int resetSection(@CategoryInt int category, @CategoryStatusEnum int categoryStatus,
+            boolean alwaysAllowEmptySections) {
         SuggestionsSource suggestionsSource = mNewTabPageManager.getSuggestionsSource();
         List<SnippetArticle> suggestions = suggestionsSource.getSuggestionsForCategory(category);
-
-        // Create the new section.
         SuggestionsCategoryInfo info = suggestionsSource.getCategoryInfo(category);
-        if (suggestions.isEmpty() && !info.showIfEmpty()) {
+
+        // Do not show an empty section if not allowed.
+        if (suggestions.isEmpty() && !info.showIfEmpty() && !alwaysAllowEmptySections) {
             mSections.remove(category);
             return 0;
         }
 
+        // Create the section if needed.
         SuggestionsSection section = mSections.get(category);
         if (section == null) {
-            section = new SuggestionsSection(category, info, this);
+            section = new SuggestionsSection(mRoot, info);
             mSections.put(category, section);
         }
 
@@ -252,8 +253,6 @@ public class NewTabPageAdapter extends Adapter<NewTabPageViewHolder>
         if (suggestions.isEmpty()) return;
 
         setSuggestions(category, suggestions, status);
-
-        NewTabPageUma.recordSnippetAction(NewTabPageUma.SNIPPETS_ACTION_SHOWN);
     }
 
     @Override
@@ -276,7 +275,7 @@ public class NewTabPageAdapter extends Adapter<NewTabPageViewHolder>
                 return;
 
             case CategoryStatus.SIGNED_OUT:
-                resetSection(category, status);
+                resetSection(category, status, /*alwaysAllowEmptySections=*/false);
                 return;
 
             default:
@@ -292,96 +291,96 @@ public class NewTabPageAdapter extends Adapter<NewTabPageViewHolder>
     }
 
     @Override
-    @NewTabPageItem.ViewType
+    @ItemViewType
     public int getItemViewType(int position) {
-        return getItems().get(position).getType();
+        return mRoot.getItemViewType(position);
     }
 
     @Override
     public NewTabPageViewHolder onCreateViewHolder(ViewGroup parent, int viewType) {
         assert parent == mRecyclerView;
 
-        if (viewType == NewTabPageItem.VIEW_TYPE_ABOVE_THE_FOLD) {
-            return new NewTabPageViewHolder(mAboveTheFoldView);
+        switch (viewType) {
+            case ItemViewType.ABOVE_THE_FOLD:
+                return new NewTabPageViewHolder(mAboveTheFoldView);
+
+            case ItemViewType.HEADER:
+                return new SectionHeaderViewHolder(mRecyclerView, mUiConfig);
+
+            case ItemViewType.SNIPPET:
+                return new SnippetArticleViewHolder(mRecyclerView, mNewTabPageManager, mUiConfig);
+
+            case ItemViewType.SPACING:
+                return new NewTabPageViewHolder(SpacingItem.createView(parent));
+
+            case ItemViewType.STATUS:
+                return new StatusCardViewHolder(mRecyclerView, mUiConfig);
+
+            case ItemViewType.PROGRESS:
+                return new ProgressViewHolder(mRecyclerView);
+
+            case ItemViewType.ACTION:
+                return new ActionItem.ViewHolder(mRecyclerView, mNewTabPageManager, mUiConfig);
+
+            case ItemViewType.PROMO:
+                return new SignInPromo.ViewHolder(mRecyclerView, mUiConfig);
+
+            case ItemViewType.FOOTER:
+                return new Footer.ViewHolder(mRecyclerView, mNewTabPageManager);
+
+            case ItemViewType.ALL_DISMISSED:
+                return new AllDismissedItem.ViewHolder(mRecyclerView, mNewTabPageManager, this);
         }
 
-        if (viewType == NewTabPageItem.VIEW_TYPE_HEADER) {
-            return new SectionHeaderViewHolder(mRecyclerView, mUiConfig);
-        }
-
-        if (viewType == NewTabPageItem.VIEW_TYPE_SNIPPET) {
-            return new SnippetArticleViewHolder(mRecyclerView, mNewTabPageManager, mUiConfig);
-        }
-
-        if (viewType == NewTabPageItem.VIEW_TYPE_SPACING) {
-            return new NewTabPageViewHolder(SpacingItem.createView(parent));
-        }
-
-        if (viewType == NewTabPageItem.VIEW_TYPE_STATUS) {
-            return new StatusCardViewHolder(mRecyclerView, mUiConfig);
-        }
-
-        if (viewType == NewTabPageItem.VIEW_TYPE_PROGRESS) {
-            return new ProgressViewHolder(mRecyclerView);
-        }
-
-        if (viewType == NewTabPageItem.VIEW_TYPE_ACTION) {
-            return new ActionItem.ViewHolder(mRecyclerView, mNewTabPageManager, mUiConfig);
-        }
-
-        if (viewType == NewTabPageItem.VIEW_TYPE_PROMO) {
-            return new SigninPromoItem.ViewHolder(mRecyclerView, mUiConfig);
-        }
-
-        if (viewType == NewTabPageItem.VIEW_TYPE_FOOTER) {
-            return new Footer.ViewHolder(mRecyclerView, mNewTabPageManager);
-        }
-
+        assert false : viewType;
         return null;
     }
 
     @Override
     public void onBindViewHolder(NewTabPageViewHolder holder, final int position) {
-        getItems().get(position).onBindViewHolder(holder);
+        mRoot.onBindViewHolder(holder, position);
     }
 
     @Override
     public int getItemCount() {
-        return getItems().size();
+        return mRoot.getItemCount();
     }
 
     public int getAboveTheFoldPosition() {
-        return getGroupPositionOffset(mAboveTheFold);
+        return getChildPositionOffset(mAboveTheFold);
     }
 
     public int getFirstHeaderPosition() {
-        List<NewTabPageItem> items = getItems();
-        for (int i = 0; i < items.size(); i++) {
-            if (items.get(i) instanceof SectionHeader) return i;
+        int count = getItemCount();
+        for (int i = 0; i < count; i++) {
+            if (getItemViewType(i) == ItemViewType.HEADER) return i;
         }
         return RecyclerView.NO_POSITION;
     }
 
     public int getFirstCardPosition() {
-        // TODO(mvanouwerkerk): Don't rely on getFirstHeaderPosition() here.
-        int firstHeaderPosition = getFirstHeaderPosition();
-        if (firstHeaderPosition == RecyclerView.NO_POSITION) return RecyclerView.NO_POSITION;
-        return firstHeaderPosition + 1;
+        for (int i = 0; i < getItemCount(); ++i) {
+            if (CardViewHolder.isCard(getItemViewType(i))) return i;
+        }
+        return RecyclerView.NO_POSITION;
     }
 
-    public int getLastContentItemPosition() {
-        return getGroupPositionOffset(mFooter);
+    public int getFooterPosition() {
+        return getChildPositionOffset(mFooter);
     }
 
     public int getBottomSpacerPosition() {
-        return getGroupPositionOffset(mBottomSpacer);
+        return getChildPositionOffset(mBottomSpacer);
+    }
+
+    public int getLastContentItemPosition() {
+        return getChildPositionOffset(hasAllBeenDismissed() ? mAllDismissed : mFooter);
     }
 
     public int getSuggestionPosition(SnippetArticle article) {
-        List<NewTabPageItem> items = getItems();
-        for (int i = 0; i < items.size(); i++) {
-            NewTabPageItem item = items.get(i);
-            if (article.equals(item)) return i;
+        for (int i = 0; i < mRoot.getItemCount(); i++) {
+            SnippetArticle articleToCheck = mRoot.getSuggestionAt(i);
+            if (articleToCheck != null && articleToCheck.equals(article)) return i;
         }
         return RecyclerView.NO_POSITION;
     }
@@ -407,72 +406,55 @@ public class NewTabPageAdapter extends Adapter<NewTabPageViewHolder>
         mSections.get(category).setSuggestions(suggestions, status);
     }
 
-    private void updateGroups() {
-        mGroups.clear();
-        mGroups.add(mAboveTheFold);
-        // TODO(treib,bauerb): Preserve the order of categories we got from getCategories.
-        mGroups.addAll(mSections.values());
-        mGroups.add(mSigninPromo);
-        if (!mSections.isEmpty()) {
-            mGroups.add(mFooter);
-            mGroups.add(mBottomSpacer);
-        }
+    private void updateChildren() {
+        mChildren.clear();
+        mChildren.add(mAboveTheFold);
+        mChildren.addAll(mSections.values());
+        mChildren.add(mSigninPromo);
+        mChildren.add(hasAllBeenDismissed() ? mAllDismissed : mFooter);
+        mChildren.add(mBottomSpacer);
 
+        // TODO(mvanouwerkerk): Notify about the subset of changed items. At least |mAboveTheFold|
+        // has not changed when refreshing from the all dismissed state.
         notifyDataSetChanged();
     }
 
     private void removeSection(SuggestionsSection section) {
         mSections.remove(section.getCategory());
-        int startPos = getGroupPositionOffset(section);
-        mGroups.remove(section);
-        int removedItems = section.getItems().size();
+        int startPos = getChildPositionOffset(section);
+        mChildren.remove(section);
+        notifyItemRangeRemoved(startPos, section.getItemCount());
 
-        notifyItemRangeRemoved(startPos, removedItems);
-
-        if (mSections.isEmpty()) {
-            mGroups.remove(mFooter);
-            mGroups.remove(mBottomSpacer);
-            notifyItemRangeRemoved(startPos + removedItems, 2);
-        } else {
-            notifyItemChanged(getItems().size() - 1); // Refresh the spacer too.
+        if (hasAllBeenDismissed()) {
+            int footerPosition = getFooterPosition();
+            mChildren.set(mChildren.indexOf(mFooter), mAllDismissed);
+            notifyItemChanged(footerPosition);
         }
+
+        notifyItemChanged(getBottomSpacerPosition());
     }
 
     @Override
-    public void notifyGroupChanged(ItemGroup group, int itemCountBefore, int itemCountAfter) {
-        if (mGroups.isEmpty()) return; // The sections have not been initialised yet.
-        int startPos = getGroupPositionOffset(group);
-
-        if (group instanceof SuggestionsSection) {
-            // The header is stable in sections. Don't notify about it.
-            ++startPos;
-            --itemCountBefore;
-            --itemCountAfter;
-        }
-
-        if (itemCountBefore < itemCountAfter) {
-            notifyItemRangeChanged(startPos, itemCountBefore);
-            notifyItemRangeInserted(startPos + itemCountBefore, itemCountAfter - itemCountBefore);
-        } else {
-            notifyItemRangeChanged(startPos, itemCountAfter);
-            notifyItemRangeRemoved(startPos + itemCountAfter, itemCountBefore - itemCountAfter);
-        }
-
-        notifyItemChanged(getItems().size() - 1); // Refresh the spacer too.
+    public void onItemRangeChanged(TreeNode child, int itemPosition, int itemCount) {
+        assert child == mRoot;
+        if (mChildren.isEmpty()) return; // The sections have not been initialised yet.
+        notifyItemRangeChanged(itemPosition, itemCount);
     }
 
     @Override
-    public void notifyItemInserted(ItemGroup group, int itemPosition) {
-        if (mGroups.isEmpty()) return; // The sections have not been initialised yet.
-        notifyItemInserted(getGroupPositionOffset(group) + itemPosition);
-        notifyItemChanged(getItems().size() - 1); // Refresh the spacer too.
+    public void onItemRangeInserted(TreeNode child, int itemPosition, int itemCount) {
+        assert child == mRoot;
+        if (mChildren.isEmpty()) return; // The sections have not been initialised yet.
+        notifyItemRangeInserted(itemPosition, itemCount);
+        notifyItemChanged(getItemCount() - 1); // Refresh the spacer too.
     }
 
     @Override
-    public void notifyItemRemoved(ItemGroup group, int itemPosition) {
-        if (mGroups.isEmpty()) return; // The sections have not been initialised yet.
-        notifyItemRemoved(getGroupPositionOffset(group) + itemPosition);
-        notifyItemChanged(getItems().size() - 1); // Refresh the spacer too.
+    public void onItemRangeRemoved(TreeNode child, int itemPosition, int itemCount) {
+        assert child == mRoot;
+        if (mChildren.isEmpty()) return; // The sections have not been initialised yet.
+        notifyItemRangeRemoved(itemPosition, itemCount);
+        notifyItemChanged(getItemCount() - 1); // Refresh the spacer too.
     }
 
     @Override
@@ -493,21 +475,23 @@ public class NewTabPageAdapter extends Adapter<NewTabPageViewHolder>
      * Dismisses the item at the provided adapter position. Can also cause the dismissal of other
      * items or even entire sections.
      */
+    // TODO(crbug.com/635567): Fix this properly.
+    @SuppressLint("SwitchIntDef")
     public void dismissItem(int position) {
         int itemViewType = getItemViewType(position);
 
         // TODO(dgn): Polymorphism is supposed to allow to avoid that kind of stuff.
         switch (itemViewType) {
-            case NewTabPageItem.VIEW_TYPE_STATUS:
-            case NewTabPageItem.VIEW_TYPE_ACTION:
-                dismissSection((SuggestionsSection) getGroup(position));
+            case ItemViewType.STATUS:
+            case ItemViewType.ACTION:
+                dismissSection(getSuggestionsSection(position));
                 return;
 
-            case NewTabPageItem.VIEW_TYPE_SNIPPET:
+            case ItemViewType.SNIPPET:
                 dismissSuggestion(position);
                 return;
 
-            case NewTabPageItem.VIEW_TYPE_PROMO:
+            case ItemViewType.PROMO:
                 dismissPromo();
                 return;
 
@@ -523,8 +507,7 @@ public class NewTabPageAdapter extends Adapter<NewTabPageViewHolder>
     }
 
     private void dismissSuggestion(int position) {
-        SnippetArticle suggestion = (SnippetArticle) getItems().get(position);
-
+        SnippetArticle suggestion = mRoot.getSuggestionAt(position);
         SuggestionsSource suggestionsSource = mNewTabPageManager.getSuggestionsSource();
         if (suggestionsSource == null) {
             // It is possible for this method to be called after the NewTabPage has had destroy()
@@ -534,88 +517,74 @@ public class NewTabPageAdapter extends Adapter<NewTabPageViewHolder>
             return;
         }
 
-        suggestionsSource.getSuggestionVisited(suggestion, new Callback<Boolean>() {
-            @Override
-            public void onResult(Boolean result) {
-                NewTabPageUma.recordSnippetAction(result
-                        ? NewTabPageUma.SNIPPETS_ACTION_DISMISSED_VISITED
-                        : NewTabPageUma.SNIPPETS_ACTION_DISMISSED_UNVISITED);
-            }
-        });
-
         announceItemRemoved(suggestion.mTitle);
 
         suggestionsSource.dismissSuggestion(suggestion);
-        SuggestionsSection section = (SuggestionsSection) getGroup(position);
+        SuggestionsSection section = getSuggestionsSection(position);
         section.removeSuggestion(suggestion);
     }
 
     private void dismissPromo() {
         // TODO(dgn): accessibility announcement.
         mSigninPromo.dismiss();
-    }
 
-    /**
-     * Returns an unmodifiable list containing all items in the adapter.
-     */
-    private List<NewTabPageItem> getItems() {
-        List<NewTabPageItem> items = new ArrayList<>();
-        for (ItemGroup group : mGroups) {
-            items.addAll(group.getItems());
+        if (hasAllBeenDismissed()) {
+            int footerPosition = getFooterPosition();
+            mChildren.set(mChildren.indexOf(mFooter), mAllDismissed);
+            notifyItemChanged(footerPosition);
         }
-        return Collections.unmodifiableList(items);
     }
 
     /**
-     * Returns another view holder that should be dismissed as the same time as the provided one.
+     * Returns another view holder that should be dismissed at the same time as the provided one.
      */
-    private ViewHolder getDismissSibling(ViewHolder viewHolder) {
+    public ViewHolder getDismissSibling(ViewHolder viewHolder) {
         int swipePos = viewHolder.getAdapterPosition();
-        ItemGroup group = getGroup(swipePos);
+        SuggestionsSection section = getSuggestionsSection(swipePos);
+        if (section == null) return null;
 
-        if (!(group instanceof SuggestionsSection)) return null;
-
-        SuggestionsSection section = (SuggestionsSection) group;
-        int siblingPosDelta = section.getDismissSiblingPosDelta(getItems().get(swipePos));
+        int siblingPosDelta =
+                section.getDismissSiblingPosDelta(swipePos - getChildPositionOffset(section));
         if (siblingPosDelta == 0) return null;
 
         return mRecyclerView.findViewHolderForAdapterPosition(siblingPosDelta + swipePos);
     }
 
+    private boolean hasAllBeenDismissed() {
+        return mSections.isEmpty() && !mSigninPromo.isShown();
+    }
+
+    /**
+     * @param itemPosition The position of an item in the adapter.
+     * @return Returns the {@link SuggestionsSection} that contains the item at
+     *     {@code itemPosition}, or null if the item is not part of one.
+     */
     @VisibleForTesting
-    ItemGroup getGroup(int itemPosition) {
-        int itemsSkipped = 0;
-        for (ItemGroup group : mGroups) {
-            List<NewTabPageItem> items = group.getItems();
-            itemsSkipped += items.size();
-            if (itemPosition < itemsSkipped) return group;
-        }
-        return null;
+    SuggestionsSection getSuggestionsSection(int itemPosition) {
+        TreeNode child = mChildren.get(mRoot.getChildIndexForPosition(itemPosition));
+        if (!(child instanceof SuggestionsSection)) return null;
+        return (SuggestionsSection) child;
     }
 
     @VisibleForTesting
-    List<ItemGroup> getGroups() {
-        return Collections.unmodifiableList(mGroups);
+    List<TreeNode> getChildren() {
+        return Collections.unmodifiableList(mChildren);
     }
 
     @VisibleForTesting
-    int getGroupPositionOffset(ItemGroup group) {
-        int positionOffset = 0;
-        for (ItemGroup candidateGroup : mGroups) {
-            if (candidateGroup == group) return positionOffset;
-            positionOffset += candidateGroup.getItems().size();
-        }
-        Log.d(TAG, "Group not found: %s", group);
-        return RecyclerView.NO_POSITION;
+    int getChildPositionOffset(TreeNode child) {
+        return mRoot.getStartingOffsetForChild(child);
     }
 
     @VisibleForTesting
     SnippetArticle getSuggestionAt(int position) {
-        return (SnippetArticle) getItems().get(position);
+        return mRoot.getSuggestionAt(position);
     }
 
-    @VisibleForTesting
-    void announceItemRemoved(String suggestionTitle) {
+    private void announceItemRemoved(String suggestionTitle) {
+        // In tests the RecyclerView can be null.
+        if (mRecyclerView == null) return;
+
         mRecyclerView.announceForAccessibility(mRecyclerView.getResources().getString(
                 R.string.ntp_accessibility_item_removed, suggestionTitle));
     }

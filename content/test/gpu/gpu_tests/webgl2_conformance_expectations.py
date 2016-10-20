@@ -24,7 +24,7 @@ class WebGL2ConformanceExpectations(WebGLConformanceExpectations):
         ['win', 'mac', 'linux'])
     self.Skip('WebglExtension_WEBGL_compressed_texture_atc',
         ['win', 'mac', 'linux'])
-    self.Skip('WebglExtension_WEBGL_compressed_texture_es3_0',
+    self.Skip('WebglExtension_WEBGL_compressed_texture_etc',
         ['linux', 'mac'])
     self.Skip('WebglExtension_WEBGL_compressed_texture_etc1',
         ['mac', 'linux'])
@@ -44,17 +44,28 @@ class WebGL2ConformanceExpectations(WebGLConformanceExpectations):
     self.Fail('conformance2/glsl3/tricky-loop-conditions.html', bug=483282)
     self.Fail('conformance2/glsl3/vector-dynamic-indexing-nv-driver-bug.html',
         ['linux'], bug=483282)
-    self.Fail('conformance2/textures/misc/tex-srgb-mipmap.html', bug=634519)
+
+    self.Fail('deqp/functional/gles3/framebufferblit/conversion_28.html',
+        ['mac'], bug=654187)
+    self.Fail('deqp/functional/gles3/framebufferblit/conversion_30.html',
+        ['mac'], bug=654187)
+    self.Fail('deqp/functional/gles3/framebufferblit/conversion_31.html',
+        ['mac'], bug=654187)
+    self.Fail('deqp/functional/gles3/framebufferblit/conversion_33.html',
+        ['mac'], bug=654187)
 
     # All platforms.
-    self.Fail('conformance2/rendering/blitframebuffer-outside-readbuffer.html',
-        bug=644740)
-    self.Fail('conformance2/rendering/blitframebuffer-filter-outofbounds.html',
-        bug=644740)
+    self.Fail('conformance2/context/methods-2.html', bug=616554)
     self.Flaky('conformance2/query/occlusion-query.html', bug=603168)
+    self.Fail('conformance/buffers/buffer-uninitialized.html',
+        bug=654201)
+    self.Fail('conformance2/transform_feedback/transform_feedback.html',
+        bug=654201)
 
     # Windows only.
     # We are awesome!
+    self.Fail('conformance2/buffers/get-buffer-sub-data.html',
+        ['win'], bug=654201)
 
     # Win / NVidia
     self.Flaky('deqp/functional/gles3/fbomultisample*',
@@ -171,9 +182,6 @@ class WebGL2ConformanceExpectations(WebGLConformanceExpectations):
     self.Fail('deqp/data/gles3/shaders/linkage.html',
         ['mac'], bug=641129)
 
-    self.Fail('deqp/functional/gles3/uniformbuffers/random.html',
-        ['mac'], bug=618464)
-
     # This is due to "centroid out" / "in" mismatch.
     self.Fail('deqp/data/gles3/shaders/qualification_order.html',
         ['mac'], bug=483282)
@@ -187,17 +195,9 @@ class WebGL2ConformanceExpectations(WebGLConformanceExpectations):
     self.Fail('deqp/functional/gles3/fbomultisample*',
         ['mac', 'nvidia'], bug=641209)
 
-    self.Fail('deqp/functional/gles3/framebufferblit/conversion_28.html',
-        ['mac'], bug=483282)
-    self.Fail('deqp/functional/gles3/framebufferblit/conversion_30.html',
-        ['mac'], bug=483282)
-    self.Fail('deqp/functional/gles3/framebufferblit/conversion_31.html',
-        ['mac'], bug=483282)
-    self.Fail('deqp/functional/gles3/framebufferblit/conversion_33.html',
-        ['mac'], bug=483282)
     self.Fail('deqp/functional/gles3/framebufferblit/' +
-        'default_framebuffer_*.html',
-        ['mac'], bug=483282)
+        'default_framebuffer_04.html',
+        ['mac', 'nvidia'], bug=483282)
 
     # Mac Retina NVIDIA
     self.Fail('conformance/attribs/gl-disabled-vertex-attrib.html',
@@ -433,9 +433,6 @@ class WebGL2ConformanceExpectations(WebGLConformanceExpectations):
         'single_attribute.normalize.html',
         ['mac', 'amd'], bug=483282)
 
-    self.Fail('deqp/functional/gles3/framebufferblit/rect_02.html',
-        ['mac', 'amd'], bug=483282)
-
     self.Fail('deqp/functional/gles3/shaderoperator/' +
         'angle_and_trigonometry_02.html',
         ['mac', 'amd'], bug=483282)
@@ -444,6 +441,10 @@ class WebGL2ConformanceExpectations(WebGLConformanceExpectations):
         ['mac', 'amd'], bug=483282)
     self.Fail('deqp/functional/gles3/shaderoperator/geometric.html',
         ['mac', 'amd'], bug=483282)
+
+    # Fixed on OSX 10.12
+    self.Fail('deqp/functional/gles3/uniformbuffers/random.html',
+        ['mac', 'amd'], bug=618464)
 
     self.Flaky('deqp/functional/gles3/shaderindexing/mat_02.html',
         ['mac', 'amd'], bug=644360)
@@ -476,12 +477,6 @@ class WebGL2ConformanceExpectations(WebGLConformanceExpectations):
     self.Fail('deqp/functional/gles3/texturespecification/' +
         'random_teximage2d_2d.html',
         ['mac', 'intel'], bug=483282)
-    self.Fail('deqp/functional/gles3/texturespecification/' +
-        'teximage3d_pbo_params.html',
-        ['mac', 'intel'], bug=483282)
-    self.Fail('deqp/functional/gles3/texturespecification/' +
-        'texsubimage3d_pbo_params.html',
-        ['mac', 'intel'], bug=483282)
 
     self.Fail('deqp/functional/gles3/shadertexturefunction/' +
         'texturelod.html',
@@ -493,17 +488,18 @@ class WebGL2ConformanceExpectations(WebGLConformanceExpectations):
         'textureprojgrad.html',
         ['mac', 'intel'], bug=483282)
 
-    self.Fail('deqp/functional/gles3/framebufferblit/rect_02.html',
-        ['mac', 'intel'], bug=483282)
     self.Fail('deqp/functional/gles3/framebufferblit/rect_03.html',
         ['mac', 'intel'], bug=483282)
     self.Fail('deqp/functional/gles3/framebufferblit/rect_04.html',
         ['mac', 'intel'], bug=483282)
 
-    self.Fail('conformance2/textures/misc/tex-unpack-params.html',
-        ['mac', 'intel'], bug=483282)
+    # Fixed on OSX 10.11
+    self.Fail('deqp/functional/gles3/uniformbuffers/random.html',
+        ['mac', 'intel'], bug=618464)
 
     # Linux only.
+    self.Fail('conformance2/buffers/get-buffer-sub-data.html',
+        ['linux'], bug=654201)
 
     self.Flaky('conformance/textures/video/' +
                'tex-2d-rgba-rgba-unsigned_byte.html',
@@ -561,11 +557,6 @@ class WebGL2ConformanceExpectations(WebGLConformanceExpectations):
     self.Fail('deqp/data/gles3/shaders/scoping.html',
         ['linux', 'intel'], bug=610800)
 
-    self.Fail('deqp/functional/gles3/framebufferblit/' +
-        'default_framebuffer_00.html',
-        ['linux', 'intel'], bug=598902)
-    self.Fail('deqp/functional/gles3/framebufferblit/rect_02.html',
-        ['linux', 'intel'], bug=598902)
     self.Fail('deqp/functional/gles3/fbomultisample.8_samples.html',
         ['linux', 'intel'], bug=635528)
 
@@ -808,11 +799,6 @@ class WebGL2ConformanceExpectations(WebGLConformanceExpectations):
     self.Fail('deqp/functional/gles3/framebufferblit/conversion_33.html',
         ['linux', 'amd'], bug=483282)
     self.Fail('deqp/functional/gles3/framebufferblit/conversion_34.html',
-        ['linux', 'amd'], bug=483282)
-    self.Fail('deqp/functional/gles3/framebufferblit/' +
-        'default_framebuffer_00.html',
-        ['linux', 'amd'], bug=483282)
-    self.Fail('deqp/functional/gles3/framebufferblit/rect_02.html',
         ['linux', 'amd'], bug=483282)
 
     self.Fail('deqp/functional/gles3/shaderoperator/unary_operator_01.html',

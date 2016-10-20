@@ -104,8 +104,6 @@ split_static_library("ui") {
     "find_bar/find_tab_helper.cc",
     "find_bar/find_tab_helper.h",
     "javascript_dialogs/chrome_javascript_native_dialog_factory.h",
-    "javascript_dialogs/javascript_dialog_tab_helper.cc",
-    "javascript_dialogs/javascript_dialog_tab_helper.h",
     "login/login_handler.cc",
     "login/login_handler.h",
     "login/login_interstitial_delegate.cc",
@@ -462,6 +460,7 @@ split_static_library("ui") {
     "//chrome/app/resources:platform_locale_settings",
     "//chrome/app/theme:chrome_unscaled_resources",
     "//chrome/app/theme:theme_resources",
+    "//chrome/browser:resource_prefetch_predictor_proto",
     "//chrome/browser/devtools",
     "//chrome/browser/ui/webui/engagement:mojo_bindings",
     "//chrome/browser/ui/webui/omnibox:mojo_bindings",
@@ -481,7 +480,6 @@ split_static_library("ui") {
     "//components/bubble:bubble",
     "//components/certificate_reporting:cert_logger_proto",
     "//components/certificate_reporting:encrypted_cert_logger_proto",
-    "//components/content_settings/content/common",
     "//components/content_settings/core/browser",
     "//components/crash/content/app",
     "//components/crash/core/browser",
@@ -560,13 +558,12 @@ split_static_library("ui") {
     "//content/app/resources",
     "//content/public/common",
     "//crypto",
+    "//device/base",
     "//device/bluetooth/public/interfaces:experimental_interfaces",
-    "//device/core",
     "//device/usb",
     "//media",
     "//net:net_with_v8",
-    "//net:stale_while_revalidate_experiment_domains",
-    "//services/shell/runner/common",
+    "//services/service_manager/runner/common",
     "//skia",
     "//storage/browser",
     "//storage/common",
@@ -581,7 +578,6 @@ split_static_library("ui") {
     "//third_party/re2",
     "//third_party/zlib",
     "//ui/accessibility",
-    "//ui/base",
     "//ui/base",
     "//ui/base/ime",
     "//ui/compositor",
@@ -728,6 +724,10 @@ split_static_library("ui") {
       "global_error/global_error_service_factory.h",
       "infobar_container_delegate.cc",
       "infobar_container_delegate.h",
+      "javascript_dialogs/javascript_dialog_tab_helper.cc",
+      "javascript_dialogs/javascript_dialog_tab_helper.h",
+      "javascript_dialogs/javascript_dialog_views.cc",
+      "javascript_dialogs/javascript_dialog_views.h",
       "layout_constants.cc",
       "layout_constants.h",
       "location_bar/location_bar.cc",
@@ -798,8 +798,12 @@ split_static_library("ui") {
       "startup/startup_browser_creator.h",
       "startup/startup_browser_creator_impl.cc",
       "startup/startup_browser_creator_impl.h",
+      "startup/startup_features.cc",
+      "startup/startup_features.h",
       "startup/startup_tab.cc",
       "startup/startup_tab.h",
+      "startup/startup_tab_provider.cc",
+      "startup/startup_tab_provider.h",
       "startup/startup_types.h",
       "sync/browser_synced_window_delegate.cc",
       "sync/browser_synced_window_delegate.h",
@@ -1064,10 +1068,14 @@ split_static_library("ui") {
       "webui/settings/chromeos/change_picture_handler.h",
       "webui/settings/chromeos/cups_printers_handler.cc",
       "webui/settings/chromeos/cups_printers_handler.h",
+      "webui/settings/chromeos/date_time_handler.cc",
+      "webui/settings/chromeos/date_time_handler.h",
       "webui/settings/chromeos/device_keyboard_handler.cc",
       "webui/settings/chromeos/device_keyboard_handler.h",
       "webui/settings/chromeos/device_pointer_handler.cc",
       "webui/settings/chromeos/device_pointer_handler.h",
+      "webui/settings/chromeos/device_storage_handler.cc",
+      "webui/settings/chromeos/device_storage_handler.h",
       "webui/settings/chromeos/easy_unlock_settings_handler.cc",
       "webui/settings/chromeos/easy_unlock_settings_handler.h",
       "webui/settings/chromeos/internet_handler.cc",
@@ -1276,8 +1284,6 @@ split_static_library("ui") {
       "ash/chrome_shell_content_state_chromeos.cc",
       "ash/chrome_shell_delegate.cc",
       "ash/chrome_shell_delegate.h",
-      "ash/chrome_wallpaper_manager.cc",
-      "ash/chrome_wallpaper_manager.h",
       "ash/ime_controller_chromeos.cc",
       "ash/ime_controller_chromeos.h",
       "ash/keyboard_ui_service.cc",
@@ -1310,8 +1316,6 @@ split_static_library("ui") {
       "ash/launcher/chrome_launcher_controller_mus.h",
       "ash/launcher/chrome_launcher_controller_util.cc",
       "ash/launcher/chrome_launcher_controller_util.h",
-      "ash/launcher/chrome_mash_shelf_controller.cc",
-      "ash/launcher/chrome_mash_shelf_controller.h",
       "ash/launcher/desktop_shell_launcher_context_menu.cc",
       "ash/launcher/desktop_shell_launcher_context_menu.h",
       "ash/launcher/extension_app_window_launcher_controller.cc",
@@ -1433,8 +1437,6 @@ split_static_library("ui") {
       "views/apps/native_app_window_frame_view_mac.mm",
       "views/autofill/card_unmask_prompt_views.cc",
       "views/autofill/card_unmask_prompt_views.h",
-      "views/autofill/decorated_textfield.cc",
-      "views/autofill/decorated_textfield.h",
       "views/autofill/info_bubble.cc",
       "views/autofill/info_bubble.h",
       "views/autofill/tooltip_icon.cc",
@@ -1851,18 +1853,16 @@ split_static_library("ui") {
           "//services/ui/public/cpp",
           "//services/ui/public/interfaces",
         ]
+      }
 
-        # TODO(erg): These files hard depend on mus, and thus can't be in a gyp
-        # build. When gyp goes away, merge this back into the sources list.
+      # TODO(ellyjones): Mus is not supported on Mac (there is no ui::Window
+      # apart from aura::Window, which is also not supported).
+      if (!is_mac) {
         sources += [
           "views/tabs/window_finder_mus.cc",
           "views/tabs/window_finder_mus.h",
         ]
-      }
 
-      # TODO(ellyjones): This target fails to build on Mac because of
-      # incompatible uses of gpu::AcceleratedWidget vs gpu::SurfaceHandle.
-      if (!is_mac) {
         deps += [ "//ui/views/mus" ]
       }
     }
@@ -2113,13 +2113,9 @@ split_static_library("ui") {
         "android/autofill/password_generation_popup_view_android.h",
         "android/bluetooth_chooser_android.cc",
         "android/bluetooth_chooser_android.h",
-        "android/certificate_viewer_android.cc",
-        "android/certificate_viewer_android.h",
         "android/chrome_http_auth_handler.cc",
         "android/chrome_http_auth_handler.h",
         "android/color_chooser_dialog_android.cc",
-        "android/connection_info_popup_android.cc",
-        "android/connection_info_popup_android.h",
         "android/content_settings/popup_blocked_infobar_delegate.cc",
         "android/content_settings/popup_blocked_infobar_delegate.h",
         "android/content_settings/subresource_filter_infobar_delegate.cc",
@@ -2154,6 +2150,8 @@ split_static_library("ui") {
         "android/infobars/save_password_infobar.h",
         "android/infobars/simple_confirm_infobar_builder.cc",
         "android/infobars/simple_confirm_infobar_builder.h",
+        "android/infobars/subresource_filter_infobar.cc",
+        "android/infobars/subresource_filter_infobar.h",
         "android/infobars/translate_infobar.cc",
         "android/infobars/translate_infobar.h",
         "android/infobars/update_password_infobar.cc",
@@ -2164,6 +2162,12 @@ split_static_library("ui") {
         "android/omnibox/omnibox_url_emphasizer.h",
         "android/omnibox/omnibox_view_util.cc",
         "android/omnibox/omnibox_view_util.h",
+        "android/page_info/certificate_viewer_android.cc",
+        "android/page_info/certificate_viewer_android.h",
+        "android/page_info/connection_info_popup_android.cc",
+        "android/page_info/connection_info_popup_android.h",
+        "android/page_info/website_settings_popup_android.cc",
+        "android/page_info/website_settings_popup_android.h",
         "android/simple_message_box_android.cc",
         "android/snackbars/auto_signin_prompt_controller.cc",
         "android/snackbars/auto_signin_prompt_controller.h",
@@ -2187,8 +2191,6 @@ split_static_library("ui") {
         "android/usb_chooser_dialog_android.h",
         "android/view_android_helper.cc",
         "android/view_android_helper.h",
-        "android/website_settings_popup_android.cc",
-        "android/website_settings_popup_android.h",
         "browser_otr_state_android.cc",
         "screen_capture_notification_ui_stub.cc",
         "webui/offline/offline_internals_ui.cc",
@@ -2204,8 +2206,10 @@ split_static_library("ui") {
         "webui/snippets_internals_ui.cc",
         "webui/snippets_internals_ui.h",
       ]
-      if (enable_vr_shell) {
-        defines += [ "ENABLE_VR_SHELL" ]
+      if (enable_vr_shell || enable_webvr) {
+        if (enable_vr_shell) {
+          defines += [ "ENABLE_VR_SHELL" ]
+        }
         sources += [
           "webui/vr_shell/vr_shell_ui_message_handler.cc",
           "webui/vr_shell/vr_shell_ui_message_handler.h",
@@ -2213,7 +2217,7 @@ split_static_library("ui") {
           "webui/vr_shell/vr_shell_ui_ui.h",
         ]
         configs += [ "//third_party/gvr-android-sdk:libgvr_config" ]
-        deps += [ "//chrome/browser/android/vr_shell:vr_shell" ]
+        deps += [ "//chrome/browser/android/vr_shell:vr_common" ]
       }
       if (enable_vr_shell_ui_dev) {
         assert(enable_vr_shell)
@@ -2636,6 +2640,8 @@ split_static_library("ui") {
         "cocoa/framed_browser_window.mm",
         "cocoa/full_size_content_window.h",
         "cocoa/full_size_content_window.mm",
+        "cocoa/fullscreen/fullscreen_menubar_tracker.h",
+        "cocoa/fullscreen/fullscreen_menubar_tracker.mm",
         "cocoa/fullscreen_low_power_coordinator.h",
         "cocoa/fullscreen_low_power_coordinator.mm",
         "cocoa/fullscreen_toolbar_controller.h",
@@ -3065,10 +3071,6 @@ split_static_library("ui") {
       "app_list/app_list_model_builder.h",
       "app_list/app_list_positioner.cc",
       "app_list/app_list_positioner.h",
-      "app_list/app_list_prefs.cc",
-      "app_list/app_list_prefs.h",
-      "app_list/app_list_prefs_factory.cc",
-      "app_list/app_list_prefs_factory.h",
       "app_list/app_list_service.cc",
       "app_list/app_list_service.h",
       "app_list/app_list_service_impl.cc",
@@ -3095,8 +3097,6 @@ split_static_library("ui") {
       "app_list/google_now_extension.h",
       "app_list/launcher_page_event_dispatcher.cc",
       "app_list/launcher_page_event_dispatcher.h",
-      "app_list/model_pref_updater.cc",
-      "app_list/model_pref_updater.h",
       "app_list/profile_loader.cc",
       "app_list/profile_loader.h",
       "app_list/profile_store.h",

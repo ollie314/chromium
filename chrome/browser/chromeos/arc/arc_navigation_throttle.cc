@@ -10,11 +10,11 @@
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
 #include "base/metrics/histogram_macros.h"
-#include "chrome/browser/chromeos/arc/page_transition_util.h"
 #include "components/arc/arc_bridge_service.h"
 #include "components/arc/arc_service_manager.h"
 #include "components/arc/intent_helper/arc_intent_helper_bridge.h"
 #include "components/arc/intent_helper/local_activity_resolver.h"
+#include "components/arc/intent_helper/page_transition_util.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_handle.h"
@@ -178,7 +178,7 @@ void ArcNavigationThrottle::OnAppCandidatesReceived(
     return;
   }
 
-  // Swap Chrome app with any app in row |kMaxAppResults-1| iff his index is
+  // Swap Chrome app with any app in row |kMaxAppResults-1| iff its index is
   // bigger, thus ensuring the user can always see Chrome without scrolling.
   size_t chrome_app_index = 0;
   for (size_t i = 0; i < handlers.size(); ++i) {

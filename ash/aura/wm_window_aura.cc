@@ -9,12 +9,12 @@
 #include "ash/aura/wm_shell_aura.h"
 #include "ash/common/ash_constants.h"
 #include "ash/common/shelf/shelf_item_types.h"
-#include "ash/common/shell_window_ids.h"
 #include "ash/common/wm/window_state.h"
 #include "ash/common/wm_layout_manager.h"
 #include "ash/common/wm_transient_window_observer.h"
 #include "ash/common/wm_window_observer.h"
 #include "ash/common/wm_window_property.h"
+#include "ash/public/cpp/shell_window_ids.h"
 #include "ash/screen_util.h"
 #include "ash/shell.h"
 #include "ash/wm/resize_handle_window_targeter.h"
@@ -197,6 +197,14 @@ bool WmWindowAura::IsBubble() {
 
 ui::Layer* WmWindowAura::GetLayer() {
   return window_->layer();
+}
+
+bool WmWindowAura::GetLayerTargetVisibility() {
+  return GetLayer()->GetTargetVisibility();
+}
+
+bool WmWindowAura::GetLayerVisible() {
+  return GetLayer()->visible();
 }
 
 display::Display WmWindowAura::GetDisplayNearestWindow() {
@@ -626,6 +634,10 @@ void WmWindowAura::StackChildBelow(WmWindow* child, WmWindow* target) {
   window_->StackChildBelow(GetAuraWindow(child), GetAuraWindow(target));
 }
 
+void WmWindowAura::SetPinned(bool trusted) {
+  wm::PinWindow(window_, trusted);
+}
+
 void WmWindowAura::SetAlwaysOnTop(bool value) {
   window_->SetProperty(aura::client::kAlwaysOnTopKey, value);
 }
@@ -798,8 +810,8 @@ void WmWindowAura::OnWindowHierarchyChanging(
   wm_params.target = Get(params.target);
   wm_params.new_parent = Get(params.new_parent);
   wm_params.old_parent = Get(params.old_parent);
-  FOR_EACH_OBSERVER(WmWindowObserver, observers_,
-                    OnWindowTreeChanging(this, wm_params));
+  for (auto& observer : observers_)
+    observer.OnWindowTreeChanging(this, wm_params);
 }
 
 void WmWindowAura::OnWindowHierarchyChanged(
@@ -808,13 +820,13 @@ void WmWindowAura::OnWindowHierarchyChanged(
   wm_params.target = Get(params.target);
   wm_params.new_parent = Get(params.new_parent);
   wm_params.old_parent = Get(params.old_parent);
-  FOR_EACH_OBSERVER(WmWindowObserver, observers_,
-                    OnWindowTreeChanged(this, wm_params));
+  for (auto& observer : observers_)
+    observer.OnWindowTreeChanged(this, wm_params);
 }
 
 void WmWindowAura::OnWindowStackingChanged(aura::Window* window) {
-  FOR_EACH_OBSERVER(WmWindowObserver, observers_,
-                    OnWindowStackingChanged(this));
+  for (auto& observer : observers_)
+    observer.OnWindowStackingChanged(this);
 }
 
 void WmWindowAura::OnWindowPropertyChanged(aura::Window* window,
@@ -844,52 +856,55 @@ void WmWindowAura::OnWindowPropertyChanged(aura::Window* window,
   } else {
     return;
   }
-  FOR_EACH_OBSERVER(WmWindowObserver, observers_,
-                    OnWindowPropertyChanged(this, wm_property));
+  for (auto& observer : observers_)
+    observer.OnWindowPropertyChanged(this, wm_property);
 }
 
 void WmWindowAura::OnWindowBoundsChanged(aura::Window* window,
                                          const gfx::Rect& old_bounds,
                                          const gfx::Rect& new_bounds) {
-  FOR_EACH_OBSERVER(WmWindowObserver, observers_,
-                    OnWindowBoundsChanged(this, old_bounds, new_bounds));
+  for (auto& observer : observers_)
+    observer.OnWindowBoundsChanged(this, old_bounds, new_bounds);
 }
 
 void WmWindowAura::OnWindowDestroying(aura::Window* window) {
-  FOR_EACH_OBSERVER(WmWindowObserver, observers_, OnWindowDestroying(this));
+  for (auto& observer : observers_)
+    observer.OnWindowDestroying(this);
 }
 
 void WmWindowAura::OnWindowDestroyed(aura::Window* window) {
-  FOR_EACH_OBSERVER(WmWindowObserver, observers_, OnWindowDestroyed(this));
+  for (auto& observer : observers_)
+    observer.OnWindowDestroyed(this);
 }
 
 void WmWindowAura::OnWindowVisibilityChanging(aura::Window* window,
                                               bool visible) {
   DCHECK_EQ(window, window_);
-  FOR_EACH_OBSERVER(WmWindowObserver, observers_,
-                    OnWindowVisibilityChanging(this, visible));
+  for (auto& observer : observers_)
+    observer.OnWindowVisibilityChanging(this, visible);
 }
 
 void WmWindowAura::OnWindowVisibilityChanged(aura::Window* window,
                                              bool visible) {
-  FOR_EACH_OBSERVER(WmWindowObserver, observers_,
-                    OnWindowVisibilityChanged(Get(window), visible));
+  for (auto& observer : observers_)
+    observer.OnWindowVisibilityChanged(Get(window), visible);
 }
 
 void WmWindowAura::OnWindowTitleChanged(aura::Window* window) {
-  FOR_EACH_OBSERVER(WmWindowObserver, observers_, OnWindowTitleChanged(this));
+  for (auto& observer : observers_)
+    observer.OnWindowTitleChanged(this);
 }
 
 void WmWindowAura::OnTransientChildAdded(aura::Window* window,
                                          aura::Window* transient) {
-  FOR_EACH_OBSERVER(WmTransientWindowObserver, transient_observers_,
-                    OnTransientChildAdded(this, Get(transient)));
+  for (auto& observer : transient_observers_)
+    observer.OnTransientChildAdded(this, Get(transient));
 }
 
 void WmWindowAura::OnTransientChildRemoved(aura::Window* window,
                                            aura::Window* transient) {
-  FOR_EACH_OBSERVER(WmTransientWindowObserver, transient_observers_,
-                    OnTransientChildRemoved(this, Get(transient)));
+  for (auto& observer : transient_observers_)
+    observer.OnTransientChildRemoved(this, Get(transient));
 }
 
 }  // namespace ash

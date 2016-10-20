@@ -129,7 +129,8 @@ class RecordingImageBufferSurfaceTest : public Test {
 
   void testNonAnimatedCanvasUpdate() {
     m_testSurface->initializeCurrentFrame();
-    // acquire picture twice to simulate a static canvas: nothing drawn between updates
+    // Acquire picture twice to simulate a static canvas: nothing drawn between
+    // updates.
     m_fakeImageBufferClient->fakeDraw();
     m_testSurface->getPicture();
     m_testSurface->getPicture();
@@ -200,7 +201,7 @@ class RecordingImageBufferSurfaceTest : public Test {
     m_testSurface->initializeCurrentFrame();
     m_testSurface->getPicture();
     SkPaint clearPaint;
-    clearPaint.setXfermodeMode(SkXfermode::kClear_Mode);
+    clearPaint.setBlendMode(SkBlendMode::kClear);
     m_imageBuffer->canvas()->drawRect(
         SkRect::MakeWH(m_testSurface->size().width(),
                        m_testSurface->size().height()),

@@ -26,6 +26,7 @@
 
 #include "core/CoreExport.h"
 #include "core/fetch/CachedMetadataHandler.h"
+#include "core/fetch/IntegrityMetadata.h"
 #include "core/fetch/ResourceLoaderOptions.h"
 #include "platform/MemoryCoordinator.h"
 #include "platform/SharedBuffer.h"
@@ -35,9 +36,10 @@
 #include "platform/network/ResourceRequest.h"
 #include "platform/network/ResourceResponse.h"
 #include "platform/scheduler/CancellableTaskFactory.h"
-#include "platform/web_process_memory_dump.h"
+#include "platform/tracing/web_process_memory_dump.h"
 #include "public/platform/WebDataConsumerHandle.h"
 #include "wtf/Allocator.h"
+#include "wtf/AutoReset.h"
 #include "wtf/HashCountedSet.h"
 #include "wtf/HashSet.h"
 #include "wtf/text/WTFString.h"
@@ -98,13 +100,6 @@ class CORE_EXPORT Resource : public GarbageCollectedFinalized<Resource>,
     DontMarkAsReferenced,
   };
 
-  // Exposed for testing.
-  static Resource* create(
-      const ResourceRequest& request,
-      Type type,
-      const ResourceLoaderOptions& options = ResourceLoaderOptions()) {
-    return new Resource(request, type, options);
-  }
   virtual ~Resource();
 
   DECLARE_VIRTUAL_TRACE();
@@ -201,14 +196,13 @@ class CORE_EXPORT Resource : public GarbageCollectedFinalized<Resource>,
   bool passesAccessControlCheck(SecurityOrigin*,
                                 String& errorDescription) const;
 
-  bool isEligibleForIntegrityCheck(SecurityOrigin*) const;
-
   virtual PassRefPtr<const SharedBuffer> resourceBuffer() const {
     return m_data;
   }
   void setResourceBuffer(PassRefPtr<SharedBuffer>);
 
-  virtual void willFollowRedirect(ResourceRequest&, const ResourceResponse&);
+  virtual bool willFollowRedirect(const ResourceRequest&,
+                                  const ResourceResponse&);
 
   // Called when a redirect response was received but a decision has already
   // been made to not follow it.
@@ -233,7 +227,7 @@ class CORE_EXPORT Resource : public GarbageCollectedFinalized<Resource>,
   bool errorOccurred() const {
     return m_status == LoadError || m_status == DecodeError;
   }
-  bool loadFailedOrCanceled() { return !m_error.isNull(); }
+  bool loadFailedOrCanceled() const { return !m_error.isNull(); }
 
   DataBufferingPolicy getDataBufferingPolicy() const {
     return m_options.dataBufferingPolicy;
@@ -259,10 +253,21 @@ class CORE_EXPORT Resource : public GarbageCollectedFinalized<Resource>,
   bool isCacheValidator() const { return m_isRevalidating; }
   bool hasCacheControlNoStoreHeader() const;
   bool hasVaryHeader() const;
-  virtual bool mustRefetchDueToIntegrityMetadata(
-      const FetchRequest& request) const {
-    return false;
+
+  bool isEligibleForIntegrityCheck(SecurityOrigin*) const;
+
+  void setIntegrityMetadata(const IntegrityMetadataSet& metadata) {
+    m_integrityMetadata = metadata;
   }
+  const IntegrityMetadataSet& integrityMetadata() const {
+    return m_integrityMetadata;
+  }
+  // The argument must never be |NotChecked|.
+  void setIntegrityDisposition(ResourceIntegrityDisposition);
+  ResourceIntegrityDisposition integrityDisposition() const {
+    return m_integrityDisposition;
+  }
+  bool mustRefetchDueToIntegrityMetadata(const FetchRequest&) const;
 
   double currentAge() const;
   double freshnessLifetime();
@@ -363,6 +368,12 @@ class CORE_EXPORT Resource : public GarbageCollectedFinalized<Resource>,
   SharedBuffer* data() const { return m_data.get(); }
   void clearData() { m_data.clear(); }
 
+  class ProhibitAddRemoveClientInScope : public AutoReset<bool> {
+   public:
+    ProhibitAddRemoveClientInScope(Resource* resource)
+        : AutoReset(&resource->m_isAddRemoveClientProhibited, true) {}
+  };
+
  private:
   class ResourceCallback;
   class CachedMetadataHandlerImpl;
@@ -412,6 +423,11 @@ class CORE_EXPORT Resource : public GarbageCollectedFinalized<Resource>,
   unsigned m_linkPreload : 1;
   bool m_isRevalidating : 1;
   bool m_isAlive : 1;
+
+  ResourceIntegrityDisposition m_integrityDisposition;
+  IntegrityMetadataSet m_integrityMetadata;
+
+  bool m_isAddRemoveClientProhibited;
 
   // Ordered list of all redirects followed while fetching this resource.
   Vector<RedirectPair> m_redirectChain;

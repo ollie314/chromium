@@ -343,14 +343,14 @@ class DatabaseLoader final : public ExecutableWithDatabase {
             protocol::Array<protocol::IndexedDB::ObjectStore>::create();
 
     for (const auto& storeMapEntry : databaseMetadata.objectStores) {
-      const IDBObjectStoreMetadata& objectStoreMetadata = storeMapEntry.value;
+      const IDBObjectStoreMetadata& objectStoreMetadata = *storeMapEntry.value;
 
       std::unique_ptr<protocol::Array<protocol::IndexedDB::ObjectStoreIndex>>
           indexes =
               protocol::Array<protocol::IndexedDB::ObjectStoreIndex>::create();
 
       for (const auto& metadataMapEntry : objectStoreMetadata.indexes) {
-        const IDBIndexMetadata& indexMetadata = metadataMapEntry.value;
+        const IDBIndexMetadata& indexMetadata = *metadataMapEntry.value;
 
         std::unique_ptr<ObjectStoreIndex> objectStoreIndex =
             ObjectStoreIndex::create()
@@ -504,7 +504,8 @@ class OpenCursorCallback final : public EventListener {
       return;
     }
 
-    // Continue cursor before making injected script calls, otherwise transaction might be finished.
+    // Continue cursor before making injected script calls, otherwise
+    // transaction might be finished.
     TrackExceptionState exceptionState;
     idbCursor->continueFunction(nullptr, nullptr, exceptionState);
     if (exceptionState.hadException()) {

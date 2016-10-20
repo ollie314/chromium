@@ -9,6 +9,7 @@
 #include "core/layout/LayoutPart.h"
 #include "core/layout/LayoutView.h"
 #include "core/paint/ObjectPaintProperties.h"
+#include "platform/graphics/paint/PropertyTreeState.h"
 
 #include <iomanip>
 #include <sstream>
@@ -74,8 +75,7 @@ class PropertyTreePrinter {
   }
 
   void collectPropertyNodes(const LayoutObject& object) {
-    if (const ObjectPaintProperties* paintProperties =
-            object.objectPaintProperties())
+    if (const ObjectPaintProperties* paintProperties = object.paintProperties())
       Traits::addObjectPaintProperties(object, *paintProperties, *this);
     for (LayoutObject* child = object.slowFirstChild(); child;
          child = child->nextSibling())
@@ -451,7 +451,7 @@ class PaintPropertyTreeGraphBuilder {
   }
 
   void writeObjectPaintPropertyNodes(const LayoutObject& object) {
-    const ObjectPaintProperties* properties = object.objectPaintProperties();
+    const ObjectPaintProperties* properties = object.paintProperties();
     if (!properties)
       return;
     const TransformPaintPropertyNode* paintOffset =
@@ -681,6 +681,17 @@ void showPaintPropertyPath(const blink::EffectPaintPropertyNode* node) {
 
 void showPaintPropertyPath(const blink::ScrollPaintPropertyNode* node) {
   fprintf(stderr, "%s\n", scrollPaintPropertyPathAsString(node).utf8().data());
+}
+
+void showPropertyTreeState(const blink::PropertyTreeState& state) {
+  fprintf(stderr, "%s\n", propertyTreeStateAsString(state).utf8().data());
+}
+
+String propertyTreeStateAsString(const blink::PropertyTreeState& state) {
+  return transformPaintPropertyPathAsString(state.transform()) + "\n" +
+         clipPaintPropertyPathAsString(state.clip()) + "\n" +
+         effectPaintPropertyPathAsString(state.effect()) + "\n" +
+         scrollPaintPropertyPathAsString(state.scroll());
 }
 
 String paintPropertyTreeGraph(const blink::FrameView& frameView) {

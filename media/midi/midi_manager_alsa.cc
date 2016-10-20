@@ -28,10 +28,11 @@
 #include "crypto/sha2.h"
 #include "media/midi/midi_port_info.h"
 
-namespace media {
 namespace midi {
 
 namespace {
+
+using midi::mojom::Result;
 
 // Per-output buffer. This can be smaller, but then large sysex messages
 // will be (harmlessly) split across multiple seq events. This should
@@ -1404,4 +1405,3 @@ MidiManager* MidiManager::Create() {
 }
 
 }  // namespace midi
-}  // namespace media

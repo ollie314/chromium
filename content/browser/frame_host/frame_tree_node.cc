@@ -121,7 +121,8 @@ FrameTreeNode::FrameTreeNode(FrameTree* frame_tree,
 FrameTreeNode::~FrameTreeNode() {
   std::vector<std::unique_ptr<FrameTreeNode>>().swap(children_);
   frame_tree_->FrameRemoved(this);
-  FOR_EACH_OBSERVER(Observer, observers_, OnFrameTreeNodeDestroyed(this));
+  for (auto& observer : observers_)
+    observer.OnFrameTreeNodeDestroyed(this);
 
   if (opener_)
     opener_->RemoveObserver(opener_observer_.get());
@@ -205,7 +206,7 @@ void FrameTreeNode::SetOpener(FrameTreeNode* opener) {
 }
 
 void FrameTreeNode::SetCurrentURL(const GURL& url) {
-  if (!has_committed_real_load_ && url != GURL(url::kAboutBlankURL))
+  if (!has_committed_real_load_ && url != url::kAboutBlankURL)
     has_committed_real_load_ = true;
   current_frame_host()->set_last_committed_url(url);
   blame_context_.TakeSnapshot();
@@ -465,7 +466,8 @@ bool FrameTreeNode::StopLoading() {
 
 void FrameTreeNode::DidFocus() {
   last_focus_time_ = base::TimeTicks::Now();
-  FOR_EACH_OBSERVER(Observer, observers_, OnFrameTreeNodeFocused(this));
+  for (auto& observer : observers_)
+    observer.OnFrameTreeNodeFocused(this);
 }
 
 void FrameTreeNode::BeforeUnloadCanceled() {

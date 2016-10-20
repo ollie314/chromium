@@ -62,12 +62,10 @@ using namespace SVGNames;
 SVGElement::SVGElement(const QualifiedName& tagName,
                        Document& document,
                        ConstructionType constructionType)
-    : Element(tagName, &document, constructionType)
+    : Element(tagName, &document, constructionType),
 #if ENABLE(ASSERT)
-      ,
-      m_inRelativeLengthClientsInvalidation(false)
+      m_inRelativeLengthClientsInvalidation(false),
 #endif
-      ,
       m_SVGRareData(nullptr),
       m_className(SVGAnimatedString::create(this,
                                             HTMLNames::classAttr,
@@ -232,7 +230,7 @@ void SVGElement::applyActiveWebAnimations() {
   ActiveInterpolationsMap activeInterpolationsMap =
       AnimationStack::activeInterpolations(
           &elementAnimations()->animationStack(), nullptr, nullptr,
-          KeyframeEffect::DefaultPriority, isSVGAttributeHandle);
+          KeyframeEffectReadOnly::DefaultPriority, isSVGAttributeHandle);
   for (auto& entry : activeInterpolationsMap) {
     const QualifiedName& attribute = entry.key.svgAttribute();
     InterpolationEnvironment environment(
@@ -792,7 +790,7 @@ void SVGElement::addedEventListener(
   for (SVGElement* element : instances) {
     bool result =
         element->Node::addEventListenerInternal(eventType, listener, options);
-    ASSERT_UNUSED(result, result);
+    DCHECK(result);
   }
 }
 

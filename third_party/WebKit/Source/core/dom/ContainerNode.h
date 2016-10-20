@@ -26,6 +26,7 @@
 #define ContainerNode_h
 
 #include "bindings/core/v8/ExceptionStatePlaceholder.h"
+#include "bindings/core/v8/ScriptWrappableVisitor.h"
 #include "core/CoreExport.h"
 #include "core/dom/Node.h"
 #include "core/html/CollectionType.h"
@@ -132,7 +133,7 @@ class CORE_EXPORT ContainerNode : public Node {
   void attachLayoutTree(const AttachContext& = AttachContext()) override;
   void detachLayoutTree(const AttachContext& = AttachContext()) override;
   LayoutRect boundingBox() const final;
-  void setFocus(bool) override;
+  void setFocused(bool) override;
   void focusStateChanged();
   void setActive(bool = true) override;
   void setDragged(bool) override;
@@ -311,8 +312,14 @@ class CORE_EXPORT ContainerNode : public Node {
       const QualifiedName* attrName = nullptr,
       Element* attributeOwnerElement = nullptr);
 
-  void setFirstChild(Node* child) { m_firstChild = child; }
-  void setLastChild(Node* child) { m_lastChild = child; }
+  void setFirstChild(Node* child) {
+    m_firstChild = child;
+    ScriptWrappableVisitor::writeBarrier(this, m_firstChild);
+  }
+  void setLastChild(Node* child) {
+    m_lastChild = child;
+    ScriptWrappableVisitor::writeBarrier(this, m_lastChild);
+  }
 
   // Utility functions for NodeListsNodeData API.
   template <typename Collection>

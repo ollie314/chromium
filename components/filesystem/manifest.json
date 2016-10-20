@@ -1,10 +1,13 @@
 {
   "manifest_version":  1,
-  "name": "mojo:filesystem",
+  "name": "service:filesystem",
   "display_name": "File System Service",
   "capabilities": {
+    "provided": {
+      "filesystem:filesystem": [ "filesystem::mojom::FileSystem" ]
+    },
     "required": {
-      "*": { "classes": [ "app" ] }
+      "*": [ "app" ]
     }
   }
 }

@@ -30,6 +30,7 @@
 #ifndef StyleEngine_h
 #define StyleEngine_h
 
+#include "bindings/core/v8/TraceWrapperMember.h"
 #include "core/CoreExport.h"
 #include "core/css/CSSFontSelectorClient.h"
 #include "core/css/invalidation/StyleInvalidator.h"
@@ -83,8 +84,8 @@ class CORE_EXPORT StyleEngine final
 
   ~StyleEngine();
 
-  const HeapVector<Member<StyleSheet>>& styleSheetsForStyleSheetList(
-      TreeScope&);
+  const HeapVector<TraceWrapperMember<StyleSheet>>&
+  styleSheetsForStyleSheetList(TreeScope&);
 
   const HeapVector<Member<CSSStyleSheet>>& injectedAuthorStyleSheets() const {
     return m_injectedAuthorStyleSheets;
@@ -211,9 +212,8 @@ class CORE_EXPORT StyleEngine final
                                               Element& removedElement,
                                               Element& afterElement);
   void scheduleNthPseudoInvalidations(ContainerNode&);
-  void scheduleInvalidationsForRuleSets(
-      TreeScope&,
-      const HeapVector<Member<const RuleSet>>&);
+  void scheduleInvalidationsForRuleSets(TreeScope&,
+                                        const HeapVector<Member<RuleSet>>&);
 
   unsigned styleForElementCount() const { return m_styleForElementCount; }
   void incStyleForElementCount() { m_styleForElementCount++; }
@@ -255,12 +255,14 @@ class CORE_EXPORT StyleEngine final
                             const String& text,
                             TextPosition startPosition);
 
-  const DocumentStyleSheetCollection* documentStyleSheetCollection() const {
-    return m_documentStyleSheetCollection.get();
+  const DocumentStyleSheetCollection& documentStyleSheetCollection() const {
+    DCHECK(m_documentStyleSheetCollection);
+    return *m_documentStyleSheetCollection;
   }
 
-  DocumentStyleSheetCollection* documentStyleSheetCollection() {
-    return m_documentStyleSheetCollection.get();
+  DocumentStyleSheetCollection& documentStyleSheetCollection() {
+    DCHECK(m_documentStyleSheetCollection);
+    return *m_documentStyleSheetCollection;
   }
 
   void updateActiveStyleSheetsInShadow(
@@ -271,7 +273,7 @@ class CORE_EXPORT StyleEngine final
   bool shouldSkipInvalidationFor(const Element&) const;
   void scheduleRuleSetInvalidationsForElement(
       Element&,
-      const HeapVector<Member<const RuleSet>>&);
+      const HeapVector<Member<RuleSet>>&);
   void invalidateSlottedElements(HTMLSlotElement&);
 
   Member<Document> m_document;

@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Keep this file in sync with the .proto files in this directory.
-
 #include "components/sync/protocol/proto_value_conversions.h"
 
 #include <stdint.h>
@@ -291,14 +289,13 @@ std::unique_ptr<base::DictionaryValue> ArcPackageSpecificsToValue(
   return value;
 }
 
-std::unique_ptr<base::DictionaryValue> PrinterPPDDataToValue(
-    const sync_pb::PrinterPPDData& proto) {
+std::unique_ptr<base::DictionaryValue> PrinterPPDReferenceToValue(
+    const sync_pb::PrinterPPDReference& proto) {
   std::unique_ptr<base::DictionaryValue> value =
       base::MakeUnique<base::DictionaryValue>();
-  SET_INT32(id);
-  SET_STR(file_name);
-  SET_INT64(version_number);
-  SET_BOOL(from_quirks_server);
+  SET_STR(user_supplied_ppd_url);
+  SET_STR(effective_manufacturer);
+  SET_STR(effective_model);
   return value;
 }
 
@@ -665,7 +662,7 @@ std::unique_ptr<base::DictionaryValue> PrinterSpecificsToValue(
   SET_STR(model);
   SET_STR(uri);
   SET_STR(uuid);
-  SET(ppd, PrinterPPDDataToValue);
+  SET(ppd_reference, PrinterPPDReferenceToValue);
   return value;
 }
 

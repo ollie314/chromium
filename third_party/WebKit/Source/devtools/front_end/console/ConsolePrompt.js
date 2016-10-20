@@ -185,8 +185,8 @@ WebInspector.ConsolePrompt.prototype = {
         {
             if (str !== this.text())
                 return;
-            if (exceptionDetails && (exceptionDetails.exception.description === "SyntaxError: Unexpected end of input"
-                || exceptionDetails.exception.description === "SyntaxError: Unterminated template literal")) {
+            if (exceptionDetails && (exceptionDetails.exception.description.startsWith("SyntaxError: Unexpected end of input")
+                || exceptionDetails.exception.description.startsWith("SyntaxError: Unterminated template literal"))) {
                 this._editor.newlineAndIndent();
                 this._enterProcessedForTest();
                 return;
@@ -206,7 +206,7 @@ WebInspector.ConsolePrompt.prototype = {
         var currentExecutionContext = WebInspector.context.flavor(WebInspector.ExecutionContext);
         if (currentExecutionContext) {
             WebInspector.ConsoleModel.evaluateCommandInConsole(currentExecutionContext, text, useCommandLineAPI);
-            if (WebInspector.inspectorView.currentPanel() && WebInspector.inspectorView.currentPanel().name === "console")
+            if (WebInspector.ConsolePanel.instance().isShowing())
                 WebInspector.userMetrics.actionTaken(WebInspector.UserMetrics.Action.CommandEvaluatedInConsolePanel);
         }
     },

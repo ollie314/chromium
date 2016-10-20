@@ -106,11 +106,6 @@ const int kAXResultsLimitNoLimit = -1;
 
 extern "C" {
 
-// See http://openradar.appspot.com/9896491. This SPI has been tested on 10.5,
-// 10.6, and 10.7. It allows accessibility clients to observe events posted on
-// this object.
-void NSAccessibilityUnregisterUniqueIdForUIElement(id element);
-
 // The following are private accessibility APIs required for cursor navigation
 // and text selection. VoiceOver started relying on them in Mac OS X 10.11.
 #if !defined(MAC_OS_X_VERSION_10_11) || \
@@ -617,8 +612,10 @@ NSString* const NSAccessibilityRequiredAttribute = @"AXRequired";
 }
 
 - (void)detach {
-  if (browserAccessibility_)
-    NSAccessibilityUnregisterUniqueIdForUIElement(self);
+  if (!browserAccessibility_)
+    return;
+  NSAccessibilityPostNotification(
+      self, NSAccessibilityUIElementDestroyedNotification);
   browserAccessibility_ = nullptr;
 }
 
@@ -2799,14 +2796,13 @@ NSString* const NSAccessibilityRequiredAttribute = @"AXRequired";
     return;
 
   // TODO(dmazzoni): Support more actions.
+  BrowserAccessibilityManager* manager = browserAccessibility_->manager();
   if ([action isEqualToString:NSAccessibilityPressAction]) {
-    [self delegate]->AccessibilityDoDefaultAction(
-        browserAccessibility_->GetId());
+    manager->DoDefaultAction(*browserAccessibility_);
   } else if ([action isEqualToString:NSAccessibilityShowMenuAction]) {
-    [self delegate]->AccessibilityShowContextMenu(
-        browserAccessibility_->GetId());
+    manager->ShowContextMenu(*browserAccessibility_);
   } else if ([action isEqualToString:NSAccessibilityScrollToVisibleAction]) {
-    browserAccessibility_->manager()->ScrollToMakeVisible(
+    manager->ScrollToMakeVisible(
         *browserAccessibility_, gfx::Rect());
   }
 }
@@ -2842,9 +2838,9 @@ NSString* const NSAccessibilityRequiredAttribute = @"AXRequired";
   }
   if ([attribute isEqualToString:NSAccessibilitySelectedTextRangeAttribute]) {
     NSRange range = [(NSValue*)value rangeValue];
-    [self delegate]->AccessibilitySetSelection(
-        browserAccessibility_->GetId(), range.location,
-        browserAccessibility_->GetId(), range.location + range.length);
+    BrowserAccessibilityManager* manager = browserAccessibility_->manager();
+    manager->SetTextSelection(
+        *browserAccessibility_, range.location, range.location + range.length);
   }
 }
 
@@ -2856,25 +2852,15 @@ NSString* const NSAccessibilityRequiredAttribute = @"AXRequired";
   if (![self instanceActive])
     return nil;
 
-  BrowserAccessibilityCocoa* hit = self;
-  for (BrowserAccessibilityCocoa* child in [self children]) {
-    if (!child->browserAccessibility_)
-      continue;
-    NSPoint origin = [child origin];
-    NSSize size = [[child size] sizeValue];
-    NSRect rect;
-    rect.origin = origin;
-    rect.size = size;
-    if (NSPointInRect(point, rect)) {
-      hit = child;
-      id childResult = [child accessibilityHitTest:point];
-      if (![childResult accessibilityIsIgnored]) {
-        hit = childResult;
-        break;
-      }
-    }
-  }
-  return NSAccessibilityUnignoredAncestor(hit);
+  BrowserAccessibilityManager* manager = browserAccessibility_->manager();
+  gfx::Point screen_point(point.x, point.y);
+  screen_point += manager->GetViewBounds().OffsetFromOrigin();
+
+  BrowserAccessibility* hit = manager->CachingAsyncHitTest(screen_point);
+  if (!hit)
+    return nil;
+
+  return NSAccessibilityUnignoredAncestor(ToBrowserAccessibilityCocoa(hit));
 }
 
 - (BOOL)isEqual:(id)object {
@@ -2890,7 +2876,10 @@ NSString* const NSAccessibilityRequiredAttribute = @"AXRequired";
   return browserAccessibility_->GetId();
 }
 
-- (BOOL)accessibilityShouldUseUniqueId {
+- (BOOL)accessibilityNotifiesWhenDestroyed {
+  // Indicate that BrowserAccessibilityCocoa will post a notification when it's
+  // destroyed (see -detach). This allows VoiceOver to do some internal things
+  // more efficiently.
   return YES;
 }
 

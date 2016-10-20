@@ -363,25 +363,8 @@ class BLINK_PLATFORM_EXPORT Platform {
       const blink::WebSecurityOrigin& cacheStorageOrigin,
       const WebString& cacheStorageCacheName) {}
 
-  // Returns the decoded data url if url had a supported mimetype and parsing
-  // was successful.
-  virtual WebData parseDataURL(const WebURL&,
-                               WebString& mimetype,
-                               WebString& charset) {
-    return WebData();
-  }
-
   virtual WebURLError cancelledError(const WebURL&) const {
     return WebURLError();
-  }
-
-  // Returns true and stores the position of the end of the headers to |*end|
-  // if the headers part ends in |bytes[0..size]|. Returns false otherwise.
-  virtual bool parseMultipartHeadersFromBody(const char* bytes,
-                                             size_t /* size */,
-                                             WebURLResponse*,
-                                             size_t* end) const {
-    return false;
   }
 
   // Plugins -------------------------------------------------------------
@@ -553,6 +536,12 @@ class BLINK_PLATFORM_EXPORT Platform {
       const WebSize& cumulativeScroll) {
     return nullptr;
   }
+
+  // Whether the command line flag: --disable-gpu-compositing or --disable-gpu
+  // exists or not
+  // NOTE: This function should not be called from core/ and modules/, but
+  // called by platform/graphics/ is fine.
+  virtual bool isGPUCompositingEnabled() { return true; }
 
   // WebRTC ----------------------------------------------------------
 

@@ -1468,7 +1468,12 @@ void XMLHttpRequest::didFail(const ResourceError& error) {
   if (m_error)
     return;
 
-  if (error.isCancellation()) {
+  // Internally, access check violations are considered `cancellations`, but
+  // at least the mixed-content and CSP specs require them to be surfaced as
+  // network errors to the page. See:
+  //   [1] https://www.w3.org/TR/mixed-content/#algorithms,
+  //   [2] https://www.w3.org/TR/CSP3/#fetch-integration.
+  if (error.isCancellation() && !error.isAccessCheck()) {
     handleDidCancel();
     return;
   }
@@ -1804,7 +1809,7 @@ void XMLHttpRequest::resume() {
   m_progressEventThrottle->resume();
 }
 
-void XMLHttpRequest::stop() {
+void XMLHttpRequest::contextDestroyed() {
   InspectorInstrumentation::didFailXHRLoading(getExecutionContext(), this, this,
                                               m_method, m_url);
   m_progressEventThrottle->stop();
@@ -1821,11 +1826,6 @@ bool XMLHttpRequest::hasPendingActivity() const {
   if (m_loader || m_responseDocumentParser)
     return true;
   return m_eventDispatchRecursionLevel > 0;
-}
-
-void XMLHttpRequest::contextDestroyed() {
-  DCHECK(!m_loader);
-  ActiveDOMObject::contextDestroyed();
 }
 
 const AtomicString& XMLHttpRequest::interfaceName() const {

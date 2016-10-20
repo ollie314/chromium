@@ -1,13 +1,16 @@
 {
   "manifest_version": 1,
-  "name": "mojo:login",
+  "name": "service:login",
   "display_name": "Login",
   "capabilities": {
+    "provided": {
+      "login:login": [ "mash::login::mojom::Login" ]
+    },
     "required": {
-      "*": { "classes": [ "app" ] },
-      "mojo:mash_init": { "interfaces": [ "mash::init::mojom::Init" ] },
-      "mojo:ui": { "interfaces": [ "ui::mojom::UserAccessManager" ] },
-      "mojo:shell":  { "classes":  ["shell:all_users"] }
+      "*": [ "app" ],
+      "service:mash_init": [ "mash_init:init" ],
+      "service:ui": [ "ui:user_access_manager" ],
+      "service:service_manager": [ "service_manager:all_users" ]
     }
   }
 }

@@ -119,6 +119,12 @@ class WEB_EXPORT WebLocalFrameImpl final
   void requestExecuteScriptAndReturnValue(const WebScriptSource&,
                                           bool userGesture,
                                           WebScriptExecutionCallback*) override;
+  void requestExecuteV8Function(v8::Local<v8::Context>,
+                                v8::Local<v8::Function>,
+                                v8::Local<v8::Value> receiver,
+                                int argc,
+                                v8::Local<v8::Value> argv[],
+                                WebScriptExecutionCallback*) override;
   void executeScriptInIsolatedWorld(
       int worldID,
       const WebScriptSource* sourcesIn,
@@ -195,6 +201,7 @@ class WEB_EXPORT WebLocalFrameImpl final
       int compositionEnd,
       const WebVector<WebCompositionUnderline>& underlines) override;
   void extendSelectionAndDelete(int before, int after) override;
+  void deleteSurroundingText(int before, int after) override;
   void setCaretVisible(bool) override;
   int printBegin(const WebPrintParams&,
                  const WebNode& constrainToNode) override;
@@ -254,6 +261,8 @@ class WEB_EXPORT WebLocalFrameImpl final
                 WebHistoryLoadType,
                 bool isClientRedirect) override;
   bool isLoading() const override;
+  bool isFrameDetachedForSpecialOneOffStopTheCrashingHackBug561873()
+      const override;
   bool isNavigationScheduledWithin(double interval) const override;
   void setCommittedFirstRealLoad() override;
   void sendOrientationChangeEvent() override;

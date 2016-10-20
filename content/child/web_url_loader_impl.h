@@ -54,7 +54,6 @@ class CONTENT_EXPORT WebURLLoaderImpl
   static void PopulateURLRequestForRedirect(
       const blink::WebURLRequest& request,
       const net::RedirectInfo& redirect_info,
-      blink::WebReferrerPolicy referrer_policy,
       blink::WebURLRequest::SkipServiceWorker skip_service_worker,
       blink::WebURLRequest* new_request);
 
@@ -72,12 +71,6 @@ class CONTENT_EXPORT WebURLLoaderImpl
   void didChangePriority(blink::WebURLRequest::Priority new_priority,
                          int intra_priority_value) override;
   void setLoadingTaskRunner(blink::WebTaskRunner* loading_task_runner) override;
-
-  // This is a utility function for multipart image resources.
-  static bool ParseMultipartHeadersFromBody(const char* bytes,
-                                            size_t size,
-                                            blink::WebURLResponse* response,
-                                            size_t* end);
 
  private:
   class Context;

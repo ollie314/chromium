@@ -71,12 +71,10 @@ using namespace HTMLNames;
 AXNodeObject::AXNodeObject(Node* node, AXObjectCacheImpl& axObjectCache)
     : AXObject(axObjectCache),
       m_ariaRole(UnknownRole),
-      m_childrenDirty(false)
+      m_childrenDirty(false),
 #if ENABLE(ASSERT)
-      ,
-      m_initialized(false)
+      m_initialized(false),
 #endif
-      ,
       m_node(node) {
 }
 
@@ -422,7 +420,7 @@ AccessibilityRole AXNodeObject::nativeAccessibilityRoleIgnoringAria() const {
 
   if (isHTMLSelectElement(*getNode())) {
     HTMLSelectElement& selectElement = toHTMLSelectElement(*getNode());
-    return selectElement.multiple() ? ListBoxRole : PopUpButtonRole;
+    return selectElement.isMultiple() ? ListBoxRole : PopUpButtonRole;
   }
 
   if (isHTMLTextAreaElement(*getNode()))
@@ -840,11 +838,9 @@ bool AXNodeObject::isHeading() const {
 }
 
 bool AXNodeObject::isHovered() const {
-  Node* node = this->getNode();
-  if (!node)
-    return false;
-
-  return node->hovered();
+  if (Node* node = this->getNode())
+    return node->isHovered();
+  return false;
 }
 
 bool AXNodeObject::isImage() const {
@@ -888,7 +884,7 @@ bool AXNodeObject::isMultiSelectable() const {
     return false;
 
   return isHTMLSelectElement(getNode()) &&
-         toHTMLSelectElement(*getNode()).multiple();
+         toHTMLSelectElement(*getNode()).isMultiple();
 }
 
 bool AXNodeObject::isNativeCheckboxOrRadio() const {
@@ -1072,7 +1068,7 @@ bool AXNodeObject::isPressed() const {
     return false;
   }
 
-  return node->active();
+  return node->isActive();
 }
 
 bool AXNodeObject::isReadOnly() const {
@@ -1356,7 +1352,7 @@ RGBA32 AXNodeObject::colorValue() const {
   // HTMLInputElement::value always returns a string parseable by Color.
   Color color;
   bool success = color.setFromString(input->value());
-  ASSERT_UNUSED(success, success);
+  DCHECK(success);
   return color.rgb();
 }
 
@@ -1528,7 +1524,7 @@ String AXNodeObject::stringValue() const {
       if (!overriddenDescription.isNull())
         return overriddenDescription;
     }
-    if (!selectElement.multiple())
+    if (!selectElement.isMultiple())
       return selectElement.value();
     return String();
   }
@@ -2158,12 +2154,14 @@ void AXNodeObject::setFocused(bool on) {
 }
 
 void AXNodeObject::increment() {
-  UserGestureIndicator gestureIndicator(DefinitelyProcessingNewUserGesture);
+  UserGestureIndicator gestureIndicator(
+      UserGestureToken::create(UserGestureToken::NewGesture));
   alterSliderValue(true);
 }
 
 void AXNodeObject::decrement() {
-  UserGestureIndicator gestureIndicator(DefinitelyProcessingNewUserGesture);
+  UserGestureIndicator gestureIndicator(
+      UserGestureToken::create(UserGestureToken::NewGesture));
   alterSliderValue(false);
 }
 

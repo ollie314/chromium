@@ -24,7 +24,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA
  *
  * Alternatively, the contents of this file may be used under the terms
  * of either the Mozilla Public License Version 1.1, found at
@@ -125,16 +125,18 @@ class CORE_EXPORT PaintLayerScrollableArea final
   class ScrollbarManager {
     DISALLOW_NEW();
 
-    // Helper class to manage the life cycle of Scrollbar objects.  Some layout containers
-    // (e.g., flexbox, table) run multi-pass layout on their children, applying different
-    // constraints.  If a child has overflow:auto, it may gain and lose scrollbars multiple
-    // times during multi-pass layout, causing pointless allocation/deallocation thrashing,
-    // and potentially leading to other problems (crbug.com/528940).
+    // Helper class to manage the life cycle of Scrollbar objects.  Some layout
+    // containers (e.g., flexbox, table) run multi-pass layout on their
+    // children, applying different constraints.  If a child has overflow:auto,
+    // it may gain and lose scrollbars multiple times during multi-pass layout,
+    // causing pointless allocation/deallocation thrashing, and potentially
+    // leading to other problems (crbug.com/528940).
 
-    // ScrollbarManager allows a ScrollableArea to delay the destruction of a scrollbar that
-    // is no longer needed, until the end of multi-pass layout.  If the scrollbar is then
-    // re-added before multi-pass layout finishes, the previously "deleted" scrollbar will
-    // be restored, rather than constructing a new one.
+    // ScrollbarManager allows a ScrollableArea to delay the destruction of a
+    // scrollbar that is no longer needed, until the end of multi-pass layout.
+    // If the scrollbar is then re-added before multi-pass layout finishes, the
+    // previously "deleted" scrollbar will be restored, rather than constructing
+    // a new one.
    public:
     ScrollbarManager(PaintLayerScrollableArea&);
 
@@ -214,16 +216,17 @@ class CORE_EXPORT PaintLayerScrollableArea final
     static int s_count;
   };
 
-  // If a DelayScrollPositionClampScope object is alive, updateAfterLayout() will not
-  // clamp scroll positions to ensure they are in the valid range.  When
-  // the last DelayScrollPositionClampScope object is destructed, all PaintLayerScrollableArea's
-  // that delayed clamping their positions will immediately clamp them.
-  class DelayScrollPositionClampScope {
+  // If a DelayScrollOffsetClampScope object is alive, updateAfterLayout() will
+  // not clamp scroll offsets to ensure they are in the valid range.  When the
+  // last DelayScrollOffsetClampScope object is destructed, all
+  // PaintLayerScrollableArea's that delayed clamping their offsets will
+  // immediately clamp them.
+  class DelayScrollOffsetClampScope {
     STACK_ALLOCATED();
 
    public:
-    DelayScrollPositionClampScope();
-    ~DelayScrollPositionClampScope();
+    DelayScrollOffsetClampScope();
+    ~DelayScrollOffsetClampScope();
 
     static bool clampingIsDelayed() { return s_count; }
     static void setNeedsClamp(PaintLayerScrollableArea*);
@@ -287,10 +290,10 @@ class CORE_EXPORT PaintLayerScrollableArea final
       const Scrollbar&,
       const IntPoint&) const override;
   int scrollSize(ScrollbarOrientation) const override;
-  IntPoint scrollPosition() const override;
-  DoublePoint scrollPositionDouble() const override;
-  IntPoint minimumScrollPosition() const override;
-  IntPoint maximumScrollPosition() const override;
+  IntSize scrollOffsetInt() const override;
+  ScrollOffset scrollOffset() const override;
+  IntSize minimumScrollOffsetInt() const override;
+  IntSize maximumScrollOffsetInt() const override;
   IntRect visibleContentRect(
       IncludeScrollbarsInRect = ExcludeScrollbars) const override;
   int visibleHeight() const override;
@@ -310,56 +313,31 @@ class CORE_EXPORT PaintLayerScrollableArea final
   ScrollBehavior scrollBehaviorStyle() const override;
   CompositorAnimationTimeline* compositorAnimationTimeline() const override;
 
-  double scrollXOffset() const {
-    return m_scrollOffset.width() + scrollOrigin().x();
-  }
-  double scrollYOffset() const {
-    return m_scrollOffset.height() + scrollOrigin().y();
-  }
-
-  DoubleSize scrollOffset() const { return m_scrollOffset; }
-
   // FIXME: We shouldn't allow access to m_overflowRect outside this class.
   LayoutRect overflowRect() const { return m_overflowRect; }
 
-  void scrollToPosition(const DoublePoint& scrollPosition,
-                        ScrollOffsetClamping = ScrollOffsetUnclamped,
-                        ScrollBehavior = ScrollBehaviorInstant,
-                        ScrollType = ProgrammaticScroll);
-
-  void scrollToOffset(const DoubleSize& scrollOffset,
-                      ScrollOffsetClamping clamp = ScrollOffsetUnclamped,
-                      ScrollBehavior scrollBehavior = ScrollBehaviorInstant,
-                      ScrollType scrollType = ProgrammaticScroll) {
-    scrollToPosition(-scrollOrigin() + scrollOffset, clamp, scrollBehavior,
-                     scrollType);
+  void scrollToAbsolutePosition(
+      const FloatPoint& position,
+      ScrollBehavior scrollBehavior = ScrollBehaviorInstant,
+      ScrollType scrollType = ProgrammaticScroll) {
+    setScrollOffset(position - scrollOrigin(), scrollType, scrollBehavior);
   }
 
-  void scrollToXOffset(double x,
-                       ScrollOffsetClamping clamp = ScrollOffsetUnclamped,
-                       ScrollBehavior scrollBehavior = ScrollBehaviorInstant) {
-    scrollToOffset(DoubleSize(x, scrollYOffset()), clamp, scrollBehavior);
-  }
+  // This will set the scroll position without clamping, and it will do all
+  // post-update work even if the scroll position didn't change.
+  void setScrollOffsetUnconditionally(const ScrollOffset&,
+                                      ScrollType = ProgrammaticScroll);
 
-  void scrollToYOffset(double y,
-                       ScrollOffsetClamping clamp = ScrollOffsetUnclamped,
-                       ScrollBehavior scrollBehavior = ScrollBehaviorInstant) {
-    scrollToOffset(DoubleSize(scrollXOffset(), y), clamp, scrollBehavior);
-  }
+  // This will set the scroll position without clamping, and it will do all
+  // post-update work even if the scroll position didn't change.
+  void setScrollPositionUnconditionally(const DoublePoint&,
+                                        ScrollType = ProgrammaticScroll);
 
-  void setScrollPosition(
-      const DoublePoint& position,
-      ScrollType scrollType,
-      ScrollBehavior scrollBehavior = ScrollBehaviorInstant) override {
-    scrollToOffset(toDoubleSize(position), ScrollOffsetClamped, scrollBehavior,
-                   scrollType);
-  }
-
-  // TODO(szager): Actually run these after all of layout is finished.  Currently, they
-  // run at the end of box()'es layout (or after all flexbox layout has finished) but while
-  // document layout is still happening.
+  // TODO(szager): Actually run these after all of layout is finished.
+  // Currently, they run at the end of box()'es layout (or after all flexbox
+  // layout has finished) but while document layout is still happening.
   void updateAfterLayout();
-  void clampScrollPositionsAfterLayout();
+  void clampScrollOffsetsAfterLayout();
 
   void updateAfterStyleChange(const ComputedStyle*);
   void updateAfterOverflowRecalc();
@@ -396,13 +374,13 @@ class CORE_EXPORT PaintLayerScrollableArea final
       OverlayScrollbarClipBehavior = IgnoreOverlayScrollbarSize) const;
 
   DoubleSize adjustedScrollOffset() const {
-    return DoubleSize(scrollXOffset(), scrollYOffset());
+    return toDoubleSize(DoublePoint(scrollOrigin()) + m_scrollOffset);
   }
 
   void positionOverflowControls();
 
-  // isPointInResizeControl() is used for testing if a pointer/touch position is in the resize control
-  // area.
+  // isPointInResizeControl() is used for testing if a pointer/touch position is
+  // in the resize control area.
   bool isPointInResizeControl(const IntPoint& absolutePoint,
                               ResizerHitTestType) const;
   bool hitTestOverflowControls(HitTestResult&, const IntPoint& localPoint);
@@ -410,16 +388,18 @@ class CORE_EXPORT PaintLayerScrollableArea final
   bool hitTestResizerInFragments(const PaintLayerFragments&,
                                  const HitTestLocation&) const;
 
-  // Returns the new position, after scrolling, of the given rect in absolute
+  // Returns the new offset, after scrolling, of the given rect in absolute
   // coordinates, clipped by the parent's client rect.
   LayoutRect scrollIntoView(const LayoutRect&,
                             const ScrollAlignment& alignX,
                             const ScrollAlignment& alignY,
                             ScrollType = ProgrammaticScroll) override;
 
-  // Returns true if scrollable area is in the FrameView's collection of scrollable areas. This can
-  // only happen if we're scrollable, visible to hit test, and do in fact overflow. This means that
-  // 'overflow: hidden' or 'pointer-events: none' layers never get added to the FrameView's collection.
+  // Returns true if scrollable area is in the FrameView's collection of
+  // scrollable areas. This can only happen if we're scrollable, visible to hit
+  // test, and do in fact overflow. This means that 'overflow: hidden' or
+  // 'pointer-events: none' layers never get added to the FrameView's
+  // collection.
   bool scrollsOverflow() const { return m_scrollsOverflow; }
 
   // Rectangle encompassing the scroll corner and resizer rect.
@@ -471,15 +451,13 @@ class CORE_EXPORT PaintLayerScrollableArea final
   }
   void resetRebuildScrollbarLayerFlags();
 
-  // Did DelayScrollPositionClampScope prevent us from running clampScrollPositionsAfterLayout()
-  // in updateAfterLayout()?
-  bool needsScrollPositionClamp() const { return m_needsScrollPositionClamp; }
-  void setNeedsScrollPositionClamp(bool val) {
-    m_needsScrollPositionClamp = val;
-  }
+  // Did DelayScrollOffsetClampScope prevent us from running
+  // clampScrollOffsetsAfterLayout() in updateAfterLayout()?
+  bool needsScrollOffsetClamp() const { return m_needsScrollOffsetClamp; }
+  void setNeedsScrollOffsetClamp(bool val) { m_needsScrollOffsetClamp = val; }
 
-  // Did PreventRelayoutScope prevent us from running re-layout due to adding/subtracting
-  // scrollbars in updateAfterLayout()?
+  // Did PreventRelayoutScope prevent us from running re-layout due to
+  // adding/subtracting scrollbars in updateAfterLayout()?
   bool needsRelayout() const { return m_needsRelayout; }
   void setNeedsRelayout(bool val) { m_needsRelayout = val; }
 
@@ -526,7 +504,7 @@ class CORE_EXPORT PaintLayerScrollableArea final
   void updateScrollOrigin();
   void updateScrollDimensions();
 
-  void setScrollOffset(const DoublePoint&, ScrollType) override;
+  void updateScrollOffset(const ScrollOffset&, ScrollType) override;
 
   int verticalScrollbarStart(int minX, int maxX) const;
   int horizontalScrollbarStart(int minX) const;
@@ -558,7 +536,8 @@ class CORE_EXPORT PaintLayerScrollableArea final
   PaintLayer* m_nextTopmostScrollChild;
   PaintLayer* m_topmostScrollChild;
 
-  // Keeps track of whether the layer is currently resizing, so events can cause resizing to start and stop.
+  // Keeps track of whether the layer is currently resizing, so events can cause
+  // resizing to start and stop.
   unsigned m_inResizeMode : 1;
   unsigned m_scrollsOverflow : 1;
 
@@ -574,7 +553,7 @@ class CORE_EXPORT PaintLayerScrollableArea final
   unsigned m_rebuildHorizontalScrollbarLayer : 1;
   unsigned m_rebuildVerticalScrollbarLayer : 1;
 
-  unsigned m_needsScrollPositionClamp : 1;
+  unsigned m_needsScrollOffsetClamp : 1;
   unsigned m_needsRelayout : 1;
   unsigned m_hadHorizontalScrollbarBeforeRelayout : 1;
   unsigned m_hadVerticalScrollbarBeforeRelayout : 1;
@@ -588,8 +567,8 @@ class CORE_EXPORT PaintLayerScrollableArea final
   // ScrollbarManager holds the Scrollbar instances.
   ScrollbarManager m_scrollbarManager;
 
-  // This is the (scroll) offset from scrollOrigin().
-  DoubleSize m_scrollOffset;
+  // This is the offset from the beginning of content flow.
+  ScrollOffset m_scrollOffset;
 
   IntPoint m_cachedOverlayScrollbarOffset;
 

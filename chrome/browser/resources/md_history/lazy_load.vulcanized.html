@@ -679,6 +679,7 @@ button.more-vert-button div {
 
 :host {
   margin: var(--card-sizing_-_margin); max-width: var(--card-sizing_-_max-width); min-width: var(--card-sizing_-_min-width); padding: var(--card-sizing_-_padding); width: var(--card-sizing_-_width);
+        -webkit-tap-highlight-color: transparent;
         display: block;
         padding-bottom: var(--card-padding-between);
 }
@@ -726,14 +727,14 @@ button.more-vert-button div {
         border-radius: 2px;
 }
 
-#item-container {
+.item-container {
   align-items: center;
         display: flex;
         margin: 0 20px;
         min-height: var(--item-height);
 }
 
-#window-separator {
+.window-separator {
   background-color: var(--card-border-color);
         height: 1px;
         margin: 5px auto;
@@ -742,7 +743,7 @@ button.more-vert-button div {
 
 </style>
     <div id="history-item-container">
-      <div class="card-title" id="card-heading" aria-expanded$="[[opened]]" aria-controls="collapse" on-tap="toggleTabCard">
+      <div class="card-title" id="card-heading" aria-expanded$="[[opened]]" aria-controls="collapse" on-click="toggleTabCard">
         <div id="title-left-content">
           <div id="device-name">
             [[device]]
@@ -755,7 +756,7 @@ button.more-vert-button div {
             <div></div>
             <div></div>
           </button>
-          <button is="paper-icon-button-light" class="icon-button" title$="[[getCollapseTitle_(opened)]]">
+          <button is="paper-icon-button-light" class="icon-button" id="collapse-button" title$="[[getCollapseTitle_(opened)]]">
             <iron-icon icon="[[getCollapseIcon_(opened)]]" id="dropdown-indicator">
             </iron-icon>
           </button>
@@ -765,13 +766,13 @@ button.more-vert-button div {
       <iron-collapse opened="{{opened}}" id="collapse">
         <div id="tab-item-list">
           <template is="dom-repeat" items="[[tabs]]" as="tab" id="tab-list">
-            <div id="item-container">
-              <div id="icon" class="website-icon"></div>
+            <div class="item-container">
+              <div class="website-icon"></div>
               <a href="[[tab.url]]" class="website-title" title="[[tab.title]]" on-click="openTab_" on-contextmenu="onLinkRightClick_">
                 <history-searched-label title="[[tab.title]]" search-term="[[searchTerm]]"></history-searched-label>
               </a>
             </div>
-            <div id="window-separator" hidden$="[[!isWindowSeparatorIndex_(index, separatorIndexes)]]">
+            <div class="window-separator" hidden$="[[!isWindowSeparatorIndex_(index, separatorIndexes)]]">
             </div>
           </template>
         </div>

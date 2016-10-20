@@ -19,6 +19,7 @@ import android.test.suitebuilder.annotation.SmallTest;
 
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.chrome.browser.IntentHandler;
+import org.chromium.chrome.browser.customtabs.CustomTabIntentDataProvider;
 import org.chromium.chrome.browser.externalnav.ExternalNavigationHandler.OverrideUrlLoadingResult;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabRedirectHandler;
@@ -456,13 +457,44 @@ public class ExternalNavigationHandlerTest extends NativeLibraryTestBase {
                 .withRedirectHandler(redirectHandler)
                 .expecting(OverrideUrlLoadingResult.NO_OVERRIDE, IGNORE);
 
-        // In Custom Tabs, if the first url is a redirect, allow it to intent out.
+        // In Custom Tabs, if the first url is a redirect, don't allow it to intent out.
         Intent fooIntent = Intent.parseUri("http://foo.com/", Intent.URI_INTENT_SCHEME);
         fooIntent.putExtra(CustomTabsIntent.EXTRA_SESSION, "");
         fooIntent.setPackage(context.getPackageName());
         redirectHandler.updateIntent(fooIntent);
         redirectHandler.updateNewUrlLoading(transTypeLinkFromIntent, false, false, 0, 0);
         redirectHandler.updateNewUrlLoading(transTypeLinkFromIntent, true, false, 0, 0);
+        checkUrl("http://youtube.com/")
+                .withPageTransition(transTypeLinkFromIntent)
+                .withIsRedirect(true)
+                .withRedirectHandler(redirectHandler)
+                .expecting(OverrideUrlLoadingResult.NO_OVERRIDE, IGNORE);
+
+        // In Custom Tabs, if the external handler extra is present, intent out if the first
+        // url is a redirect.
+        Intent extraIntent2 = Intent.parseUri("http://youtube.com/", Intent.URI_INTENT_SCHEME);
+        extraIntent2.putExtra(CustomTabsIntent.EXTRA_SESSION, "");
+        extraIntent2.putExtra(
+                CustomTabIntentDataProvider.EXTRA_SEND_TO_EXTERNAL_DEFAULT_HANDLER, true);
+        extraIntent2.setPackage(context.getPackageName());
+        redirectHandler.updateIntent(extraIntent2);
+        redirectHandler.updateNewUrlLoading(transTypeLinkFromIntent, false, false, 0, 0);
+        redirectHandler.updateNewUrlLoading(transTypeLinkFromIntent, true, false, 0, 0);
+        checkUrl("http://youtube.com/")
+                .withPageTransition(transTypeLinkFromIntent)
+                .withIsRedirect(true)
+                .withRedirectHandler(redirectHandler)
+                .expecting(OverrideUrlLoadingResult.OVERRIDE_WITH_EXTERNAL_INTENT,
+                        START_OTHER_ACTIVITY);
+
+        Intent extraIntent3 = Intent.parseUri("http://youtube.com/", Intent.URI_INTENT_SCHEME);
+        extraIntent3.putExtra(CustomTabsIntent.EXTRA_SESSION, "");
+        extraIntent3.putExtra(
+                CustomTabIntentDataProvider.EXTRA_SEND_TO_EXTERNAL_DEFAULT_HANDLER, true);
+        extraIntent3.setPackage(context.getPackageName());
+        redirectHandler.updateIntent(extraIntent3);
+        redirectHandler.updateNewUrlLoading(transTypeLinkFromIntent, false, false, 0, 0);
+        redirectHandler.updateNewUrlLoading(transTypeLinkFromIntent, false, false, 0, 0);
         checkUrl("http://youtube.com/")
                 .withPageTransition(transTypeLinkFromIntent)
                 .withIsRedirect(true)
@@ -751,6 +783,21 @@ public class ExternalNavigationHandlerTest extends NativeLibraryTestBase {
         checkUrl("http://youtube.com/")
                 .withIsBackgroundTabNavigation(true)
                 .expecting(OverrideUrlLoadingResult.NO_OVERRIDE, IGNORE);
+    }
+
+
+    @SmallTest
+    public void testPdfDownloadHappensInChrome() {
+        checkUrl(CALENDAR_URL + "/file.pdf")
+            .expecting(OverrideUrlLoadingResult.NO_OVERRIDE, IGNORE);
+    }
+
+    @SmallTest
+    public void testIntentToPdfFileOpensApp() {
+        checkUrl("intent://yoursite.com/mypdf.pdf#Intent;action=VIEW;category=BROWSABLE;"
+                + "scheme=http;package=com.adobe.reader;end;")
+                .expecting(OverrideUrlLoadingResult.OVERRIDE_WITH_EXTERNAL_INTENT,
+                        START_OTHER_ACTIVITY);
     }
 
     @SmallTest
@@ -1072,12 +1119,12 @@ public class ExternalNavigationHandlerTest extends NativeLibraryTestBase {
         }
 
         @Override
-        public void startActivity(Intent intent) {
+        public void startActivity(Intent intent, boolean proxy) {
             startActivityIntent = intent;
         }
 
         @Override
-        public boolean startActivityIfNeeded(Intent intent) {
+        public boolean startActivityIfNeeded(Intent intent, boolean proxy) {
             // For simplicity, don't distinguish between startActivityIfNeeded and startActivity
             // until a test requires this distinction.
             startActivityIntent = intent;
@@ -1086,7 +1133,7 @@ public class ExternalNavigationHandlerTest extends NativeLibraryTestBase {
 
         @Override
         public void startIncognitoIntent(Intent intent, String referrerUrl, String fallbackUrl,
-                Tab tab, boolean needsToCloseTab) {
+                Tab tab, boolean needsToCloseTab, boolean proxy) {
             startIncognitoIntentCalled = true;
         }
 
@@ -1129,11 +1176,17 @@ public class ExternalNavigationHandlerTest extends NativeLibraryTestBase {
 
         @Override
         public boolean isPdfDownload(String url) {
+            return url.endsWith(".pdf");
+        }
+
+        @Override
+        public boolean maybeLaunchInstantApp(Tab tab, String url, String referrerUrl,
+                boolean isIncomingRedirect) {
             return false;
         }
 
         @Override
-        public boolean maybeLaunchInstantApp(Tab tab, String url, String referrerUrl) {
+        public boolean isSerpReferrer(String referrerUrl, Tab tab) {
             return false;
         }
 

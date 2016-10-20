@@ -258,8 +258,7 @@ WebInspector.ConsoleView.prototype = {
     targetAdded: function(target)
     {
         this._viewport.invalidate();
-        var hasMultipleCotexts = WebInspector.targetManager.targets(WebInspector.Target.Capability.JS).length > 1;
-        this._showAllMessagesCheckbox.element.classList.toggle("hidden", !hasMultipleCotexts);
+        this._updateAllMessagesCheckbox();
     },
 
     /**
@@ -268,6 +267,13 @@ WebInspector.ConsoleView.prototype = {
      */
     targetRemoved: function(target)
     {
+        this._updateAllMessagesCheckbox();
+    },
+
+    _updateAllMessagesCheckbox: function()
+    {
+        var hasMultipleCotexts = WebInspector.targetManager.targets(WebInspector.Target.Capability.JS).length > 1;
+        this._showAllMessagesCheckbox.element.classList.toggle("hidden", !hasMultipleCotexts);
     },
 
     _registerWithMessageSink: function()
@@ -332,7 +338,6 @@ WebInspector.ConsoleView.prototype = {
     wasShown: function()
     {
         this._viewport.refresh();
-        this.focus();
     },
 
     focus: function()

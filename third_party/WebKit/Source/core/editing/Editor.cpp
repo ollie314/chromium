@@ -49,7 +49,6 @@
 #include "core/editing/commands/DeleteSelectionCommand.h"
 #include "core/editing/commands/IndentOutdentCommand.h"
 #include "core/editing/commands/InsertListCommand.h"
-#include "core/editing/commands/MoveSelectionCommand.h"
 #include "core/editing/commands/RemoveFormatCommand.h"
 #include "core/editing/commands/ReplaceSelectionCommand.h"
 #include "core/editing/commands/SimplifyMarkupCommand.h"
@@ -146,12 +145,6 @@ Editor::RevealSelectionScope::~RevealSelectionScope() {
   DCHECK(m_editor->m_preventRevealSelection);
   --m_editor->m_preventRevealSelection;
   if (!m_editor->m_preventRevealSelection) {
-    // TODO(xiaochengh): The use of updateStyleAndLayoutIgnorePendingStylesheets
-    // needs to be audited.  See http://crbug.com/590369 for more details.
-    m_editor->frame()
-        .document()
-        ->updateStyleAndLayoutIgnorePendingStylesheets();
-
     m_editor->frame().selection().revealSelection(
         ScrollAlignment::alignToEdgeIfNeeded, RevealExtent);
   }
@@ -164,8 +157,8 @@ VisibleSelection Editor::selectionForCommand(Event* event) {
   VisibleSelection selection = frame().selection().selection();
   if (!event)
     return selection;
-  // If the target is a text control, and the current selection is outside of its shadow tree,
-  // then use the saved selection for that text control.
+  // If the target is a text control, and the current selection is outside of
+  // its shadow tree, then use the saved selection for that text control.
   HTMLTextFormControlElement* textFormControlOfSelectionStart =
       enclosingTextFormControl(selection.start());
   HTMLTextFormControlElement* textFromControlOfTarget =
@@ -184,7 +177,8 @@ VisibleSelection Editor::selectionForCommand(Event* event) {
   return selection;
 }
 
-// Function considers Mac editing behavior a fallback when Page or Settings is not available.
+// Function considers Mac editing behavior a fallback when Page or Settings is
+// not available.
 EditingBehavior Editor::behavior() const {
   if (!frame().settings())
     return EditingBehavior(EditingMacBehavior);
@@ -242,10 +236,11 @@ bool Editor::canEditRichly() const {
   return frame().selection().isContentRichlyEditable();
 }
 
-// WinIE uses onbeforecut and onbeforepaste to enables the cut and paste menu items. They
-// also send onbeforecopy, apparently for symmetry, but it doesn't affect the menu items.
-// We need to use onbeforecopy as a real menu enabler because we allow elements that are not
-// normally selectable to implement copy/paste (like divs, or a document body).
+// WinIE uses onbeforecut and onbeforepaste to enables the cut and paste menu
+// items. They also send onbeforecopy, apparently for symmetry, but it doesn't
+// affect the menu items. We need to use onbeforecopy as a real menu enabler
+// because we allow elements that are not normally selectable to implement
+// copy/paste (like divs, or a document body).
 
 bool Editor::canDHTMLCut() {
   return !frame().selection().isInPasswordField() &&
@@ -357,8 +352,8 @@ bool Editor::deleteWithDirection(DeleteDirection direction,
   }
 
   // FIXME: We should to move this down into deleteKeyPressed.
-  // clear the "start new kill ring sequence" setting, because it was set to true
-  // when the selection was updated by deleting the range
+  // clear the "start new kill ring sequence" setting, because it was set to
+  // true when the selection was updated by deleting the range
   if (killRing)
     setStartNewKillRingSequence(false);
 
@@ -446,6 +441,13 @@ void Editor::pasteWithPasteboard(Pasteboard* pasteboard) {
     String text = pasteboard->plainText();
     if (!text.isEmpty()) {
       chosePlainText = true;
+
+      // TODO(xiaochengh): Use of updateStyleAndLayoutIgnorePendingStylesheets
+      // needs to be audited.  See http://crbug.com/590369 for more details.
+      // |selectedRange| requires clean layout for visible selection
+      // normalization.
+      frame().document()->updateStyleAndLayoutIgnorePendingStylesheets();
+
       fragment = createFragmentFromText(selectedRange(), text);
     }
   }
@@ -500,7 +502,8 @@ static void writeImageNodeToPasteboard(Pasteboard* pasteboard,
   if (!image.get())
     return;
 
-  // FIXME: This should probably be reconciled with HitTestResult::absoluteImageURL.
+  // FIXME: This should probably be reconciled with
+  // HitTestResult::absoluteImageURL.
   AtomicString urlString;
   if (isHTMLImageElement(*node) || isHTMLInputElement(*node))
     urlString = toHTMLElement(node)->getAttribute(srcAttr);
@@ -517,8 +520,8 @@ static void writeImageNodeToPasteboard(Pasteboard* pasteboard,
   pasteboard->writeImage(image.get(), url, title);
 }
 
-// Returns whether caller should continue with "the default processing", which is the same as
-// the event handler NOT setting the return value to false
+// Returns whether caller should continue with "the default processing", which
+// is the same as the event handler NOT setting the return value to false
 bool Editor::dispatchCPPEvent(const AtomicString& eventType,
                               DataTransferAccessPolicy policy,
                               PasteMode pasteMode) {
@@ -610,7 +613,8 @@ bool Editor::deleteSelectionAfterDraggingWithEvents(
                                 dragSource, InputEvent::InputType::DeleteByDrag,
                                 nullptr) == DispatchEventResult::NotCanceled;
 
-  // 'beforeinput' event handler may destroy frame, return false to cancel remaining actions;
+  // 'beforeinput' event handler may destroy frame, return false to cancel
+  // remaining actions;
   if (m_frame->document()->frame() != m_frame)
     return false;
 
@@ -642,7 +646,8 @@ bool Editor::replaceSelectionAfterDraggingWithEvents(
           dropTarget, InputEvent::InputType::InsertFromDrop, dataTransfer,
           nullptr) == DispatchEventResult::NotCanceled;
 
-  // 'beforeinput' event handler may destroy frame, return false to cancel remaining actions;
+  // 'beforeinput' event handler may destroy frame, return false to cancel
+  // remaining actions;
   if (m_frame->document()->frame() != m_frame)
     return false;
 
@@ -666,12 +671,6 @@ bool Editor::canDeleteRange(const EphemeralRange& range) const {
     return false;
 
   return hasEditableStyle(*startContainer) && hasEditableStyle(*endContainer);
-}
-
-void Editor::notifyComponentsOnChangedSelection() {
-  client().respondToChangedSelection(m_frame,
-                                     frame().selection().getSelectionType());
-  setStartNewKillRingSequence(true);
 }
 
 void Editor::respondToChangedContents(const VisibleSelection& endingSelection) {
@@ -797,7 +796,6 @@ static void dispatchEditableContentChangedEvents(Element* startRoot,
 void Editor::appliedEditing(CompositeEditCommand* cmd) {
   DCHECK(!cmd->isCommandGroupWrapper());
   EventQueueScope scope;
-  frame().document()->updateStyleAndLayout();
 
   // Request spell checking before any further DOM change.
   spellChecker().markMisspellingsAfterApplyingCommand(*cmd);
@@ -814,7 +812,8 @@ void Editor::appliedEditing(CompositeEditCommand* cmd) {
       cmd->textDataForInputEvent(), isComposingFromCommand(cmd));
   VisibleSelection newSelection(cmd->endingSelection());
 
-  // Don't clear the typing style with this selection change. We do those things elsewhere if necessary.
+  // Don't clear the typing style with this selection change. We do those things
+  // elsewhere if necessary.
   changeSelectionAfterCommand(newSelection, 0);
 
   if (!cmd->preservesTypingStyle())
@@ -840,9 +839,19 @@ void Editor::appliedEditing(CompositeEditCommand* cmd) {
   respondToChangedContents(newSelection);
 }
 
+static VisibleSelection correctedVisibleSelection(
+    const VisibleSelection& passedSelection) {
+  if (!passedSelection.base().isConnected() ||
+      !passedSelection.extent().isConnected())
+    return VisibleSelection();
+  DCHECK(!passedSelection.base().document()->needsLayoutTreeUpdate());
+  VisibleSelection correctedSelection = passedSelection;
+  correctedSelection.updateIfNeeded();
+  return correctedSelection;
+}
+
 void Editor::unappliedEditing(EditCommandComposition* cmd) {
   EventQueueScope scope;
-  frame().document()->updateStyleAndLayout();
 
   dispatchEditableContentChangedEvents(cmd->startingRootEditableElement(),
                                        cmd->endingRootEditableElement());
@@ -851,8 +860,14 @@ void Editor::unappliedEditing(EditCommandComposition* cmd) {
       InputEvent::InputType::Undo, nullAtom,
       InputEvent::EventIsComposing::NotComposing);
 
-  VisibleSelection newSelection(cmd->startingSelection());
-  newSelection.validatePositionsIfNeeded();
+  // TODO(editing-dev): The use of updateStyleAndLayoutIgnorePendingStylesheets
+  // needs to be audited.  See http://crbug.com/590369 for more details.
+  // In the long term, we should stop editing commands from storing
+  // VisibleSelections as starting and ending selections.
+  frame().document()->updateStyleAndLayoutIgnorePendingStylesheets();
+
+  VisibleSelection newSelection =
+      correctedVisibleSelection(cmd->startingSelection());
   if (newSelection.start().document() == frame().document() &&
       newSelection.end().document() == frame().document())
     changeSelectionAfterCommand(
@@ -866,7 +881,6 @@ void Editor::unappliedEditing(EditCommandComposition* cmd) {
 
 void Editor::reappliedEditing(EditCommandComposition* cmd) {
   EventQueueScope scope;
-  frame().document()->updateStyleAndLayout();
 
   dispatchEditableContentChangedEvents(cmd->startingRootEditableElement(),
                                        cmd->endingRootEditableElement());
@@ -899,9 +913,9 @@ Editor::Editor(LocalFrame& frame)
     : m_frame(&frame),
       m_undoStack(UndoStack::create()),
       m_preventRevealSelection(0),
-      m_shouldStartNewKillRingSequence(false)
-      // This is off by default, since most editors want this behavior (this matches IE but not FF).
-      ,
+      m_shouldStartNewKillRingSequence(false),
+      // This is off by default, since most editors want this behavior (this
+      // matches IE but not FF).
       m_shouldStyleWithCSS(false),
       m_killRing(wrapUnique(new KillRing)),
       m_areMarkedTextMatchesHighlighted(false),
@@ -947,12 +961,6 @@ bool Editor::insertTextWithoutSendingTextEvent(const String& text,
     if (Page* page = editedFrame->page()) {
       LocalFrame* focusedOrMainFrame =
           toLocalFrame(page->focusController().focusedOrMainFrame());
-
-      // TODO(xiaochengh): The use of updateStyleAndLayoutIgnorePendingStylesheets
-      // needs to be audited.  See http://crbug.com/590369 for more details.
-      focusedOrMainFrame->document()
-          ->updateStyleAndLayoutIgnorePendingStylesheets();
-
       focusedOrMainFrame->selection().revealSelection(
           ScrollAlignment::alignCenterIfNeeded);
     }
@@ -1002,6 +1010,13 @@ void Editor::cut(EditorCommandSource source) {
     return;  // DHTML did the whole operation
   if (!canCut())
     return;
+
+  // TODO(xiaochengh): The use of updateStyleAndLayoutIgnorePendingStylesheets
+  // needs to be audited.  See http://crbug.com/590369 for more details.
+  // |tryDHTMLCut| dispatches cut event, which may make layout dirty, but we
+  // need clean layout to obtain the selected content.
+  frame().document()->updateStyleAndLayoutIgnorePendingStylesheets();
+
   // TODO(yosin) We should use early return style here.
   if (canDeleteRange(selectedRange())) {
     spellChecker().updateMarkersForWordsAffectedByEditing(true);
@@ -1035,6 +1050,13 @@ void Editor::copy() {
     return;  // DHTML did the whole operation
   if (!canCopy())
     return;
+
+  // TODO(xiaochengh): The use of updateStyleAndLayoutIgnorePendingStylesheets
+  // needs to be audited.  See http://crbug.com/590369 for more details.
+  // |tryDHTMLCopy| dispatches copy event, which may make layout dirty, but
+  // we need clean layout to obtain the selected content.
+  frame().document()->updateStyleAndLayoutIgnorePendingStylesheets();
+
   if (enclosingTextFormControl(frame().selection().start())) {
     Pasteboard::generalPasteboard()->writePlainText(
         frame().selectedTextForClipboard(),
@@ -1098,6 +1120,12 @@ void Editor::pasteAsPlainText(EditorCommandSource source) {
 void Editor::performDelete() {
   if (!canDelete())
     return;
+
+  // TODO(xiaochengh): The use of updateStyleAndLayoutIgnorePendingStylesheets
+  // needs to be audited.  See http://crbug.com/590369 for more details.
+  // |selectedRange| requires clean layout for visible selection normalization.
+  frame().document()->updateStyleAndLayoutIgnorePendingStylesheets();
+
   addToKillRing(selectedRange());
   // TODO(chongz): |Editor::performDelete()| has no direction.
   // https://github.com/w3c/editing/issues/130
@@ -1105,8 +1133,8 @@ void Editor::performDelete() {
       canSmartCopyOrDelete() ? DeleteMode::Smart : DeleteMode::Simple,
       InputEvent::InputType::DeleteContentBackward);
 
-  // clear the "start new kill ring sequence" setting, because it was set to true
-  // when the selection was updated by deleting the range
+  // clear the "start new kill ring sequence" setting, because it was set to
+  // true when the selection was updated by deleting the range
   setStartNewKillRingSequence(false);
 }
 
@@ -1209,7 +1237,6 @@ void Editor::setBaseWritingDirection(WritingDirection direction) {
     focusedElement->setAttribute(
         dirAttr, direction == LeftToRightWritingDirection ? "ltr" : "rtl");
     focusedElement->dispatchInputEvent();
-    frame().document()->updateStyleAndLayoutTree();
     return;
   }
 
@@ -1230,11 +1257,6 @@ void Editor::revealSelectionAfterEditingOperation(
     RevealExtentOption revealExtentOption) {
   if (m_preventRevealSelection)
     return;
-
-  // TODO(xiaochengh): The use of updateStyleAndLayoutIgnorePendingStylesheets
-  // needs to be audited.  See http://crbug.com/590369 for more details.
-  frame().document()->updateStyleAndLayoutIgnorePendingStylesheets();
-
   frame().selection().revealSelection(alignment, revealExtentOption);
 }
 
@@ -1292,18 +1314,22 @@ void Editor::changeSelectionAfterCommand(
   if (newSelection.start().isOrphan() || newSelection.end().isOrphan())
     return;
 
-  // See <rdar://problem/5729315> Some shouldChangeSelectedDOMRange contain Ranges for selections that are no longer valid
+  // See <rdar://problem/5729315> Some shouldChangeSelectedDOMRange contain
+  // Ranges for selections that are no longer valid
   bool selectionDidNotChangeDOMPosition =
       newSelection == frame().selection().selection();
   frame().selection().setSelection(newSelection, options);
 
-  // Some editing operations change the selection visually without affecting its position within the DOM.
-  // For example when you press return in the following (the caret is marked by ^):
+  // Some editing operations change the selection visually without affecting its
+  // position within the DOM. For example when you press return in the following
+  // (the caret is marked by ^):
   // <div contentEditable="true"><div>^Hello</div></div>
-  // WebCore inserts <div><br></div> *before* the current block, which correctly moves the paragraph down but which doesn't
-  // change the caret's DOM position (["hello", 0]). In these situations the above FrameSelection::setSelection call
-  // does not call EditorClient::respondToChangedSelection(), which, on the Mac, sends selection change notifications and
-  // starts a new kill ring sequence, but we want to do these things (matches AppKit).
+  // WebCore inserts <div><br></div> *before* the current block, which correctly
+  // moves the paragraph down but which doesn't change the caret's DOM position
+  // (["hello", 0]). In these situations the above FrameSelection::setSelection
+  // call does not call EditorClient::respondToChangedSelection(), which, on the
+  // Mac, sends selection change notifications and starts a new kill ring
+  // sequence, but we want to do these things (matches AppKit).
   if (selectionDidNotChangeDOMPosition)
     client().respondToChangedSelection(m_frame,
                                        frame().selection().getSelectionType());
@@ -1341,7 +1367,8 @@ IntRect Editor::firstRectForRange(const EphemeralRange& range) const {
                    std::max(startCaretRect.height(), endCaretRect.height()));
   }
 
-  // start and end aren't on the same line, so go from start to the end of its line
+  // start and end aren't on the same line, so go from start to the end of its
+  // line
   return IntRect(startCaretRect.x(), startCaretRect.y(),
                  (startCaretRect.width() + extraWidthToEndOfLine).toInt(),
                  startCaretRect.height());
@@ -1548,7 +1575,9 @@ void Editor::respondToChangedSelection(
     FrameSelection::SetSelectionOptions options) {
   spellChecker().respondToChangedSelection(oldSelection, options);
   frame().inputMethodController().cancelCompositionIfSelectionIsInvalid();
-  notifyComponentsOnChangedSelection();
+  client().respondToChangedSelection(&frame(),
+                                     frame().selection().getSelectionType());
+  setStartNewKillRingSequence(true);
 }
 
 SpellChecker& Editor::spellChecker() const {

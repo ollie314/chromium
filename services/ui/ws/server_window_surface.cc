@@ -19,21 +19,18 @@ namespace ws {
 
 ServerWindowSurface::ServerWindowSurface(
     ServerWindowSurfaceManager* manager,
+    const cc::FrameSinkId& frame_sink_id,
     mojo::InterfaceRequest<Surface> request,
     mojom::SurfaceClientPtr client)
-    : frame_sink_id_(manager->window()
-                         ->delegate()
-                         ->GetDisplayCompositor()
-                         ->GenerateNextClientId(),
-                     0),
+    : frame_sink_id_(frame_sink_id),
       manager_(manager),
-      surface_id_allocator_(frame_sink_id_),
       surface_factory_(frame_sink_id_, manager_->GetSurfaceManager(), this),
       client_(std::move(client)),
       binding_(this, std::move(request)) {
   cc::SurfaceManager* surface_manager = manager_->GetSurfaceManager();
   surface_manager->RegisterFrameSinkId(frame_sink_id_);
   surface_manager->RegisterSurfaceFactoryClient(frame_sink_id_, this);
+  surface_sequence_generator_.set_frame_sink_id(frame_sink_id_);
 }
 
 ServerWindowSurface::~ServerWindowSurface() {
@@ -53,33 +50,27 @@ void ServerWindowSurface::SubmitCompositorFrame(
       frame.delegated_frame_data->render_pass_list[0]->output_rect.size();
   // If the size of the CompostiorFrame has changed then destroy the existing
   // Surface and create a new one of the appropriate size.
-  if (surface_id_.is_null() || frame_size != last_submitted_frame_size_) {
-    // Rendering of the topmost frame happens in two phases. First the frame
-    // is generated and submitted, and a later date it is actually drawn.
-    // During the time the frame is generated and drawn we can't destroy the
-    // surface, otherwise when drawn you get an empty surface. To deal with
-    // this we schedule destruction via the delegate. The delegate will call
-    // us back when we're not waiting on a frame to be drawn (which may be
-    // synchronously).
-    if (!surface_id_.is_null()) {
-      surfaces_scheduled_for_destruction_.insert(surface_id_);
-      window()->delegate()->ScheduleSurfaceDestruction(window());
-    }
-    surface_id_ = surface_id_allocator_.GenerateId();
-    surface_factory_.Create(surface_id_);
+  if (local_frame_id_.is_null() || frame_size != last_submitted_frame_size_) {
+    if (!local_frame_id_.is_null())
+      surface_factory_.Destroy(local_frame_id_);
+    local_frame_id_ = surface_id_allocator_.GenerateId();
+    surface_factory_.Create(local_frame_id_);
   }
   may_contain_video_ = frame.metadata.may_contain_video;
-  surface_factory_.SubmitCompositorFrame(surface_id_, std::move(frame),
+  surface_factory_.SubmitCompositorFrame(local_frame_id_, std::move(frame),
                                          callback);
   last_submitted_frame_size_ = frame_size;
   window()->delegate()->OnScheduleWindowPaint(window());
 }
 
-void ServerWindowSurface::DestroySurfacesScheduledForDestruction() {
-  std::set<cc::SurfaceId> surfaces;
-  surfaces.swap(surfaces_scheduled_for_destruction_);
-  for (auto& id : surfaces)
-    surface_factory_.Destroy(id);
+cc::SurfaceId ServerWindowSurface::GetSurfaceId() const {
+  if (local_frame_id_.is_null())
+    return cc::SurfaceId();
+  return cc::SurfaceId(frame_sink_id_, local_frame_id_);
+}
+
+cc::SurfaceSequence ServerWindowSurface::CreateSurfaceSequence() {
+  return surface_sequence_generator_.CreateSurfaceSequence();
 }
 
 ServerWindow* ServerWindowSurface::window() {

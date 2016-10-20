@@ -85,13 +85,12 @@
 #include "core/svg/graphics/SVGImage.h"
 #include "core/xml/parser/XMLDocumentParser.h"
 #include "platform/PluginScriptForbiddenScope.h"
-#include "platform/RuntimeEnabledFeatures.h"
 #include "platform/ScriptForbiddenScope.h"
-#include "platform/TraceEvent.h"
 #include "platform/UserGestureIndicator.h"
 #include "platform/network/HTTPParsers.h"
 #include "platform/network/ResourceRequest.h"
 #include "platform/scroll/ScrollAnimatorBase.h"
+#include "platform/tracing/TraceEvent.h"
 #include "platform/weborigin/SecurityOrigin.h"
 #include "platform/weborigin/SecurityPolicy.h"
 #include "platform/weborigin/Suborigin.h"
@@ -275,9 +274,9 @@ void FrameLoader::saveScrollState() {
 
   if (ScrollableArea* layoutScrollableArea =
           m_frame->view()->layoutViewportScrollableArea())
-    m_currentItem->setScrollPoint(layoutScrollableArea->scrollPosition());
-  m_currentItem->setVisualViewportScrollPoint(
-      m_frame->host()->visualViewport().visibleRect().location());
+    m_currentItem->setScrollOffset(layoutScrollableArea->scrollOffset());
+  m_currentItem->setVisualViewportScrollOffset(toScrollOffset(
+      m_frame->host()->visualViewport().visibleRect().location()));
 
   if (m_frame->isMainFrame())
     m_currentItem->setPageScaleFactor(m_frame->page()->pageScaleFactor());
@@ -425,9 +424,9 @@ void FrameLoader::setHistoryItemStateForCommit(
        !equalIgnoringFragmentIdentifier(oldItem->url(), m_currentItem->url())))
     return;
   m_currentItem->setDocumentSequenceNumber(oldItem->documentSequenceNumber());
-  m_currentItem->setScrollPoint(oldItem->scrollPoint());
-  m_currentItem->setVisualViewportScrollPoint(
-      oldItem->visualViewportScrollPoint());
+  m_currentItem->setScrollOffset(oldItem->scrollOffset());
+  m_currentItem->setVisualViewportScrollOffset(
+      oldItem->visualViewportScrollOffset());
   m_currentItem->setPageScaleFactor(oldItem->pageScaleFactor());
   m_currentItem->setScrollRestorationType(oldItem->scrollRestorationType());
 
@@ -473,9 +472,10 @@ void FrameLoader::receivedFirstData() {
                                HistoryNavigationType::DifferentDocument);
 
   if (!m_stateMachine.committedMultipleRealLoads() &&
-      m_loadType == FrameLoadTypeStandard)
+      m_loadType == FrameLoadTypeStandard) {
     m_stateMachine.advanceTo(
         FrameLoaderStateMachine::CommittedMultipleRealLoads);
+  }
 
   client()->dispatchDidCommitLoad(m_currentItem.get(), historyCommitType);
 
@@ -488,9 +488,10 @@ void FrameLoader::receivedFirstData() {
 
   // didObserveLoadingBehavior() must be called after dispatchDidCommitLoad() is
   // called for the metrics tracking logic to handle it properly.
-  if (client()->isControlledByServiceWorker(*m_documentLoader))
+  if (client()->isControlledByServiceWorker(*m_documentLoader)) {
     client()->didObserveLoadingBehavior(
         WebLoadingBehaviorServiceWorkerControlled);
+  }
 
   // Links with media values need more information (like viewport information).
   // This happens after the first chunk is parsed in HTMLDocumentParser.
@@ -519,9 +520,10 @@ void FrameLoader::didInstallNewDocument(bool dispatchWindowObjectAvailable) {
       m_documentLoader ? m_documentLoader->releaseContentSecurityPolicy()
                        : ContentSecurityPolicy::create());
 
-  if (m_provisionalItem && isBackForwardLoadType(m_loadType))
+  if (m_provisionalItem && isBackForwardLoadType(m_loadType)) {
     m_frame->document()->setStateForNewFormElements(
         m_provisionalItem->documentState());
+  }
 }
 
 void FrameLoader::didBeginDocument() {
@@ -538,10 +540,11 @@ void FrameLoader::didBeginDocument() {
       if (parseSuboriginHeader(suboriginHeader, &suborigin, messages))
         m_frame->document()->enforceSuborigin(suborigin);
 
-      for (auto& message : messages)
+      for (auto& message : messages) {
         m_frame->document()->addConsoleMessage(
             ConsoleMessage::create(SecurityMessageSource, ErrorMessageLevel,
                                    "Error with Suborigin header: " + message));
+      }
     }
     m_frame->document()->clientHintsPreferences().updateFrom(
         m_documentLoader->clientHintsPreferences());
@@ -569,9 +572,10 @@ void FrameLoader::didBeginDocument() {
           commaIndex);  // kNotFound == -1 == don't truncate
       headerContentLanguage =
           headerContentLanguage.stripWhiteSpace(isHTMLSpace<UChar>);
-      if (!headerContentLanguage.isEmpty())
+      if (!headerContentLanguage.isEmpty()) {
         m_frame->document()->setContentLanguage(
             AtomicString(headerContentLanguage));
+      }
     }
 
     OriginTrialContext::addTokensFromHeader(
@@ -579,8 +583,7 @@ void FrameLoader::didBeginDocument() {
         m_documentLoader->response().httpHeaderField(HTTPNames::Origin_Trial));
   }
 
-  if (m_documentLoader &&
-      RuntimeEnabledFeatures::referrerPolicyHeaderEnabled()) {
+  if (m_documentLoader) {
     String referrerPolicyHeader = m_documentLoader->response().httpHeaderField(
         HTTPNames::Referrer_Policy);
     if (!referrerPolicyHeader.isNull()) {
@@ -602,9 +605,10 @@ void FrameLoader::finishedParsing() {
     client()->dispatchDidFinishDocumentLoad();
   }
 
-  if (client())
+  if (client()) {
     client()->runScriptsAtDocumentReady(
         m_documentLoader ? m_documentLoader->isCommittedButEmpty() : true);
+  }
 
   checkCompleted();
 
@@ -947,7 +951,7 @@ bool FrameLoader::prepareRequestForThisFrame(FrameLoadRequest& request) {
     return true;
 
   KURL url = request.resourceRequest().url();
-  if (m_frame->script().executeScriptIfJavaScriptURL(url))
+  if (m_frame->script().executeScriptIfJavaScriptURL(url, nullptr))
     return false;
 
   if (!request.originDocument()->getSecurityOrigin()->canDisplay(url)) {
@@ -976,9 +980,10 @@ static NavigationType determineNavigationType(FrameLoadType frameLoadType,
                                               bool haveEvent) {
   bool isReload = isReloadLoadType(frameLoadType);
   bool isBackForward = isBackForwardLoadType(frameLoadType);
-  if (isFormSubmission)
+  if (isFormSubmission) {
     return (isReload || isBackForward) ? NavigationTypeFormResubmitted
                                        : NavigationTypeFormSubmitted;
+  }
   if (haveEvent)
     return NavigationTypeLinkClicked;
   if (isReload)
@@ -1190,9 +1195,11 @@ void FrameLoader::stopAllLoaders() {
   // It's possible that the above actions won't have stopped loading if load
   // completion had been blocked on parsing or if we were in the middle of
   // committing an empty document. In that case, emulate a failed navigation.
-  if (!m_provisionalDocumentLoader && m_documentLoader && m_frame->isLoading())
+  if (!m_provisionalDocumentLoader && m_documentLoader &&
+      m_frame->isLoading()) {
     loadFailed(m_documentLoader.get(),
                ResourceError::cancelledError(m_documentLoader->url()));
+  }
 
   m_inStopAllLoaders = false;
   takeObjectSnapshot();
@@ -1339,8 +1346,8 @@ void FrameLoader::restoreScrollPositionAndViewState() {
   //    completes because that may be because the page will never reach its
   //    previous height
   bool canRestoreWithoutClamping =
-      view->layoutViewportScrollableArea()->clampScrollPosition(
-          m_currentItem->scrollPoint()) == m_currentItem->scrollPoint();
+      view->layoutViewportScrollableArea()->clampScrollOffset(
+          m_currentItem->scrollOffset()) == m_currentItem->scrollOffset();
   bool canRestoreWithoutAnnoyingUser =
       !documentLoader()->initialScrollState().wasScrolledByUser &&
       (canRestoreWithoutClamping || !m_frame->isLoading() ||
@@ -1348,29 +1355,34 @@ void FrameLoader::restoreScrollPositionAndViewState() {
   if (!canRestoreWithoutAnnoyingUser)
     return;
 
-  if (shouldRestoreScroll)
-    view->layoutViewportScrollableArea()->setScrollPosition(
-        m_currentItem->scrollPoint(), ProgrammaticScroll);
+  if (shouldRestoreScroll) {
+    view->layoutViewportScrollableArea()->setScrollOffset(
+        m_currentItem->scrollOffset(), ProgrammaticScroll);
+  }
 
   // For main frame restore scale and visual viewport position
   if (m_frame->isMainFrame()) {
-    FloatPoint visualViewportOffset(m_currentItem->visualViewportScrollPoint());
+    ScrollOffset visualViewportOffset(
+        m_currentItem->visualViewportScrollOffset());
 
-    // If the visual viewport's offset is (-1, -1) it means the history item is
-    // an old version of HistoryItem so distribute the scroll between the main
-    // frame and the visual viewport as best as we can.
-    if (visualViewportOffset.x() == -1 && visualViewportOffset.y() == -1)
+    // If the visual viewport's offset is (-1, -1) it means the history item
+    // is an old version of HistoryItem so distribute the scroll between
+    // the main frame and the visual viewport as best as we can.
+    if (visualViewportOffset.width() == -1 &&
+        visualViewportOffset.height() == -1) {
       visualViewportOffset =
-          FloatPoint(m_currentItem->scrollPoint() - view->scrollPosition());
+          m_currentItem->scrollOffset() - view->scrollOffset();
+    }
 
     VisualViewport& visualViewport = m_frame->host()->visualViewport();
-    if (shouldRestoreScale && shouldRestoreScroll)
+    if (shouldRestoreScale && shouldRestoreScroll) {
       visualViewport.setScaleAndLocation(m_currentItem->pageScaleFactor(),
-                                         visualViewportOffset);
-    else if (shouldRestoreScale)
+                                         FloatPoint(visualViewportOffset));
+    } else if (shouldRestoreScale) {
       visualViewport.setScale(m_currentItem->pageScaleFactor());
-    else if (shouldRestoreScroll)
-      visualViewport.setLocation(visualViewportOffset);
+    } else if (shouldRestoreScroll) {
+      visualViewport.setLocation(FloatPoint(visualViewportOffset));
+    }
 
     if (ScrollingCoordinator* scrollingCoordinator =
             m_frame->page()->scrollingCoordinator())
@@ -1459,10 +1471,11 @@ void FrameLoader::processFragment(const KURL& url,
           : 0;
 
   // FIXME: Handle RemoteFrames
-  if (boundaryFrame && boundaryFrame->isLocalFrame())
+  if (boundaryFrame && boundaryFrame->isLocalFrame()) {
     toLocalFrame(boundaryFrame)
         ->view()
         ->setSafeToPropagateScrollToParent(false);
+  }
 
   // If scroll position is restored from history fragment then we should not
   // override it unless this is a same document reload.
@@ -1606,7 +1619,11 @@ void FrameLoader::startLoad(FrameLoadRequest& frameLoadRequest,
       m_frame->isMainFrame() ? WebURLRequest::FrameTypeTopLevel
                              : WebURLRequest::FrameTypeNested);
   ResourceRequest& request = frameLoadRequest.resourceRequest();
-  upgradeInsecureRequest(request, nullptr);
+
+  // Record the latest requiredCSP value that will be used when sending this
+  // request.
+  recordLatestRequiredCSP();
+  modifyRequestForCSP(request, nullptr);
   if (!shouldContinueForNavigationPolicy(
           request, frameLoadRequest.substituteData(), nullptr,
           frameLoadRequest.shouldCheckMainWorldContentSecurityPolicy(),
@@ -1818,8 +1835,15 @@ FrameLoader::insecureNavigationsToUpgrade() const {
   return toLocalFrame(parentFrame)->document()->insecureNavigationsToUpgrade();
 }
 
-void FrameLoader::upgradeInsecureRequest(ResourceRequest& resourceRequest,
-                                         Document* document) const {
+void FrameLoader::modifyRequestForCSP(ResourceRequest& resourceRequest,
+                                      Document* document) const {
+  if (RuntimeEnabledFeatures::embedderCSPEnforcementEnabled() &&
+      !requiredCSP().isEmpty()) {
+    // TODO(amalika): Strengthen this DCHECK that requiredCSP has proper format
+    DCHECK(requiredCSP().getString().containsOnlyASCII());
+    resourceRequest.setHTTPHeaderField(HTTPNames::Embedding_CSP, requiredCSP());
+  }
+
   // Tack an 'Upgrade-Insecure-Requests' header to outgoing navigational
   // requests, as described in
   // https://w3c.github.io/webappsec/specs/upgrade/#feature-detect
@@ -1832,6 +1856,11 @@ void FrameLoader::upgradeInsecureRequest(ResourceRequest& resourceRequest,
     resourceRequest.addHTTPHeaderField("Upgrade-Insecure-Requests", "1");
   }
 
+  upgradeInsecureRequest(resourceRequest, document);
+}
+
+void FrameLoader::upgradeInsecureRequest(ResourceRequest& resourceRequest,
+                                         Document* document) const {
   KURL url = resourceRequest.url();
 
   // If we don't yet have an |m_document| (because we're loading an iframe, for
@@ -1862,6 +1891,10 @@ void FrameLoader::upgradeInsecureRequest(ResourceRequest& resourceRequest,
       resourceRequest.setURL(url);
     }
   }
+}
+
+void FrameLoader::recordLatestRequiredCSP() {
+  m_requiredCSP = m_frame->owner() ? m_frame->owner()->csp() : nullAtom;
 }
 
 std::unique_ptr<TracedValue> FrameLoader::toTracedValue() const {

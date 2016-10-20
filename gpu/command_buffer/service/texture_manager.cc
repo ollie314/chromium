@@ -27,6 +27,7 @@
 #include "gpu/command_buffer/service/gles2_cmd_decoder.h"
 #include "gpu/command_buffer/service/mailbox_manager.h"
 #include "gpu/command_buffer/service/memory_tracking.h"
+#include "gpu/command_buffer/service/progress_reporter.h"
 #include "ui/gl/gl_context.h"
 #include "ui/gl/gl_implementation.h"
 #include "ui/gl/gl_state_restorer.h"
@@ -230,6 +231,8 @@ class FormatTypeValidator {
         {GL_DEPTH24_STENCIL8, GL_DEPTH_STENCIL, GL_UNSIGNED_INT_24_8},
         {GL_DEPTH32F_STENCIL8, GL_DEPTH_STENCIL,
          GL_FLOAT_32_UNSIGNED_INT_24_8_REV},
+        // Exposed by GL_APPLE_texture_format_BGRA8888
+        {GL_BGRA8_EXT, GL_BGRA_EXT, GL_UNSIGNED_BYTE},
     };
 
     for (size_t ii = 0; ii < arraysize(kSupportedFormatTypes); ++ii) {
@@ -307,6 +310,24 @@ GLenum GetSwizzleForChannel(GLenum channel,
   }
 }
 
+bool SizedFormatAvailable(const FeatureInfo* feature_info,
+                          bool immutable,
+                          GLenum internal_format) {
+  if (immutable)
+    return true;
+
+  // TODO(dshwang): check if it's possible to remove
+  // CHROMIUM_color_buffer_float_rgb. crbug.com/329605
+  if ((feature_info->feature_flags().chromium_color_buffer_float_rgb &&
+       internal_format == GL_RGB32F) ||
+      (feature_info->feature_flags().chromium_color_buffer_float_rgba &&
+       internal_format == GL_RGBA32F)) {
+    return true;
+  }
+
+  return feature_info->IsES3Enabled();
+}
+
 // A 32-bit and 64-bit compatible way of converting a pointer to a GLuint.
 GLuint ToGLuint(const void* ptr) {
   return static_cast<GLuint>(reinterpret_cast<size_t>(ptr));
@@ -361,9 +382,16 @@ TextureManager::~TextureManager() {
 
 void TextureManager::Destroy(bool have_context) {
   have_context_ = have_context;
-  textures_.clear();
+
+  while (!textures_.empty()) {
+    textures_.erase(textures_.begin());
+    if (progress_reporter_)
+      progress_reporter_->ReportProgress();
+  }
   for (int ii = 0; ii < kNumDefaultTextures; ++ii) {
     default_textures_[ii] = NULL;
+    if (progress_reporter_)
+      progress_reporter_->ReportProgress();
   }
 
   if (have_context) {
@@ -593,9 +621,8 @@ bool Texture::CanRenderWithSampler(const FeatureInfo* feature_info,
       // TODO(zmo): The assumption that compressed textures are all filterable
       // may not be true in the future.
     } else {
-      if (!Texture::TextureFilterable(feature_info,
-                                      first_level.internal_format,
-                                      first_level.type)) {
+      if (!Texture::TextureFilterable(feature_info, first_level.internal_format,
+                                      first_level.type, immutable_)) {
         return false;
       }
     }
@@ -721,9 +748,10 @@ bool Texture::CanGenerateMipmaps(const FeatureInfo* feature_info) const {
     return false;
   }
 
-  if (!Texture::ColorRenderable(feature_info, base.internal_format) ||
-      !Texture::TextureFilterable(
-          feature_info, base.internal_format, base.type)) {
+  if (!Texture::ColorRenderable(feature_info, base.internal_format,
+                                immutable_) ||
+      !Texture::TextureFilterable(feature_info, base.internal_format, base.type,
+                                  immutable_)) {
     return false;
   }
 
@@ -800,19 +828,24 @@ bool Texture::TextureMipComplete(const Texture::LevelInfo& base_level_face,
 
 // static
 bool Texture::ColorRenderable(const FeatureInfo* feature_info,
-                              GLenum internal_format) {
+                              GLenum internal_format,
+                              bool immutable) {
   if (feature_info->validators()->texture_unsized_internal_format.IsValid(
       internal_format)) {
     return true;
   }
-  return feature_info->validators()->
-      texture_sized_color_renderable_internal_format.IsValid(internal_format);
+
+  return SizedFormatAvailable(feature_info, immutable, internal_format) &&
+         feature_info->validators()
+             ->texture_sized_color_renderable_internal_format.IsValid(
+                 internal_format);
 }
 
 // static
 bool Texture::TextureFilterable(const FeatureInfo* feature_info,
                                 GLenum internal_format,
-                                GLenum type) {
+                                GLenum type,
+                                bool immutable) {
   if (feature_info->validators()->texture_unsized_internal_format.IsValid(
       internal_format)) {
     switch (type) {
@@ -825,8 +858,10 @@ bool Texture::TextureFilterable(const FeatureInfo* feature_info,
         return true;
     }
   }
-  return feature_info->validators()->
-      texture_sized_texture_filterable_internal_format.IsValid(internal_format);
+  return SizedFormatAvailable(feature_info, immutable, internal_format) &&
+         feature_info->validators()
+             ->texture_sized_texture_filterable_internal_format.IsValid(
+                 internal_format);
 }
 
 void Texture::SetLevelClearedRect(GLenum target,
@@ -1107,12 +1142,15 @@ bool Texture::ValidForTexture(
     int32_t max_x;
     int32_t max_y;
     int32_t max_z;
-    return SafeAddInt32(xoffset, width, &max_x) &&
-           SafeAddInt32(yoffset, height, &max_y) &&
-           SafeAddInt32(zoffset, depth, &max_z) &&
-           xoffset >= 0 &&
+    return xoffset >= 0 &&
            yoffset >= 0 &&
            zoffset >= 0 &&
+           width >= 0 &&
+           height >= 0 &&
+           depth >= 0 &&
+           SafeAddInt32(xoffset, width, &max_x) &&
+           SafeAddInt32(yoffset, height, &max_y) &&
+           SafeAddInt32(zoffset, depth, &max_z) &&
            max_x <= info.width &&
            max_y <= info.height &&
            max_z <= info.depth;
@@ -1700,15 +1738,15 @@ bool Texture::CanRenderTo(const FeatureInfo* feature_info, GLint level) const {
          level < static_cast<GLint>(face_infos_[0].level_infos.size()));
   GLenum internal_format = face_infos_[0].level_infos[level].internal_format;
   bool color_renderable =
-      ((feature_info->validators()->texture_unsized_internal_format.
-            IsValid(internal_format) &&
-        internal_format != GL_ALPHA &&
-        internal_format != GL_LUMINANCE &&
+      ((feature_info->validators()->texture_unsized_internal_format.IsValid(
+            internal_format) &&
+        internal_format != GL_ALPHA && internal_format != GL_LUMINANCE &&
         internal_format != GL_LUMINANCE_ALPHA &&
         internal_format != GL_SRGB_EXT) ||
-       feature_info->validators()->
-           texture_sized_color_renderable_internal_format.IsValid(
-               internal_format));
+       (SizedFormatAvailable(feature_info, immutable_, internal_format) &&
+        feature_info->validators()
+            ->texture_sized_color_renderable_internal_format.IsValid(
+                internal_format)));
   bool depth_renderable = feature_info->validators()->
       texture_depth_renderable_internal_format.IsValid(internal_format);
   bool stencil_renderable = feature_info->validators()->
@@ -1786,7 +1824,8 @@ TextureManager::TextureManager(MemoryTracker* memory_tracker,
                                GLint max_rectangle_texture_size,
                                GLint max_3d_texture_size,
                                GLint max_array_texture_layers,
-                               bool use_default_textures)
+                               bool use_default_textures,
+                               ProgressReporter* progress_reporter)
     : memory_type_tracker_(new MemoryTypeTracker(memory_tracker)),
       memory_tracker_(memory_tracker),
       feature_info_(feature_info),
@@ -1814,7 +1853,8 @@ TextureManager::TextureManager(MemoryTracker* memory_tracker,
       num_images_(0),
       texture_count_(0),
       have_context_(true),
-      current_service_id_generation_(0) {
+      current_service_id_generation_(0),
+      progress_reporter_(progress_reporter) {
   for (int ii = 0; ii < kNumDefaultTextures; ++ii) {
     black_texture_ids_[ii] = 0;
   }
@@ -2532,6 +2572,39 @@ void TextureManager::ValidateAndDoTexImage(
     }
   }
 
+  if (args.command_type == DoTexImageArguments::kTexImage3D &&
+      texture_state->unpack_image_height_workaround_with_unpack_buffer &&
+      buffer) {
+    ContextState::Dimension dimension = ContextState::k3D;
+    const PixelStoreParams unpack_params(state->GetUnpackParams(dimension));
+    if (unpack_params.image_height != 0 &&
+        unpack_params.image_height != args.height) {
+      ReserveTexImageToBeFilled(texture_state, state, framebuffer_state,
+                                function_name, texture_ref, args);
+
+      DoTexSubImageArguments sub_args = {
+          args.target,
+          args.level,
+          0,
+          0,
+          0,
+          args.width,
+          args.height,
+          args.depth,
+          args.format,
+          args.type,
+          args.pixels,
+          args.pixels_size,
+          args.padding,
+          DoTexSubImageArguments::kTexSubImage3D};
+      DoTexSubImageLayerByLayerWorkaround(texture_state, state, sub_args,
+                                          unpack_params);
+
+      SetLevelCleared(texture_ref, args.target, args.level, true);
+      return;
+    }
+  }
+
   if (texture_state->unpack_alignment_workaround_with_unpack_buffer && buffer) {
     uint32_t buffer_size = static_cast<uint32_t>(buffer->size());
     if (buffer_size - args.pixels_size - ToGLuint(args.pixels) < args.padding) {
@@ -2736,6 +2809,19 @@ void TextureManager::ValidateAndDoTexSubImage(
       // work around driver bug.
       DoTexSubImageRowByRowWorkaround(texture_state, state, args,
                                       unpack_params);
+      return;
+    }
+  }
+
+  if (args.command_type == DoTexSubImageArguments::kTexSubImage3D &&
+      texture_state->unpack_image_height_workaround_with_unpack_buffer &&
+      buffer) {
+    ContextState::Dimension dimension = ContextState::k3D;
+    const PixelStoreParams unpack_params(state->GetUnpackParams(dimension));
+    if (unpack_params.image_height != 0 &&
+        unpack_params.image_height != args.height) {
+      DoTexSubImageLayerByLayerWorkaround(texture_state, state, args,
+                                          unpack_params);
       return;
     }
   }
@@ -2947,6 +3033,51 @@ void TextureManager::DoTexSubImageRowByRowWorkaround(
   // Restore unpack state
   glPixelStorei(GL_UNPACK_ALIGNMENT, unpack_params.alignment);
   glPixelStorei(GL_UNPACK_ROW_LENGTH, unpack_params.row_length);
+}
+
+void TextureManager::DoTexSubImageLayerByLayerWorkaround(
+    DecoderTextureState* texture_state,
+    ContextState* state,
+    const DoTexSubImageArguments& args,
+    const PixelStoreParams& unpack_params) {
+  glPixelStorei(GL_UNPACK_IMAGE_HEIGHT, 0);
+
+  GLenum format = AdjustTexFormat(feature_info_.get(), args.format);
+
+  GLsizei row_length =
+      unpack_params.row_length ? unpack_params.row_length : args.width;
+  GLsizei row_bytes =
+      row_length * GLES2Util::ComputeImageGroupSize(format, args.type);
+  GLsizei alignment_diff = row_bytes % unpack_params.alignment;
+  if (alignment_diff != 0) {
+    row_bytes += unpack_params.alignment - alignment_diff;
+  }
+  DCHECK_EQ(0, row_bytes % unpack_params.alignment);
+
+  // process the texture layer by layer
+  GLsizei image_height = unpack_params.image_height;
+  GLsizei image_bytes = row_bytes * image_height;
+  const GLubyte* image_pixels = reinterpret_cast<const GLubyte*>(args.pixels);
+  for (GLsizei image = 0; image < args.depth - 1; ++image) {
+    glTexSubImage3D(args.target, args.level, args.xoffset, args.yoffset,
+                    image + args.zoffset, args.width, args.height, 1, format,
+                    args.type, image_pixels);
+
+    image_pixels += image_bytes;
+  }
+
+  // Process the last image row by row
+  glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+  const GLubyte* row_pixels = image_pixels;
+  for (GLsizei row = 0; row < args.height; ++row) {
+    glTexSubImage3D(args.target, args.level, args.xoffset, row + args.yoffset,
+                    args.depth - 1 + args.zoffset, args.width, 1, 1, format,
+                    args.type, row_pixels);
+    row_pixels += row_bytes;
+  }
+  // Restore unpack state
+  glPixelStorei(GL_UNPACK_ALIGNMENT, unpack_params.alignment);
+  glPixelStorei(GL_UNPACK_IMAGE_HEIGHT, unpack_params.image_height);
 }
 
 // static

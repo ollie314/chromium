@@ -64,7 +64,7 @@
 #include "modules/webgl/WebGLBuffer.h"
 #include "modules/webgl/WebGLCompressedTextureASTC.h"
 #include "modules/webgl/WebGLCompressedTextureATC.h"
-#include "modules/webgl/WebGLCompressedTextureES30.h"
+#include "modules/webgl/WebGLCompressedTextureETC.h"
 #include "modules/webgl/WebGLCompressedTextureETC1.h"
 #include "modules/webgl/WebGLCompressedTexturePVRTC.h"
 #include "modules/webgl/WebGLCompressedTextureS3TC.h"
@@ -701,10 +701,13 @@ void WebGLRenderingContextBase::commit(ExceptionState& exceptionState) {
   }
   if (!drawingBuffer())
     return;
+  double commitStartTime = WTF::monotonicallyIncreasingTime();
   // TODO(crbug.com/646864): Make commit() work correctly with
   // { preserveDrawingBuffer : true }.
   getOffscreenCanvas()->getOrCreateFrameDispatcher()->dispatchFrame(
-      std::move(drawingBuffer()->transferToStaticBitmapImage()));
+      std::move(drawingBuffer()->transferToStaticBitmapImage()),
+      commitStartTime,
+      drawingBuffer()->contextProvider()->isSoftwareRendering());
 }
 
 PassRefPtr<Image> WebGLRenderingContextBase::getImage(
@@ -1139,7 +1142,11 @@ void WebGLRenderingContextBase::initializeNewContext() {
   m_vertexAttribType.resize(m_maxVertexAttribs);
 
   contextGL()->Viewport(0, 0, drawingBufferWidth(), drawingBufferHeight());
-  contextGL()->Scissor(0, 0, drawingBufferWidth(), drawingBufferHeight());
+  m_scissorBox[0] = m_scissorBox[1] = 0;
+  m_scissorBox[2] = drawingBufferWidth();
+  m_scissorBox[3] = drawingBufferHeight();
+  contextGL()->Scissor(m_scissorBox[0], m_scissorBox[1], m_scissorBox[2],
+                       m_scissorBox[3]);
 
   drawingBuffer()->contextProvider()->setLostContextCallback(
       convertToBaseCallback(WTF::bind(
@@ -1378,21 +1385,78 @@ WebGLRenderingContextBase::clearIfComposited(GLbitfield mask) {
   return combinedClear ? CombinedClear : JustClear;
 }
 
-void WebGLRenderingContextBase::restoreStateAfterClear() {
+void WebGLRenderingContextBase::restoreScissorEnabled() {
   if (isContextLost())
     return;
 
-  // Restore the state that the context set.
-  if (m_scissorEnabled)
+  if (m_scissorEnabled) {
     contextGL()->Enable(GL_SCISSOR_TEST);
+  } else {
+    contextGL()->Disable(GL_SCISSOR_TEST);
+  }
+}
+
+void WebGLRenderingContextBase::restoreScissorBox() {
+  if (isContextLost())
+    return;
+
+  contextGL()->Scissor(m_scissorBox[0], m_scissorBox[1], m_scissorBox[2],
+                       m_scissorBox[3]);
+}
+
+void WebGLRenderingContextBase::restoreClearColor() {
+  if (isContextLost())
+    return;
+
   contextGL()->ClearColor(m_clearColor[0], m_clearColor[1], m_clearColor[2],
                           m_clearColor[3]);
+}
+
+void WebGLRenderingContextBase::restoreClearDepthf() {
+  if (isContextLost())
+    return;
+
+  contextGL()->ClearDepthf(m_clearDepth);
+}
+
+void WebGLRenderingContextBase::restoreClearStencil() {
+  if (isContextLost())
+    return;
+
+  contextGL()->ClearStencil(m_clearStencil);
+}
+
+void WebGLRenderingContextBase::restoreStencilMaskSeparate() {
+  if (isContextLost())
+    return;
+
+  contextGL()->StencilMaskSeparate(GL_FRONT, m_stencilMask);
+}
+
+void WebGLRenderingContextBase::restoreColorMask() {
+  if (isContextLost())
+    return;
+
   contextGL()->ColorMask(m_colorMask[0], m_colorMask[1], m_colorMask[2],
                          m_colorMask[3]);
-  contextGL()->ClearDepthf(m_clearDepth);
-  contextGL()->ClearStencil(m_clearStencil);
-  contextGL()->StencilMaskSeparate(GL_FRONT, m_stencilMask);
+}
+
+void WebGLRenderingContextBase::restoreDepthMask() {
+  if (isContextLost())
+    return;
+
   contextGL()->DepthMask(m_depthMask);
+}
+
+void WebGLRenderingContextBase::restoreStateAfterClear() {
+  // Restore clear-related state items back to what the context had set.
+  restoreScissorEnabled();
+  restoreClearColor();
+  restoreColorMask();
+  restoreClearDepthf();
+  restoreClearStencil();
+  restoreStencilMaskSeparate();
+  restoreDepthMask();
 }
 
 void WebGLRenderingContextBase::markLayerComposited() {
@@ -2528,25 +2592,8 @@ void WebGLRenderingContextBase::framebufferRenderbuffer(
                       "no framebuffer bound");
     return;
   }
-  GLuint bufferObject = objectOrZero(buffer);
-  if (isWebGL2OrHigher() && attachment == GL_DEPTH_STENCIL_ATTACHMENT) {
-    // On ES3, DEPTH_STENCIL_ATTACHMENT is like an alias for DEPTH_ATTACHMENT +
-    // STENCIL_ATTACHMENT.  We divide it here so in WebGLFramebuffer, we don't
-    // have to handle DEPTH_STENCIL_ATTACHMENT in WebGL 2.
-    contextGL()->FramebufferRenderbuffer(target, GL_DEPTH_ATTACHMENT,
-                                         renderbuffertarget, bufferObject);
-    contextGL()->FramebufferRenderbuffer(target, GL_STENCIL_ATTACHMENT,
-                                         renderbuffertarget, bufferObject);
-    framebufferBinding->setAttachmentForBoundFramebuffer(
-        target, GL_DEPTH_ATTACHMENT, buffer);
-    framebufferBinding->setAttachmentForBoundFramebuffer(
-        target, GL_STENCIL_ATTACHMENT, buffer);
-  } else {
-    contextGL()->FramebufferRenderbuffer(target, attachment, renderbuffertarget,
-                                         bufferObject);
-    framebufferBinding->setAttachmentForBoundFramebuffer(target, attachment,
-                                                         buffer);
-  }
+  framebufferBinding->setAttachmentForBoundFramebuffer(target, attachment,
+                                                       buffer);
   applyStencilTest();
 }
 
@@ -2573,25 +2620,8 @@ void WebGLRenderingContextBase::framebufferTexture2D(GLenum target,
                       "no framebuffer bound");
     return;
   }
-  GLuint textureObject = objectOrZero(texture);
-  if (isWebGL2OrHigher() && attachment == GL_DEPTH_STENCIL_ATTACHMENT) {
-    // On ES3, DEPTH_STENCIL_ATTACHMENT is like an alias for DEPTH_ATTACHMENT +
-    // STENCIL_ATTACHMENT.  We divide it here so in WebGLFramebuffer, we don't
-    // have to handle DEPTH_STENCIL_ATTACHMENT in WebGL 2.
-    contextGL()->FramebufferTexture2D(target, GL_DEPTH_ATTACHMENT, textarget,
-                                      textureObject, level);
-    contextGL()->FramebufferTexture2D(target, GL_STENCIL_ATTACHMENT, textarget,
-                                      textureObject, level);
-    framebufferBinding->setAttachmentForBoundFramebuffer(
-        target, GL_DEPTH_ATTACHMENT, textarget, texture, level, 0);
-    framebufferBinding->setAttachmentForBoundFramebuffer(
-        target, GL_STENCIL_ATTACHMENT, textarget, texture, level, 0);
-  } else {
-    contextGL()->FramebufferTexture2D(target, attachment, textarget,
-                                      textureObject, level);
-    framebufferBinding->setAttachmentForBoundFramebuffer(
-        target, attachment, textarget, texture, level, 0);
-  }
+  framebufferBinding->setAttachmentForBoundFramebuffer(
+      target, attachment, textarget, texture, level, 0);
   applyStencilTest();
 }
 
@@ -4176,6 +4206,10 @@ void WebGLRenderingContextBase::scissor(GLint x,
                                         GLsizei height) {
   if (isContextLost())
     return;
+  m_scissorBox[0] = x;
+  m_scissorBox[1] = y;
+  m_scissorBox[2] = width;
+  m_scissorBox[3] = height;
   contextGL()->Scissor(x, y, width, height);
 }
 
@@ -7428,6 +7462,28 @@ DEFINE_TRACE(WebGLRenderingContextBase) {
   visitor->trace(m_textureUnits);
   visitor->trace(m_extensions);
   CanvasRenderingContext::trace(visitor);
+}
+
+DEFINE_TRACE_WRAPPERS(WebGLRenderingContextBase) {
+  if (isContextLost()) {
+    return;
+  }
+  visitor->traceWrappers(m_boundArrayBuffer);
+  visitor->traceWrappers(m_renderbufferBinding);
+  visitor->traceWrappers(m_framebufferBinding);
+  visitor->traceWrappers(m_currentProgram);
+  visitor->traceWrappers(m_boundVertexArrayObject);
+  for (auto& unit : m_textureUnits) {
+    visitor->traceWrappers(unit.m_texture2DBinding);
+    visitor->traceWrappers(unit.m_textureCubeMapBinding);
+    visitor->traceWrappers(unit.m_texture3DBinding);
+    visitor->traceWrappers(unit.m_texture2DArrayBinding);
+  }
+  for (ExtensionTracker* tracker : m_extensions) {
+    WebGLExtension* extension = tracker->getExtensionObjectIfAlreadyEnabled();
+    visitor->traceWrappers(extension);
+  }
+  CanvasRenderingContext::traceWrappers(visitor);
 }
 
 int WebGLRenderingContextBase::externallyAllocatedBytesPerPixel() {

@@ -27,17 +27,18 @@
 #include "content/browser/histogram_message_filter.h"
 #include "content/browser/loader/resource_message_filter.h"
 #include "content/browser/memory/memory_message_filter.h"
-#include "content/browser/mojo/mojo_shell_context.h"
 #include "content/browser/profiler_message_filter.h"
+#include "content/browser/service_manager/service_manager_context.h"
 #include "content/browser/tracing/trace_message_filter.h"
 #include "content/common/child_process_host_impl.h"
 #include "content/common/child_process_messages.h"
-#include "content/common/mojo/mojo_child_connection.h"
+#include "content/common/service_manager/child_connection.h"
 #include "content/public/browser/browser_child_process_host_delegate.h"
 #include "content/public/browser/browser_child_process_observer.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/child_process_data.h"
 #include "content/public/browser/content_browser_client.h"
+#include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/mojo_channel_switches.h"
 #include "content/public/common/process_type.h"
@@ -60,28 +61,28 @@ base::LazyInstance<base::ObserverList<BrowserChildProcessObserver>>
     g_observers = LAZY_INSTANCE_INITIALIZER;
 
 void NotifyProcessLaunchedAndConnected(const ChildProcessData& data) {
-  FOR_EACH_OBSERVER(BrowserChildProcessObserver, g_observers.Get(),
-                    BrowserChildProcessLaunchedAndConnected(data));
+  for (auto& observer : g_observers.Get())
+    observer.BrowserChildProcessLaunchedAndConnected(data);
 }
 
 void NotifyProcessHostConnected(const ChildProcessData& data) {
-  FOR_EACH_OBSERVER(BrowserChildProcessObserver, g_observers.Get(),
-                    BrowserChildProcessHostConnected(data));
+  for (auto& observer : g_observers.Get())
+    observer.BrowserChildProcessHostConnected(data);
 }
 
 void NotifyProcessHostDisconnected(const ChildProcessData& data) {
-  FOR_EACH_OBSERVER(BrowserChildProcessObserver, g_observers.Get(),
-                    BrowserChildProcessHostDisconnected(data));
+  for (auto& observer : g_observers.Get())
+    observer.BrowserChildProcessHostDisconnected(data);
 }
 
 void NotifyProcessCrashed(const ChildProcessData& data, int exit_code) {
-  FOR_EACH_OBSERVER(BrowserChildProcessObserver, g_observers.Get(),
-                    BrowserChildProcessCrashed(data, exit_code));
+  for (auto& observer : g_observers.Get())
+    observer.BrowserChildProcessCrashed(data, exit_code);
 }
 
 void NotifyProcessKilled(const ChildProcessData& data, int exit_code) {
-  FOR_EACH_OBSERVER(BrowserChildProcessObserver, g_observers.Get(),
-                    BrowserChildProcessKilled(data, exit_code));
+  for (auto& observer : g_observers.Get())
+    observer.BrowserChildProcessKilled(data, exit_code);
 }
 
 }  // namespace
@@ -175,9 +176,9 @@ BrowserChildProcessHostImpl::BrowserChildProcessHostImpl(
 
   if (!service_name.empty()) {
     DCHECK_CURRENTLY_ON(BrowserThread::IO);
-    child_connection_.reset(new MojoChildConnection(
+    child_connection_.reset(new ChildConnection(
         service_name, base::StringPrintf("%d", data_.id), child_token_,
-        MojoShellContext::GetConnectorForIOThread(),
+        ServiceManagerContext::GetConnectorForIOThread(),
         base::ThreadTaskRunnerHandle::Get()));
   }
 
@@ -207,7 +208,8 @@ void BrowserChildProcessHostImpl::TerminateAll() {
 }
 
 // static
-void BrowserChildProcessHostImpl::CopyFeatureAndFieldTrialFlags(
+std::unique_ptr<base::SharedMemory>
+BrowserChildProcessHostImpl::CopyFeatureAndFieldTrialFlags(
     base::CommandLine* cmd_line) {
   std::string enabled_features;
   std::string disabled_features;
@@ -220,17 +222,14 @@ void BrowserChildProcessHostImpl::CopyFeatureAndFieldTrialFlags(
 
   // If we run base::FieldTrials, we want to pass to their state to the
   // child process so that it can act in accordance with each state.
-  std::string field_trial_states;
-  base::FieldTrialList::AllStatesToString(&field_trial_states);
-  if (!field_trial_states.empty()) {
-    cmd_line->AppendSwitchASCII(switches::kForceFieldTrials,
-                                field_trial_states);
-  }
+  return base::FieldTrialList::CopyFieldTrialStateToFlags(
+      switches::kFieldTrialHandle, cmd_line);
 }
 
 void BrowserChildProcessHostImpl::Launch(
     SandboxedProcessLauncherDelegate* delegate,
     base::CommandLine* cmd_line,
+    const base::SharedMemory* field_trial_state,
     bool terminate_on_shutdown) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
@@ -252,17 +251,13 @@ void BrowserChildProcessHostImpl::Launch(
                              arraysize(kForwardSwitches));
 
   if (child_connection_) {
-    cmd_line->AppendSwitchASCII(switches::kMojoApplicationChannelToken,
+    cmd_line->AppendSwitchASCII(switches::kServiceRequestChannelToken,
                                 child_connection_->service_token());
   }
 
   notify_child_disconnected_ = true;
   child_process_.reset(new ChildProcessLauncher(
-      delegate,
-      cmd_line,
-      data_.id,
-      this,
-      child_token_,
+      delegate, cmd_line, data_.id, this, field_trial_state, child_token_,
       base::Bind(&BrowserChildProcessHostImpl::OnMojoError,
                  weak_factory_.GetWeakPtr(),
                  base::ThreadTaskRunnerHandle::Get()),
@@ -317,7 +312,8 @@ void BrowserChildProcessHostImpl::AddFilter(BrowserMessageFilter* filter) {
   child_process_host_->AddFilter(filter->GetFilter());
 }
 
-shell::InterfaceProvider* BrowserChildProcessHostImpl::GetRemoteInterfaces() {
+service_manager::InterfaceProvider*
+BrowserChildProcessHostImpl::GetRemoteInterfaces() {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   if (!child_connection_)
     return nullptr;

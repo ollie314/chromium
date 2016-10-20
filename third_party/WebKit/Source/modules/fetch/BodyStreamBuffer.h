@@ -11,7 +11,6 @@
 #include "core/streams/UnderlyingSourceBase.h"
 #include "modules/ModulesExport.h"
 #include "modules/fetch/BytesConsumer.h"
-#include "modules/fetch/FetchDataConsumerHandle.h"
 #include "modules/fetch/FetchDataLoader.h"
 #include "platform/heap/Handle.h"
 #include "public/platform/WebDataConsumerHandle.h"
@@ -48,7 +47,7 @@ class MODULES_EXPORT BodyStreamBuffer final : public UnderlyingSourceBase,
   ScriptPromise pull(ScriptState*) override;
   ScriptPromise cancel(ScriptState*, ScriptValue reason) override;
   bool hasPendingActivity() const override;
-  void stop() override;
+  void contextDestroyed() override;
 
   // BytesConsumer::Client
   void onStateChange() override;

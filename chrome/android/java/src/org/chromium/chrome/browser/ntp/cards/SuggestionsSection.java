@@ -5,7 +5,6 @@
 package org.chromium.chrome.browser.ntp.cards;
 
 import org.chromium.base.VisibleForTesting;
-import org.chromium.chrome.browser.ntp.cards.StatusItem.ActionDelegate;
 import org.chromium.chrome.browser.ntp.snippets.CategoryInt;
 import org.chromium.chrome.browser.ntp.snippets.CategoryStatus.CategoryStatusEnum;
 import org.chromium.chrome.browser.ntp.snippets.SectionHeader;
@@ -13,62 +12,42 @@ import org.chromium.chrome.browser.ntp.snippets.SnippetArticle;
 import org.chromium.chrome.browser.ntp.snippets.SnippetsBridge;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 
 /**
  * A group of suggestions, with a header, a status card, and a progress indicator.
  */
-public class SuggestionsSection implements ItemGroup {
+public class SuggestionsSection extends InnerNode {
+    private final List<TreeNode> mChildren = new ArrayList<>();
     private final List<SnippetArticle> mSuggestions = new ArrayList<>();
     private final SectionHeader mHeader;
-    private StatusItem mStatus;
+    private final StatusItem mStatus;
     private final ProgressItem mProgressIndicator = new ProgressItem();
-    private final ActionDelegate mActionDelegate;
     private final ActionItem mMoreButton;
-    @CategoryInt
-    private final int mCategory;
-    private final Observer mObserver;
+    private final SuggestionsCategoryInfo mCategoryInfo;
 
-    public SuggestionsSection(@CategoryInt int category, SuggestionsCategoryInfo info,
-            final NewTabPageAdapter adapter) {
-        this(category, info, adapter, new ActionDelegate() {
-            @Override
-            public void onButtonTapped() {
-                adapter.reloadSnippets();
-            }
-        });
-    }
-
-    @VisibleForTesting
-    SuggestionsSection(@CategoryInt int category, SuggestionsCategoryInfo info, Observer observer,
-            ActionDelegate actionDelegate) {
+    public SuggestionsSection(NodeParent parent, SuggestionsCategoryInfo info) {
+        super(parent);
         mHeader = new SectionHeader(info.getTitle());
-        mCategory = category;
-        mObserver = observer;
-
-        // TODO(dgn): Properly define strings, actions, etc. for each section and category type.
-        if (info.hasMoreButton()) {
-            mMoreButton = new ActionItem(category);
-            mActionDelegate = null;
-        } else {
-            mMoreButton = null;
-            mActionDelegate = actionDelegate;
-        }
+        mCategoryInfo = info;
+        mMoreButton = new ActionItem(info);
+        mStatus = StatusItem.createNoSuggestionsItem(info);
+        resetChildren();
     }
 
     @Override
-    public List<NewTabPageItem> getItems() {
-        // Note: Keep this coherent with the various notify** calls on ItemGroup.Observer
-        List<NewTabPageItem> items = new ArrayList<>();
-        items.add(mHeader);
-        items.addAll(mSuggestions);
+    public List<TreeNode> getChildren() {
+        return mChildren;
+    }
 
-        if (mSuggestions.isEmpty()) items.add(mStatus);
-        if (mMoreButton != null) items.add(mMoreButton);
-        if (mSuggestions.isEmpty()) items.add(mProgressIndicator);
+    private void resetChildren() {
+        mChildren.clear();
+        mChildren.add(mHeader);
+        mChildren.addAll(mSuggestions);
 
-        return Collections.unmodifiableList(items);
+        if (mSuggestions.isEmpty()) mChildren.add(mStatus);
+        if (mCategoryInfo.hasMoreButton() || mSuggestions.isEmpty()) mChildren.add(mMoreButton);
+        if (mSuggestions.isEmpty()) mChildren.add(mProgressIndicator);
     }
 
     public void removeSuggestion(SnippetArticle suggestion) {
@@ -78,16 +57,20 @@ public class SuggestionsSection implements ItemGroup {
         mSuggestions.remove(removedIndex);
         if (mMoreButton != null) mMoreButton.setDismissable(!hasSuggestions());
 
+        resetChildren();
+
         // Note: Keep this coherent with getItems()
         int globalRemovedIndex = removedIndex + 1; // Header has index 0 in the section.
-        mObserver.notifyItemRemoved(this, globalRemovedIndex);
+        notifyItemRemoved(globalRemovedIndex);
 
-        if (!hasSuggestions()) {
-            // When the last suggestion is removed, we insert other items to display the status,
-            // notify about them too.
-            mObserver.notifyItemInserted(this, globalRemovedIndex);
-            mObserver.notifyItemInserted(this, globalRemovedIndex + (mMoreButton == null ? 1 : 2));
+        // If we still have some suggestions, we are done. Otherwise, we'll have to notify about the
+        // status-related items that are now present.
+        if (hasSuggestions()) return;
+        notifyItemInserted(globalRemovedIndex); // Status card.
+        if (!mCategoryInfo.hasMoreButton()) {
+            notifyItemInserted(globalRemovedIndex + 1); // Action card.
         }
+        notifyItemInserted(globalRemovedIndex + 2); // Progress indicator.
     }
 
     public void removeSuggestionById(String idWithinCategory) {
@@ -110,7 +93,7 @@ public class SuggestionsSection implements ItemGroup {
     public void setSuggestions(List<SnippetArticle> suggestions, @CategoryStatusEnum int status) {
         copyThumbnails(suggestions);
 
-        int itemCountBefore = getItems().size();
+        int itemCountBefore = getItemCount();
         setStatusInternal(status);
 
         mSuggestions.clear();
@@ -118,27 +101,29 @@ public class SuggestionsSection implements ItemGroup {
 
         if (mMoreButton != null) {
             mMoreButton.setPosition(mSuggestions.size());
+            mMoreButton.setDismissable(mSuggestions.isEmpty());
         }
-        mObserver.notifyGroupChanged(this, itemCountBefore, getItems().size());
+        resetChildren();
+        notifySectionChanged(itemCountBefore);
     }
 
     /** Sets the status for the section. Some statuses can cause the suggestions to be cleared. */
     public void setStatus(@CategoryStatusEnum int status) {
-        int itemCountBefore = getItems().size();
+        int itemCountBefore = getItemCount();
         setStatusInternal(status);
-        mObserver.notifyGroupChanged(this, itemCountBefore, getItems().size());
+        resetChildren();
+        notifySectionChanged(itemCountBefore);
     }
 
     private void setStatusInternal(@CategoryStatusEnum int status) {
-        mStatus = StatusItem.create(status, mActionDelegate);
-
         if (!SnippetsBridge.isCategoryStatusAvailable(status)) mSuggestions.clear();
 
         mProgressIndicator.setVisible(SnippetsBridge.isCategoryLoading(status));
     }
 
+    @CategoryInt
     public int getCategory() {
-        return mCategory;
+        return mCategoryInfo.getCategory();
     }
 
     private void copyThumbnails(List<SnippetArticle> suggestions) {
@@ -160,13 +145,15 @@ public class SuggestionsSection implements ItemGroup {
      * @return a position delta to apply to the position of the provided item to get the adapter
      * position of the item to animate. Returns {@code 0} if there is no dismiss sibling.
      */
-    public int getDismissSiblingPosDelta(NewTabPageItem item) {
+    public int getDismissSiblingPosDelta(int position) {
         // The only dismiss siblings we have so far are the More button and the status card.
         // Exit early if there is no More button.
         if (mMoreButton == null) return 0;
 
         // When there are suggestions we won't have contiguous status and action items.
         if (hasSuggestions()) return 0;
+
+        TreeNode item = getChildren().get(position);
 
         // The sibling of the more button is the status card, that should be right above.
         if (item == mMoreButton) return -1;
@@ -177,6 +164,30 @@ public class SuggestionsSection implements ItemGroup {
         return 0;
     }
 
+    private void notifySectionChanged(int itemCountBefore) {
+        int itemCountAfter = getItemCount();
+
+        // The header is stable in sections. Don't notify about it.
+        final int startPos = 1;
+        itemCountBefore--;
+        itemCountAfter--;
+
+        notifyItemRangeChanged(startPos, Math.min(itemCountBefore, itemCountAfter));
+        if (itemCountBefore < itemCountAfter) {
+            notifyItemRangeInserted(startPos + itemCountBefore, itemCountAfter - itemCountBefore);
+        } else if (itemCountBefore > itemCountAfter) {
+            notifyItemRangeRemoved(startPos + itemCountAfter, itemCountBefore - itemCountAfter);
+        }
+    }
+
+    /**
+     * @return The progress indicator.
+     */
+    @VisibleForTesting
+    ProgressItem getProgressItemForTesting() {
+        return mProgressIndicator;
+    }
+
     @VisibleForTesting
     ActionItem getActionItem() {
         return mMoreButton;
@@ -185,5 +196,5 @@ public class SuggestionsSection implements ItemGroup {
     @VisibleForTesting
     StatusItem getStatusItem() {
         return mStatus;
-    };
+    }
 }

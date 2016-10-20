@@ -15,8 +15,8 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "components/prefs/pref_service.h"
-#include "components/sync/api/sync_change.h"
-#include "components/sync/api/sync_error_factory.h"
+#include "components/sync/model/sync_change.h"
+#include "components/sync/model/sync_error_factory.h"
 #include "components/sync/protocol/preference_specifics.pb.h"
 #include "components/sync/protocol/sync.pb.h"
 #include "components/syncable_prefs/pref_model_associator_client.h"
@@ -538,8 +538,8 @@ void PrefModelAssociator::NotifySyncedPrefObservers(const std::string& path,
   if (observer_iter == synced_pref_observers_.end())
     return;
   SyncedPrefObserverList* observers = observer_iter->second.get();
-  FOR_EACH_OBSERVER(SyncedPrefObserver, *observers,
-                    OnSyncedPrefChanged(path, from_sync));
+  for (auto& observer : *observers)
+    observer.OnSyncedPrefChanged(path, from_sync);
 }
 
 }  // namespace syncable_prefs

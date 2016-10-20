@@ -29,7 +29,6 @@ class LayerTreeTestCompositorFrameSinkClient;
 class Proxy;
 class ProxyImpl;
 class ProxyMain;
-class RemoteChannelImplForTest;
 class TestContextProvider;
 class TestCompositorFrameSink;
 class TestGpuMemoryBufferManager;
@@ -103,20 +102,6 @@ class LayerTreeTest : public testing::Test, public TestHooks {
 
   void RealEndTest();
 
-  virtual void DispatchAddAnimationToPlayer(
-      AnimationPlayer* player_to_receive_animation,
-      double animation_duration);
-  void DispatchSetDeferCommits(bool defer_commits);
-  void DispatchSetNeedsCommit();
-  void DispatchSetNeedsUpdateLayers();
-  void DispatchSetNeedsRedraw();
-  void DispatchSetNeedsRedrawRect(const gfx::Rect& damage_rect);
-  void DispatchSetVisible(bool visible);
-  void DispatchSetNextCommitForcesRedraw();
-  void DispatchDidAddAnimation();
-  void DispatchCompositeImmediately();
-  void DispatchNextCommitWaitsForActivation();
-
   std::unique_ptr<CompositorFrameSink>
   ReleaseCompositorFrameSinkOnLayerTreeHost();
   void SetVisibleOnLayerTreeHost(bool visible);
@@ -135,19 +120,16 @@ class LayerTreeTest : public testing::Test, public TestHooks {
   base::SingleThreadTaskRunner* MainThreadTaskRunner() {
     return main_task_runner_.get();
   }
-  Proxy* proxy() const {
-    return layer_tree_host_ ? layer_tree_host_->proxy() : NULL;
-  }
-  Proxy* remote_client_proxy() const;
+  Proxy* proxy();
   TaskRunnerProvider* task_runner_provider() const;
   TaskGraphRunner* task_graph_runner() const {
     return task_graph_runner_.get();
   }
   bool TestEnded() const { return ended_; }
 
-  LayerTreeHostInProcess* layer_tree_host();
+  LayerTreeHost* layer_tree_host();
+  LayerTreeHostInProcess* layer_tree_host_in_process();
   LayerTree* layer_tree() { return layer_tree_host()->GetLayerTree(); }
-  LayerTreeHost* remote_client_layer_tree_host();
   SharedBitmapManager* shared_bitmap_manager() const {
     return shared_bitmap_manager_.get();
   }
@@ -178,19 +160,27 @@ class LayerTreeTest : public testing::Test, public TestHooks {
   gfx::Vector2dF ScrollDelta(LayerImpl* layer_impl);
 
  private:
+  virtual void DispatchAddAnimationToPlayer(
+      AnimationPlayer* player_to_receive_animation,
+      double animation_duration);
+  void DispatchSetDeferCommits(bool defer_commits);
+  void DispatchSetNeedsCommit();
+  void DispatchSetNeedsUpdateLayers();
+  void DispatchSetNeedsRedraw();
+  void DispatchSetNeedsRedrawRect(const gfx::Rect& damage_rect);
+  void DispatchSetVisible(bool visible);
+  void DispatchSetNextCommitForcesRedraw();
+  void DispatchDidAddAnimation();
+  void DispatchCompositeImmediately();
+  void DispatchNextCommitWaitsForActivation();
+
   LayerTreeSettings settings_;
 
   CompositorMode mode_;
 
   std::unique_ptr<LayerTreeHostClientForTesting> client_;
-  std::unique_ptr<LayerTreeHostInProcess> layer_tree_host_;
-
-  // The LayerTreeHost created by the cc embedder on the client in remote mode.
-  std::unique_ptr<LayerTreeHostForTesting> remote_client_layer_tree_host_;
-
-  RemoteProtoChannelBridge remote_proto_channel_bridge_;
-
-  std::unique_ptr<ImageSerializationProcessor> image_serialization_processor_;
+  std::unique_ptr<LayerTreeHost> layer_tree_host_;
+  LayerTreeHostInProcess* layer_tree_host_in_process_;
 
   bool beginning_ = false;
   bool end_when_begin_returns_ = false;
@@ -229,9 +219,23 @@ class LayerTreeTest : public testing::Test, public TestHooks {
   }                                                              \
   class MultiThreadDelegatingImplNeedsSemicolon##TEST_FIXTURE_NAME {}
 
+#define REMOTE_TEST_F(TEST_FIXTURE_NAME)                    \
+  TEST_F(TEST_FIXTURE_NAME, RunRemote_DelegatingRenderer) { \
+    RunTest(CompositorMode::REMOTE);                        \
+  }                                                         \
+  class RemoteDelegatingImplNeedsSemicolon##TEST_FIXTURE_NAME {}
+
 #define SINGLE_AND_MULTI_THREAD_TEST_F(TEST_FIXTURE_NAME) \
   SINGLE_THREAD_TEST_F(TEST_FIXTURE_NAME);                \
   MULTI_THREAD_TEST_F(TEST_FIXTURE_NAME)
+
+#define REMOTE_AND_MULTI_THREAD_TEST_F(TEST_FIXTURE_NAME) \
+  MULTI_THREAD_TEST_F(TEST_FIXTURE_NAME);                 \
+  REMOTE_TEST_F(TEST_FIXTURE_NAME)
+
+#define SINGLE_MULTI_AND_REMOTE_TEST_F(TEST_FIXTURE_NAME) \
+  SINGLE_AND_MULTI_THREAD_TEST_F(TEST_FIXTURE_NAME);      \
+  REMOTE_TEST_F(TEST_FIXTURE_NAME)
 
 // Some tests want to control when notify ready for activation occurs,
 // but this is not supported in the single-threaded case.

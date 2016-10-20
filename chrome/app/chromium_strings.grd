@@ -319,14 +319,9 @@ If you update this file, be sure also to update google_chrome_strings.grd. -->
           Welcome to Chromium
         </message>
       </if>
-      <if expr="not chromeos">
-        <message name="IDS_EXTERNAL_PROTOCOL_INFORMATION" desc="General information about what Chrome is trying to do when opening this external protocol">
-          Chromium needs to launch an external application to handle <ph name="SCHEME">$1<ex>acrobat:</ex></ph> links. The link requested is <ph name="PROTOLINK">$2<ex>acrobat:yourpdf</ex></ph>.
-        </message>
-      </if>
       <if expr="chromeos">
-        <message name="IDS_EXTERNAL_PROTOCOL_INFORMATION" desc="General information about what Chrome is trying to do when opening this external protocol">
-          Chromium OS does not support launching an external application to handle <ph name="SCHEME">$1<ex>acrobat:</ex></ph> links. The link requested is <ph name="PROTOLINK">$2<ex>acrobat:yourpdf</ex></ph>.
+        <message name="IDS_EXTERNAL_PROTOCOL_TITLE" desc="External Protocol Dialog Title">
+          Chromium OS can't open this page.
         </message>
       </if>
       <!-- Strings used to warn that an OS is not supported -->
@@ -1213,6 +1208,11 @@ Please check your email at <ph name="ACCOUNT_EMAIL">$2<ex>jane.doe@example.com</
         Chromium Tab
       </message>
 
+      <!-- Plugin Placeholders -->
+      <message name="IDS_PLUGIN_RESTART_REQUIRED" desc="The placeholder text for a plugin that can't be loaded until the browser is restarted.">
+        Restart Chromium to enable <ph name="PLUGIN_NAME">$1<ex>Flash</ex></ph>
+      </message>
+
       <!-- Runtime permission strings -->
       <if expr="is_android">
         <message name="IDS_INFOBAR_MISSING_CAMERA_PERMISSION_TEXT" desc="Text shown in an infobar when a website has requested access to the camera capabilities, but Chrome is missing the Android camera permission.">
@@ -1292,6 +1292,14 @@ Please check your email at <ph name="ACCOUNT_EMAIL">$2<ex>jane.doe@example.com</
           Select <ph name="SMALL_PRODUCT_LOGO">&lt;div class="logo-small"&gt;&lt;/div&gt;</ph> <ph name="BEGIN_BOLD">&lt;strong&gt;</ph>Chromium<ph name="END_BOLD">&lt;/strong&gt;</ph>
         </message>
       </if>
+
+      <!-- Strings describing Chromium security policy for DevTools security panel -->
+      <message name="IDS_PRIVATE_USER_DATA_INPUT_FUTURE_DESCRIPTION" desc="Description of a security problem where the site collects private user data on an insecure page, which will result in an omnibox warning in future versions of Chromium." translateable="false">
+        This page includes a password or credit card input over HTTP. A warning will be added to the URL bar starting in Chromium 56 (Jan 2017).
+      </message>
+      <message name="IDS_PRIVATE_USER_DATA_INPUT_DESCRIPTION" desc="Description of a security problem where the site collects private user data on an insecure page, which results in an omnibox warning." translateable="false">
+        This page includes a password or credit card input over HTTP. A warning has been added to the URL bar.
+      </message>
 
     </messages>
   </release>

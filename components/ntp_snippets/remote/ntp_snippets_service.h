@@ -15,6 +15,7 @@
 #include "base/callback_forward.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
+#include "base/time/time.h"
 #include "components/image_fetcher/image_fetcher_delegate.h"
 #include "components/ntp_snippets/category.h"
 #include "components/ntp_snippets/category_factory.h"
@@ -26,7 +27,6 @@
 #include "components/ntp_snippets/remote/ntp_snippets_scheduler.h"
 #include "components/ntp_snippets/remote/ntp_snippets_status_service.h"
 #include "components/ntp_snippets/remote/request_throttler.h"
-#include "components/suggestions/suggestions_service.h"
 
 class PrefRegistrySimple;
 class PrefService;
@@ -40,13 +40,10 @@ class ImageDecoder;
 class ImageFetcher;
 }  // namespace image_fetcher
 
-namespace suggestions {
-class SuggestionsProfile;
-}  // namespace suggestions
-
 namespace ntp_snippets {
 
 class NTPSnippetsDatabase;
+class UserClassifier;
 
 // Retrieves fresh content data (articles) from the server, stores them and
 // provides them as content suggestions.
@@ -71,8 +68,8 @@ class NTPSnippetsService final : public ContentSuggestionsProvider,
   NTPSnippetsService(Observer* observer,
                      CategoryFactory* category_factory,
                      PrefService* pref_service,
-                     suggestions::SuggestionsService* suggestions_service,
                      const std::string& application_language_code,
+                     const UserClassifier* user_classifier,
                      NTPSnippetsScheduler* scheduler,
                      std::unique_ptr<NTPSnippetsFetcher> snippets_fetcher,
                      std::unique_ptr<image_fetcher::ImageFetcher> image_fetcher,
@@ -99,10 +96,9 @@ class NTPSnippetsService final : public ContentSuggestionsProvider,
   // Useful for requests triggered by the user.
   void FetchSnippets(bool interactive_request);
 
-  // Fetches snippets from the server for specified hosts (overriding
-  // suggestions from the suggestion service) and adds them to the current ones.
-  // Only called from chrome://snippets-internals, DO NOT USE otherwise!
-  // Ignored while ready() is false.
+  // Fetches snippets from the server for specified hosts and adds them to the
+  // current ones. Only called from chrome://snippets-internals, DO NOT USE
+  // otherwise! Ignored while ready() is false.
   void FetchSnippetsFromHosts(const std::set<std::string>& hosts,
                               bool interactive_request);
 
@@ -131,13 +127,11 @@ class NTPSnippetsService final : public ContentSuggestionsProvider,
       const DismissedSuggestionsCallback& callback) override;
   void ClearDismissedSuggestionsForDebugging(Category category) override;
 
-  // Returns the lists of suggestion hosts the snippets are restricted to.
-  std::set<std::string> GetSuggestionsHosts() const;
-
   // Returns the maximum number of snippets that will be shown at once.
   static int GetMaxSnippetCountForTesting();
 
   // Available snippets, only for unit tests.
+  // TODO(treib): Get rid of this. Tests should use a fake observer instead.
   const NTPSnippet::PtrVector& GetSnippetsForTesting(Category category) const {
     return categories_.find(category)->second.snippets;
   }
@@ -160,6 +154,8 @@ class NTPSnippetsService final : public ContentSuggestionsProvider,
                            RemoveExpiredDismissedContent);
   FRIEND_TEST_ALL_PREFIXES(NTPSnippetsServiceTest, RescheduleOnStateChange);
   FRIEND_TEST_ALL_PREFIXES(NTPSnippetsServiceTest, StatusChanges);
+  FRIEND_TEST_ALL_PREFIXES(NTPSnippetsServiceTest,
+                           SuggestionsFetchedOnSignInAndSignOut);
 
   // Possible state transitions:
   //       NOT_INITED --------+
@@ -211,11 +207,9 @@ class NTPSnippetsService final : public ContentSuggestionsProvider,
   void OnDatabaseLoaded(NTPSnippet::PtrVector snippets);
   void OnDatabaseError();
 
-  // Callback for the SuggestionsService.
-  void OnSuggestionsChanged(const suggestions::SuggestionsProfile& suggestions);
-
   // Callback for the NTPSnippetsFetcher.
-  void OnFetchFinished(NTPSnippetsFetcher::OptionalSnippets snippets);
+  void OnFetchFinished(
+      NTPSnippetsFetcher::OptionalFetchedCategories fetched_categories);
 
   // Moves all snippets from |to_archive| into the archive of the |category|.
   // It also deletes the snippets from the DB and keeps the archive reasonably
@@ -225,14 +219,12 @@ class NTPSnippetsService final : public ContentSuggestionsProvider,
   // Replace old snippets in |category| by newly available snippets.
   void ReplaceSnippets(Category category, NTPSnippet::PtrVector new_snippets);
 
-  std::set<std::string> GetSnippetHostsFromPrefs() const;
-  void StoreSnippetHostsToPrefs(const std::set<std::string>& hosts);
-
   // Removes expired dismissed snippets from the service and the database.
   void ClearExpiredDismissedSnippets();
 
-  // Removes images from the DB that do not have any corresponding snippet
-  // (neither in the current set, nor in the archived set).
+  // Removes images from the DB that are not referenced from any known snippet.
+  // Needs to iterate the whole snippet database -- so do it often enough to
+  // keep it small but not too often as it still iterates over the file system.
   void ClearOrphanedImages();
 
   // Clears all stored snippets and updates the observer.
@@ -259,10 +251,10 @@ class NTPSnippetsService final : public ContentSuggestionsProvider,
                                         const std::string& id_within_category,
                                         const gfx::Image& image);
 
-  // Triggers a state transition depending on the provided reason to be
-  // disabled (or lack thereof). This method is called when a change is detected
-  // by |snippets_status_service_|.
-  void OnDisabledReasonChanged(DisabledReason disabled_reason);
+  // Triggers a state transition depending on the provided snippets status. This
+  // method is called when a change is detected by |snippets_status_service_|.
+  void OnSnippetsStatusChanged(SnippetsStatus old_snippets_status,
+                               SnippetsStatus new_snippets_status);
 
   // Verifies state transitions (see |State|'s documentation) and applies them.
   // Also updates the provider status. Does nothing except updating the provider
@@ -289,11 +281,12 @@ class NTPSnippetsService final : public ContentSuggestionsProvider,
   // Calls UpdateCategoryStatus() for all provided categories.
   void UpdateAllCategoryStatus(CategoryStatus status);
 
+  void RestoreCategoriesFromPrefs();
+  void StoreCategoriesToPrefs();
+
   State state_;
 
   PrefService* pref_service_;
-
-  suggestions::SuggestionsService* suggestions_service_;
 
   const Category articles_category_;
 
@@ -336,15 +329,11 @@ class NTPSnippetsService final : public ContentSuggestionsProvider,
   // The ISO 639-1 code of the language used by the application.
   const std::string application_language_code_;
 
+  // Classifier that tells us how active the user is. Not owned.
+  const UserClassifier* user_classifier_;
+
   // Scheduler for fetching snippets. Not owned.
   NTPSnippetsScheduler* scheduler_;
-
-  // The subscription to the SuggestionsService. When the suggestions change,
-  // SuggestionsService will call |OnSuggestionsChanged|, which triggers an
-  // update to the set of snippets.
-  using SuggestionsSubscription =
-      suggestions::SuggestionsService::ResponseCallbackList::Subscription;
-  std::unique_ptr<SuggestionsSubscription> suggestions_service_subscription_;
 
   // The snippets fetcher.
   std::unique_ptr<NTPSnippetsFetcher> snippets_fetcher_;
@@ -354,6 +343,7 @@ class NTPSnippetsService final : public ContentSuggestionsProvider,
 
   // The database for persisting snippets.
   std::unique_ptr<NTPSnippetsDatabase> database_;
+  base::TimeTicks database_load_start_;
 
   // The service that provides events and data about the signin and sync state.
   std::unique_ptr<NTPSnippetsStatusService> snippets_status_service_;

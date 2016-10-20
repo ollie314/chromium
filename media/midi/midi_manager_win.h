@@ -15,13 +15,12 @@
 #include "base/time/time.h"
 #include "media/midi/midi_manager.h"
 
-namespace media {
 namespace midi {
 
 class MidiServiceWinDelegate {
  public:
   virtual ~MidiServiceWinDelegate() {}
-  virtual void OnCompleteInitialization(Result result) = 0;
+  virtual void OnCompleteInitialization(mojom::Result result) = 0;
   virtual void OnAddInputPort(MidiPortInfo info) = 0;
   virtual void OnAddOutputPort(MidiPortInfo info) = 0;
   virtual void OnSetInputPortState(uint32_t port_index,
@@ -58,7 +57,7 @@ class MidiManagerWin final : public MidiManager, public MidiServiceWinDelegate {
                             double timestamp) final;
 
   // MidiServiceWinDelegate overrides:
-  void OnCompleteInitialization(Result result) final;
+  void OnCompleteInitialization(mojom::Result result) final;
   void OnAddInputPort(MidiPortInfo info) final;
   void OnAddOutputPort(MidiPortInfo info) final;
   void OnSetInputPortState(uint32_t port_index, MidiPortState state) final;
@@ -73,6 +72,5 @@ class MidiManagerWin final : public MidiManager, public MidiServiceWinDelegate {
 };
 
 }  // namespace midi
-}  // namespace media
 
 #endif  // MEDIA_MIDI_MIDI_MANAGER_WIN_H_

@@ -7,8 +7,8 @@
 
 #include <memory>
 
-#include "ash/common/shell_window_ids.h"
 #include "ash/common/wm_window.h"
+#include "ash/public/cpp/shell_window_ids.h"
 #include "base/macros.h"
 #include "base/observer_list.h"
 #include "services/ui/public/cpp/window_observer.h"
@@ -126,6 +126,8 @@ class WmWindowMus : public WmWindow, public ui::WindowObserver {
   void SetAppType(int app_type) const override;
   bool IsBubble() override;
   ui::Layer* GetLayer() override;
+  bool GetLayerTargetVisibility() override;
+  bool GetLayerVisible() override;
   display::Display GetDisplayNearestWindow() override;
   bool HasNonClientArea() override;
   int GetNonClientComponent(const gfx::Point& location) override;
@@ -199,6 +201,7 @@ class WmWindowMus : public WmWindow, public ui::WindowObserver {
   bool HasCapture() override;
   void ReleaseCapture() override;
   bool HasRestoreBounds() const override;
+  void SetPinned(bool trusted) override;
   void SetAlwaysOnTop(bool value) override;
   bool IsAlwaysOnTop() const override;
   void Hide() override;
@@ -272,7 +275,7 @@ class WmWindowMus : public WmWindow, public ui::WindowObserver {
   ui::Window* window_;
 
   // The shell window id of this window. Shell window ids are defined in
-  // ash/common/shell_window_ids.h.
+  // ash/public/cpp/shell_window_ids.h.
   int shell_window_id_ = kShellWindowId_Invalid;
 
   std::unique_ptr<wm::WindowState> window_state_;

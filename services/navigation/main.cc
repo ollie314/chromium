@@ -9,7 +9,7 @@
 #include "base/path_service.h"
 #include "content/public/app/content_main.h"
 #include "services/navigation/content_client/main_delegate.h"
-#include "services/shell/runner/init.h"
+#include "services/service_manager/runner/init.h"
 
 #if defined(OS_WIN)
 #include "content/public/app/sandbox_helper_win.h"
@@ -24,7 +24,7 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, wchar_t*, int) {
 int main(int argc, const char** argv) {
 #endif
   base::CommandLine::Init(argc, argv);
-  shell::WaitForDebuggerIfNecessary();
+  service_manager::WaitForDebuggerIfNecessary();
 
 #if !defined(OFFICIAL_BUILD)
 #if defined(OS_WIN)

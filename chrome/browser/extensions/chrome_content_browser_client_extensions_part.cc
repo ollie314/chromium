@@ -29,6 +29,7 @@
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/resource_dispatcher_host.h"
 #include "content/public/browser/site_instance.h"
+#include "content/public/browser/storage_partition.h"
 #include "content/public/browser/vpn_service_proxy.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_switches.h"
@@ -268,24 +269,30 @@ bool ChromeContentBrowserClientExtensionsPart::ShouldUseProcessPerSite(
 bool ChromeContentBrowserClientExtensionsPart::DoesSiteRequireDedicatedProcess(
     content::BrowserContext* browser_context,
     const GURL& effective_site_url) {
-  if (effective_site_url.SchemeIs(extensions::kExtensionScheme)) {
-    // --isolate-extensions should isolate extensions, except for a) hosted
-    // apps, b) platform apps.
-    // a) Isolating hosted apps is a good idea, but ought to be a separate knob.
-    // b) Sandbox pages in platform app can load web content in iframes;
-    //   isolating the app and the iframe leads to StoragePartition mismatch in
-    //   the two processes.
-    //   TODO(lazyboy): We should deprecate this behaviour and not let web
-    //   content load in platform app's process; see http://crbug.com/615585.
-    if (IsIsolateExtensionsEnabled()) {
-      const Extension* extension =
-          ExtensionRegistry::Get(browser_context)
-              ->enabled_extensions()
-              .GetExtensionOrAppByURL(effective_site_url);
-      if (extension && !extension->is_hosted_app() &&
-          !extension->is_platform_app()) {
+  if (IsIsolateExtensionsEnabled()) {
+    const Extension* extension =
+        ExtensionRegistry::Get(browser_context)
+            ->enabled_extensions()
+            .GetExtensionOrAppByURL(effective_site_url);
+    if (extension) {
+      // Always isolate Chrome Web Store.
+      if (extension->id() == kWebStoreAppId)
         return true;
-      }
+
+      // --isolate-extensions should isolate extensions, except for a) hosted
+      // apps, b) platform apps.
+      // a) Isolating hosted apps is a good idea, but ought to be a separate
+      //    knob.
+      // b) Sandbox pages in platform app can load web content in iframes;
+      //    isolating the app and the iframe leads to StoragePartition mismatch
+      //    in the two processes.
+      //    TODO(lazyboy): We should deprecate this behaviour and not let web
+      //    content load in platform app's process; see http://crbug.com/615585.
+      if (extension->is_hosted_app() || extension->is_platform_app())
+        return false;
+
+      // Isolate all extensions.
+      return true;
     }
   }
   return false;
@@ -419,39 +426,40 @@ bool ChromeContentBrowserClientExtensionsPart::
     return false;
 
   // We must use a new BrowsingInstance (forcing a process swap and disabling
-  // scripting by existing tabs) if one of the URLs is an extension and the
-  // other is not the exact same extension.
+  // scripting by existing tabs) if one of the URLs corresponds to the Chrome
+  // Web Store hosted app, and the other does not.
   //
-  // We ignore hosted apps here so that other tabs in their BrowsingInstance can
-  // use postMessage with them.  (The exception is the Chrome Web Store, which
-  // is a hosted app that requires its own BrowsingInstance.)  Navigations
-  // to/from a hosted app will still trigger a SiteInstance swap in
-  // RenderFrameHostManager.
+  // We don't force a BrowsingInstance swap in other cases (i.e., when opening
+  // a popup from one extension to a different extension, or to a non-extension
+  // URL) to preserve script connections and allow use cases like postMessage
+  // via window.opener. Those cases would still force a SiteInstance swap in
+  // RenderFrameHostManager.  This behavior is similar to how extension
+  // subframes on a web main frame are also placed in the same BrowsingInstance
+  // (by the content/ part of ShouldSwapBrowsingInstancesForNavigation); this
+  // check is just doing the same for top-level frames.  See
+  // https://crbug.com/590068.
   const Extension* current_extension =
       registry->enabled_extensions().GetExtensionOrAppByURL(current_url);
-  if (current_extension && current_extension->is_hosted_app() &&
-      current_extension->id() != kWebStoreAppId)
-    current_extension = NULL;
+  bool is_current_url_for_web_store =
+      current_extension && current_extension->id() == kWebStoreAppId;
 
   const Extension* new_extension =
       registry->enabled_extensions().GetExtensionOrAppByURL(new_url);
-  if (new_extension && new_extension->is_hosted_app() &&
-      new_extension->id() != kWebStoreAppId)
-    new_extension = NULL;
+  bool is_new_url_for_web_store =
+      new_extension && new_extension->id() == kWebStoreAppId;
 
-  // First do a process check.  We should force a BrowsingInstance swap if the
-  // current process doesn't know about new_extension, even if current_extension
-  // is somehow the same as new_extension.
+  // First do a process check.  We should force a BrowsingInstance swap if we
+  // are going to Chrome Web Store, but the current process doesn't know about
+  // CWS, even if current_extension somehow corresponds to CWS.
   ProcessMap* process_map = ProcessMap::Get(site_instance->GetBrowserContext());
-  if (new_extension &&
-      site_instance->HasProcess() &&
-      !process_map->Contains(
-          new_extension->id(), site_instance->GetProcess()->GetID()))
+  if (is_new_url_for_web_store && site_instance->HasProcess() &&
+      !process_map->Contains(new_extension->id(),
+                             site_instance->GetProcess()->GetID()))
     return true;
 
-  // Otherwise, swap BrowsingInstances if current_extension and new_extension
-  // differ.
-  return current_extension != new_extension;
+  // Otherwise, swap BrowsingInstances when transitioning to/from Chrome Web
+  // Store.
+  return is_current_url_for_web_store != is_new_url_for_web_store;
 }
 
 // static
@@ -553,7 +561,8 @@ void ChromeContentBrowserClientExtensionsPart::RenderProcessWillLaunch(
   host->AddFilter(new ExtensionsGuestViewMessageFilter(id, profile));
   if (extensions::ExtensionsClient::Get()
           ->ExtensionAPIEnabledInExtensionServiceWorkers()) {
-    host->AddFilter(new ExtensionServiceWorkerMessageFilter(id, profile));
+    host->AddFilter(new ExtensionServiceWorkerMessageFilter(
+        id, profile, host->GetStoragePartition()->GetServiceWorkerContext()));
   }
   extension_web_request_api_helpers::SendExtensionWebRequestStatusToHost(host);
 }
@@ -679,10 +688,6 @@ void ChromeContentBrowserClientExtensionsPart::
 #if defined(ENABLE_WEBRTC)
     command_line->AppendSwitch(::switches::kEnableWebRtcHWH264Encoding);
 #endif
-    if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-            switches::kEnableMojoSerialService)) {
-      command_line->AppendSwitch(switches::kEnableMojoSerialService);
-    }
   }
 }
 

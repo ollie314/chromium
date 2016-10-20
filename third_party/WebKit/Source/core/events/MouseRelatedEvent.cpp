@@ -28,6 +28,7 @@
 #include "core/frame/LocalFrame.h"
 #include "core/layout/LayoutObject.h"
 #include "core/paint/PaintLayer.h"
+#include "core/svg/SVGElement.h"
 
 namespace blink {
 
@@ -74,24 +75,24 @@ MouseRelatedEvent::MouseRelatedEvent(
       m_movementDelta(movementDelta),
       m_positionType(positionType) {
   LayoutPoint adjustedPageLocation;
-  LayoutPoint scrollPosition;
+  LayoutSize scrollOffset;
 
   LocalFrame* frame = view() && view()->isLocalDOMWindow()
                           ? toLocalDOMWindow(view())->frame()
                           : nullptr;
   if (frame && hasPosition()) {
     if (FrameView* frameView = frame->view()) {
-      scrollPosition = frameView->scrollPosition();
+      scrollOffset = LayoutSize(frameView->scrollOffsetInt());
       adjustedPageLocation = frameView->rootFrameToContents(rootFrameLocation);
       float scaleFactor = 1 / frame->pageZoomFactor();
       if (scaleFactor != 1.0f) {
         adjustedPageLocation.scale(scaleFactor, scaleFactor);
-        scrollPosition.scale(scaleFactor, scaleFactor);
+        scrollOffset.scale(scaleFactor, scaleFactor);
       }
     }
   }
 
-  m_clientLocation = adjustedPageLocation - toLayoutSize(scrollPosition);
+  m_clientLocation = adjustedPageLocation - scrollOffset;
   m_pageLocation = adjustedPageLocation;
 
   // Set up initial values for coordinates.
@@ -178,7 +179,8 @@ void MouseRelatedEvent::computeRelativePosition() {
         FloatPoint(absoluteLocation()), UseTransforms);
 
     // Adding this here to address crbug.com/570666. Basically we'd like to
-    // find the local coordinates relative to the padding box not the border box.
+    // find the local coordinates relative to the padding box not the border
+    // box.
     if (layoutObject->isBoxModelObject()) {
       const LayoutBoxModelObject* layoutBox =
           toLayoutBoxModelObject(layoutObject);
@@ -247,13 +249,15 @@ int MouseRelatedEvent::pageY() const {
 
 int MouseRelatedEvent::x() const {
   // FIXME: This is not correct.
-  // See Microsoft documentation and <http://www.quirksmode.org/dom/w3c_events.html>.
+  // See Microsoft documentation and
+  // <http://www.quirksmode.org/dom/w3c_events.html>.
   return m_clientLocation.x().toInt();
 }
 
 int MouseRelatedEvent::y() const {
   // FIXME: This is not correct.
-  // See Microsoft documentation and <http://www.quirksmode.org/dom/w3c_events.html>.
+  // See Microsoft documentation and
+  // <http://www.quirksmode.org/dom/w3c_events.html>.
   return m_clientLocation.y().toInt();
 }
 

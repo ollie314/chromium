@@ -30,6 +30,7 @@
 #include "ui/views/controls/textfield/textfield_model.h"
 #include "ui/views/drag_controller.h"
 #include "ui/views/view.h"
+#include "ui/views/word_lookup_client.h"
 
 namespace views {
 
@@ -42,6 +43,7 @@ class VIEWS_EXPORT Textfield : public View,
                                public TextfieldModel::Delegate,
                                public ContextMenuController,
                                public DragController,
+                               public WordLookupClient,
                                public ui::TouchEditable,
                                public ui::TextInputClient {
  public:
@@ -87,6 +89,9 @@ class VIEWS_EXPORT Textfield : public View,
   void AppendText(const base::string16& new_text);
 
   // Inserts |new_text| at the cursor position, replacing any selected text.
+  // This method is used to handle user input via paths Textfield doesn't
+  // normally handle, so it calls UpdateAfterChange() and notifies observers of
+  // changes.
   void InsertOrReplaceText(const base::string16& new_text);
 
   // Returns the text that is currently selected. Call sites should take care to
@@ -158,6 +163,10 @@ class VIEWS_EXPORT Textfield : public View,
     placeholder_text_color_ = color;
   }
 
+  // Sets whether to indicate the textfield has invalid content.
+  void SetInvalid(bool invalid);
+  bool invalid() const { return invalid_; }
+
   // Get or set the horizontal alignment used for the button from the underlying
   // RenderText object.
   gfx::HorizontalAlignment GetHorizontalAlignment() const;
@@ -209,10 +218,12 @@ class VIEWS_EXPORT Textfield : public View,
   int GetBaseline() const override;
   gfx::Size GetPreferredSize() const override;
   const char* GetClassName() const override;
+  void SetBorder(std::unique_ptr<Border> b) override;
   gfx::NativeCursor GetCursor(const ui::MouseEvent& event) override;
   bool OnMousePressed(const ui::MouseEvent& event) override;
   bool OnMouseDragged(const ui::MouseEvent& event) override;
   void OnMouseReleased(const ui::MouseEvent& event) override;
+  WordLookupClient* GetWordLookupClient() override;
   void OnGestureEvent(ui::GestureEvent* event) override;
   bool AcceleratorPressed(const ui::Accelerator& accelerator) override;
   bool CanHandleAccelerators() const override;
@@ -253,6 +264,11 @@ class VIEWS_EXPORT Textfield : public View,
   bool CanStartDragForView(View* sender,
                            const gfx::Point& press_pt,
                            const gfx::Point& p) override;
+
+  // WordLookupClient overrides:
+  bool GetDecoratedWordAtPoint(const gfx::Point& point,
+                               gfx::DecoratedText* decorated_word,
+                               gfx::Point* baseline_point) override;
 
   // ui::TouchEditable overrides:
   void SelectRect(const gfx::Point& start, const gfx::Point& end) override;
@@ -337,6 +353,9 @@ class VIEWS_EXPORT Textfield : public View,
   // Updates the painted background color.
   void UpdateBackgroundColor();
 
+  // Updates the border per the state of |invalid_|.
+  void UpdateBorder();
+
   // Does necessary updates when the text and/or cursor position changes.
   void UpdateAfterChange(bool text_changed, bool cursor_changed);
 
@@ -395,9 +414,8 @@ class VIEWS_EXPORT Textfield : public View,
   // Pastes the selection clipboard for the specified mouse event.
   void PasteSelectionClipboard(const ui::MouseEvent& event);
 
-  // Called whenever a keypress is unhandled for any reason, including failing
-  // to insert text into a readonly text field.
-  void OnKeypressUnhandled();
+  // Called when editing a textfield fails because the textfield is readonly.
+  void OnEditFailed();
 
   // Returns true if an insertion cursor should be visible (a vertical bar,
   // placed at the point new text will be inserted).
@@ -453,6 +471,10 @@ class VIEWS_EXPORT Textfield : public View,
   // TODO(estade): remove this when Harmony/MD is default.
   SkColor placeholder_text_color_;
 
+  // True when the contents are deemed unacceptable and should be indicated as
+  // such.
+  bool invalid_;
+
   // The accessible name of the text field.
   base::string16 accessible_name_;
 
@@ -503,6 +525,9 @@ class VIEWS_EXPORT Textfield : public View,
   // Tracks if touch editing handles are hidden because user has started
   // scrolling. If |true|, handles are shown after scrolling ends.
   bool touch_handles_hidden_due_to_scroll_;
+
+  // True if this textfield should use a focus ring to indicate focus.
+  bool use_focus_ring_;
 
   // Context menu related members.
   std::unique_ptr<ui::SimpleMenuModel> context_menu_contents_;

@@ -11,6 +11,7 @@
 #include "ash/common/wm_shell.h"
 #include "base/memory/ptr_util.h"
 #include "base/stl_util.h"
+#include "components/arc/arc_bridge_service.h"
 #include "mojo/common/common_type_converters.h"
 #include "ui/arc/notification/arc_custom_notification_item.h"
 #include "ui/arc/notification/arc_notification_item.h"
@@ -62,7 +63,7 @@ void ArcNotificationManager::OnInstanceClosed() {
     auto it = items_.begin();
     std::unique_ptr<ArcNotificationItem> item = std::move(it->second);
     items_.erase(it);
-    item->OnClosedFromAndroid(false /* by_user */);
+    item->OnClosedFromAndroid();
   }
   ready_ = false;
 }
@@ -101,7 +102,7 @@ void ArcNotificationManager::OnNotificationRemoved(const mojo::String& key) {
 
   std::unique_ptr<ArcNotificationItem> item = std::move(it->second);
   items_.erase(it);
-  item->OnClosedFromAndroid(true /* by_user */);
+  item->OnClosedFromAndroid();
 }
 
 void ArcNotificationManager::SendNotificationRemovedFromChrome(
@@ -176,7 +177,7 @@ void ArcNotificationManager::SendNotificationButtonClickedOnChrome(
     return;
   }
 
-  arc::mojom::ArcNotificationEvent command;
+  mojom::ArcNotificationEvent command;
   switch (button_index) {
     case 0:
       command = mojom::ArcNotificationEvent::BUTTON_1_CLICKED;

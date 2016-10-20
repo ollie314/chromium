@@ -104,10 +104,6 @@ void WebRuntimeFeatures::enableDisplayList2dCanvas(bool enable) {
   RuntimeEnabledFeatures::setDisplayList2dCanvasEnabled(enable);
 }
 
-void WebRuntimeFeatures::enableGpuCompositing(bool enable) {
-  RuntimeEnabledFeatures::setGpuCompositingEnabled(enable);
-}
-
 void WebRuntimeFeatures::enableCanvas2dDynamicRenderingModeSwitching(
     bool enable) {
   RuntimeEnabledFeatures::setEnableCanvas2dDynamicRenderingModeSwitchingEnabled(
@@ -136,6 +132,10 @@ void WebRuntimeFeatures::enableFileSystem(bool enable) {
 
 void WebRuntimeFeatures::enableGamepadExtensions(bool enable) {
   RuntimeEnabledFeatures::setGamepadExtensionsEnabled(enable);
+}
+
+void WebRuntimeFeatures::enableGenericSensor(bool enable) {
+  RuntimeEnabledFeatures::setSensorEnabled(enable);
 }
 
 void WebRuntimeFeatures::enableInputMultipleFieldsUI(bool enable) {
@@ -250,6 +250,10 @@ void WebRuntimeFeatures::forceOverlayFullscreenVideo(bool enable) {
   RuntimeEnabledFeatures::setForceOverlayFullscreenVideoEnabled(enable);
 }
 
+void WebRuntimeFeatures::enableSharedArrayBuffer(bool enable) {
+  RuntimeEnabledFeatures::setSharedArrayBufferEnabled(enable);
+}
+
 void WebRuntimeFeatures::enableSharedWorker(bool enable) {
   RuntimeEnabledFeatures::setSharedWorkerEnabled(enable);
 }
@@ -314,6 +318,10 @@ void WebRuntimeFeatures::enableWebFontsInterventionTrigger(bool enable) {
 
 void WebRuntimeFeatures::enableRenderingPipelineThrottling(bool enable) {
   RuntimeEnabledFeatures::setRenderingPipelineThrottlingEnabled(enable);
+}
+
+void WebRuntimeFeatures::enableExpensiveBackgroundTimerThrottling(bool enable) {
+  RuntimeEnabledFeatures::setExpensiveBackgroundTimerThrottlingEnabled(enable);
 }
 
 void WebRuntimeFeatures::enableRootLayerScrolling(bool enable) {

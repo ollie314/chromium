@@ -32,7 +32,6 @@
 #include "content/public/common/sandbox_type.h"
 #include "content/public/common/sandboxed_process_launcher_delegate.h"
 #include "content/public/common/service_names.h"
-#include "ipc/ipc_switches.h"
 #include "mojo/edk/embedder/embedder.h"
 #include "net/base/network_change_notifier.h"
 #include "ppapi/proxy/ppapi_messages.h"
@@ -43,6 +42,7 @@
 #endif  // defined(OS_POSIX)
 
 #if defined(OS_WIN)
+#include "base/win/windows_version.h"
 #include "content/browser/renderer_host/dwrite_font_proxy_message_filter_win.h"
 #include "content/common/sandbox_win.h"
 #include "sandbox/win/src/process_mitigations.h"
@@ -62,10 +62,9 @@ class PpapiPluginSandboxedProcessLauncherDelegate
     : public content::SandboxedProcessLauncherDelegate {
  public:
   PpapiPluginSandboxedProcessLauncherDelegate(bool is_broker,
-                                              const PepperPluginInfo& info,
                                               ChildProcessHost* host)
 #if defined(OS_WIN)
-      : info_(info), is_broker_(is_broker) {
+      : is_broker_(is_broker) {
 #elif defined(OS_MACOSX) || defined(OS_ANDROID)
       : ipc_fd_(host->TakeClientFileDescriptor()) {
 #elif defined(OS_POSIX)
@@ -99,16 +98,12 @@ class PpapiPluginSandboxedProcessLauncherDelegate
         GetContentClient()->browser();
 
 #if !defined(NACL_WIN64)
-    if (IsWin32kRendererLockdownEnabled()) {
-      for (const auto& mime_type : info_.mime_types) {
-        if (browser_client->IsWin32kLockdownEnabledForMimeType(
-                mime_type.mime_type)) {
-          result = AddWin32kLockdownPolicy(policy, true);
-          if (result != sandbox::SBOX_ALL_OK)
-            return false;
-          break;
-        }
-      }
+    // We don't support PPAPI win32k lockdown prior to Windows 10.
+    if (base::win::GetVersion() >= base::win::VERSION_WIN10 &&
+        IsWin32kLockdownEnabled()) {
+      result = AddWin32kLockdownPolicy(policy, true);
+      if (result != sandbox::SBOX_ALL_OK)
+        return false;
     }
 #endif
     const base::string16& sid =
@@ -140,9 +135,6 @@ class PpapiPluginSandboxedProcessLauncherDelegate
   }
 
  private:
-#if defined(OS_WIN)
-  const PepperPluginInfo& info_;
-#endif // OS_WIN
 #if defined(OS_POSIX)
   base::ScopedFD ipc_fd_;
 #endif  // OS_POSIX
@@ -331,7 +323,7 @@ PpapiPluginProcessHost::PpapiPluginProcessHost(
   permissions_ = ppapi::PpapiPermissions::GetForCommandLine(base_permissions);
 
   process_.reset(new BrowserChildProcessHostImpl(
-      PROCESS_TYPE_PPAPI_PLUGIN, this, kPluginMojoApplicationName));
+      PROCESS_TYPE_PPAPI_PLUGIN, this, kPluginServiceName));
 
   host_impl_.reset(new BrowserPpapiHostImpl(this, permissions_, info.name,
                                             info.path, profile_data_directory,
@@ -354,7 +346,7 @@ PpapiPluginProcessHost::PpapiPluginProcessHost(
 
 PpapiPluginProcessHost::PpapiPluginProcessHost() : is_broker_(true) {
   process_.reset(new BrowserChildProcessHostImpl(
-      PROCESS_TYPE_PPAPI_BROKER, this, kPluginMojoApplicationName));
+      PROCESS_TYPE_PPAPI_BROKER, this, kPluginServiceName));
 
   ppapi::PpapiPermissions permissions;  // No permissions.
   // The plugin name, path and profile data directory shouldn't be needed for
@@ -455,12 +447,9 @@ bool PpapiPluginProcessHost::Init(const PepperPluginInfo& info) {
   // On posix, never use the zygote for the broker. Also, only use the zygote if
   // we are not using a plugin launcher - having a plugin launcher means we need
   // to use another process instead of just forking the zygote.
-  process_->Launch(
-      new PpapiPluginSandboxedProcessLauncherDelegate(is_broker_,
-                                                      info,
-                                                      process_->GetHost()),
-      cmd_line,
-      true);
+  process_->Launch(new PpapiPluginSandboxedProcessLauncherDelegate(
+                       is_broker_, process_->GetHost()),
+                   cmd_line, nullptr, true);
   return true;
 }
 

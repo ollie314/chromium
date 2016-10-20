@@ -10,6 +10,7 @@
 
 #include "ash/common/ash_switches.h"
 #include "ash/common/system/tray/system_tray_delegate.h"
+#include "ash/common/test/test_system_tray_delegate.h"
 #include "ash/common/test/test_volume_control_delegate.h"
 #include "ash/common/wm/overview/window_selector_controller.h"
 #include "ash/common/wm_shell.h"
@@ -17,7 +18,6 @@
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/test/display_manager_test_api.h"
-#include "ash/test/test_system_tray_delegate.h"
 #include "base/command_line.h"
 #include "base/test/simple_test_tick_clock.h"
 #include "base/test/user_action_tester.h"
@@ -82,7 +82,8 @@ class MaximizeModeControllerTest : public test::AshTestBase {
 
     // Set the first display to be the internal display for the accelerometer
     // screen rotation tests.
-    test::DisplayManagerTestApi().SetFirstDisplayAsInternalDisplay();
+    test::DisplayManagerTestApi(Shell::GetInstance()->display_manager())
+        .SetFirstDisplayAsInternalDisplay();
   }
 
   void TearDown() override {
@@ -489,7 +490,8 @@ TEST_F(MaximizeModeControllerTest, NoMaximizeModeWithDisabledInternalDisplay) {
   DisplayManager* display_manager = Shell::GetInstance()->display_manager();
   UpdateDisplay("200x200, 200x200");
   const int64_t internal_display_id =
-      test::DisplayManagerTestApi().SetFirstDisplayAsInternalDisplay();
+      test::DisplayManagerTestApi(Shell::GetInstance()->display_manager())
+          .SetFirstDisplayAsInternalDisplay();
   ASSERT_FALSE(IsMaximizeModeStarted());
 
   OpenLidToAngle(270.0f);

@@ -121,6 +121,8 @@ class CORE_EXPORT InspectorDOMAgent final
   void enable(ErrorString*) override;
   void disable(ErrorString*) override;
   void getDocument(ErrorString*,
+                   const Maybe<int>& depth,
+                   const Maybe<bool>& traverseFrames,
                    std::unique_ptr<protocol::DOM::Node>* root) override;
   void collectClassNamesFromSubtree(
       ErrorString*,
@@ -128,7 +130,8 @@ class CORE_EXPORT InspectorDOMAgent final
       std::unique_ptr<protocol::Array<String>>* classNames) override;
   void requestChildNodes(ErrorString*,
                          int nodeId,
-                         const Maybe<int>& depth) override;
+                         const Maybe<int>& depth,
+                         const Maybe<bool>& traverseFrames) override;
   void querySelector(ErrorString*,
                      int nodeId,
                      const String& selector,
@@ -281,8 +284,9 @@ class CORE_EXPORT InspectorDOMAgent final
 
   InspectorHistory* history() { return m_history.get(); }
 
-  // We represent embedded doms as a part of the same hierarchy. Hence we treat children of frame owners differently.
-  // We also skip whitespace text nodes conditionally. Following methods encapsulate these specifics.
+  // We represent embedded doms as a part of the same hierarchy. Hence we treat
+  // children of frame owners differently.  We also skip whitespace text nodes
+  // conditionally. Following methods encapsulate these specifics.
   static Node* innerFirstChild(Node*);
   static Node* innerNextSibling(Node*);
   static Node* innerPreviousSibling(Node*);
@@ -293,6 +297,7 @@ class CORE_EXPORT InspectorDOMAgent final
   Node* assertNode(ErrorString*, int nodeId);
   Element* assertElement(ErrorString*, int nodeId);
   Document* assertDocument(ErrorString*, int nodeId);
+  Document* document() const { return m_document.get(); }
 
  private:
   void setDocument(Document*);
@@ -317,18 +322,22 @@ class CORE_EXPORT InspectorDOMAgent final
   Element* assertEditableElement(ErrorString*, int nodeId);
 
   int pushNodePathToFrontend(Node*, NodeToIdMap* nodeMap);
-  void pushChildNodesToFrontend(int nodeId, int depth = 1);
+  void pushChildNodesToFrontend(int nodeId,
+                                int depth = 1,
+                                bool traverseFrames = false);
 
   void invalidateFrameOwnerElement(LocalFrame*);
 
   std::unique_ptr<protocol::DOM::Node> buildObjectForNode(Node*,
                                                           int depth,
+                                                          bool traverseFrames,
                                                           NodeToIdMap*);
   std::unique_ptr<protocol::Array<String>> buildArrayForElementAttributes(
       Element*);
   std::unique_ptr<protocol::Array<protocol::DOM::Node>>
   buildArrayForContainerChildren(Node* container,
                                  int depth,
+                                 bool traverseFrames,
                                  NodeToIdMap* nodesMap);
   std::unique_ptr<protocol::Array<protocol::DOM::Node>>
   buildArrayForPseudoElements(Element*, NodeToIdMap* nodesMap);

@@ -24,6 +24,7 @@ using UpdateStatus = RequestQueueStore::UpdateStatus;
 namespace {
 const int64_t kRequestId = 42;
 const int64_t kRequestId2 = 44;
+const int64_t kRequestId3 = 47;
 const GURL kUrl("http://example.com");
 const GURL kUrl2("http://another-example.com");
 const ClientId kClientId("bookmark", "1234");
@@ -58,22 +59,11 @@ class RequestQueueStoreTestBase : public testing::Test {
   void AddOrUpdateDone(UpdateStatus result);
   void AddRequestDone(ItemActionStatus status);
   void UpdateRequestDone(std::unique_ptr<UpdateRequestsResult> result);
-  // Callback used for remove requests.
-  void RemoveDone(const RequestQueue::UpdateMultipleRequestResults& results,
-                  std::vector<std::unique_ptr<SavePageRequest>> requests);
   // Callback used for reset.
   void ResetDone(bool result);
 
   LastResult last_result() const { return last_result_; }
   UpdateStatus last_update_status() const { return last_update_status_; }
-  const RequestQueue::UpdateMultipleRequestResults&
-  last_multiple_update_results() const {
-    return last_multiple_update_results_;
-  }
-  const RequestQueue::UpdateMultipleRequestResults& last_remove_results()
-      const {
-    return last_remove_results_;
-  }
   const std::vector<std::unique_ptr<SavePageRequest>>& last_requests() const {
     return last_requests_;
   }
@@ -91,8 +81,6 @@ class RequestQueueStoreTestBase : public testing::Test {
   UpdateStatus last_update_status_;
   ItemActionStatus last_add_status_;
   std::unique_ptr<UpdateRequestsResult> last_update_result_;
-  RequestQueue::UpdateMultipleRequestResults last_multiple_update_results_;
-  RequestQueue::UpdateMultipleRequestResults last_remove_results_;
   std::vector<std::unique_ptr<SavePageRequest>> last_requests_;
 
   scoped_refptr<base::TestSimpleTaskRunner> task_runner_;
@@ -121,7 +109,6 @@ void RequestQueueStoreTestBase::ClearResults() {
   last_result_ = LastResult::kNone;
   last_update_status_ = UpdateStatus::FAILED;
   last_add_status_ = ItemActionStatus::NOT_FOUND;
-  last_remove_results_.clear();
   last_requests_.clear();
   last_update_result_.reset(nullptr);
 }
@@ -144,13 +131,6 @@ void RequestQueueStoreTestBase::AddRequestDone(ItemActionStatus status) {
 void RequestQueueStoreTestBase::UpdateRequestDone(
     std::unique_ptr<UpdateRequestsResult> result) {
   last_update_result_ = std::move(result);
-}
-
-void RequestQueueStoreTestBase::RemoveDone(
-    const RequestQueue::UpdateMultipleRequestResults& results,
-    std::vector<std::unique_ptr<SavePageRequest>> requests) {
-  last_remove_results_ = results;
-  last_requests_ = std::move(requests);
 }
 
 void RequestQueueStoreTestBase::ResetDone(bool result) {
@@ -217,6 +197,65 @@ TYPED_TEST(RequestQueueStoreTest, GetRequestsEmpty) {
   this->PumpLoop();
   ASSERT_EQ(LastResult::kTrue, this->last_result());
   ASSERT_TRUE(this->last_requests().empty());
+}
+
+TYPED_TEST(RequestQueueStoreTest, GetRequestsByIds) {
+  std::unique_ptr<RequestQueueStore> store(this->BuildStore());
+  base::Time creation_time = base::Time::Now();
+  SavePageRequest request1(kRequestId, kUrl, kClientId, creation_time,
+                           kUserRequested);
+  store->AddRequest(request1,
+                    base::Bind(&RequestQueueStoreTestBase::AddRequestDone,
+                               base::Unretained(this)));
+  SavePageRequest request2(kRequestId2, kUrl2, kClientId2, creation_time,
+                           kUserRequested);
+  store->AddRequest(request2,
+                    base::Bind(&RequestQueueStoreTestBase::AddRequestDone,
+                               base::Unretained(this)));
+  this->PumpLoop();
+  this->ClearResults();
+
+  std::vector<int64_t> request_ids{kRequestId, kRequestId2};
+  store->GetRequestsByIds(
+      request_ids, base::Bind(&RequestQueueStoreTestBase::UpdateRequestDone,
+                              base::Unretained(this)));
+
+  ASSERT_FALSE(this->last_update_result());
+  this->PumpLoop();
+  ASSERT_TRUE(this->last_update_result());
+  EXPECT_EQ(2UL, this->last_update_result()->item_statuses.size());
+  EXPECT_EQ(kRequestId, this->last_update_result()->item_statuses[0].first);
+  EXPECT_EQ(ItemActionStatus::SUCCESS,
+            this->last_update_result()->item_statuses[0].second);
+  EXPECT_EQ(kRequestId2, this->last_update_result()->item_statuses[1].first);
+  EXPECT_EQ(ItemActionStatus::SUCCESS,
+            this->last_update_result()->item_statuses[1].second);
+  EXPECT_EQ(2UL, this->last_update_result()->updated_items.size());
+  EXPECT_EQ(request1, this->last_update_result()->updated_items.at(0));
+  EXPECT_EQ(request2, this->last_update_result()->updated_items.at(1));
+  this->ClearResults();
+
+  request_ids.clear();
+  request_ids.push_back(kRequestId);
+  request_ids.push_back(kRequestId3);
+  request_ids.push_back(kRequestId);
+
+  store->GetRequestsByIds(
+      request_ids, base::Bind(&RequestQueueStoreTestBase::UpdateRequestDone,
+                              base::Unretained(this)));
+
+  ASSERT_FALSE(this->last_update_result());
+  this->PumpLoop();
+  ASSERT_TRUE(this->last_update_result());
+  EXPECT_EQ(2UL, this->last_update_result()->item_statuses.size());
+  EXPECT_EQ(kRequestId, this->last_update_result()->item_statuses[0].first);
+  EXPECT_EQ(ItemActionStatus::SUCCESS,
+            this->last_update_result()->item_statuses[0].second);
+  EXPECT_EQ(kRequestId3, this->last_update_result()->item_statuses[1].first);
+  EXPECT_EQ(ItemActionStatus::NOT_FOUND,
+            this->last_update_result()->item_statuses[1].second);
+  EXPECT_EQ(1UL, this->last_update_result()->updated_items.size());
+  EXPECT_EQ(request1, this->last_update_result()->updated_items.at(0));
 }
 
 TYPED_TEST(RequestQueueStoreTest, AddRequest) {
@@ -331,18 +370,23 @@ TYPED_TEST(RequestQueueStoreTest, RemoveRequests) {
   this->ClearResults();
 
   std::vector<int64_t> request_ids{kRequestId, kRequestId2};
-  store->RemoveRequests(request_ids,
-                        base::Bind(&RequestQueueStoreTestBase::RemoveDone,
-                                   base::Unretained(this)));
-  ASSERT_EQ(0ul, this->last_remove_results().size());
+  store->RemoveRequests(
+      request_ids, base::Bind(&RequestQueueStoreTestBase::UpdateRequestDone,
+                              base::Unretained(this)));
+
+  ASSERT_FALSE(this->last_update_result());
   this->PumpLoop();
-  ASSERT_EQ(2ul, this->last_remove_results().size());
-  ASSERT_EQ(RequestQueue::UpdateRequestResult::SUCCESS,
-            this->last_remove_results().at(0).second);
-  ASSERT_EQ(RequestQueue::UpdateRequestResult::SUCCESS,
-            this->last_remove_results().at(1).second);
-  ASSERT_EQ(2UL, this->last_requests().size());
-  ASSERT_EQ(kRequestId, this->last_requests().at(0)->request_id());
+  ASSERT_TRUE(this->last_update_result());
+  EXPECT_EQ(2UL, this->last_update_result()->item_statuses.size());
+  EXPECT_EQ(kRequestId, this->last_update_result()->item_statuses[0].first);
+  EXPECT_EQ(ItemActionStatus::SUCCESS,
+            this->last_update_result()->item_statuses[0].second);
+  EXPECT_EQ(kRequestId2, this->last_update_result()->item_statuses[1].first);
+  EXPECT_EQ(ItemActionStatus::SUCCESS,
+            this->last_update_result()->item_statuses[1].second);
+  EXPECT_EQ(2UL, this->last_update_result()->updated_items.size());
+  EXPECT_EQ(request1, this->last_update_result()->updated_items.at(0));
+  EXPECT_EQ(request2, this->last_update_result()->updated_items.at(1));
   this->ClearResults();
 
   store->GetRequests(base::Bind(&RequestQueueStoreTestBase::GetRequestsDone,
@@ -353,19 +397,22 @@ TYPED_TEST(RequestQueueStoreTest, RemoveRequests) {
   this->ClearResults();
 
   // Try to remove a request that is not in the queue.
-  store->RemoveRequests(request_ids,
-                        base::Bind(&RequestQueueStoreTestBase::RemoveDone,
-                                   base::Unretained(this)));
-  ASSERT_EQ(LastResult::kNone, this->last_result());
+  store->RemoveRequests(
+      request_ids, base::Bind(&RequestQueueStoreTestBase::UpdateRequestDone,
+                              base::Unretained(this)));
+  ASSERT_FALSE(this->last_update_result());
   this->PumpLoop();
-  ASSERT_EQ(2ul, this->last_remove_results().size());
+  ASSERT_TRUE(this->last_update_result());
   // When requests are missing, we expect the results to say so, but since they
   // are missing, no requests should have been returned.
-  ASSERT_EQ(RequestQueue::UpdateRequestResult::REQUEST_DOES_NOT_EXIST,
-            this->last_remove_results().at(0).second);
-  ASSERT_EQ(RequestQueue::UpdateRequestResult::REQUEST_DOES_NOT_EXIST,
-            this->last_remove_results().at(1).second);
-  ASSERT_EQ(0UL, this->last_requests().size());
+  EXPECT_EQ(2UL, this->last_update_result()->item_statuses.size());
+  EXPECT_EQ(kRequestId, this->last_update_result()->item_statuses[0].first);
+  EXPECT_EQ(ItemActionStatus::NOT_FOUND,
+            this->last_update_result()->item_statuses[0].second);
+  EXPECT_EQ(kRequestId2, this->last_update_result()->item_statuses[1].first);
+  EXPECT_EQ(ItemActionStatus::NOT_FOUND,
+            this->last_update_result()->item_statuses[1].second);
+  EXPECT_EQ(0UL, this->last_update_result()->updated_items.size());
 }
 
 TYPED_TEST(RequestQueueStoreTest, ResetStore) {

@@ -44,7 +44,7 @@ class OffscreenBrowserCompositorOutputSurface
                const gfx::ColorSpace& color_space,
                bool alpha) override;
   void BindFramebuffer() override;
-  void SwapBuffers(cc::CompositorFrame frame) override;
+  void SwapBuffers(cc::OutputSurfaceFrame frame) override;
   bool IsDisplayedAsOverlayPlane() const override;
   unsigned GetOverlayTextureId() const override;
   bool SurfaceIsSuspendForRecycle() const override;
@@ -52,14 +52,11 @@ class OffscreenBrowserCompositorOutputSurface
 
   // BrowserCompositorOutputSurface
   void OnReflectorChanged() override;
-  void OnGpuSwapBuffersCompleted(
-      const std::vector<ui::LatencyInfo>& latency_info,
-      gfx::SwapResult result,
-      const gpu::GpuProcessHostedCALayerTreeParamsMac* params_mac) override{};
 #if defined(OS_MACOSX)
   void SetSurfaceSuspendedForRecycle(bool suspended) override {};
 #endif
 
+  gfx::Size reshape_size_;
   uint32_t fbo_ = 0;
   bool reflector_changed_ = false;
   std::unique_ptr<ReflectorTexture> reflector_texture_;

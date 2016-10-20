@@ -240,7 +240,9 @@ void DOMSelection::collapseToEnd(ExceptionState& exceptionState) {
   // no longer performs synchronous layout by itself.
   frame()->document()->updateStyleAndLayoutIgnorePendingStylesheets();
 
-  frame()->selection().moveTo(selection.end(), SelDefaultAffinity);
+  SelectionInDOMTree::Builder builder;
+  builder.collapse(selection.end());
+  frame()->selection().setSelection(createVisibleSelection(builder.build()));
 }
 
 void DOMSelection::collapseToStart(ExceptionState& exceptionState) {
@@ -262,7 +264,9 @@ void DOMSelection::collapseToStart(ExceptionState& exceptionState) {
   // no longer performs synchronous layout by itself.
   frame()->document()->updateStyleAndLayoutIgnorePendingStylesheets();
 
-  frame()->selection().moveTo(selection.start(), SelDefaultAffinity);
+  SelectionInDOMTree::Builder builder;
+  builder.collapse(selection.start());
+  frame()->selection().setSelection(createVisibleSelection(builder.build()));
 }
 
 void DOMSelection::empty() {
@@ -361,6 +365,10 @@ void DOMSelection::modify(const String& alterString,
     granularity = DocumentBoundary;
   else
     return;
+
+  // TODO(editing-dev): The use of updateStyleAndLayoutIgnorePendingStylesheets
+  // needs to be audited.  See http://crbug.com/590369 for more details.
+  frame()->document()->updateStyleAndLayoutIgnorePendingStylesheets();
 
   frame()->selection().modify(alter, direction, granularity);
 }
@@ -466,7 +474,7 @@ void DOMSelection::addRange(Range* newRange) {
   frame()->document()->updateStyleAndLayoutIgnorePendingStylesheets();
 
   if (selection.isNone()) {
-    selection.setSelectedRange(newRange, VP_DEFAULT_AFFINITY);
+    selection.setSelectedRange(EphemeralRange(newRange), VP_DEFAULT_AFFINITY);
     return;
   }
 
@@ -494,9 +502,11 @@ void DOMSelection::addRange(Range* newRange) {
     return;
   }
 
-  // FIXME: "Merge the ranges if they intersect" is Blink-specific behavior; other browsers supporting discontiguous
-  // selection (obviously) keep each Range added and return it in getRangeAt(). But it's unclear if we can really
-  // do the same, since we don't support discontiguous selection. Further discussions at
+  // FIXME: "Merge the ranges if they intersect" is Blink-specific behavior;
+  // other browsers supporting discontiguous selection (obviously) keep each
+  // Range added and return it in getRangeAt(). But it's unclear if we can
+  // really do the same, since we don't support discontiguous selection. Further
+  // discussions at
   // <https://code.google.com/p/chromium/issues/detail?id=353069>.
 
   Range* start = originalRange->compareBoundaryPoints(
@@ -507,9 +517,8 @@ void DOMSelection::addRange(Range* newRange) {
                                                     ASSERT_NO_EXCEPTION) < 0
                    ? newRange
                    : originalRange;
-  Range* merged = Range::create(originalRange->startContainer()->document(),
-                                start->startContainer(), start->startOffset(),
-                                end->endContainer(), end->endOffset());
+  const EphemeralRange merged =
+      EphemeralRange(start->startPosition(), end->endPosition());
   TextAffinity affinity = selection.selection().affinity();
   selection.setSelectedRange(merged, affinity);
 }
@@ -522,6 +531,11 @@ void DOMSelection::deleteFromDocument() {
 
   if (selection.isNone())
     return;
+
+  // TODO(xiaochengh): The use of updateStyleAndLayoutIgnorePendingStylesheets
+  // needs to be audited.  See http://crbug.com/590369 for more details.
+  // |VisibleSelection::toNormalizedEphemeralRange| requires clean layout.
+  frame()->document()->updateStyleAndLayoutIgnorePendingStylesheets();
 
   Range* selectedRange =
       createRange(selection.selection().toNormalizedEphemeralRange());
@@ -548,6 +562,12 @@ bool DOMSelection::containsNode(const Node* n, bool allowPartial) const {
     return false;
 
   unsigned nodeIndex = n->nodeIndex();
+
+  // TODO(xiaochengh): The use of updateStyleAndLayoutIgnorePendingStylesheets
+  // needs to be audited.  See http://crbug.com/590369 for more details.
+  // |VisibleSelection::toNormalizedEphemeralRange| requires clean layout.
+  frame()->document()->updateStyleAndLayoutIgnorePendingStylesheets();
+
   const EphemeralRange selectedRange =
       selection.selection().toNormalizedEphemeralRange();
 

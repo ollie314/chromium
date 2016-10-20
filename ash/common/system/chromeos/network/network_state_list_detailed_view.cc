@@ -9,13 +9,13 @@
 
 #include "ash/common/ash_constants.h"
 #include "ash/common/material_design/material_design_controller.h"
-#include "ash/common/shell_window_ids.h"
 #include "ash/common/system/chromeos/network/tray_network_state_observer.h"
 #include "ash/common/system/chromeos/network/vpn_list_view.h"
 #include "ash/common/system/networking_config_delegate.h"
 #include "ash/common/system/tray/fixed_sized_image_view.h"
 #include "ash/common/system/tray/fixed_sized_scroll_view.h"
 #include "ash/common/system/tray/hover_highlight_view.h"
+#include "ash/common/system/tray/system_menu_button.h"
 #include "ash/common/system/tray/system_tray.h"
 #include "ash/common/system/tray/system_tray_controller.h"
 #include "ash/common/system/tray/system_tray_delegate.h"
@@ -28,6 +28,7 @@
 #include "ash/common/wm_root_window_controller.h"
 #include "ash/common/wm_shell.h"
 #include "ash/common/wm_window.h"
+#include "ash/public/cpp/shell_window_ids.h"
 #include "base/command_line.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
@@ -51,6 +52,7 @@
 #include "ui/chromeos/network/network_icon_animation.h"
 #include "ui/chromeos/network/network_info.h"
 #include "ui/chromeos/network/network_list.h"
+#include "ui/chromeos/network/network_list_md.h"
 #include "ui/chromeos/network/network_list_view_base.h"
 #include "ui/chromeos/resources/grit/ui_chromeos_resources.h"
 #include "ui/compositor/layer.h"
@@ -318,6 +320,9 @@ NetworkStateListDetailedView::NetworkStateListDetailedView(
       other_mobile_(nullptr),
       settings_(nullptr),
       proxy_settings_(nullptr),
+      info_button_md_(nullptr),
+      settings_button_md_(nullptr),
+      proxy_settings_button_md_(nullptr),
       info_bubble_(nullptr),
       scanning_throbber_(nullptr) {
   if (list_type == LIST_TYPE_VPN) {
@@ -325,7 +330,13 @@ NetworkStateListDetailedView::NetworkStateListDetailedView(
     network_list_view_.reset(new VPNListView(this));
   } else {
     // Use a common class to list any other network types.
-    network_list_view_.reset(new ui::NetworkListView(this));
+    // TODO(varkha): NetworkListViewMd is a temporary fork of NetworkListView.
+    // NetworkListView will go away when Material Design becomes default.
+    // See crbug.com/614453.
+    if (MaterialDesignController::IsSystemTrayMenuMaterial())
+      network_list_view_.reset(new ui::NetworkListViewMd(this));
+    else
+      network_list_view_.reset(new ui::NetworkListView(this));
   }
 }
 
@@ -353,10 +364,14 @@ void NetworkStateListDetailedView::Init() {
   other_mobile_ = nullptr;
   settings_ = nullptr;
   proxy_settings_ = nullptr;
+  info_button_md_ = nullptr;
+  settings_button_md_ = nullptr;
+  proxy_settings_button_md_ = nullptr;
   scanning_throbber_ = nullptr;
 
   CreateScrollableList();
-  CreateNetworkExtra();
+  if (!MaterialDesignController::IsSystemTrayMenuMaterial())
+    CreateNetworkExtra();
   CreateTitleRow(IDS_ASH_STATUS_TRAY_NETWORK);
 
   network_list_view_->set_container(scroll_content());
@@ -373,8 +388,20 @@ NetworkStateListDetailedView::GetViewType() const {
 
 void NetworkStateListDetailedView::HandleButtonPressed(views::Button* sender,
                                                        const ui::Event& event) {
-  if (MaterialDesignController::IsSystemTrayMenuMaterial())
+  if (MaterialDesignController::IsSystemTrayMenuMaterial()) {
+    if (sender == info_button_md_) {
+      ToggleInfoBubble();
+      return;
+    } else if (sender == settings_button_md_) {
+      ShowSettings();
+    } else if (sender == proxy_settings_button_md_) {
+      WmShell::Get()->system_tray_controller()->ShowProxySettings();
+    }
+
+    if (owner()->system_tray())
+      owner()->system_tray()->CloseSystemBubble();
     return;
+  }
 
   if (sender == info_icon_) {
     ToggleInfoBubble();
@@ -405,9 +432,7 @@ void NetworkStateListDetailedView::HandleButtonPressed(views::Button* sender,
     delegate->ShowOtherNetworkDialog(shill::kTypeCellular);
     close_bubble = true;
   } else if (sender == other_wifi_) {
-    WmShell::Get()->RecordUserMetricsAction(
-        UMA_STATUS_AREA_NETWORK_JOIN_OTHER_CLICKED);
-    delegate->ShowOtherNetworkDialog(shill::kTypeWifi);
+    OnOtherWifiClicked();
     close_bubble = true;
   } else {
     NOTREACHED();
@@ -435,8 +460,8 @@ void NetworkStateListDetailedView::HandleViewClicked(views::View* view) {
         list_type_ == LIST_TYPE_VPN
             ? UMA_STATUS_AREA_SHOW_NETWORK_CONNECTION_DETAILS
             : UMA_STATUS_AREA_SHOW_VPN_CONNECTION_DETAILS);
-    WmShell::Get()->system_tray_delegate()->ShowNetworkSettingsForGuid(
-        network ? network->guid() : "");
+    WmShell::Get()->system_tray_controller()->ShowNetworkSettings(
+        network ? network->guid() : std::string());
   } else {
     WmShell::Get()->RecordUserMetricsAction(
         list_type_ == LIST_TYPE_VPN
@@ -448,8 +473,35 @@ void NetworkStateListDetailedView::HandleViewClicked(views::View* view) {
 }
 
 void NetworkStateListDetailedView::CreateExtraTitleRowButtons() {
-  if (MaterialDesignController::IsSystemTrayMenuMaterial())
+  if (MaterialDesignController::IsSystemTrayMenuMaterial()) {
+    if (login_ == LoginStatus::LOCKED)
+      return;
+
+    info_button_md_ = new SystemMenuButton(this, kSystemMenuInfoIcon,
+                                           IDS_ASH_STATUS_TRAY_NETWORK_INFO);
+    title_row()->AddViewToTitleRow(info_button_md_);
+
+    if (login_ != LoginStatus::NOT_LOGGED_IN) {
+      settings_button_md_ = new SystemMenuButton(
+          this, kSystemMenuSettingsIcon, IDS_ASH_STATUS_TRAY_NETWORK_SETTINGS);
+
+      // Allow the user to access settings only if user is logged in
+      // and showing settings is allowed. There are situations (supervised user
+      // creation flow) when session is started but UI flow continues within
+      // login UI, i.e., no browser window is yet avaialable.
+      if (!WmShell::Get()->system_tray_delegate()->ShouldShowSettings())
+        settings_button_md_->SetState(views::Button::STATE_DISABLED);
+
+      title_row()->AddViewToTitleRow(settings_button_md_);
+    } else {
+      proxy_settings_button_md_ =
+          new SystemMenuButton(this, kSystemMenuSettingsIcon,
+                               IDS_ASH_STATUS_TRAY_NETWORK_PROXY_SETTINGS);
+      title_row()->AddViewToTitleRow(proxy_settings_button_md_);
+    }
+
     return;
+  }
 
   if (list_type_ != LIST_TYPE_VPN) {
     NetworkStateHandler* network_state_handler =
@@ -513,7 +565,7 @@ void NetworkStateListDetailedView::ShowSettings() {
   WmShell::Get()->RecordUserMetricsAction(
       list_type_ == LIST_TYPE_VPN ? UMA_STATUS_AREA_VPN_SETTINGS_OPENED
                                   : UMA_STATUS_AREA_NETWORK_SETTINGS_OPENED);
-  WmShell::Get()->system_tray_delegate()->ShowNetworkSettingsForGuid("");
+  WmShell::Get()->system_tray_controller()->ShowNetworkSettings(std::string());
 }
 
 void NetworkStateListDetailedView::CreateNetworkExtra() {
@@ -757,7 +809,10 @@ void NetworkStateListDetailedView::ToggleInfoBubble() {
   if (ResetInfoBubble())
     return;
 
-  info_bubble_ = new InfoBubble(info_icon_, CreateNetworkInfoView(), this);
+  info_bubble_ = new InfoBubble(
+      MaterialDesignController::IsSystemTrayMenuMaterial() ? info_button_md_
+                                                           : info_icon_,
+      CreateNetworkInfoView(), this);
   views::BubbleDialogDelegateView::CreateBubble(info_bubble_)->Show();
   info_bubble_->NotifyAccessibilityEvent(ui::AX_EVENT_ALERT, false);
 }
@@ -935,6 +990,13 @@ views::Label* NetworkStateListDetailedView::CreateInfoLabel() {
 
 void NetworkStateListDetailedView::OnNetworkEntryClicked(views::View* sender) {
   HandleViewClicked(sender);
+}
+
+void NetworkStateListDetailedView::OnOtherWifiClicked() {
+  WmShell::Get()->RecordUserMetricsAction(
+      UMA_STATUS_AREA_NETWORK_JOIN_OTHER_CLICKED);
+  SystemTrayDelegate* delegate = WmShell::Get()->system_tray_delegate();
+  delegate->ShowOtherNetworkDialog(shill::kTypeWifi);
 }
 
 void NetworkStateListDetailedView::RelayoutScrollList() {

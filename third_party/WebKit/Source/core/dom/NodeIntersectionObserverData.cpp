@@ -23,7 +23,9 @@ IntersectionObservation* NodeIntersectionObserverData::getObservationFor(
 
 void NodeIntersectionObserverData::addObservation(
     IntersectionObservation& observation) {
-  m_intersectionObservations.add(&observation.observer(), &observation);
+  m_intersectionObservations.add(
+      TraceWrapperMember<IntersectionObserver>(this, &observation.observer()),
+      &observation);
 }
 
 void NodeIntersectionObserverData::removeObservation(

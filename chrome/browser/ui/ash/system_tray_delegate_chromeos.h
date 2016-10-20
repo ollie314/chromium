@@ -79,7 +79,6 @@ class SystemTrayDelegateChromeOS
 
   // Overridden from ash::SystemTrayDelegate:
   void Initialize() override;
-  bool GetTrayVisibilityOnStartup() override;
   ash::LoginStatus GetUserLoginStatus() const override;
   std::string GetEnterpriseDomain() const override;
   base::string16 GetEnterpriseMessage() const override;
@@ -91,8 +90,6 @@ class SystemTrayDelegateChromeOS
   void GetSystemUpdateInfo(ash::UpdateInfo* info) const override;
   bool ShouldShowSettings() override;
   void ShowSetTimeDialog() override;
-  void ShowNetworkSettingsForGuid(const std::string& guid) override;
-  bool ShouldShowDisplayNotification() override;
   void ShowEnterpriseInfo() override;
   void ShowUserLogin() override;
   void SignOut() override;
@@ -264,7 +261,6 @@ class SystemTrayDelegateChromeOS
   std::unique_ptr<PrefChangeRegistrar> user_pref_registrar_;
   Profile* user_profile_;
   int search_key_mapped_to_;
-  bool screen_locked_;
   bool have_session_start_time_;
   base::TimeTicks session_start_time_;
   bool have_session_length_limit_;

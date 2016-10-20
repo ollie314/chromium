@@ -26,6 +26,14 @@ Polymer({
   behaviors: [SiteSettingsBehavior, WebUIListenerBehavior],
 
   properties: {
+    /** @private */
+    enableSiteSettings_: {
+      type: Boolean,
+      value: function() {
+        return loadTimeData.getBoolean('enableSiteSettings');
+      },
+    },
+
     /**
      * The site that was selected by the user in the dropdown list.
      * @type {SiteException}
@@ -418,6 +426,8 @@ Polymer({
    * @private
    */
   onOriginTap_: function(event) {
+    if (!this.enableSiteSettings_)
+      return;
     this.selectedSite = event.model.item;
     settings.navigateTo(settings.Route.SITE_SETTINGS_SITE_DETAILS,
         new URLSearchParams('site=' + this.selectedSite.origin));
@@ -425,15 +435,15 @@ Polymer({
 
   /**
    * A handler for activating one of the menu action items.
-   * @param {!{model: !{item: !{origin: string}},
-   *           detail: !{selected: string}}} event
+   * @param {!{model: !{item: !{origin: string}}}} event
+   * @param {string} action The permission to set (Allow, Block, SessionOnly,
+   *     etc).
    * @private
    */
-  onActionMenuIronActivate_: function(event) {
+  onActionMenuActivate_: function(event, action) {
     var origin = event.model.item.origin;
     var incognito = event.model.item.incognito;
     var embeddingOrigin = event.model.item.embeddingOrigin;
-    var action = event.detail.selected;
     if (action == settings.PermissionValues.DEFAULT) {
       this.browserProxy.resetCategoryPermissionForOrigin(
           origin, embeddingOrigin, this.category, incognito);
@@ -443,27 +453,24 @@ Polymer({
     }
   },
 
-  /**
-   * Returns the appropriate header value for display.
-   * @param {Array<string>} siteList The list of all sites to display for this
-   *     category subtype.
-   * @param {boolean} toggleState The state of the global toggle for this
-   *     category.
-   * @private
-   */
-  computeSiteListHeader_: function(siteList, toggleState) {
-    var title = '';
-    if (this.categorySubtype == settings.PermissionValues.ALLOW) {
-      title = loadTimeData.getString(
-          toggleState ? 'siteSettingsAllow' : 'siteSettingsExceptions');
-    } else if (this.categorySubtype == settings.PermissionValues.BLOCK) {
-      title = loadTimeData.getString('siteSettingsBlock');
-    } else if (this.categorySubtype == settings.PermissionValues.SESSION_ONLY) {
-      title = loadTimeData.getString('siteSettingsSessionOnly');
-    } else {
-      return title;
-    }
-    return loadTimeData.getStringF('titleAndCount', title, siteList.length);
+  /** @private */
+  onAllowTap_: function(event) {
+    this.onActionMenuActivate_(event, settings.PermissionValues.ALLOW);
+  },
+
+  /** @private */
+  onBlockTap_: function(event) {
+    this.onActionMenuActivate_(event, settings.PermissionValues.BLOCK);
+  },
+
+  /** @private */
+  onSessionOnlyTap_: function(event) {
+    this.onActionMenuActivate_(event, settings.PermissionValues.SESSION_ONLY);
+  },
+
+  /** @private */
+  onResetTap_: function(event) {
+    this.onActionMenuActivate_(event, settings.PermissionValues.DEFAULT);
   },
 
   /**

@@ -165,7 +165,6 @@ class CONTENT_EXPORT RenderWidgetHostImpl : public RenderWidgetHost,
   int GetRoutingID() const override;
   RenderWidgetHostViewBase* GetView() const override;
   bool IsLoading() const override;
-  void ResizeRectChanged(const gfx::Rect& new_rect) override;
   void RestartHangMonitorTimeout() override;
   void DisableHangMonitorForTesting() override;
   void SetIgnoreInputEvents(bool ignore_input_events) override;
@@ -293,9 +292,9 @@ class CONTENT_EXPORT RenderWidgetHostImpl : public RenderWidgetHost,
   // Starts a hang monitor timeout. If there's already a hang monitor timeout
   // the new one will only fire if it has a shorter delay than the time
   // left on the existing timeouts.
-  void StartHangMonitorTimeout(
-      base::TimeDelta delay,
-      RenderWidgetHostDelegate::RendererUnresponsiveType hang_monitor_reason);
+  void StartHangMonitorTimeout(base::TimeDelta delay,
+                               blink::WebInputEvent::Type event_type,
+                               RendererUnresponsiveType hang_monitor_reason);
 
   // Stops all existing hang monitor timeouts and assumes the renderer is
   // responsive.
@@ -324,7 +323,7 @@ class CONTENT_EXPORT RenderWidgetHostImpl : public RenderWidgetHost,
       const ui::LatencyInfo& ui_latency);
   virtual void ForwardWheelEventWithLatencyInfo(
       const blink::WebMouseWheelEvent& wheel_event,
-      const ui::LatencyInfo& ui_latency); // Virtual for testing.
+      const ui::LatencyInfo& ui_latency);  // Virtual for testing.
 
   // Enables/disables touch emulation using mouse event. See TouchEmulator.
   void SetTouchEventEmulationEnabled(
@@ -519,12 +518,25 @@ class CONTENT_EXPORT RenderWidgetHostImpl : public RenderWidgetHost,
   // a new renderer is created.
   void RendererExited(base::TerminationStatus status, int exit_code);
 
+  // Called from a RenderFrameHost when the text selection has changed.
+  void SelectionChanged(const base::string16& text,
+                        uint32_t offset,
+                        const gfx::Range& range);
+
   // Expose increment/decrement of the in-flight event count, so
   // RenderViewHostImpl can account for in-flight beforeunload/unload events.
   int increment_in_flight_event_count() { return ++in_flight_event_count_; }
   int decrement_in_flight_event_count() {
     DCHECK_GT(in_flight_event_count_, 0);
     return --in_flight_event_count_;
+  }
+
+  size_t in_flight_event_count() const { return in_flight_event_count_; }
+  blink::WebInputEvent::Type hang_monitor_event_type() const {
+    return hang_monitor_event_type_;
+  }
+  blink::WebInputEvent::Type last_event_type() const {
+    return last_event_type_;
   }
 
   bool renderer_initialized() const { return renderer_initialized_; }
@@ -594,9 +606,6 @@ class CONTENT_EXPORT RenderWidgetHostImpl : public RenderWidgetHost,
   void OnShowDisambiguationPopup(const gfx::Rect& rect_pixels,
                                  const gfx::Size& size,
                                  const cc::SharedBitmapId& id);
-  void OnSelectionChanged(const base::string16& text,
-                          uint32_t offset,
-                          const gfx::Range& range);
   void OnSelectionBoundsChanged(
       const ViewHostMsg_SelectionBounds_Params& params);
   void OnForwardCompositorProto(const std::vector<uint8_t>& proto);
@@ -617,7 +626,8 @@ class CONTENT_EXPORT RenderWidgetHostImpl : public RenderWidgetHost,
   InputEventAckState FilterInputEvent(
       const blink::WebInputEvent& event,
       const ui::LatencyInfo& latency_info) override;
-  void IncrementInFlightEventCount() override;
+  void IncrementInFlightEventCount(
+      blink::WebInputEvent::Type event_type) override;
   void DecrementInFlightEventCount() override;
   void OnHasTouchEventHandlers(bool has_handlers) override;
   void DidFlush() override;
@@ -835,7 +845,13 @@ class CONTENT_EXPORT RenderWidgetHostImpl : public RenderWidgetHost,
 
   // Stores the reason the hang_monitor_timeout_ has been started. Used to
   // report histograms if the renderer is hung.
-  RenderWidgetHostDelegate::RendererUnresponsiveType hang_monitor_reason_;
+  RendererUnresponsiveType hang_monitor_reason_;
+
+  // Type of the last blocking event that started the hang monitor.
+  blink::WebInputEvent::Type hang_monitor_event_type_;
+
+  // Type of the last blocking event sent to the renderer.
+  blink::WebInputEvent::Type last_event_type_;
 
   // This value indicates how long to wait for a new compositor frame from a
   // renderer process before clearing any previously displayed content.

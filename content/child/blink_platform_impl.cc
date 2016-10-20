@@ -49,7 +49,6 @@
 #include "content/child/web_url_request_util.h"
 #include "content/child/worker_thread_registry.h"
 #include "content/public/common/content_client.h"
-#include "net/base/data_url.h"
 #include "net/base/net_errors.h"
 #include "third_party/WebKit/public/platform/WebData.h"
 #include "third_party/WebKit/public/platform/WebFloatPoint.h"
@@ -142,10 +141,14 @@ static int ToMessageID(WebLocalizedString::Name name) {
       return IDS_AX_MEDIA_SHOW_CLOSED_CAPTIONS_BUTTON;
     case WebLocalizedString::AXMediaHideClosedCaptionsButton:
       return IDS_AX_MEDIA_HIDE_CLOSED_CAPTIONS_BUTTON;
-    case WebLocalizedString::AxMediaCastOffButton:
+    case WebLocalizedString::AXMediaCastOffButton:
       return IDS_AX_MEDIA_CAST_OFF_BUTTON;
-    case WebLocalizedString::AxMediaCastOnButton:
+    case WebLocalizedString::AXMediaCastOnButton:
       return IDS_AX_MEDIA_CAST_ON_BUTTON;
+    case WebLocalizedString::AXMediaDownloadButton:
+      return IDS_AX_MEDIA_DOWNLOAD_BUTTON;
+    case WebLocalizedString::AXMediaOverflowButton:
+      return IDS_AX_MEDIA_OVERFLOW_BUTTON;
     case WebLocalizedString::AXMediaAudioElementHelp:
       return IDS_AX_MEDIA_AUDIO_ELEMENT_HELP;
     case WebLocalizedString::AXMediaVideoElementHelp:
@@ -178,10 +181,12 @@ static int ToMessageID(WebLocalizedString::Name name) {
       return IDS_AX_MEDIA_SHOW_CLOSED_CAPTIONS_BUTTON_HELP;
     case WebLocalizedString::AXMediaHideClosedCaptionsButtonHelp:
       return IDS_AX_MEDIA_HIDE_CLOSED_CAPTIONS_BUTTON_HELP;
-    case WebLocalizedString::AxMediaCastOffButtonHelp:
+    case WebLocalizedString::AXMediaCastOffButtonHelp:
       return IDS_AX_MEDIA_CAST_OFF_BUTTON_HELP;
-    case WebLocalizedString::AxMediaCastOnButtonHelp:
+    case WebLocalizedString::AXMediaCastOnButtonHelp:
       return IDS_AX_MEDIA_CAST_ON_BUTTON_HELP;
+    case WebLocalizedString::AXMediaOverflowButtonHelp:
+      return IDS_AX_MEDIA_OVERFLOW_BUTTON_HELP;
     case WebLocalizedString::AXMillisecondFieldText:
       return IDS_AX_MILLISECOND_FIELD_TEXT;
     case WebLocalizedString::AXMinuteFieldText:
@@ -244,8 +249,6 @@ static int ToMessageID(WebLocalizedString::Name name) {
       return IDS_FORM_OTHER_TIME_LABEL;
     case WebLocalizedString::OtherWeekLabel:
       return IDS_FORM_OTHER_WEEK_LABEL;
-    case WebLocalizedString::AxMediaOverflowButton:
-      return IDS_AX_MEDIA_OVERFLOW_BUTTON;
     case WebLocalizedString::OverflowMenuCaptions:
       return IDS_MEDIA_OVERFLOW_MENU_CLOSED_CAPTIONS;
     case WebLocalizedString::OverflowMenuCast:
@@ -416,31 +419,9 @@ WebString BlinkPlatformImpl::userAgent() {
   return blink::WebString::fromUTF8(GetContentClient()->GetUserAgent());
 }
 
-WebData BlinkPlatformImpl::parseDataURL(const WebURL& url,
-                                        WebString& mimetype_out,
-                                        WebString& charset_out) {
-  std::string mime_type, char_set, data;
-  if (net::DataURL::Parse(url, &mime_type, &char_set, &data) &&
-      mime_util::IsSupportedMimeType(mime_type)) {
-    mimetype_out = WebString::fromUTF8(mime_type);
-    charset_out = WebString::fromUTF8(char_set);
-    return data;
-  }
-  return WebData();
-}
-
 WebURLError BlinkPlatformImpl::cancelledError(
     const WebURL& unreachableURL) const {
   return CreateWebURLError(unreachableURL, false, net::ERR_ABORTED);
-}
-
-bool BlinkPlatformImpl::parseMultipartHeadersFromBody(
-    const char* bytes,
-    size_t size,
-    blink::WebURLResponse* response,
-    size_t* end) const {
-  return WebURLLoaderImpl::ParseMultipartHeadersFromBody(
-      bytes, size, response, end);
 }
 
 blink::WebThread* BlinkPlatformImpl::createThread(const char* name) {

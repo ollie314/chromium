@@ -11,7 +11,6 @@
 #include "mojo/public/cpp/bindings/binding.h"
 #include "platform/graphics/OffscreenCanvasFrameDispatcher.h"
 #include "platform/graphics/StaticBitmapImage.h"
-#include "wtf/Compiler.h"
 #include <memory>
 
 namespace blink {
@@ -21,19 +20,30 @@ class PLATFORM_EXPORT OffscreenCanvasFrameDispatcherImpl final
       WTF_NON_EXPORTED_BASE(
           public cc::mojom::blink::MojoCompositorFrameSinkClient) {
  public:
-  explicit OffscreenCanvasFrameDispatcherImpl(uint32_t clientId,
-                                              uint32_t localId,
-                                              uint64_t nonce,
-                                              int width,
-                                              int height);
+  OffscreenCanvasFrameDispatcherImpl(uint32_t clientId,
+                                     uint32_t sinkId,
+                                     uint32_t localId,
+                                     uint64_t nonce,
+                                     int width,
+                                     int height);
 
   // OffscreenCanvasFrameDispatcher implementation.
   ~OffscreenCanvasFrameDispatcherImpl() override {}
-  void dispatchFrame(RefPtr<StaticBitmapImage>) override;
+  void dispatchFrame(RefPtr<StaticBitmapImage>,
+                     double commitStartTime,
+                     bool isWebGLSoftwareRendering = false) override;
 
   // cc::mojom::blink::MojoCompositorFrameSinkClient implementation.
-  void ReturnResources(
-      Vector<cc::mojom::blink::ReturnedResourcePtr> resources) override;
+  void ReturnResources(const cc::ReturnedResourceArray& resources) override;
+
+  // This enum is used in histogram, so it should be append-only.
+  enum OffscreenCanvasCommitType {
+    CommitGPUCanvasGPUCompositing = 0,
+    CommitGPUCanvasSoftwareCompositing = 1,
+    CommitSoftwareCanvasGPUCompositing = 2,
+    CommitSoftwareCanvasSoftwareCompositing = 3,
+    OffscreenCanvasCommitTypeCount,
+  };
 
  private:
   const cc::SurfaceId m_surfaceId;
@@ -50,12 +60,12 @@ class PLATFORM_EXPORT OffscreenCanvasFrameDispatcherImpl final
   cc::mojom::blink::MojoCompositorFrameSinkPtr m_sink;
   mojo::Binding<cc::mojom::blink::MojoCompositorFrameSinkClient> m_binding;
 
-  void setTransferableResourceInMemory(cc::TransferableResource&,
-                                       RefPtr<StaticBitmapImage>);
-  void setTransferableResourceMemoryToTexture(cc::TransferableResource&,
-                                              RefPtr<StaticBitmapImage>);
-  void setTransferableResourceInTexture(cc::TransferableResource&,
-                                        RefPtr<StaticBitmapImage>);
+  void setTransferableResourceToSharedBitmap(cc::TransferableResource&,
+                                             RefPtr<StaticBitmapImage>);
+  void setTransferableResourceToSharedGPUContext(cc::TransferableResource&,
+                                                 RefPtr<StaticBitmapImage>);
+  void setTransferableResourceToStaticBitmapImage(cc::TransferableResource&,
+                                                  RefPtr<StaticBitmapImage>);
 };
 
 }  // namespace blink

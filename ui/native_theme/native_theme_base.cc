@@ -51,8 +51,8 @@ const SkColor kProgressValueColor = gfx::kGoogleBlue300;
 
 const SkColor kMenuPopupBackgroundColor = SkColorSetRGB(210, 225, 246);
 
-const unsigned int kDefaultScrollbarWidth = 15;
-const unsigned int kDefaultScrollbarButtonLength = 14;
+const int kDefaultScrollbarWidth = 15;
+const int kDefaultScrollbarButtonLength = 14;
 
 const SkColor kCheckboxTinyColor = SK_ColorGRAY;
 const SkColor kCheckboxShadowColor = SkColorSetARGB(0x15, 0, 0, 0);
@@ -783,7 +783,7 @@ void NativeThemeBase::PaintMenuPopupBackground(
     SkCanvas* canvas,
     const gfx::Size& size,
     const MenuBackgroundExtraParams& menu_background) const {
-  canvas->drawColor(kMenuPopupBackgroundColor, SkXfermode::kSrc_Mode);
+  canvas->drawColor(kMenuPopupBackgroundColor, SkBlendMode::kSrc);
 }
 
 void NativeThemeBase::PaintMenuItemBackground(

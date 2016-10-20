@@ -15,7 +15,7 @@
 namespace prefs {
 
 // Profile prefs. Please add Local State prefs below instead.
-#if defined(OS_CHROMEOS) && defined(ENABLE_APP_LIST)
+#if defined(OS_CHROMEOS) && BUILDFLAG(ENABLE_APP_LIST)
 extern const char kArcApps[];
 extern const char kArcBackupRestoreEnabled[];
 extern const char kArcEnabled[];
@@ -295,6 +295,8 @@ extern const char kPlatformKeys[];
 extern const char kUnifiedDesktopEnabledByDefault[];
 extern const char kAllowScreenLock[];
 extern const char kHatsLastInteractionTimestamp[];
+extern const char kHatsSurveyCycleEndTimestamp[];
+extern const char kHatsDeviceIsSelected[];
 extern const char kQuickUnlockPinSalt[];
 extern const char kQuickUnlockPinSecret[];
 extern const char kEolStatus[];
@@ -309,7 +311,7 @@ extern const char kAllowDeletingBrowserHistory[];
 extern const char kMdHistoryMenuPromoShown[];
 #endif
 extern const char kForceGoogleSafeSearch[];
-extern const char kForceYouTubeSafetyMode[];
+extern const char kForceYouTubeRestrict[];
 extern const char kForceSessionSync[];
 extern const char kAllowedDomainsForApps[];
 #if defined(OS_LINUX) && !defined(OS_CHROMEOS)
@@ -329,12 +331,13 @@ extern const char kPluginsPluginsList[];
 extern const char kPluginsDisabledPlugins[];
 extern const char kPluginsDisabledPluginsExceptions[];
 extern const char kPluginsEnabledPlugins[];
+extern const char kPluginsAlwaysOpenPdfExternally[];
 #if defined(ENABLE_PLUGINS)
 extern const char kPluginsShowDetails[];
 #endif
 extern const char kPluginsAllowOutdated[];
 extern const char kPluginsAlwaysAuthorize[];
-#if defined(ENABLE_PLUGIN_INSTALLATION)
+#if BUILDFLAG(ENABLE_PLUGIN_INSTALLATION)
 extern const char kPluginsMetadata[];
 extern const char kPluginsResourceCacheUpdate[];
 #endif
@@ -646,6 +649,8 @@ extern const char kServerBackedDeviceState[];
 extern const char kCustomizationDefaultWallpaperURL[];
 extern const char kLogoutStartedLast[];
 extern const char kConsumerManagementStage[];
+extern const char kIsBootstrappingSlave[];
+extern const char kReportArcStatusEnabled[];
 #endif  // defined(OS_CHROMEOS)
 
 extern const char kClearPluginLSODataEnabled[];
@@ -753,7 +758,7 @@ extern const char kRLZBrand[];
 extern const char kRLZDisabled[];
 #endif
 
-#if defined(ENABLE_APP_LIST)
+#if BUILDFLAG(ENABLE_APP_LIST)
 extern const char kAppListProfile[];
 extern const char kLastAppListLaunchPing[];
 extern const char kAppListLaunchCount[];
@@ -768,7 +773,7 @@ extern const char kAppLauncherShortcutVersion[];
 extern const char kShowAppLauncherPromo[];
 extern const char kAppLauncherDriveAppMapping[];
 extern const char kAppLauncherUninstalledDriveApps[];
-#endif  // defined(ENABLE_APP_LIST)
+#endif  // BUILDFLAG(ENABLE_APP_LIST)
 
 #if defined(OS_WIN)
 extern const char kAppLaunchForMetroRestart[];

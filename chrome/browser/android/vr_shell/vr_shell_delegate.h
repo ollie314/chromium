@@ -8,6 +8,7 @@
 #include <jni.h>
 
 #include "base/android/jni_weak_ref.h"
+#include "base/macros.h"
 #include "device/vr/android/gvr/gvr_delegate.h"
 
 namespace vr_shell {
@@ -28,13 +29,18 @@ class VrShellDelegate : public device::GvrDelegateProvider {
   // device::vrDelegateProvider implementation
   bool RequestWebVRPresent(device::GvrDeviceProvider* device_provider) override;
   void ExitWebVRPresent() override;
+  device::GvrDelegate* GetNonPresentingDelegate() override;
+  void DestroyNonPresentingDelegate() override;
 
   // Called from VRShell
   void OnVrShellReady(VrShell* vr_shell);
 
  private:
+  std::unique_ptr<device::GvrDelegate> non_presenting_delegate_;
   base::android::ScopedJavaGlobalRef<jobject> j_vr_shell_delegate_;
   device::GvrDeviceProvider* device_provider_;
+
+  DISALLOW_COPY_AND_ASSIGN(VrShellDelegate);
 };
 
 bool RegisterVrShellDelegate(JNIEnv* env);

@@ -85,7 +85,7 @@
 #include "extensions/browser/browser_context_keyed_service_factories.h"
 #endif
 
-#if defined(ENABLE_CAPTIVE_PORTAL_DETECTION)
+#if BUILDFLAG(ENABLE_CAPTIVE_PORTAL_DETECTION)
 #include "chrome/browser/captive_portal/captive_portal_service_factory.h"
 #endif
 
@@ -135,7 +135,7 @@
 #include "chrome/browser/spellchecker/spellcheck_factory.h"
 #endif
 
-#if defined(ENABLE_SERVICE_DISCOVERY)
+#if BUILDFLAG(ENABLE_SERVICE_DISCOVERY)
 #include "chrome/browser/printing/cloud_print/privet_notifications_factory.h"
 #endif
 
@@ -181,7 +181,7 @@ EnsureBrowserContextKeyedServiceFactoriesBuilt() {
   AppShortcutManagerFactory::GetInstance();
 #endif
 
-#if defined(ENABLE_APP_LIST)
+#if BUILDFLAG(ENABLE_APP_LIST)
   app_list::AppListSyncableServiceFactory::GetInstance();
 #endif
 
@@ -196,7 +196,7 @@ EnsureBrowserContextKeyedServiceFactoriesBuilt() {
   BookmarkModelFactory::GetInstance();
   BookmarkUndoServiceFactory::GetInstance();
   BrowsingDataRemoverFactory::GetInstance();
-#if defined(ENABLE_CAPTIVE_PORTAL_DETECTION)
+#if BUILDFLAG(ENABLE_CAPTIVE_PORTAL_DETECTION)
   CaptivePortalServiceFactory::GetInstance();
 #endif
 #if defined(OS_ANDROID)
@@ -244,7 +244,7 @@ EnsureBrowserContextKeyedServiceFactoriesBuilt() {
   InMemoryURLIndexFactory::GetInstance();
   invalidation::ProfileInvalidationProviderFactory::GetInstance();
   InstantServiceFactory::GetInstance();
-#if defined(ENABLE_SERVICE_DISCOVERY)
+#if BUILDFLAG(ENABLE_SERVICE_DISCOVERY)
   cloud_print::PrivetNotificationServiceFactory::GetInstance();
 #endif
 #if defined(ENABLE_SUPERVISED_USERS)

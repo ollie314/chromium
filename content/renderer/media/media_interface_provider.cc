@@ -10,14 +10,13 @@
 #include "media/mojo/interfaces/content_decryption_module.mojom.h"
 #include "media/mojo/interfaces/renderer.mojom.h"
 #include "mojo/public/cpp/bindings/interface_request.h"
-#include "services/shell/public/cpp/interface_provider.h"
+#include "services/service_manager/public/cpp/interface_provider.h"
 
 namespace content {
 
 MediaInterfaceProvider::MediaInterfaceProvider(
-    shell::InterfaceProvider* remote_interfaces)
-    : remote_interfaces_(remote_interfaces) {
-}
+    service_manager::InterfaceProvider* remote_interfaces)
+    : remote_interfaces_(remote_interfaces) {}
 
 MediaInterfaceProvider::~MediaInterfaceProvider() {
   DCHECK(thread_checker_.CalledOnValidThread());

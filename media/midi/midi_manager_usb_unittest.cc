@@ -18,10 +18,11 @@
 #include "media/midi/usb_midi_device.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-namespace media {
 namespace midi {
 
 namespace {
+
+using mojom::Result;
 
 template<typename T, size_t N>
 std::vector<T> ToVector(const T (&array)[N]) {
@@ -574,4 +575,3 @@ TEST_F(MidiManagerUsbTest, AttachDevice) {
 }  // namespace
 
 }  // namespace midi
-}  // namespace media

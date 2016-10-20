@@ -6,6 +6,7 @@ import("//build/config/android/config.gni")
 import("//build/config/features.gni")
 import("//build/config/ui.gni")
 import("//media/media_options.gni")
+import("//mojo/public/tools/bindings/mojom.gni")
 import("//testing/test.gni")
 
 if (is_android) {
@@ -50,25 +51,25 @@ if (is_android) {
     ]
 
     java_files = [
-      "java/src/org/chromium/media/midi/MidiDeviceAndroid.java",
-      "java/src/org/chromium/media/midi/MidiInputPortAndroid.java",
-      "java/src/org/chromium/media/midi/MidiManagerAndroid.java",
-      "java/src/org/chromium/media/midi/MidiOutputPortAndroid.java",
-      "java/src/org/chromium/media/midi/UsbMidiDeviceAndroid.java",
-      "java/src/org/chromium/media/midi/UsbMidiDeviceFactoryAndroid.java",
+      "java/src/org/chromium/midi/MidiDeviceAndroid.java",
+      "java/src/org/chromium/midi/MidiInputPortAndroid.java",
+      "java/src/org/chromium/midi/MidiManagerAndroid.java",
+      "java/src/org/chromium/midi/MidiOutputPortAndroid.java",
+      "java/src/org/chromium/midi/UsbMidiDeviceAndroid.java",
+      "java/src/org/chromium/midi/UsbMidiDeviceFactoryAndroid.java",
     ]
   }
 
   generate_jni("midi_jni_headers") {
     sources = [
-      "java/src/org/chromium/media/midi/MidiDeviceAndroid.java",
-      "java/src/org/chromium/media/midi/MidiInputPortAndroid.java",
-      "java/src/org/chromium/media/midi/MidiManagerAndroid.java",
-      "java/src/org/chromium/media/midi/MidiOutputPortAndroid.java",
-      "java/src/org/chromium/media/midi/UsbMidiDeviceAndroid.java",
-      "java/src/org/chromium/media/midi/UsbMidiDeviceFactoryAndroid.java",
+      "java/src/org/chromium/midi/MidiDeviceAndroid.java",
+      "java/src/org/chromium/midi/MidiInputPortAndroid.java",
+      "java/src/org/chromium/midi/MidiManagerAndroid.java",
+      "java/src/org/chromium/midi/MidiOutputPortAndroid.java",
+      "java/src/org/chromium/midi/UsbMidiDeviceAndroid.java",
+      "java/src/org/chromium/midi/UsbMidiDeviceFactoryAndroid.java",
     ]
-    jni_package = "media/midi"
+    jni_package = "midi"
   }
 }
 
@@ -95,6 +96,7 @@ component("midi") {
 
   defines = [ "MIDI_IMPLEMENTATION" ]
   deps = [
+    ":mojo",
     "//base",
   ]
   libs = []
@@ -165,6 +167,13 @@ component("midi") {
   if (use_udev) {
     deps += [ "//device/udev_linux" ]
   }
+}
+
+mojom("mojo") {
+  sources = [
+    "midi_service.mojom",
+  ]
+  use_new_wrapper_types = true
 }
 
 test("midi_unittests") {

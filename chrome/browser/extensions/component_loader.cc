@@ -336,7 +336,7 @@ void ComponentLoader::AddWebstoreWidgetExtension() {
 }
 
 void ComponentLoader::AddHangoutServicesExtension() {
-#if defined(GOOGLE_CHROME_BUILD) || defined(ENABLE_HANGOUT_SERVICES_EXTENSION)
+#if BUILDFLAG(ENABLE_HANGOUT_SERVICES_EXTENSION)
   Add(IDR_HANGOUT_SERVICES_MANIFEST,
       base::FilePath(FILE_PATH_LITERAL("hangout_services")));
 #endif
@@ -408,7 +408,7 @@ void ComponentLoader::AddWithNameAndDescription(
 }
 
 void ComponentLoader::AddChromeApp() {
-#if defined(ENABLE_APP_LIST)
+#if BUILDFLAG(ENABLE_APP_LIST)
   AddWithNameAndDescription(
       IDR_CHROME_APP_MANIFEST, base::FilePath(FILE_PATH_LITERAL("chrome_app")),
       l10n_util::GetStringUTF8(IDS_SHORT_PRODUCT_NAME),
@@ -465,7 +465,7 @@ void ComponentLoader::AddDefaultComponentExtensions(
     Add(IDR_HELP_MANIFEST, base::FilePath(FILE_PATH_LITERAL(
                                "/usr/share/chromeos-assets/helpapp")));
   }
-#endif
+#endif  // defined(GOOGLE_CHROME_BUILD)
 
   // Skip all other extensions that require user session presence.
   if (!skip_session_components) {
@@ -478,14 +478,16 @@ void ComponentLoader::AddDefaultComponentExtensions(
     Add(IDR_CROSH_BUILTIN_MANIFEST, base::FilePath(FILE_PATH_LITERAL(
         "/usr/share/chromeos-assets/crosh_builtin")));
   }
-#else  // !defined(OS_CHROMEOS)
+#else  // defined(OS_CHROMEOS)
   DCHECK(!skip_session_components);
   Add(IDR_BOOKMARKS_MANIFEST,
       base::FilePath(FILE_PATH_LITERAL("bookmark_manager")));
+#if defined(ENABLE_PRINTING)
   // Cloud Print component app. Not required on Chrome OS.
   Add(IDR_CLOUDPRINT_MANIFEST,
       base::FilePath(FILE_PATH_LITERAL("cloud_print")));
-#endif
+#endif  // defined(ENABLE_PRINTING)
+#endif  // defined(OS_CHROMEOS)
 
   if (!skip_session_components) {
     AddWebStoreApp();

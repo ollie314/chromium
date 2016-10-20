@@ -7,6 +7,7 @@
 // clang-format off
 #include "V8TestObject.h"
 
+#include "bindings/core/v8/AnyCallbackFunctionOptionalAnyArg.h"
 #include "bindings/core/v8/ArrayBufferOrArrayBufferViewOrDictionary.h"
 #include "bindings/core/v8/BindingSecurity.h"
 #include "bindings/core/v8/BooleanOrStringOrUnrestrictedDouble.h"
@@ -14,7 +15,7 @@
 #include "bindings/core/v8/DoubleOrString.h"
 #include "bindings/core/v8/ExceptionState.h"
 #include "bindings/core/v8/GeneratedCodeHelper.h"
-#include "bindings/core/v8/LongExperimentalCallbackFunction.h"
+#include "bindings/core/v8/LongCallbackFunction.h"
 #include "bindings/core/v8/PrivateScriptRunner.h"
 #include "bindings/core/v8/ScriptCallStack.h"
 #include "bindings/core/v8/ScriptPromise.h"
@@ -63,7 +64,7 @@
 #include "bindings/core/v8/V8Uint8Array.h"
 #include "bindings/core/v8/V8Window.h"
 #include "bindings/core/v8/V8XPathNSResolver.h"
-#include "bindings/core/v8/VoidExperimentalCallbackFunction.h"
+#include "bindings/core/v8/VoidCallbackFunction.h"
 #include "core/HTMLNames.h"
 #include "core/dom/ClassCollection.h"
 #include "core/dom/Document.h"
@@ -948,7 +949,7 @@ static void voidCallbackFunctionAttributeAttributeGetter(const v8::FunctionCallb
 
     TestObject* impl = V8TestObject::toImpl(holder);
 
-    v8SetReturnValue(info, impl->voidCallbackFunctionAttribute().v8Value());
+    v8SetReturnValueFast(info, impl->voidCallbackFunctionAttribute(), impl);
 }
 
 void voidCallbackFunctionAttributeAttributeGetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
@@ -962,7 +963,7 @@ static void voidCallbackFunctionAttributeAttributeSetter(v8::Local<v8::Value> v8
     TestObject* impl = V8TestObject::toImpl(holder);
 
     // Prepare the value to be set.
-    ScriptValue cppValue = ScriptValue(ScriptState::current(info.GetIsolate()), v8Value);
+    VoidCallbackFunction* cppValue = VoidCallbackFunction::create(info.GetIsolate(), v8::Local<v8::Function>::Cast(v8Value));
 
     impl->setVoidCallbackFunctionAttribute(cppValue);
 }
@@ -980,7 +981,7 @@ static void anyCallbackFunctionOptionalAnyArgAttributeAttributeGetter(const v8::
 
     TestObject* impl = V8TestObject::toImpl(holder);
 
-    v8SetReturnValue(info, impl->anyCallbackFunctionOptionalAnyArgAttribute().v8Value());
+    v8SetReturnValueFast(info, impl->anyCallbackFunctionOptionalAnyArgAttribute(), impl);
 }
 
 void anyCallbackFunctionOptionalAnyArgAttributeAttributeGetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
@@ -994,7 +995,7 @@ static void anyCallbackFunctionOptionalAnyArgAttributeAttributeSetter(v8::Local<
     TestObject* impl = V8TestObject::toImpl(holder);
 
     // Prepare the value to be set.
-    ScriptValue cppValue = ScriptValue(ScriptState::current(info.GetIsolate()), v8Value);
+    AnyCallbackFunctionOptionalAnyArg* cppValue = AnyCallbackFunctionOptionalAnyArg::create(info.GetIsolate(), v8::Local<v8::Function>::Cast(v8Value));
 
     impl->setAnyCallbackFunctionOptionalAnyArgAttribute(cppValue);
 }
@@ -4732,7 +4733,7 @@ static void limitedToOnlyOneAttributeAttributeGetter(const v8::FunctionCallbackI
 
     if (cppValue.isEmpty()) {
         ;
-    } else if (equalIgnoringCase(cppValue, "unique")) {
+    } else if (equalIgnoringASCIICase(cppValue, "unique")) {
         cppValue = "unique";
     } else {
         cppValue = "";
@@ -4781,11 +4782,11 @@ static void limitedToOnlyAttributeAttributeGetter(const v8::FunctionCallbackInfo
 
     if (cppValue.isEmpty()) {
         ;
-    } else if (equalIgnoringCase(cppValue, "Per")) {
+    } else if (equalIgnoringASCIICase(cppValue, "Per")) {
         cppValue = "Per";
-    } else if (equalIgnoringCase(cppValue, "Paal")) {
+    } else if (equalIgnoringASCIICase(cppValue, "Paal")) {
         cppValue = "Paal";
-    } else if (equalIgnoringCase(cppValue, "Espen")) {
+    } else if (equalIgnoringASCIICase(cppValue, "Espen")) {
         cppValue = "Espen";
     } else {
         cppValue = "";
@@ -4834,9 +4835,9 @@ static void limitedToOnlyOtherAttributeAttributeGetter(const v8::FunctionCallbac
 
     if (cppValue.isEmpty()) {
         ;
-    } else if (equalIgnoringCase(cppValue, "Value1")) {
+    } else if (equalIgnoringASCIICase(cppValue, "Value1")) {
         cppValue = "Value1";
-    } else if (equalIgnoringCase(cppValue, "Value2")) {
+    } else if (equalIgnoringASCIICase(cppValue, "Value2")) {
         cppValue = "Value2";
     } else {
         cppValue = "";
@@ -4885,9 +4886,9 @@ static void limitedWithMissingDefaultAttributeAttributeGetter(const v8::Function
 
     if (cppValue.isEmpty()) {
         cppValue = "rsa";
-    } else if (equalIgnoringCase(cppValue, "rsa")) {
+    } else if (equalIgnoringASCIICase(cppValue, "rsa")) {
         cppValue = "rsa";
-    } else if (equalIgnoringCase(cppValue, "dsa")) {
+    } else if (equalIgnoringASCIICase(cppValue, "dsa")) {
         cppValue = "dsa";
     } else {
         cppValue = "";
@@ -4936,11 +4937,11 @@ static void limitedWithInvalidMissingDefaultAttributeAttributeGetter(const v8::F
 
     if (cppValue.isEmpty()) {
         cppValue = "auto";
-    } else if (equalIgnoringCase(cppValue, "ltr")) {
+    } else if (equalIgnoringASCIICase(cppValue, "ltr")) {
         cppValue = "ltr";
-    } else if (equalIgnoringCase(cppValue, "rtl")) {
+    } else if (equalIgnoringASCIICase(cppValue, "rtl")) {
         cppValue = "rtl";
-    } else if (equalIgnoringCase(cppValue, "auto")) {
+    } else if (equalIgnoringASCIICase(cppValue, "auto")) {
         cppValue = "auto";
     } else {
         cppValue = "ltr";
@@ -4991,9 +4992,9 @@ static void corsSettingAttributeAttributeGetter(const v8::FunctionCallbackInfo<v
         ;
     } else if (cppValue.isEmpty()) {
         cppValue = "anonymous";
-    } else if (equalIgnoringCase(cppValue, "anonymous")) {
+    } else if (equalIgnoringASCIICase(cppValue, "anonymous")) {
         cppValue = "anonymous";
-    } else if (equalIgnoringCase(cppValue, "use-credentials")) {
+    } else if (equalIgnoringASCIICase(cppValue, "use-credentials")) {
         cppValue = "use-credentials";
     } else {
         cppValue = "anonymous";
@@ -5019,13 +5020,13 @@ static void limitedWithEmptyMissingInvalidAttributeAttributeGetter(const v8::Fun
         cppValue = "missing";
     } else if (cppValue.isEmpty()) {
         cppValue = "empty";
-    } else if (equalIgnoringCase(cppValue, "empty")) {
+    } else if (equalIgnoringASCIICase(cppValue, "empty")) {
         cppValue = "empty";
-    } else if (equalIgnoringCase(cppValue, "missing")) {
+    } else if (equalIgnoringASCIICase(cppValue, "missing")) {
         cppValue = "missing";
-    } else if (equalIgnoringCase(cppValue, "invalid")) {
+    } else if (equalIgnoringASCIICase(cppValue, "invalid")) {
         cppValue = "invalid";
-    } else if (equalIgnoringCase(cppValue, "a-normal")) {
+    } else if (equalIgnoringASCIICase(cppValue, "a-normal")) {
         cppValue = "a-normal";
     } else {
         cppValue = "invalid";
@@ -6748,7 +6749,7 @@ static void voidCallbackFunctionMethodMethod(const v8::FunctionCallbackInfo<v8::
 {
     TestObject* impl = V8TestObject::toImpl(info.Holder());
 
-    v8SetReturnValue(info, impl->voidCallbackFunctionMethod().v8Value());
+    v8SetReturnValue(info, impl->voidCallbackFunctionMethod());
 }
 
 static void voidCallbackFunctionMethodMethodCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
@@ -6760,7 +6761,7 @@ static void anyCallbackFunctionOptionalAnyArgMethodMethod(const v8::FunctionCall
 {
     TestObject* impl = V8TestObject::toImpl(info.Holder());
 
-    v8SetReturnValue(info, impl->anyCallbackFunctionOptionalAnyArgMethod().v8Value());
+    v8SetReturnValue(info, impl->anyCallbackFunctionOptionalAnyArgMethod());
 }
 
 static void anyCallbackFunctionOptionalAnyArgMethodMethodCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
@@ -6777,13 +6778,13 @@ static void voidMethodVoidCallbackFunctionArgMethod(const v8::FunctionCallbackIn
         return;
     }
 
-    ScriptValue voidCallbackFunctionArg;
+    VoidCallbackFunction* voidCallbackFunctionArg;
     if (!info[0]->IsFunction()) {
         V8ThrowException::throwTypeError(info.GetIsolate(), ExceptionMessages::failedToExecute("voidMethodVoidCallbackFunctionArg", "TestObject", "The callback provided as parameter 1 is not a function."));
 
         return;
     }
-    voidCallbackFunctionArg = ScriptValue(ScriptState::current(info.GetIsolate()), info[0]);
+    voidCallbackFunctionArg = VoidCallbackFunction::create(info.GetIsolate(), v8::Local<v8::Function>::Cast(info[0]));
 
     impl->voidMethodVoidCallbackFunctionArg(voidCallbackFunctionArg);
 }
@@ -6797,7 +6798,7 @@ static void voidMethodOptionalVoidCallbackFunctionArgMethod(const v8::FunctionCa
 {
     TestObject* impl = V8TestObject::toImpl(info.Holder());
 
-    ScriptValue voidCallbackFunctionArg;
+    VoidCallbackFunction* voidCallbackFunctionArg;
     int numArgsPassed = info.Length();
     while (numArgsPassed > 0) {
         if (!info[numArgsPassed - 1]->IsUndefined())
@@ -6813,7 +6814,7 @@ static void voidMethodOptionalVoidCallbackFunctionArgMethod(const v8::FunctionCa
 
         return;
     }
-    voidCallbackFunctionArg = ScriptValue(ScriptState::current(info.GetIsolate()), info[0]);
+    voidCallbackFunctionArg = VoidCallbackFunction::create(info.GetIsolate(), v8::Local<v8::Function>::Cast(info[0]));
 
     impl->voidMethodOptionalVoidCallbackFunctionArg(voidCallbackFunctionArg);
 }
@@ -6832,13 +6833,13 @@ static void voidMethodNullableVoidCallbackFunctionArgMethod(const v8::FunctionCa
         return;
     }
 
-    ScriptValue voidCallbackFunctionArg;
+    Nullable<VoidCallbackFunction*> voidCallbackFunctionArg;
     if (!info[0]->IsFunction() && !info[0]->IsNull()) {
         V8ThrowException::throwTypeError(info.GetIsolate(), ExceptionMessages::failedToExecute("voidMethodNullableVoidCallbackFunctionArg", "TestObject", "The callback provided as parameter 1 is not a function."));
 
         return;
     }
-    voidCallbackFunctionArg = ScriptValue(ScriptState::current(info.GetIsolate()), info[0]);
+    voidCallbackFunctionArg = VoidCallbackFunction::create(info.GetIsolate(), v8::Local<v8::Function>::Cast(info[0]));
 
     impl->voidMethodNullableVoidCallbackFunctionArg(voidCallbackFunctionArg);
 }
@@ -6857,13 +6858,13 @@ static void voidMethodAnyCallbackFunctionOptionalAnyArgMethod(const v8::Function
         return;
     }
 
-    ScriptValue anyCallbackFunctionOptionalAnyArgArg;
+    AnyCallbackFunctionOptionalAnyArg* anyCallbackFunctionOptionalAnyArgArg;
     if (!info[0]->IsFunction()) {
         V8ThrowException::throwTypeError(info.GetIsolate(), ExceptionMessages::failedToExecute("voidMethodAnyCallbackFunctionOptionalAnyArg", "TestObject", "The callback provided as parameter 1 is not a function."));
 
         return;
     }
-    anyCallbackFunctionOptionalAnyArgArg = ScriptValue(ScriptState::current(info.GetIsolate()), info[0]);
+    anyCallbackFunctionOptionalAnyArgArg = AnyCallbackFunctionOptionalAnyArg::create(info.GetIsolate(), v8::Local<v8::Function>::Cast(info[0]));
 
     impl->voidMethodAnyCallbackFunctionOptionalAnyArg(anyCallbackFunctionOptionalAnyArgArg);
 }
@@ -6873,54 +6874,29 @@ static void voidMethodAnyCallbackFunctionOptionalAnyArgMethodCallback(const v8::
     TestObjectV8Internal::voidMethodAnyCallbackFunctionOptionalAnyArgMethod(info);
 }
 
-static void voidMethodVoidExperimentalCallbackFunctionArgMethod(const v8::FunctionCallbackInfo<v8::Value>& info)
+static void voidMethodLongCallbackFunctionArgMethod(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
     TestObject* impl = V8TestObject::toImpl(info.Holder());
 
     if (UNLIKELY(info.Length() < 1)) {
-        V8ThrowException::throwTypeError(info.GetIsolate(), ExceptionMessages::failedToExecute("voidMethodVoidExperimentalCallbackFunctionArg", "TestObject", ExceptionMessages::notEnoughArguments(1, info.Length())));
+        V8ThrowException::throwTypeError(info.GetIsolate(), ExceptionMessages::failedToExecute("voidMethodLongCallbackFunctionArg", "TestObject", ExceptionMessages::notEnoughArguments(1, info.Length())));
         return;
     }
 
-    VoidExperimentalCallbackFunction* voidExperimentalCallbackFunctionArg;
+    LongCallbackFunction* longCallbackFunctionArg;
     if (!info[0]->IsFunction()) {
-        V8ThrowException::throwTypeError(info.GetIsolate(), ExceptionMessages::failedToExecute("voidMethodVoidExperimentalCallbackFunctionArg", "TestObject", "The callback provided as parameter 1 is not a function."));
+        V8ThrowException::throwTypeError(info.GetIsolate(), ExceptionMessages::failedToExecute("voidMethodLongCallbackFunctionArg", "TestObject", "The callback provided as parameter 1 is not a function."));
 
         return;
     }
-    voidExperimentalCallbackFunctionArg = VoidExperimentalCallbackFunction::create(info.GetIsolate(), v8::Local<v8::Function>::Cast(info[0]));
+    longCallbackFunctionArg = LongCallbackFunction::create(info.GetIsolate(), v8::Local<v8::Function>::Cast(info[0]));
 
-    impl->voidMethodVoidExperimentalCallbackFunctionArg(voidExperimentalCallbackFunctionArg);
+    impl->voidMethodLongCallbackFunctionArg(longCallbackFunctionArg);
 }
 
-static void voidMethodVoidExperimentalCallbackFunctionArgMethodCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
+static void voidMethodLongCallbackFunctionArgMethodCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
-    TestObjectV8Internal::voidMethodVoidExperimentalCallbackFunctionArgMethod(info);
-}
-
-static void voidMethodLongExperimentalCallbackFunctionArgMethod(const v8::FunctionCallbackInfo<v8::Value>& info)
-{
-    TestObject* impl = V8TestObject::toImpl(info.Holder());
-
-    if (UNLIKELY(info.Length() < 1)) {
-        V8ThrowException::throwTypeError(info.GetIsolate(), ExceptionMessages::failedToExecute("voidMethodLongExperimentalCallbackFunctionArg", "TestObject", ExceptionMessages::notEnoughArguments(1, info.Length())));
-        return;
-    }
-
-    LongExperimentalCallbackFunction* longExperimentalCallbackFunctionArg;
-    if (!info[0]->IsFunction()) {
-        V8ThrowException::throwTypeError(info.GetIsolate(), ExceptionMessages::failedToExecute("voidMethodLongExperimentalCallbackFunctionArg", "TestObject", "The callback provided as parameter 1 is not a function."));
-
-        return;
-    }
-    longExperimentalCallbackFunctionArg = LongExperimentalCallbackFunction::create(info.GetIsolate(), v8::Local<v8::Function>::Cast(info[0]));
-
-    impl->voidMethodLongExperimentalCallbackFunctionArg(longExperimentalCallbackFunctionArg);
-}
-
-static void voidMethodLongExperimentalCallbackFunctionArgMethodCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
-{
-    TestObjectV8Internal::voidMethodLongExperimentalCallbackFunctionArgMethod(info);
+    TestObjectV8Internal::voidMethodLongCallbackFunctionArgMethod(info);
 }
 
 static void anyMethodMethod(const v8::FunctionCallbackInfo<v8::Value>& info)
@@ -13187,8 +13163,7 @@ const V8DOMConfiguration::MethodConfiguration V8TestObjectMethods[] = {
     {"voidMethodOptionalVoidCallbackFunctionArg", TestObjectV8Internal::voidMethodOptionalVoidCallbackFunctionArgMethodCallback, 0, 0, v8::None, V8DOMConfiguration::ExposedToAllScripts, V8DOMConfiguration::OnPrototype},
     {"voidMethodNullableVoidCallbackFunctionArg", TestObjectV8Internal::voidMethodNullableVoidCallbackFunctionArgMethodCallback, 0, 1, v8::None, V8DOMConfiguration::ExposedToAllScripts, V8DOMConfiguration::OnPrototype},
     {"voidMethodAnyCallbackFunctionOptionalAnyArg", TestObjectV8Internal::voidMethodAnyCallbackFunctionOptionalAnyArgMethodCallback, 0, 1, v8::None, V8DOMConfiguration::ExposedToAllScripts, V8DOMConfiguration::OnPrototype},
-    {"voidMethodVoidExperimentalCallbackFunctionArg", TestObjectV8Internal::voidMethodVoidExperimentalCallbackFunctionArgMethodCallback, 0, 1, v8::None, V8DOMConfiguration::ExposedToAllScripts, V8DOMConfiguration::OnPrototype},
-    {"voidMethodLongExperimentalCallbackFunctionArg", TestObjectV8Internal::voidMethodLongExperimentalCallbackFunctionArgMethodCallback, 0, 1, v8::None, V8DOMConfiguration::ExposedToAllScripts, V8DOMConfiguration::OnPrototype},
+    {"voidMethodLongCallbackFunctionArg", TestObjectV8Internal::voidMethodLongCallbackFunctionArgMethodCallback, 0, 1, v8::None, V8DOMConfiguration::ExposedToAllScripts, V8DOMConfiguration::OnPrototype},
     {"anyMethod", TestObjectV8Internal::anyMethodMethodCallback, 0, 0, v8::None, V8DOMConfiguration::ExposedToAllScripts, V8DOMConfiguration::OnPrototype},
     {"voidMethodEventTargetArg", TestObjectV8Internal::voidMethodEventTargetArgMethodCallback, 0, 1, v8::None, V8DOMConfiguration::ExposedToAllScripts, V8DOMConfiguration::OnPrototype},
     {"voidMethodAnyArg", TestObjectV8Internal::voidMethodAnyArgMethodCallback, 0, 1, v8::None, V8DOMConfiguration::ExposedToAllScripts, V8DOMConfiguration::OnPrototype},

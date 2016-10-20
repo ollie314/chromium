@@ -39,18 +39,12 @@ SigninErrorUI::SigninErrorUI(content::WebUI* web_ui,
   bool is_system_profile =
       webui_profile->GetOriginalProfile()->IsSystemProfile();
 
-// TODO(zmin): Remove the condition for MACOSX once user_manager_mac.cc is
-// updated.
-#if !defined(OS_MACOSX)
   if (is_system_profile) {
     signin_profile = g_browser_process->profile_manager()->GetProfileByPath(
         UserManager::GetSigninProfilePath());
   } else {
     signin_profile = webui_profile;
   }
-#else
-  signin_profile = webui_profile;
-#endif
 
   content::WebUIDataSource* source =
       content::WebUIDataSource::Create(chrome::kChromeUISigninErrorHost);
@@ -89,7 +83,7 @@ SigninErrorUI::SigninErrorUI(content::WebUI* web_ui,
       for (const ProfileAttributesEntry* entry : entries) {
         if (gaia::AreEmailsSame(base::UTF16ToUTF8(email),
                                 base::UTF16ToUTF8(entry->GetUserName()))) {
-          handler->set_duplicate_profile_entry(entry);
+          handler->set_duplicate_profile_path(entry->GetPath());
           existing_name = entry->GetName();
         }
       }

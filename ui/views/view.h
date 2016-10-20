@@ -76,6 +76,7 @@ class LayoutManager;
 class NativeViewAccessibility;
 class ScrollView;
 class Widget;
+class WordLookupClient;
 
 namespace internal {
 class PreEventDispatchHandler;
@@ -280,10 +281,11 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   // windows.
   virtual gfx::Size GetMaximumSize() const;
 
-  // Return the height necessary to display this view with the provided width.
-  // View's implementation returns the value from getPreferredSize.cy.
-  // Override if your View's preferred height depends upon the width (such
-  // as with Labels).
+  // Return the preferred height for a specific width. Override if the
+  // preferred height depends upon the width (such as a multi-line label). If
+  // a LayoutManger has been installed this returns the value of
+  // LayoutManager::GetPreferredHeightForWidth(), otherwise this returns
+  // GetPreferredSize().height().
   virtual int GetHeightForWidth(int w) const;
 
   // Sets whether this view is visible. Painting is scheduled as needed. Also,
@@ -717,6 +719,9 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
 
   ViewTargeter* targeter() const { return targeter_.get(); }
 
+  // Returns the WordLookupClient associated with this view.
+  virtual WordLookupClient* GetWordLookupClient();
+
   // Overridden from ui::EventTarget:
   bool CanAcceptEvent(const ui::Event& event) override;
   ui::EventTarget* GetParentTarget() override;
@@ -1118,7 +1123,6 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   void OnPaintLayer(const ui::PaintContext& context) override;
   void OnDelegatedFrameDamage(const gfx::Rect& damage_rect_in_dip) override;
   void OnDeviceScaleFactorChanged(float device_scale_factor) override;
-  base::Closure PrepareForLayerBoundsChange() override;
 
   // Finds the layer that this view paints to (it may belong to an ancestor
   // view), then reorders the immediate children of that layer to match the

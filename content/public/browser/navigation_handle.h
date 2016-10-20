@@ -23,6 +23,7 @@ namespace content {
 class NavigationData;
 class NavigationThrottle;
 class RenderFrameHost;
+class SiteInstance;
 class WebContents;
 
 // A NavigationHandle tracks information related to a single navigation.
@@ -47,6 +48,11 @@ class CONTENT_EXPORT NavigationHandle {
   // example, viewing a page's source navigates to the URL of the page, but the
   // virtual URL is prefixed with "view-source:".
   virtual const GURL& GetURL() = 0;
+
+  // Returns the SiteInstance that started the request.
+  // If a frame in SiteInstance A navigates a frame in SiteInstance B to a URL
+  // in SiteInstance C, then this returns B.
+  virtual SiteInstance* GetStartingSiteInstance() = 0;
 
   // Whether the navigation is taking place in the main frame or in a subframe.
   // This remains constant over the navigation lifetime.
@@ -159,10 +165,11 @@ class CONTENT_EXPORT NavigationHandle {
   // GetNetErrorCode will be net::OK.
   virtual bool IsErrorPage() = 0;
 
-  // Returns the response headers for the request or nullptr if there are none.
-  // This should only be accessed after a redirect was encountered or after the
-  // navigation is ready to commit. The headers returned should not be modified,
-  // as modifications will not be reflected in the network stack.
+  // Returns the response headers for the request, or nullptr if there aren't
+  // any response headers or they have not been received yet. The response
+  // headers may change during the navigation (e.g. after encountering a server
+  // redirect). The headers returned should not be modified, as modifications
+  // will not be reflected in the network stack.
   virtual const net::HttpResponseHeaders* GetResponseHeaders() = 0;
 
   // Resumes a navigation that was previously deferred by a NavigationThrottle.

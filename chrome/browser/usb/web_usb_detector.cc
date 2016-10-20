@@ -16,7 +16,7 @@
 #include "chrome/grit/generated_resources.h"
 #include "chrome/grit/theme_resources.h"
 #include "content/public/common/origin_util.h"
-#include "device/core/device_client.h"
+#include "device/base/device_client.h"
 #include "device/usb/usb_device.h"
 #include "device/usb/usb_ids.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -118,6 +118,9 @@ WebUsbDetector::WebUsbDetector() : observer_(this) {}
 WebUsbDetector::~WebUsbDetector() {}
 
 void WebUsbDetector::Initialize() {
+// Disabled on Windows due to jank and hangs caused by enumerating devices.
+// https://crbug.com/656702
+#if !defined(OS_WIN)
   SCOPED_UMA_HISTOGRAM_TIMER("WebUsb.DetectorInitialization");
   device::UsbService* usb_service =
       device::DeviceClient::Get()->GetUsbService();
@@ -125,6 +128,7 @@ void WebUsbDetector::Initialize() {
     return;
 
   observer_.Add(usb_service);
+#endif
 }
 
 void WebUsbDetector::OnDeviceAdded(scoped_refptr<device::UsbDevice> device) {

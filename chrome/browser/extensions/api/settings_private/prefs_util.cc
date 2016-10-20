@@ -75,6 +75,10 @@ const PrefsUtil::TypedPrefMap& PrefsUtil::GetWhitelistedKeys() {
   // Appearance settings.
   (*s_whitelist)["extensions.theme.id"] =
       settings_private::PrefType::PREF_TYPE_STRING;
+#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
+  (*s_whitelist)["extensions.theme.use_system"] =
+      settings_private::PrefType::PREF_TYPE_BOOLEAN;
+#endif
   (*s_whitelist)["webkit.webprefs.default_fixed_font_size"] =
       settings_private::PrefType::PREF_TYPE_NUMBER;
   (*s_whitelist)["webkit.webprefs.default_font_size"] =
@@ -252,6 +256,10 @@ const PrefsUtil::TypedPrefMap& PrefsUtil::GetWhitelistedKeys() {
   (*s_whitelist)["settings.internet.wake_on_wifi_darkconnect"] =
       settings_private::PrefType::PREF_TYPE_BOOLEAN;
   (*s_whitelist)["settings.enable_screen_lock"] =
+      settings_private::PrefType::PREF_TYPE_BOOLEAN;
+
+  // Time zone settings.
+  (*s_whitelist)["settings.resolve_timezone_by_geolocation"] =
       settings_private::PrefType::PREF_TYPE_BOOLEAN;
 
   // Ash settings.

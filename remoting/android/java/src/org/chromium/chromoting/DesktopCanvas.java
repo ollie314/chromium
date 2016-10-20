@@ -58,6 +58,18 @@ public class DesktopCanvas {
      */
     private RectF mVisibleImagePadding = new RectF();
 
+    /**
+     * Tracks whether to adjust the viewport to account for System UI. If false, the viewport
+     * center is the center of the screen.  If true, then System UI offsets will be used to
+     * adjust the position of the viewport to ensure the cursor is visible.
+     */
+    private boolean mAdjustViewportForSystemUi = false;
+
+    /**
+    * Represents the amount of space, in pixels, to adjust the cursor center along the y-axis.
+    */
+    private float mCursorOffsetScreenY = 0.0f;
+
     public DesktopCanvas(RenderStub renderStub, RenderData renderData) {
         mRenderStub = renderStub;
         mRenderData = renderData;
@@ -113,20 +125,39 @@ public class DesktopCanvas {
     }
 
     /**
-     * Sets the offset values used to calculate the space used by System UI.
+     * Handles System UI size and visibility changes.
      *
-     * @param left The space used by System UI on the left edge of the screen.
-     * @param top The space used by System UI on the top edge of the screen.
-     * @param right The space used by System UI on the right edge of the screen.
-     * @param bottom The space used by System UI on the bottom edge of the screen.
+     * @param parameter The set of values defining the current System UI state.
      */
-    public void setSystemUiOffsetValues(int left, int top, int right, int bottom) {
-        mSystemUiScreenSize.set(left, top, right, bottom);
+    public void onSystemUiVisibilityChanged(SystemUiVisibilityChangedEventParameter parameter) {
+        if (parameter.softInputMethodVisible) {
+            mSystemUiScreenSize.set(parameter.left, parameter.top,
+                    mRenderData.screenWidth - parameter.right,
+                    mRenderData.screenHeight - parameter.bottom);
+
+            if (mAdjustViewportForSystemUi) {
+                // Adjust the cursor position to ensure it's visible when large System UI (1/3 or
+                // more of the total screen size) is displayed (typically the Soft Keyboard).
+                // Without this change, it is difficult for users to enter text into edit controls
+                // which are located bottom of the screen and may not see the cursor at all.
+                if (mSystemUiScreenSize.bottom > (mRenderData.screenHeight / 3)) {
+                    // Center the cursor within the viewable area (not obscured by System UI).
+                    mCursorOffsetScreenY = (float) parameter.bottom / 2.0f;
+                } else {
+                    mCursorOffsetScreenY = 0.0f;
+                }
+
+                // Apply the cursor offset.
+                setCursorPosition(mCursorPosition.x, mCursorPosition.y);
+            }
+        } else {
+            mCursorOffsetScreenY = 0.0f;
+            mSystemUiScreenSize.setEmpty();
+        }
     }
 
-    /** Called to indicate that no System UI is visible. */
-    public void clearSystemUiOffsets() {
-        mSystemUiScreenSize.setEmpty();
+    public void adjustViewportForSystemUi(boolean adjustViewportForSystemUi) {
+        mAdjustViewportForSystemUi = adjustViewportForSystemUi;
     }
 
     /** Resizes the image by zooming it such that the image is displayed without borders. */
@@ -220,9 +251,10 @@ public class DesktopCanvas {
         mRenderData.transform.mapPoints(viewportPosition);
 
         float viewportTransX = ((float) mRenderData.screenWidth / 2) - viewportPosition[0];
-        float viewportTransY = ((float) mRenderData.screenHeight / 2) - viewportPosition[1];
+        float viewportTransY =
+                ((float) mRenderData.screenHeight / 2) - viewportPosition[1] - mCursorOffsetScreenY;
 
-        // Translate the image so the viewport center is displayed in the middle of the screen.
+        // Translate the image to move the viewport to the expected screen location.
         mRenderData.transform.postTranslate(viewportTransX, viewportTransY);
 
         updateVisibleImagePadding();
@@ -263,9 +295,10 @@ public class DesktopCanvas {
         // the desktop image from 'snapping' back to pre-System UI state.
         RectF systemUiOverlap = getSystemUiOverlap();
         float[] padding = {Math.max(mVisibleImagePadding.left, systemUiOverlap.left),
-                Math.max(mVisibleImagePadding.top, systemUiOverlap.top),
+                Math.max(mVisibleImagePadding.top + mCursorOffsetScreenY, systemUiOverlap.top),
                 Math.max(mVisibleImagePadding.right, systemUiOverlap.right),
-                Math.max(mVisibleImagePadding.bottom, systemUiOverlap.bottom)};
+                Math.max(mVisibleImagePadding.bottom - mCursorOffsetScreenY,
+                        systemUiOverlap.bottom)};
         Matrix screenToImage = new Matrix();
         mRenderData.transform.invert(screenToImage);
         screenToImage.mapVectors(padding);
@@ -325,9 +358,10 @@ public class DesktopCanvas {
         // Note: Ignore negative padding (clamp to 0) since that means no overlap exists.
         PointF letterboxPadding = getLetterboxPadding();
         return new RectF(Math.max(mSystemUiScreenSize.left - letterboxPadding.x, 0.0f),
-                Math.max(mSystemUiScreenSize.top - letterboxPadding.y, 0.0f),
+                Math.max(mSystemUiScreenSize.top - letterboxPadding.y + mCursorOffsetScreenY, 0.0f),
                 Math.max(mSystemUiScreenSize.right - letterboxPadding.x, 0.0f),
-                Math.max(mSystemUiScreenSize.bottom - letterboxPadding.y, 0.0f));
+                Math.max(mSystemUiScreenSize.bottom - letterboxPadding.y - mCursorOffsetScreenY,
+                        0.0f));
     }
 
     /**

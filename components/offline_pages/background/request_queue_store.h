@@ -31,16 +31,17 @@ class RequestQueueStore {
       std::vector<std::unique_ptr<SavePageRequest>> /* requests */)>
       GetRequestsCallback;
   typedef base::Callback<void(ItemActionStatus)> AddCallback;
-  typedef base::Callback<void(
-      const RequestQueue::UpdateMultipleRequestResults& /* statuses */,
-      std::vector<std::unique_ptr<SavePageRequest>> /* requests */)>
-      RemoveCallback;
   typedef base::Callback<void(bool /* success */)> ResetCallback;
 
   virtual ~RequestQueueStore(){};
 
   // Gets all of the requests from the store.
   virtual void GetRequests(const GetRequestsCallback& callback) = 0;
+
+  // Gets requests with specified IDs from the store. UpdateCallback is used
+  // instead of GetRequestsCallback to indicate which requests where not found.
+  virtual void GetRequestsByIds(const std::vector<int64_t>& request_ids,
+                                const UpdateCallback& callback) = 0;
 
   // Asynchronously adds request in store. Fails if request with the same
   // offline ID already exists.
@@ -57,7 +58,7 @@ class RequestQueueStore {
   // Result of remove should be false, when one of the provided items couldn't
   // be deleted, e.g. because it was missing.
   virtual void RemoveRequests(const std::vector<int64_t>& request_ids,
-                              const RemoveCallback& callback) = 0;
+                              const UpdateCallback& callback) = 0;
 
   // Resets the store.
   virtual void Reset(const ResetCallback& callback) = 0;

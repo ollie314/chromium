@@ -26,7 +26,7 @@
 
 #include "platform/Timer.h"
 
-#include "platform/TraceEvent.h"
+#include "platform/tracing/TraceEvent.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebScheduler.h"
 #include "wtf/AddressSanitizer.h"
@@ -43,12 +43,10 @@ namespace blink {
 TimerBase::TimerBase(WebTaskRunner* webTaskRunner)
     : m_nextFireTime(0),
       m_repeatInterval(0),
-      m_webTaskRunner(webTaskRunner->clone())
+      m_webTaskRunner(webTaskRunner->clone()),
 #if DCHECK_IS_ON()
-      ,
-      m_thread(currentThread())
+      m_thread(currentThread()),
 #endif
-      ,
       m_weakPtrFactory(this) {
   ASSERT(m_webTaskRunner);
 }
@@ -129,7 +127,6 @@ void TimerBase::runInternal() {
       << "Timer posted by " << m_location.function_name() << " "
       << m_location.file_name() << " was run on a different thread";
 #endif
-  TRACE_EVENT_SET_SAMPLING_STATE("blink", "BlinkInternal");
 
   if (m_repeatInterval) {
     double now = timerMonotonicallyIncreasingTime();
@@ -144,7 +141,6 @@ void TimerBase::runInternal() {
     m_nextFireTime = 0;
   }
   fired();
-  TRACE_EVENT_SET_SAMPLING_STATE("blink", "Sleeping");
 }
 
 bool TimerBase::Comparator::operator()(const TimerBase* a,

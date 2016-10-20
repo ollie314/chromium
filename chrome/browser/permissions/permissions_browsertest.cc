@@ -63,8 +63,8 @@ void PermissionsBrowserTest::CommonFailsIfDismissed() {
   prompt_factory()->set_response_type(PermissionRequestManager::DISMISS);
   TriggerPrompt();
 
-  EXPECT_EQ(1, prompt_factory()->total_request_count());
   EXPECT_FALSE(FeatureUsageSucceeds());
+  EXPECT_EQ(1, prompt_factory()->total_request_count());
 }
 
 void PermissionsBrowserTest::CommonFailsIfBlocked() {
@@ -72,8 +72,8 @@ void PermissionsBrowserTest::CommonFailsIfBlocked() {
   prompt_factory()->set_response_type(PermissionRequestManager::DENY_ALL);
   TriggerPrompt();
 
-  EXPECT_EQ(1, prompt_factory()->total_request_count());
   EXPECT_FALSE(FeatureUsageSucceeds());
+  EXPECT_EQ(1, prompt_factory()->total_request_count());
 }
 
 void PermissionsBrowserTest::CommonSucceedsIfAllowed() {
@@ -81,6 +81,6 @@ void PermissionsBrowserTest::CommonSucceedsIfAllowed() {
   prompt_factory()->set_response_type(PermissionRequestManager::ACCEPT_ALL);
   TriggerPrompt();
 
-  EXPECT_EQ(1, prompt_factory()->total_request_count());
   EXPECT_TRUE(FeatureUsageSucceeds());
+  EXPECT_EQ(1, prompt_factory()->total_request_count());
 }

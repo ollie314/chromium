@@ -22,6 +22,7 @@
 #include "chrome/grit/generated_resources.h"
 #include "chrome/grit/theme_resources.h"
 #include "components/content_settings/core/browser/cookie_settings.h"
+#include "content/public/common/origin_util.h"
 #include "content/public/common/url_constants.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "net/cookies/canonical_cookie.h"
@@ -70,19 +71,26 @@ struct HostNodeComparator {
 };
 
 std::string CanonicalizeHost(const GURL& url) {
-  // The canonicalized representation makes the registry controlled domain
-  // come first, and then adds subdomains in reverse order, e.g.
-  // 1.mail.google.com would become google.com.mail.1, and then a standard
-  // string comparison works to order hosts by registry controlled domain
-  // first. Leading dots are ignored, ".google.com" is the same as
-  // "google.com".
-
+  // The canonicalized representation makes the registry controlled domain come
+  // first, and then adds subdomains in reverse order, e.g.  1.mail.google.com
+  // would become google.com.mail.1, and then a standard string comparison works
+  // to order hosts by registry controlled domain first. Leading dots are
+  // ignored, ".google.com" is the same as "google.com".
+  //
+  // Suborigins, an experimental web platform feature defined in
+  // https://w3c.github.io/webappsec-suborigins/, are treated as part of the
+  // physical origin they are associated with. From a users perspective, they
+  // are part of and should be visualized as part of that host. For example,
+  // given a a suborigin 'foobar' at 'https://example.com', this is serialized
+  // into the URL as 'https-so://foobar.example.com'. Thus, the host for this
+  // URL is canonicalized as 'example.com' to treat it as being part of that
+  // host, and thus the suborigin is striped from the URL.
   if (url.SchemeIsFile()) {
     return std::string(url::kFileScheme) +
            url::kStandardSchemeSeparator;
   }
 
-  std::string host = url.host();
+  std::string host = content::StripSuboriginFromUrl(url).host();
   std::string retval =
       net::registry_controlled_domains::GetDomainAndRegistry(
           host,
@@ -136,6 +144,7 @@ bool TypeIsProtected(CookieTreeNode::DetailedInfo::NodeType type) {
     case CookieTreeNode::DetailedInfo::TYPE_QUOTA:
     case CookieTreeNode::DetailedInfo::TYPE_CHANNEL_ID:
     case CookieTreeNode::DetailedInfo::TYPE_FLASH_LSO:
+    case CookieTreeNode::DetailedInfo::TYPE_MEDIA_LICENSE:
       return false;
     default:
       break;
@@ -268,6 +277,15 @@ CookieTreeNode::DetailedInfo& CookieTreeNode::DetailedInfo::InitFlashLSO(
     const std::string& flash_lso_domain) {
   Init(TYPE_FLASH_LSO);
   this->flash_lso_domain = flash_lso_domain;
+  return *this;
+}
+
+CookieTreeNode::DetailedInfo& CookieTreeNode::DetailedInfo::InitMediaLicense(
+    const BrowsingDataMediaLicenseHelper::MediaLicenseInfo*
+        media_license_info) {
+  Init(TYPE_MEDIA_LICENSE);
+  this->media_license_info = media_license_info;
+  this->origin = media_license_info->origin;
   return *this;
 }
 
@@ -575,6 +593,32 @@ CookieTreeNode::DetailedInfo CookieTreeCacheStorageNode::GetDetailedInfo()
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+// CookieTreeMediaLicenseNode, public:
+
+CookieTreeMediaLicenseNode::CookieTreeMediaLicenseNode(
+    const std::list<BrowsingDataMediaLicenseHelper::MediaLicenseInfo>::iterator
+        media_license_info)
+    : CookieTreeNode(base::UTF8ToUTF16(media_license_info->origin.spec())),
+      media_license_info_(media_license_info) {}
+
+CookieTreeMediaLicenseNode::~CookieTreeMediaLicenseNode() {}
+
+void CookieTreeMediaLicenseNode::DeleteStoredObjects() {
+  LocalDataContainer* container = GetLocalDataContainerForNode(this);
+
+  if (container) {
+    container->media_license_helper_->DeleteMediaLicenseOrigin(
+        media_license_info_->origin);
+    container->media_license_info_list_.erase(media_license_info_);
+  }
+}
+
+CookieTreeNode::DetailedInfo CookieTreeMediaLicenseNode::GetDetailedInfo()
+    const {
+  return DetailedInfo().InitMediaLicense(&*media_license_info_);
+}
+
+///////////////////////////////////////////////////////////////////////////////
 // CookieTreeRootNode, public:
 
 CookieTreeRootNode::CookieTreeRootNode(CookiesTreeModel* model)
@@ -615,8 +659,9 @@ CookieTreeNode::DetailedInfo CookieTreeRootNode::GetDetailedInfo() const {
 base::string16 CookieTreeHostNode::TitleForUrl(const GURL& url) {
   const std::string file_origin_node_name(
       std::string(url::kFileScheme) + url::kStandardSchemeSeparator);
-  return base::UTF8ToUTF16(url.SchemeIsFile() ? file_origin_node_name
-                                              : url.host());
+  return base::UTF8ToUTF16(url.SchemeIsFile()
+                               ? file_origin_node_name
+                               : content::StripSuboriginFromUrl(url).host());
 }
 
 CookieTreeHostNode::CookieTreeHostNode(const GURL& url)
@@ -738,6 +783,15 @@ CookieTreeFlashLSONode* CookieTreeHostNode::GetOrCreateFlashLSONode(
   flash_lso_child_ = new CookieTreeFlashLSONode(domain);
   AddChildSortedByTitle(base::WrapUnique(flash_lso_child_));
   return flash_lso_child_;
+}
+
+CookieTreeMediaLicensesNode*
+CookieTreeHostNode::GetOrCreateMediaLicensesNode() {
+  if (media_licenses_child_)
+    return media_licenses_child_;
+  media_licenses_child_ = new CookieTreeMediaLicensesNode();
+  AddChildSortedByTitle(base::WrapUnique(media_licenses_child_));
+  return media_licenses_child_;
 }
 
 void CookieTreeHostNode::CreateContentException(
@@ -926,6 +980,18 @@ CookieTreeNode::DetailedInfo CookieTreeFlashLSONode::GetDetailedInfo() const {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+// CookieTreeMediaLicensesNode
+CookieTreeMediaLicensesNode::CookieTreeMediaLicensesNode()
+    : CookieTreeNode(l10n_util::GetStringUTF16(IDS_COOKIES_MEDIA_LICENSES)) {}
+
+CookieTreeMediaLicensesNode::~CookieTreeMediaLicensesNode() {}
+
+CookieTreeNode::DetailedInfo CookieTreeMediaLicensesNode::GetDetailedInfo()
+    const {
+  return DetailedInfo().Init(DetailedInfo::TYPE_MEDIA_LICENSES);
+}
+
+///////////////////////////////////////////////////////////////////////////////
 // ScopedBatchUpdateNotifier
 CookiesTreeModel::ScopedBatchUpdateNotifier::ScopedBatchUpdateNotifier(
     CookiesTreeModel* model,
@@ -1019,6 +1085,7 @@ int CookiesTreeModel::GetIconIndex(ui::TreeModelNode* node) {
     case CookieTreeNode::DetailedInfo::TYPE_FILE_SYSTEM:
     case CookieTreeNode::DetailedInfo::TYPE_SERVICE_WORKER:
     case CookieTreeNode::DetailedInfo::TYPE_CACHE_STORAGE:
+    case CookieTreeNode::DetailedInfo::TYPE_MEDIA_LICENSE:
       return DATABASE;
     case CookieTreeNode::DetailedInfo::TYPE_QUOTA:
       return -1;
@@ -1160,6 +1227,11 @@ void CookiesTreeModel::PopulateFlashLSOInfo(
       LocalDataContainer* container) {
   ScopedBatchUpdateNotifier notifier(this, GetRoot());
   PopulateFlashLSOInfoWithFilter(container, &notifier, base::string16());
+}
+
+void CookiesTreeModel::PopulateMediaLicenseInfo(LocalDataContainer* container) {
+  ScopedBatchUpdateNotifier notifier(this, GetRoot());
+  PopulateMediaLicenseInfoWithFilter(container, &notifier, base::string16());
 }
 
 void CookiesTreeModel::PopulateAppCacheInfoWithFilter(
@@ -1484,6 +1556,33 @@ void CookiesTreeModel::PopulateFlashLSOInfoWithFilter(
   }
 }
 
+void CookiesTreeModel::PopulateMediaLicenseInfoWithFilter(
+    LocalDataContainer* container,
+    ScopedBatchUpdateNotifier* notifier,
+    const base::string16& filter) {
+  CookieTreeRootNode* root = static_cast<CookieTreeRootNode*>(GetRoot());
+
+  if (container->media_license_info_list_.empty())
+    return;
+
+  notifier->StartBatchUpdate();
+  for (MediaLicenseInfoList::iterator media_license_info =
+           container->media_license_info_list_.begin();
+       media_license_info != container->media_license_info_list_.end();
+       ++media_license_info) {
+    GURL origin(media_license_info->origin);
+
+    if (filter.empty() || (CookieTreeHostNode::TitleForUrl(origin).find(
+                               filter) != base::string16::npos)) {
+      CookieTreeHostNode* host_node = root->GetOrCreateHostNode(origin);
+      CookieTreeMediaLicensesNode* media_licenses_node =
+          host_node->GetOrCreateMediaLicensesNode();
+      media_licenses_node->AddMediaLicenseNode(
+          base::MakeUnique<CookieTreeMediaLicenseNode>(media_license_info));
+    }
+  }
+}
+
 void CookiesTreeModel::SetBatchExpectation(int batches_expected, bool reset) {
   batches_expected_ = batches_expected;
   if (reset) {
@@ -1502,9 +1601,8 @@ void CookiesTreeModel::RecordBatchSeen() {
 void CookiesTreeModel::NotifyObserverBeginBatch() {
   // Only notify the model once if we're batching in a nested manner.
   if (batches_started_++ == 0) {
-    FOR_EACH_OBSERVER(Observer,
-                      cookies_observer_list_,
-                      TreeModelBeginBatch(this));
+    for (Observer& observer : cookies_observer_list_)
+      observer.TreeModelBeginBatch(this);
   }
 }
 
@@ -1518,9 +1616,8 @@ void CookiesTreeModel::MaybeNotifyBatchesEnded() {
   // called in a nested manner.
   if (batches_ended_ == batches_started_ &&
       batches_seen_ == batches_expected_) {
-    FOR_EACH_OBSERVER(Observer,
-                      cookies_observer_list_,
-                      TreeModelEndBatch(this));
+    for (Observer& observer : cookies_observer_list_)
+      observer.TreeModelEndBatch(this);
     SetBatchExpectation(0, true);
   }
 }

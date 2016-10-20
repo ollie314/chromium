@@ -10,6 +10,7 @@
 
 #include <memory>
 
+#include "base/memory/weak_ptr.h"
 #include "components/safe_browsing_db/database_manager.h"
 #include "components/safe_browsing_db/hit_report.h"
 #include "components/safe_browsing_db/v4_database.h"
@@ -70,6 +71,13 @@ class V4LocalDatabaseManager : public SafeBrowsingDatabaseManager {
   // Must be initialized by calling StartOnIOThread() before using.
   V4LocalDatabaseManager(const base::FilePath& base_path);
 
+  ~V4LocalDatabaseManager() override;
+
+  void SetTaskRunnerForTest(
+      const scoped_refptr<base::SequencedTaskRunner>& task_runner) {
+    task_runner_ = task_runner;
+  }
+
   enum class ClientCallbackType {
     // This represents the case when we're trying to determine if a URL is
     // unsafe from the following perspectives: Malware, Phishing, UwS.
@@ -120,10 +128,6 @@ class V4LocalDatabaseManager : public SafeBrowsingDatabaseManager {
 
  private:
   friend class V4LocalDatabaseManagerTest;
-  void SetTaskRunnerForTest(
-      const scoped_refptr<base::SequencedTaskRunner>& task_runner) {
-    task_runner_ = task_runner;
-  }
   FRIEND_TEST_ALL_PREFIXES(V4LocalDatabaseManagerTest,
                            TestGetSeverestThreatTypeAndMetadata);
 
@@ -131,11 +135,16 @@ class V4LocalDatabaseManager : public SafeBrowsingDatabaseManager {
   // which clients have cancelled their outstanding request.
   typedef std::unordered_set<Client*> PendingClients;
 
-  ~V4LocalDatabaseManager() override;
-
   // Called when all the stores managed by the database have been read from
-  // disk after startup and the database is ready for use.
-  void DatabaseReady(std::unique_ptr<V4Database> v4_database);
+  // disk after startup and the database is ready for checking resource
+  // reputation.
+  void DatabaseReadyForChecks(std::unique_ptr<V4Database> v4_database);
+
+  // Called when all the stores managed by the database have been verified for
+  // checksum correctness after startup and the database is ready for applying
+  // updates.
+  void DatabaseReadyForUpdates(
+      const std::vector<ListIdentifier>& stores_to_reset);
 
   // Called when the database has been updated and schedules the next update.
   void DatabaseUpdated();
@@ -163,9 +172,9 @@ class V4LocalDatabaseManager : public SafeBrowsingDatabaseManager {
                           const std::vector<FullHashInfo>& full_hash_infos);
 
   // Performs the full hash checking of the URL in |check|.
-  void PerformFullHashCheck(std::unique_ptr<PendingCheck> check,
-                            const FullHashToStoreAndHashPrefixesMap&
-                                full_hash_to_store_and_hash_prefixes);
+  virtual void PerformFullHashCheck(std::unique_ptr<PendingCheck> check,
+                                    const FullHashToStoreAndHashPrefixesMap&
+                                        full_hash_to_store_and_hash_prefixes);
 
   // When the database is ready to use, process the checks that were queued
   // while the database was loading from disk.
@@ -226,6 +235,8 @@ class V4LocalDatabaseManager : public SafeBrowsingDatabaseManager {
 
   // The protocol manager that downloads the hash prefix updates.
   std::unique_ptr<V4UpdateProtocolManager> v4_update_protocol_manager_;
+
+  base::WeakPtrFactory<V4LocalDatabaseManager> weak_factory_;
 
   friend class base::RefCountedThreadSafe<V4LocalDatabaseManager>;
   DISALLOW_COPY_AND_ASSIGN(V4LocalDatabaseManager);

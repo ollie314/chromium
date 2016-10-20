@@ -5,154 +5,64 @@
 var vrShellUi = (function() {
   'use strict';
 
-  /**
-   * Enumeration of valid Anchroing for X axis.
-   * A mesh can either be anchored to the left, right, or center of the main
-   * content rect (or it can be absolutely positioned using NONE). Any
-   * translations applied will be relative to this anchoring.
-   * @enum {number}
-   * @const
-   */
-  var XAnchoring = Object.freeze({
-    'XNONE': 0,
-    'XLEFT': 1,
-    'XRIGHT': 2
-  });
+  var scene = new ui.Scene();
+  var uiElements = [];
 
-  /**
-   * Enumeration of valid Anchroing for Y axis.
-   * @enum {number}
-   * @const
-   */
-  var YAnchoring = Object.freeze({
-    'YNONE': 0,
-    'YTOP': 1,
-    'YBOTTOM': 2
-  });
+  class DomUiElement {
+    constructor(domId) {
+      var domElement = document.querySelector(domId);
+      var style = window.getComputedStyle(domElement);
 
-  /**
-   * Enumeration of animatable properties.
-   * @enum {number}
-   * @const
-   */
-  var Property = Object.freeze({
-    'COPYRECT': 0,
-    'SIZE': 1,
-    'TRANSLATION': 2,
-    'ORIENTATION': 3,
-    'ROTATION': 4
-  });
+      // Pull copy rectangle from DOM element properties.
+      var pixelX = domElement.offsetLeft;
+      var pixelY = domElement.offsetTop;
+      var pixelWidth = parseInt(style.getPropertyValue('width'));
+      var pixelHeight = parseInt(style.getPropertyValue('height'));
 
-  /**
-   * Enumeration of easing type.
-   * @enum {number}
-   * @const
-   */
-  var Easing = Object.freeze({
-    'LINEAR': 0,
-    'CUBICBEZIER': 1,
-    'EASEIN': 2,
-    'EASEOUT': 3
-  });
+      var element = new api.UiElement(pixelX, pixelY, pixelWidth, pixelHeight);
+      element.setSize(pixelWidth / 1000, pixelHeight / 1000);
 
-  /**
-   * Enumeration of scene update commands.
-   * @enum {number}
-   * @const
-   */
-  var Command = Object.freeze({
-    'ADD_ELEMENT': 0,
-    'UPDATE_ELEMENT': 1,
-    'REMOVE_ELEMENT': 2,
-    'ADD_ANIMATION': 3,
-    'REMOVE_ANIMATION': 4
-  });
-
-  /**
-   * @type {number} Id generator.
-   */
-  var idIndex = 1;
-
-  class UiElement {
-    /**
-     * Constructor of UiElement.
-     * pixelX and pixelY values indicate the left upper corner; pixelWidth and
-     * pixelHeight is width and height of the texture to be copied from the web
-     * contents. metersX and metersY indicate the size of the rectangle onto
-     * which the pixel region will be mapped.
-     */
-    constructor(pixelX, pixelY, pixelWidth, pixelHeight, metersX, metersY) {
-      this.copyRect = {
-          x: pixelX,
-          y: pixelY,
-          width: pixelWidth,
-          height: pixelHeight
-      };
-      this.size = { x: metersX, y: metersY };
-      this.xAnchoring = XAnchoring.XNONE;
-      this.yAnchoring = YAnchoring.YNONE;
-      this.translation = { x: 0, y: 0, z: 0 };
-      this.orientationAxisAngle = { x: 0, y: 0, z: 0, a: 0 };
-      this.rotationAxisAngle = { x: 0, y: 0, z: 0, a: 0 };
-    }
-
-    /**
-     * The rotation for the mesh in 3D, applied before translation. The
-     * rotation is axis-angle representation (rotated around unit vector [x, y,
-     * z] by 'a' radians).
-     */
-    setRotation(x, y, z, a) {
-      this.rotationAxisAngle = { x: x, y: y, z: z, a: a };
-    }
-
-    /**
-     * The offset for the mesh in 3D.  If anchoring is specified, the offset is
-     * applied to the anchoring position rather than the origin.
-     */
-    setTranslation(x, y, z) {
-      this.translation = { x: x, y: y, z: z };
-    }
-
-    /**
-     * Anchoring allows a rectangle to be positioned relative to the edge of
-     * content window.  Values should be XAnchoring and YAnchoring elements.
-     * Example: rect.setAnchoring(XAnchoring.XNONE, YAnchoring.YBOTTOM);
-     */
-    setAnchoring(x, y, z) {
-      this.xAnchoring = x;
-      this.yAnchoring = y;
+      this.uiElementId = scene.addElement(element);
+      this.uiAnimationId = -1;
+      this.domElement = domElement;
     }
   };
 
-  class Animation {
-    constructor(meshId, durationMs) {
-      this.meshId = meshId;
-      this.easing = {};
-      this.to = {};
-      this.easing.type = Easing.LINEAR;
+  class RoundButton extends DomUiElement {
+    constructor(domId, callback) {
+      super(domId);
 
-      // How many milliseconds in the future to start the animation.
-      this.startInMillis = 0.0;
-      // Duration of the animation (milliseconds).
-      this.durationMillis = durationMs;
+      var button = this.domElement.querySelector('.button');
+      button.addEventListener('mouseenter', this.onMouseEnter.bind(this));
+      button.addEventListener('mouseleave', this.onMouseLeave.bind(this));
+      button.addEventListener('click', callback);
     }
 
-    setRotateTo(x, y, z, a) {
-      this.property = Property.ROTATION;
-      this.to.x = x;
-      this.to.y = y;
-      this.to.z = z;
-      this.to.a = a;
+    configure(buttonOpacity, captionOpacity, distanceForward) {
+      var button = this.domElement.querySelector('.button');
+      var caption = this.domElement.querySelector('.caption');
+      button.style.opacity = buttonOpacity;
+      caption.style.opacity = captionOpacity;
+      var anim = new api.Animation(this.uiElementId, 150);
+      anim.setTranslation(0, 0, distanceForward);
+      if (this.uiAnimationId >= 0) {
+        scene.removeAnimation(this.uiAnimationId);
+      }
+      this.uiAnimationId = scene.addAnimation(anim);
+      scene.flush();
     }
 
-    setResizeTo(newWidth, newHeight) {
-      this.property = Property.SIZE;
-      this.to.x = newWidth;
-      this.to.y = newHeight;
+    onMouseEnter() {
+      this.configure(1, 1, 0.015);
+    }
+
+    onMouseLeave() {
+      this.configure(0.8, 0, 0);
     }
   };
 
   function initialize() {
+
     domLoaded();
 
     // Change the body background so that the transparency applies.
@@ -166,88 +76,40 @@ var vrShellUi = (function() {
   // Build a row of control buttons.
   function addControlButtons() {
     var buttons = [
-        // Button text, UI action passed down to native.
-        ['<', 'HISTORY_BACK'],
-        ['>', 'HISTORY_FORWARD'],
-        ['R', 'RELOAD'],
-        ['-', 'ZOOM_OUT'],
-        ['+', 'ZOOM_IN']
+        ['#back', function() { api.doAction(api.Action.HISTORY_BACK); }],
+        ['#reload', function() { api.doAction(api.Action.RELOAD); }],
+        ['#forward', function() { api.doAction(api.Action.HISTORY_FORWARD); }],
     ];
 
-    var buttonWidth = 0.3;
-    var buttonHeight = 0.2;
-    var buttonSpacing = 0.5;
+    var buttonSpacing = 0.3;
     var buttonStartPosition = -buttonSpacing * (buttons.length / 2.0 - 0.5);
 
     for (var i = 0; i < buttons.length; i++) {
-      var b = document.createElement('div');
-      b.position = 'absolute';
-      b.style.top = '384px';
-      b.style.left = 50 * i + 'px';
-      b.style.width = '50px';
-      b.style.height = '50px';
-      b.className = 'ui-button';
-      b.textContent = buttons[i][0];
+      // Use an invisible parent to simplify Z-axis movement on hover.
+      var position = new api.UiElement(0, 0, 0, 0);
+      position.setParentId(api.getContentElementId());
+      position.setVisible(false);
+      position.setAnchoring(api.XAnchoring.XNONE, api.YAnchoring.YBOTTOM);
+      position.setTranslation(
+          buttonStartPosition + i * buttonSpacing, -0.3, 0.3);
+      var id = scene.addElement(position);
 
-      // Add click behaviour.
-      b.addEventListener('click', function(action, e) {
-        chrome.send('doAction', [action]);
-      }.bind(undefined, buttons[i][1]));
+      var domId = buttons[i][0];
+      var callback = buttons[i][1];
+      var element = new RoundButton(domId, callback);
+      uiElements.push(element);
 
-      document.body.appendChild(b);
-
-      // Add a UI rectangle for the button.
-      var el = new UiElement(50 * i, 384, 50, 50, buttonWidth, buttonHeight);
-      el.parentId = 0;
-      el.setAnchoring(XAnchoring.XNONE, YAnchoring.YBOTTOM);
-      el.setTranslation(buttonStartPosition + buttonSpacing * i, -0.3, 0.0);
-      var id = idIndex++;
-      addMesh(id, el);
-
-      // Add transitions when the mouse hovers over (and leaves) the button.
-      b.addEventListener('mouseenter', function(buttonId, width, height, e) {
-        var resize = new Animation(buttonId, 250);
-        resize.id = idIndex++;
-        resize.setResizeTo(width, height);
-        addAnimations([resize]);
-      }.bind(undefined, id, buttonWidth * 1.5, buttonHeight * 1.5));
-      b.addEventListener('mouseleave', function(buttonId, width, height) {
-        var resize = new Animation(buttonId, 250);
-        resize.id = idIndex++;
-        resize.setResizeTo(width, height);
-        addAnimations([resize]);
-      }.bind(undefined, id, buttonWidth, buttonHeight));
+      var update = new api.UiElementUpdate();
+      update.setParentId(id);
+      update.setScale(2.2, 2.2, 1);
+      scene.updateElement(element.uiElementId, update);
     }
+
+    scene.flush();
   }
 
   function domLoaded() {
-    chrome.send('domLoaded', [window.innerWidth, window.innerHeight]);
-  }
-
-  function addMesh(id, mesh) {
-    mesh.id = id;
-    chrome.send('updateScene', [{
-      'type': Command.ADD_ELEMENT,
-      'data': mesh
-    }]);
-  }
-
-  function removeMesh(id) {
-    chrome.send('updateScene', [{
-      'type': Command.REMOVE_ELEMENT,
-      'data': {'id': id}
-    }]);
-  }
-
-  function addAnimations(animations) {
-    var commands = [];
-    for (var i = 0; i < animations.length; i++) {
-      commands.push({
-        'type': Command.ADD_ANIMATION,
-        'data': animations[i]
-      });
-    }
-    chrome.send('updateScene', commands);
+    api.domLoaded();
   }
 
   return {

@@ -11,9 +11,11 @@
 #import "chrome/browser/ui/cocoa/location_bar/location_bar_view_mac.h"
 #import "chrome/browser/ui/cocoa/location_bar/location_icon_decoration.h"
 #import "chrome/browser/ui/cocoa/themed_window.h"
+#include "chrome/grit/generated_resources.h"
 #include "chrome/grit/theme_resources.h"
 #include "skia/ext/skia_utils_mac.h"
 #import "ui/base/cocoa/nsview_additions.h"
+#include "ui/base/l10n/l10n_util_mac.h"
 #include "ui/base/material_design/material_design_controller.h"
 #include "ui/gfx/animation/tween.h"
 #include "ui/gfx/color_palette.h"
@@ -131,6 +133,10 @@ bool SecurityStateBubbleDecoration::AnimatingOut() const {
   return !animation_.IsShowing() && animation_.GetCurrentValue() != 0.0;
 }
 
+void SecurityStateBubbleDecoration::ResetAnimation() {
+  animation_.Reset();
+}
+
 //////////////////////////////////////////////////////////////////
 // SecurityStateBubbleDecoration::LocationBarDecoration:
 
@@ -174,7 +180,7 @@ void SecurityStateBubbleDecoration::DrawInFrame(NSRect frame,
 
     // Transform the coordinate system to adjust the baseline on Retina.
     // This is the only way to get fractional adjustments.
-    // gfx::ScopedNSGraphicsContextSaveGState save_graphics_state;
+    gfx::ScopedNSGraphicsContextSaveGState save_graphics_state;
     CGFloat line_width = [control_view cr_lineWidth];
     if (line_width < 1) {
       NSAffineTransform* transform = [NSAffineTransform transform];
@@ -233,10 +239,6 @@ void SecurityStateBubbleDecoration::DrawInFrame(NSRect frame,
     divider_color = [divider_color colorWithAlphaComponent:divider_alpha];
     [divider_color set];
     [line stroke];
-
-    // Revert the transformation.
-    [transform invert];
-    [transform concat];
   }
 }
 
@@ -288,6 +290,11 @@ NSPoint SecurityStateBubbleDecoration::GetBubblePointInFrame(NSRect frame) {
   NSRect image_rect = GetImageRectInFrame(frame);
   return NSMakePoint(NSMidX(image_rect),
                      NSMaxY(image_rect) - kPageInfoBubblePointYOffset);
+}
+
+NSString* SecurityStateBubbleDecoration::GetToolTip() {
+  return [NSString stringWithFormat:@"%@. %@", full_label_.get(),
+                   l10n_util::GetNSStringWithFixup(IDS_TOOLTIP_LOCATION_ICON)];
 }
 
 //////////////////////////////////////////////////////////////////

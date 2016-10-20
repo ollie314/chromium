@@ -152,6 +152,8 @@ target(link_target_type, "base") {
     "media_log.cc",
     "media_log.h",
     "media_log_event.h",
+    "media_observer.cc",
+    "media_observer.h",
     "media_permission.cc",
     "media_permission.h",
     "media_resources.cc",
@@ -181,6 +183,7 @@ target(link_target_type, "base") {
     "pipeline.h",
     "pipeline_impl.cc",
     "pipeline_impl.h",
+    "pipeline_metadata.cc",
     "pipeline_metadata.h",
     "pipeline_status.h",
     "player_tracker.cc",
@@ -260,7 +263,9 @@ target(link_target_type, "base") {
 
   allow_circular_includes_from = []
   defines = []
-  public_deps = []
+  public_deps = [
+    "//ppapi/features",
+  ]
   deps = [
     "//base/third_party/dynamic_annotations:dynamic_annotations",
     "//gpu",
@@ -289,7 +294,7 @@ target(link_target_type, "base") {
   }
 
   if (is_android) {
-    public_deps = [
+    public_deps += [
       "//media/base/android",
       "//media/base/android:media_jni_headers",
     ]
@@ -457,6 +462,7 @@ source_set("unittests") {
     "//gpu/command_buffer/common",
     "//media",
     "//media/base/android:anywhere_unittests",
+    "//ppapi/features",
     "//skia",
     "//testing/gmock",
     "//testing/gtest",

@@ -28,6 +28,7 @@
 #include "gpu/command_buffer/service/gles2_cmd_decoder.h"
 #include "gpu/command_buffer/service/gpu_preferences.h"
 #include "gpu/command_buffer/service/program_cache.h"
+#include "gpu/command_buffer/service/progress_reporter.h"
 #include "gpu/command_buffer/service/shader_manager.h"
 #include "third_party/re2/src/re2/re2.h"
 #include "ui/gl/gl_version_info.h"
@@ -338,6 +339,7 @@ Program::Program(ProgramManager* manager, GLuint service_id)
       link_status_(false),
       uniforms_cleared_(false),
       transform_feedback_buffer_mode_(GL_NONE),
+      effective_transform_feedback_buffer_mode_(GL_NONE),
       fragment_output_type_mask_(0u),
       fragment_output_written_mask_(0u) {
   DCHECK(manager_);
@@ -692,6 +694,9 @@ void Program::Update() {
   UpdateFragmentOutputBaseTypes();
   UpdateVertexInputBaseTypes();
   UpdateUniformBlockSizeInfo();
+
+  effective_transform_feedback_buffer_mode_ = transform_feedback_buffer_mode_;
+  effective_transform_feedback_varyings_ = transform_feedback_varyings_;
 
   valid_ = true;
 }
@@ -1325,8 +1330,8 @@ bool Program::Link(ShaderManager* manager,
                                  attached_shaders_[0].get(),
                                  attached_shaders_[1].get(),
                                  &bind_attrib_location_map_,
-                                 transform_feedback_varyings_,
-                                 transform_feedback_buffer_mode_,
+                                 effective_transform_feedback_varyings_,
+                                 effective_transform_feedback_buffer_mode_,
                                  shader_callback);
       }
       UMA_HISTOGRAM_CUSTOM_COUNTS(
@@ -2452,14 +2457,14 @@ Program::~Program() {
   }
 }
 
-ProgramManager::ProgramManager(
-    ProgramCache* program_cache,
-    uint32_t max_varying_vectors,
-    uint32_t max_draw_buffers,
-    uint32_t max_dual_source_draw_buffers,
-    uint32_t max_vertex_attribs,
-    const GpuPreferences& gpu_preferences,
-    FeatureInfo* feature_info)
+ProgramManager::ProgramManager(ProgramCache* program_cache,
+                               uint32_t max_varying_vectors,
+                               uint32_t max_draw_buffers,
+                               uint32_t max_dual_source_draw_buffers,
+                               uint32_t max_vertex_attribs,
+                               const GpuPreferences& gpu_preferences,
+                               FeatureInfo* feature_info,
+                               ProgressReporter* progress_reporter)
     : program_count_(0),
       have_context_(true),
       program_cache_(program_cache),
@@ -2468,7 +2473,8 @@ ProgramManager::ProgramManager(
       max_dual_source_draw_buffers_(max_dual_source_draw_buffers),
       max_vertex_attribs_(max_vertex_attribs),
       gpu_preferences_(gpu_preferences),
-      feature_info_(feature_info) {}
+      feature_info_(feature_info),
+      progress_reporter_(progress_reporter) {}
 
 ProgramManager::~ProgramManager() {
   DCHECK(programs_.empty());
@@ -2479,7 +2485,11 @@ void ProgramManager::Destroy(bool have_context) {
 
   ProgramDeletionScopedUmaTimeAndRate scoped_histogram(
       base::saturated_cast<int32_t>(programs_.size()));
-  programs_.clear();
+  while (!programs_.empty()) {
+    programs_.erase(programs_.begin());
+    if (progress_reporter_)
+      progress_reporter_->ReportProgress();
+  }
 }
 
 void ProgramManager::StartTracking(Program* /* program */) {

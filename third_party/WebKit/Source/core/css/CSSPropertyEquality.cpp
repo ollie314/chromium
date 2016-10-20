@@ -146,10 +146,12 @@ bool CSSPropertyEquality::propertiesEqual(CSSPropertyID prop,
     case CSSPropertyFloodOpacity:
       return a.floodOpacity() == b.floodOpacity();
     case CSSPropertyFontSize:
-      // CSSPropertyFontSize: Must pass a specified size to setFontSize if Text Autosizing is enabled, but a computed size
-      // if text zoom is enabled (if neither is enabled it's irrelevant as they're probably the same).
-      // FIXME: Should we introduce an option to pass the computed font size here, allowing consumers to
-      // enable text zoom rather than Text Autosizing? See http://crbug.com/227545.
+      // CSSPropertyFontSize: Must pass a specified size to setFontSize if Text
+      // Autosizing is enabled, but a computed size if text zoom is enabled (if
+      // neither is enabled it's irrelevant as they're probably the same).
+      // FIXME: Should we introduce an option to pass the computed font size
+      // here, allowing consumers to enable text zoom rather than Text
+      // Autosizing? See http://crbug.com/227545.
       return a.specifiedFontSize() == b.specifiedFontSize();
     case CSSPropertyFontSizeAdjust:
       return a.fontSizeAdjust() == b.fontSizeAdjust();
@@ -252,6 +254,8 @@ bool CSSPropertyEquality::propertiesEqual(CSSPropertyID prop,
       return a.textDecorationColor() == b.textDecorationColor() &&
              a.visitedLinkTextDecorationColor() ==
                  b.visitedLinkTextDecorationColor();
+    case CSSPropertyTextDecorationSkip:
+      return a.getTextDecorationSkip() == b.getTextDecorationSkip();
     case CSSPropertyTextIndent:
       return a.textIndent() == b.textIndent();
     case CSSPropertyTextShadow:

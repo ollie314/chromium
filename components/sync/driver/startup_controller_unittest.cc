@@ -7,10 +7,11 @@
 #include <memory>
 
 #include "base/command_line.h"
+#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
+#include "components/sync/base/sync_prefs.h"
 #include "components/sync/driver/sync_driver_switches.h"
-#include "components/sync/driver/sync_prefs.h"
 #include "components/syncable_prefs/testing_pref_service_syncable.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -30,12 +31,12 @@ class StartupControllerTest : public testing::Test {
 
   void SetUp() override {
     SyncPrefs::RegisterProfilePrefs(pref_service_.registry());
-    sync_prefs_.reset(new SyncPrefs(&pref_service_));
-    controller_.reset(new StartupController(
+    sync_prefs_ = base::MakeUnique<SyncPrefs>(&pref_service_);
+    controller_ = base::MakeUnique<StartupController>(
         sync_prefs_.get(),
         base::Bind(&StartupControllerTest::CanStart, base::Unretained(this)),
         base::Bind(&StartupControllerTest::FakeStartBackend,
-                   base::Unretained(this))));
+                   base::Unretained(this)));
     controller_->Reset(UserTypes());
     controller_->OverrideFallbackTimeoutForTest(
         base::TimeDelta::FromSeconds(0));

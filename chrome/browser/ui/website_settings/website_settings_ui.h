@@ -138,7 +138,7 @@ class WebsiteSettingsUI {
 
   using CookieInfoList = std::vector<CookieInfo>;
   using PermissionInfoList = std::vector<PermissionInfo>;
-  using ChosenObjectInfoList = std::vector<ChosenObjectInfo*>;
+  using ChosenObjectInfoList = std::vector<std::unique_ptr<ChosenObjectInfo>>;
 
   virtual ~WebsiteSettingsUI();
 
@@ -154,6 +154,7 @@ class WebsiteSettingsUI {
   // including why that action was taken. E.g. "Allowed by you",
   // "Blocked by default".
   static base::string16 PermissionActionToUIString(
+      Profile* profile,
       ContentSettingsType type,
       ContentSetting setting,
       ContentSetting default_setting,
@@ -193,11 +194,10 @@ class WebsiteSettingsUI {
   // Sets cookie information.
   virtual void SetCookieInfo(const CookieInfoList& cookie_info_list) = 0;
 
-  // Sets permission information. The callee is expected to take ownership of
-  // the objects in |chosen_object_info_list|.
+  // Sets permission information.
   virtual void SetPermissionInfo(
       const PermissionInfoList& permission_info_list,
-      const ChosenObjectInfoList& chosen_object_info_list) = 0;
+      ChosenObjectInfoList chosen_object_info_list) = 0;
 
   // Sets site identity information.
   virtual void SetIdentityInfo(const IdentityInfo& identity_info) = 0;

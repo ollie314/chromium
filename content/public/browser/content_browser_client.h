@@ -21,8 +21,8 @@
 #include "content/public/browser/navigation_throttle.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/media_stream_request.h"
-#include "content/public/common/mojo_application_info.h"
 #include "content/public/common/resource_type.h"
+#include "content/public/common/service_info.h"
 #include "content/public/common/socket_permission_request.h"
 #include "content/public/common/window_container_type.h"
 #include "media/audio/audio_manager.h"
@@ -64,7 +64,7 @@ namespace media {
 class CdmFactory;
 }
 
-namespace shell {
+namespace service_manager {
 class InterfaceRegistry;
 class Service;
 }
@@ -114,6 +114,7 @@ class ExternalVideoSurfaceContainer;
 class GpuProcessHost;
 class LocationProvider;
 class MediaObserver;
+class MemoryCoordinatorDelegate;
 class NavigationHandle;
 class NavigationUIData;
 class PlatformNotificationService;
@@ -478,16 +479,6 @@ class CONTENT_EXPORT ContentBrowserClient {
       net::SSLCertRequestInfo* cert_request_info,
       std::unique_ptr<ClientCertificateDelegate> delegate);
 
-  // Adds a new installable certificate or private key.
-  // Typically used to install an X.509 user certificate.
-  // Note that it's up to the embedder to verify that the data is
-  // well-formed. |cert_data| will be nullptr if |cert_size| is 0.
-  virtual void AddCertificate(net::CertificateMimeType cert_type,
-                              const void* cert_data,
-                              size_t cert_size,
-                              int render_process_id,
-                              int render_frame_id) {}
-
   // Returns a class to get notifications about media event. The embedder can
   // return nullptr if they're not interested.
   virtual MediaObserver* GetMediaObserver();
@@ -648,29 +639,29 @@ class CONTENT_EXPORT ContentBrowserClient {
       BrowserContext* browser_context,
       const GURL& url);
 
-  // Generate a Shell user-id for the supplied browser context. Defaults to
+  // Generate a Service user-id for the supplied browser context. Defaults to
   // returning a random GUID.
-  virtual std::string GetShellUserIdForBrowserContext(
+  virtual std::string GetServiceUserIdForBrowserContext(
       BrowserContext* browser_context);
 
-  // Allows to register browser Mojo interfaces exposed through the
+  // Allows to register browser interfaces exposed through the
   // RenderProcessHost. Note that interface factory callbacks added to
   // |registry| will by default be run immediately on the IO thread, unless a
   // task runner is provided.
   virtual void ExposeInterfacesToRenderer(
-      shell::InterfaceRegistry* registry,
+      service_manager::InterfaceRegistry* registry,
       RenderProcessHost* render_process_host) {}
 
   // Called when RenderFrameHostImpl connects to the Media service. Expose
   // interfaces to the service using |registry|.
   virtual void ExposeInterfacesToMediaService(
-      shell::InterfaceRegistry* registry,
+      service_manager::InterfaceRegistry* registry,
       RenderFrameHost* render_frame_host) {}
 
   // Allows to register browser Mojo interfaces exposed through the
   // RenderFrameHost.
   virtual void RegisterRenderFrameMojoInterfaces(
-      shell::InterfaceRegistry* registry,
+      service_manager::InterfaceRegistry* registry,
       RenderFrameHost* render_frame_host) {}
 
   // Allows to register browser Mojo interfaces exposed through the
@@ -678,33 +669,31 @@ class CONTENT_EXPORT ContentBrowserClient {
   // callbacks added to |registry| will by default be run immediately on the IO
   // thread, unless a task runner is provided.
   virtual void ExposeInterfacesToGpuProcess(
-      shell::InterfaceRegistry* registry,
+      service_manager::InterfaceRegistry* registry,
       GpuProcessHost* render_process_host) {}
 
-  using StaticMojoApplicationMap = std::map<std::string, MojoApplicationInfo>;
+  using StaticServiceMap = std::map<std::string, ServiceInfo>;
 
-  // Registers Mojo applications to be loaded in the browser process by the
-  // browser's global Mojo shell.
-  virtual void RegisterInProcessMojoApplications(
-      StaticMojoApplicationMap* apps) {}
+  // Registers services to be loaded in the browser process by the Service
+  // Manager.
+  virtual void RegisterInProcessServices(StaticServiceMap* services) {}
 
-  using OutOfProcessMojoApplicationMap = std::map<std::string, base::string16>;
+  using OutOfProcessServiceMap = std::map<std::string, base::string16>;
 
-  // Registers Mojo applications to be loaded out of the browser process, in a
-  // sandboxed utility process. The value of each map entry should be the
-  // process name to use for the application's host process when launched.
-  virtual void RegisterOutOfProcessMojoApplications(
-      OutOfProcessMojoApplicationMap* apps) {}
+  // Registers services to be loaded out of the browser process, in a sandboxed
+  // utility process. The value of each map entry should be the process name to
+  // use for the service's host process when launched.
+  virtual void RegisterOutOfProcessServices(OutOfProcessServiceMap* services) {}
 
-  // Registers Mojo applications to be loaded out of the browser process (in
-  // a utility process) without the sandbox.
+  // Registers services to be loaded out of the browser process (in a utility
+  // process) without the sandbox.
   //
-  // WARNING: This path is NOT recommended! If a Mojo application needs a
-  // service that is only available out of the sandbox, it could ask the browser
-  // process to provide it (e.g. through OverrideFrameMojoShellServices()). Only
-  // use this method when that approach does not work.
-  virtual void RegisterUnsandboxedOutOfProcessMojoApplications(
-      OutOfProcessMojoApplicationMap* apps) {}
+  // WARNING: This path is NOT recommended! If a service needs another service
+  // that is only available out of the sandbox, it could ask the browser
+  // process to provide it. Only use this method when that approach does not
+  // work.
+  virtual void RegisterUnsandboxedOutOfProcessServices(
+      OutOfProcessServiceMap* services) {}
 
   // Allow the embedder to provide a dictionary loaded from a JSON file
   // resembling a service manifest whose capabilities section will be merged
@@ -786,12 +775,11 @@ class CONTENT_EXPORT ContentBrowserClient {
   // an AppContainer.
   virtual base::string16 GetAppContainerSidForSandboxType(
       int sandbox_type) const;
-
-  // Returns whether the Win32k lockdown process mitigation should be applied to
-  // a process hosting a plugin with the specified |mime_type|.
-  virtual bool IsWin32kLockdownEnabledForMimeType(
-      const std::string& mime_type) const;
 #endif
+
+  // Returns an instance of MemoryCoordinatorDelegate.
+  virtual std::unique_ptr<MemoryCoordinatorDelegate>
+  GetMemoryCoordinatorDelegate();
 };
 
 }  // namespace content

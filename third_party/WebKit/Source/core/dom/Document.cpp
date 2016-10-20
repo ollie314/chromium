@@ -228,13 +228,13 @@
 #include "platform/PluginScriptForbiddenScope.h"
 #include "platform/RuntimeEnabledFeatures.h"
 #include "platform/ScriptForbiddenScope.h"
-#include "platform/TraceEvent.h"
 #include "platform/network/ContentSecurityPolicyParsers.h"
 #include "platform/network/HTTPParsers.h"
 #include "platform/scheduler/CancellableTaskFactory.h"
 #include "platform/scroll/ScrollbarTheme.h"
 #include "platform/text/PlatformLocale.h"
 #include "platform/text/SegmentedString.h"
+#include "platform/tracing/TraceEvent.h"
 #include "platform/weborigin/OriginAccessEntry.h"
 #include "platform/weborigin/SchemeRegistry.h"
 #include "platform/weborigin/SecurityOrigin.h"
@@ -425,11 +425,11 @@ Document::Document(const DocumentInit& initializer,
       m_pendingSheetLayout(NoLayoutWithPendingSheets),
       m_frame(initializer.frame()),
       m_domWindow(m_frame ? m_frame->localDOMWindow() : 0),
-      m_importsController(initializer.importsController()),
+      m_importsController(this, initializer.importsController()),
       m_contextFeatures(ContextFeatures::defaultSwitch()),
       m_wellFormed(false),
-      m_printing(false),
-      m_wasPrinting(false),
+      m_implementation(this, nullptr),
+      m_printing(NotPrinting),
       m_paginatedForScreen(false),
       m_compatibilityMode(NoQuirksMode),
       m_compatibilityModeLocked(false),
@@ -443,6 +443,8 @@ Document::Document(const DocumentInit& initializer,
       m_styleVersion(0),
       m_listenerTypes(0),
       m_mutationObserverTypes(0),
+      m_styleEngine(this, nullptr),
+      m_styleSheetList(this, nullptr),
       m_visitedLinkState(VisitedLinkState::create(*this)),
       m_visuallyOrdered(false),
       m_readyState(Complete),
@@ -975,7 +977,7 @@ Node* Document::importNode(Node* importedNode,
       return nullptr;
   }
 
-  ASSERT_NOT_REACHED();
+  NOTREACHED();
   return nullptr;
 }
 
@@ -1093,7 +1095,7 @@ String Document::readyState() const {
       return complete;
   }
 
-  ASSERT_NOT_REACHED();
+  NOTREACHED();
   return String();
 }
 
@@ -1220,7 +1222,7 @@ Range* Document::caretRangeFromPoint(int x, int y) {
 
   HitTestResult result = hitTestInDocument(this, x, y);
   PositionWithAffinity positionWithAffinity = result.position();
-  if (positionWithAffinity.position().isNull())
+  if (positionWithAffinity.isNull())
     return nullptr;
 
   Position rangeCompliantPosition =
@@ -1244,6 +1246,18 @@ Element* Document::scrollingElement() {
   }
 
   return body();
+}
+
+// We use HashMap::set over HashMap::add here as we want to
+// replace the ComputedStyle but not the Element if the Element is
+// already present.
+void Document::addNonAttachedStyle(Element& element,
+                                   RefPtr<ComputedStyle> computedStyle) {
+  m_nonAttachedStyle.set(&element, computedStyle);
+}
+
+ComputedStyle* Document::getNonAttachedStyle(Element& element) {
+  return m_nonAttachedStyle.get(&element);
 }
 
 /*
@@ -1766,6 +1780,8 @@ static void assertLayoutTreeUpdated(Node& root) {
       continue;
     DCHECK(!node.needsStyleRecalc());
     DCHECK(!node.childNeedsStyleRecalc());
+    DCHECK(!node.needsReattachLayoutTree());
+    DCHECK(!node.childNeedsReattachLayoutTree());
     DCHECK(!node.childNeedsDistributionRecalc());
     DCHECK(!node.needsStyleInvalidation());
     DCHECK(!node.childNeedsStyleInvalidation());
@@ -1815,7 +1831,6 @@ void Document::updateStyleAndLayoutTree() {
 
   TRACE_EVENT_BEGIN1("blink,devtools.timeline", "UpdateLayoutTree", "beginData",
                      InspectorRecalculateStylesEvent::data(frame()));
-  TRACE_EVENT_SCOPED_SAMPLING_STATE("blink", "UpdateLayoutTree");
 
   unsigned startElementCount = styleEngine().styleForElementCount();
 
@@ -1899,6 +1914,7 @@ void Document::updateStyle() {
   }
 
   clearNeedsStyleRecalc();
+  clearNeedsReattachLayoutTree();
 
   StyleResolver& resolver = ensureStyleResolver();
 
@@ -1917,16 +1933,21 @@ void Document::updateStyle() {
 
   view()->recalcOverflowAfterStyleChange();
 
+  // Only retain the HashMap for the duration of StyleRecalc and
+  // LayoutTreeConstruction.
+  m_nonAttachedStyle.clear();
   clearChildNeedsStyleRecalc();
+  clearChildNeedsReattachLayoutTree();
 
   resolver.clearStyleSharingList();
 
-  m_wasPrinting = m_printing;
-
   DCHECK(!needsStyleRecalc());
   DCHECK(!childNeedsStyleRecalc());
+  DCHECK(!needsReattachLayoutTree());
+  DCHECK(!childNeedsReattachLayoutTree());
   DCHECK(inStyleRecalc());
   DCHECK_EQ(styleResolver(), &resolver);
+  DCHECK(m_nonAttachedStyle.isEmpty());
   m_lifecycle.advanceTo(DocumentLifecycle::StyleClean);
   if (shouldRecordStats) {
     TRACE_EVENT_END2("blink,blink_style", "Document::updateStyle",
@@ -1994,7 +2015,7 @@ void Document::updateStyleAndLayout() {
   FrameView* frameView = view();
   if (frameView && frameView->isInPerformLayout()) {
     // View layout should not be re-entrant.
-    ASSERT_NOT_REACHED();
+    NOTREACHED();
     return;
   }
 
@@ -2153,7 +2174,7 @@ void Document::pageSizeAndMarginsInPixels(int pageIndex,
       break;
     }
     default:
-      ASSERT_NOT_REACHED();
+      NOTREACHED();
   }
   pageSize = DoubleSize(width, height);
 
@@ -2282,6 +2303,7 @@ void Document::shutdown() {
   // Don't allow script to run in the middle of detachLayoutTree() because a
   // detaching Document is not in a consistent state.
   ScriptForbiddenScope forbidScript;
+
   view()->dispose();
   m_markers->prepareForDestruction();
 
@@ -2296,8 +2318,6 @@ void Document::shutdown() {
         .client()
         ->sharedWorkerRepositoryClient()
         ->documentDetached(this);
-
-  stopActiveDOMObjects();
 
   // FIXME: consider using ActiveDOMObject.
   if (m_scriptedAnimationController)
@@ -2384,7 +2404,9 @@ void Document::shutdown() {
 
   m_lifecycle.advanceTo(DocumentLifecycle::Stopped);
 
-  // FIXME: Currently we call notifyContextDestroyed() only in
+  // TODO(haraken): Call contextDestroyed() before we start any disruptive
+  // operations.
+  // TODO(haraken): Currently we call notifyContextDestroyed() only in
   // Document::detachLayoutTree(), which means that we don't call
   // notifyContextDestroyed() for a document that doesn't get detached.
   // If such a document has any observer, the observer won't get
@@ -2395,8 +2417,8 @@ void Document::shutdown() {
   // This is required, as our LocalFrame might delete itself as soon as it
   // detaches us. However, this violates Node::detachLayoutTree() semantics, as
   // it's never possible to re-attach. Eventually Document::detachLayoutTree()
-  // should be renamed, or this setting of the frame to 0 could be made explicit
-  // in each of the callers of Document::detachLayoutTree().
+  // should be renamed, or this setting of the frame to 0 could be made
+  // explicit in each of the callers of Document::detachLayoutTree().
   m_frame = nullptr;
 }
 
@@ -2949,7 +2971,7 @@ Document::PageDismissalType Document::pageDismissalEventBeingDispatched()
     case UnloadEventHandled:
       return NoDismissal;
   }
-  ASSERT_NOT_REACHED();
+  NOTREACHED();
   return NoDismissal;
 }
 
@@ -3363,6 +3385,20 @@ String Document::outgoingReferrer() const {
   return referrerDocument->m_url.strippedForUseAsReferrer();
 }
 
+ReferrerPolicy Document::getReferrerPolicy() const {
+  ReferrerPolicy policy = ExecutionContext::getReferrerPolicy();
+  // For srcdoc documents without their own policy, walk up the frame
+  // tree to find the document that is either not a srcdoc or doesn't
+  // have its own policy. This algorithm is defined in
+  // https://html.spec.whatwg.org/multipage/browsers.html#set-up-a-browsing-context-environment-settings-object.
+  if (!m_frame || policy != ReferrerPolicyDefault || !isSrcdocDocument()) {
+    return policy;
+  }
+  LocalFrame* frame = toLocalFrame(m_frame->tree().parent());
+  DCHECK(frame);
+  return frame->document()->getReferrerPolicy();
+}
+
 MouseEventWithHitTestResults Document::performMouseEventHitTest(
     const HitTestRequest& request,
     const LayoutPoint& documentPoint,
@@ -3749,7 +3785,7 @@ bool Document::setFocusedElement(Element* prpNewFocusedElement,
 
   // Remove focus from the existing focus node (if any)
   if (oldFocusedElement) {
-    oldFocusedElement->setFocus(false);
+    oldFocusedElement->setFocused(false);
 
     // Dispatch the blur event and let the node do any other blur related
     // activities (important for text fields)
@@ -3786,9 +3822,9 @@ bool Document::setFocusedElement(Element* prpNewFocusedElement,
     if (view()) {
       Widget* oldWidget = widgetForElement(*oldFocusedElement);
       if (oldWidget)
-        oldWidget->setFocus(false, params.type);
+        oldWidget->setFocused(false, params.type);
       else
-        view()->setFocus(false, params.type);
+        view()->setFocused(false, params.type);
     }
   }
 
@@ -3805,8 +3841,8 @@ bool Document::setFocusedElement(Element* prpNewFocusedElement,
     m_focusedElement = newFocusedElement;
     setSequentialFocusNavigationStartingPoint(m_focusedElement.get());
 
-    m_focusedElement->setFocus(true);
-    // Element::setFocus for frames can dispatch events.
+    m_focusedElement->setFocused(true);
+    // Element::setFocused for frames can dispatch events.
     if (m_focusedElement != newFocusedElement) {
       focusChangeBlocked = true;
       goto SetFocusedElementDone;
@@ -3868,9 +3904,9 @@ bool Document::setFocusedElement(Element* prpNewFocusedElement,
         focusWidget = widgetForElement(*m_focusedElement);
       }
       if (focusWidget)
-        focusWidget->setFocus(true, params.type);
+        focusWidget->setFocused(true, params.type);
       else
-        view()->setFocus(true, params.type);
+        view()->setFocused(true, params.type);
     }
   }
 
@@ -5161,7 +5197,7 @@ Vector<IconURL> Document::iconURLs(int iconTypesMask) {
         secondaryIcons.append(firstTouchPrecomposedIcon);
       firstTouchPrecomposedIcon = newURL;
     } else {
-      ASSERT_NOT_REACHED();
+      NOTREACHED();
     }
   }
 
@@ -5363,9 +5399,10 @@ bool Document::allowInlineEventHandler(Node* node,
                                        EventListener* listener,
                                        const String& contextURL,
                                        const WTF::OrdinalNumber& contextLine) {
+  Element* element = node && node->isElementNode() ? toElement(node) : nullptr;
   if (!ContentSecurityPolicy::shouldBypassMainWorld(this) &&
       !contentSecurityPolicy()->allowInlineEventHandler(
-          listener->code(), contextURL, contextLine))
+          element, listener->code(), contextURL, contextLine))
     return false;
 
   // HTML says that inline script needs browsing context to create its execution
@@ -6069,7 +6106,7 @@ void Document::didAssociateFormControl(Element* element) {
 }
 
 void Document::didAssociateFormControlsTimerFired(TimerBase* timer) {
-  ASSERT_UNUSED(timer, timer == &m_didAssociateFormControlsTimer);
+  DCHECK_EQ(timer, &m_didAssociateFormControlsTimer);
   if (!frame() || !frame()->page())
     return;
 
@@ -6326,6 +6363,7 @@ DEFINE_TRACE(Document) {
   visitor->trace(m_snapCoordinator);
   visitor->trace(m_resizeObserverController);
   visitor->trace(m_propertyRegistry);
+  visitor->trace(m_nonAttachedStyle);
   Supplementable<Document>::trace(visitor);
   TreeScope::trace(visitor);
   ContainerNode::trace(visitor);
@@ -6346,13 +6384,15 @@ DEFINE_TRACE_WRAPPERS(Document) {
   visitor->traceWrappers(m_implementation);
   visitor->traceWrappers(m_styleSheetList);
   visitor->traceWrappers(m_styleEngine);
-  visitor->traceWrappers(Supplementable<Document>::m_supplements.get(
-      FontFaceSet::supplementName()));
   for (int i = 0; i < numNodeListInvalidationTypes; ++i) {
     for (auto list : m_nodeLists[i]) {
       visitor->traceWrappers(list);
     }
   }
+  // Cannot trace in Supplementable<Document> as it is part of platform/ and
+  // thus cannot refer to ScriptWrappableVisitor.
+  visitor->traceWrappers(Supplementable<Document>::m_supplements.get(
+      FontFaceSet::supplementName()));
   ContainerNode::traceWrappers(visitor);
 }
 

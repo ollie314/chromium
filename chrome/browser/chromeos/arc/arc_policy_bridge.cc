@@ -17,6 +17,7 @@
 #include "chrome/browser/policy/profile_policy_connector.h"
 #include "chrome/browser/policy/profile_policy_connector_factory.h"
 #include "chromeos/network/onc/onc_utils.h"
+#include "components/arc/arc_bridge_service.h"
 #include "components/onc/onc_constants.h"
 #include "components/policy/core/common/policy_map.h"
 #include "components/policy/core/common/policy_namespace.h"
@@ -174,7 +175,7 @@ void AddOncCaCertsToPolicies(const policy::PolicyMap& policy_map,
 
     base::DictionaryValue data;
     data.SetString("X509", x509_data);
-    ca_certs->Append(data.DeepCopy());
+    ca_certs->Append(data.CreateDeepCopy());
   }
   filtered_policies->Set(kArcCaCerts, std::move(ca_certs));
 }

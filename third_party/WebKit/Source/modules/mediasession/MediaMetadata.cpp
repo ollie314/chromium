@@ -5,7 +5,7 @@
 #include "modules/mediasession/MediaMetadata.h"
 
 #include "core/dom/ExecutionContext.h"
-#include "modules/mediasession/MediaArtwork.h"
+#include "modules/mediasession/MediaImage.h"
 #include "modules/mediasession/MediaMetadataInit.h"
 
 namespace blink {
@@ -21,8 +21,8 @@ MediaMetadata::MediaMetadata(ExecutionContext* context,
   m_title = metadata.title();
   m_artist = metadata.artist();
   m_album = metadata.album();
-  for (const auto& artwork : metadata.artwork())
-    m_artwork.append(MediaArtwork::create(context, artwork));
+  for (const auto& image : metadata.artwork())
+    m_artwork.append(MediaImage::create(context, image));
 }
 
 String MediaMetadata::title() const {
@@ -37,21 +37,8 @@ String MediaMetadata::album() const {
   return m_album;
 }
 
-const HeapVector<Member<MediaArtwork>>& MediaMetadata::artwork() const {
+const HeapVector<Member<MediaImage>>& MediaMetadata::artwork() const {
   return m_artwork;
-}
-
-MediaMetadata::operator WebMediaMetadata() const {
-  WebMediaMetadata webMetadata;
-  webMetadata.title = m_title;
-  webMetadata.artist = m_artist;
-  webMetadata.album = m_album;
-  WebVector<WebMediaArtwork> webArtwork(m_artwork.size());
-  for (size_t i = 0; i < m_artwork.size(); ++i) {
-    webArtwork[i] = *m_artwork[i]->data();
-  }
-  webMetadata.artwork.swap(webArtwork);
-  return webMetadata;
 }
 
 DEFINE_TRACE(MediaMetadata) {

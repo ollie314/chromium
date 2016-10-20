@@ -99,7 +99,7 @@ class LayerTreeHostImplClient {
  public:
   virtual void DidLoseCompositorFrameSinkOnImplThread() = 0;
   virtual void SetBeginFrameSource(BeginFrameSource* source) = 0;
-  virtual void DidSwapBuffersCompleteOnImplThread() = 0;
+  virtual void DidReceiveCompositorFrameAckOnImplThread() = 0;
   virtual void OnCanDrawStateChanged(bool can_draw) = 0;
   virtual void NotifyReadyToActivate() = 0;
   virtual void NotifyReadyToDraw() = 0;
@@ -180,6 +180,7 @@ class CC_EXPORT LayerTreeHostImpl
   void MouseDown() override;
   void MouseUp() override;
   void MouseMoveAt(const gfx::Point& viewport_point) override;
+  void MouseLeave() override;
 
   void PinchGestureBegin() override;
   void PinchGestureUpdate(float magnify_delta,
@@ -365,7 +366,7 @@ class CC_EXPORT LayerTreeHostImpl
       const gfx::Rect& viewport_rect,
       const gfx::Transform& transform) override;
   void DidLoseCompositorFrameSink() override;
-  void DidSwapBuffersComplete() override;
+  void DidReceiveCompositorFrameAck() override;
   void ReclaimResources(const ReturnedResourceArray& resources) override;
   void SetMemoryPolicy(const ManagedMemoryPolicy& policy) override;
   void SetTreeActivationCallback(const base::Closure& callback) override;
@@ -597,6 +598,8 @@ class CC_EXPORT LayerTreeHostImpl
   void ClearCurrentlyScrollingLayerForTesting() {
     ClearCurrentlyScrollingLayer();
   }
+
+  LayerImpl* ViewportMainScrollLayer();
 
  protected:
   LayerTreeHostImpl(

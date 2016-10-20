@@ -4,65 +4,30 @@
 
 #include "modules/mediasession/MediaSession.h"
 
-#include "bindings/core/v8/CallbackPromiseAdapter.h"
-#include "bindings/core/v8/ScriptPromiseResolver.h"
 #include "bindings/core/v8/ScriptState.h"
-#include "core/dom/DOMException.h"
-#include "core/dom/ExceptionCode.h"
-#include "core/frame/LocalDOMWindow.h"
+#include "core/dom/Document.h"
+#include "core/dom/ExecutionContext.h"
 #include "core/frame/LocalFrame.h"
-#include "core/loader/FrameLoaderClient.h"
+#include "modules/EventTargetModules.h"
 #include "modules/mediasession/MediaMetadata.h"
-#include "modules/mediasession/MediaSessionError.h"
+#include "modules/mediasession/MediaMetadataSanitizer.h"
+#include "public/platform/InterfaceProvider.h"
 #include <memory>
 
 namespace blink {
 
-MediaSession::MediaSession(std::unique_ptr<WebMediaSession> webMediaSession)
-    : m_webMediaSession(std::move(webMediaSession)) {
-  DCHECK(m_webMediaSession);
-}
+MediaSession::MediaSession(ScriptState* scriptState)
+    : m_scriptState(scriptState) {}
 
-MediaSession* MediaSession::create(ExecutionContext* context,
-                                   ExceptionState& exceptionState) {
-  Document* document = toDocument(context);
-  LocalFrame* frame = document->frame();
-  FrameLoaderClient* client = frame->loader().client();
-  std::unique_ptr<WebMediaSession> webMediaSession =
-      client->createWebMediaSession();
-  if (!webMediaSession) {
-    exceptionState.throwDOMException(NotSupportedError,
-                                     "Missing platform implementation.");
-    return nullptr;
-  }
-  return new MediaSession(std::move(webMediaSession));
-}
-
-ScriptPromise MediaSession::activate(ScriptState* scriptState) {
-  ScriptPromiseResolver* resolver = ScriptPromiseResolver::create(scriptState);
-  ScriptPromise promise = resolver->promise();
-
-  m_webMediaSession->activate(
-      new CallbackPromiseAdapter<void, MediaSessionError>(resolver));
-  return promise;
-}
-
-ScriptPromise MediaSession::deactivate(ScriptState* scriptState) {
-  ScriptPromiseResolver* resolver = ScriptPromiseResolver::create(scriptState);
-  ScriptPromise promise = resolver->promise();
-
-  m_webMediaSession->deactivate(
-      new CallbackPromiseAdapter<void, void>(resolver));
-  return promise;
+MediaSession* MediaSession::create(ScriptState* scriptState) {
+  return new MediaSession(scriptState);
 }
 
 void MediaSession::setMetadata(MediaMetadata* metadata) {
-  m_metadata = metadata;
-  if (metadata) {
-    WebMediaMetadata webMetadata = (WebMediaMetadata)*metadata;
-    m_webMediaSession->setMetadata(&webMetadata);
-  } else {
-    m_webMediaSession->setMetadata(nullptr);
+  if (mojom::blink::MediaSessionService* service =
+          getService(m_scriptState.get())) {
+    service->SetMetadata(
+        MediaMetadataSanitizer::sanitizeAndConvertToMojo(metadata));
   }
 }
 
@@ -70,8 +35,51 @@ MediaMetadata* MediaSession::metadata() const {
   return m_metadata;
 }
 
+const WTF::AtomicString& MediaSession::interfaceName() const {
+  return EventTargetNames::MediaSession;
+}
+
+ExecutionContext* MediaSession::getExecutionContext() const {
+  return m_scriptState->getExecutionContext();
+}
+
+mojom::blink::MediaSessionService* MediaSession::getService(
+    ScriptState* scriptState) {
+  if (!m_service) {
+    InterfaceProvider* interfaceProvider = nullptr;
+    DCHECK(scriptState->getExecutionContext()->isDocument())
+        << "MediaSession::getService() is only available from a frame";
+    Document* document = toDocument(scriptState->getExecutionContext());
+    if (document->frame())
+      interfaceProvider = document->frame()->interfaceProvider();
+
+    if (interfaceProvider)
+      interfaceProvider->getInterface(mojo::GetProxy(&m_service));
+  }
+  return m_service.get();
+}
+
+bool MediaSession::addEventListenerInternal(
+    const AtomicString& eventType,
+    EventListener* listener,
+    const AddEventListenerOptionsResolved& options) {
+  // TODO(zqzhang): Notify MediaSessionService the handler has been set. See
+  // https://crbug.com/656563
+  return EventTarget::addEventListenerInternal(eventType, listener, options);
+}
+
+bool MediaSession::removeEventListenerInternal(
+    const AtomicString& eventType,
+    const EventListener* listener,
+    const EventListenerOptions& options) {
+  // TODO(zqzhang): Notify MediaSessionService the handler has been unset. See
+  // https://crbug.com/656563
+  return EventTarget::removeEventListenerInternal(eventType, listener, options);
+}
+
 DEFINE_TRACE(MediaSession) {
   visitor->trace(m_metadata);
+  EventTargetWithInlineData::trace(visitor);
 }
 
 }  // namespace blink

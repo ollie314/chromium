@@ -67,8 +67,10 @@ Layer::Inputs::Inputs(int layer_id)
       scroll_parent(nullptr),
       clip_parent(nullptr),
       has_will_change_transform_hint(false),
+      has_preferred_raster_scale(false),
       hide_layer_and_subtree(false),
-      client(nullptr) {}
+      client(nullptr),
+      preferred_raster_scale(1.0) {}
 
 Layer::Inputs::~Inputs() {}
 
@@ -77,15 +79,12 @@ scoped_refptr<Layer> Layer::Create() {
 }
 
 Layer::Layer()
-    // Layer IDs start from 1.
-    : Layer(g_next_layer_id.GetNext() + 1) {}
-
-Layer::Layer(int layer_id)
     : ignore_set_needs_commit_(false),
       parent_(nullptr),
       layer_tree_host_(nullptr),
       layer_tree_(nullptr),
-      inputs_(layer_id),
+      // Layer IDs start from 1.
+      inputs_(g_next_layer_id.GetNext() + 1),
       num_descendants_that_draw_content_(0),
       transform_tree_index_(TransformTree::kInvalidNodeId),
       effect_tree_index_(EffectTree::kInvalidNodeId),
@@ -589,7 +588,7 @@ void Layer::SetPosition(const gfx::PointF& position) {
               transform_tree_index());
       sticky_data->main_thread_offset =
           position.OffsetFromOrigin() -
-          sticky_data->constraints.scroll_container_relative_sticky_box_rect
+          sticky_data->constraints.parent_relative_sticky_box_offset
               .OffsetFromOrigin();
     }
     transform_node->needs_local_transform_update = true;
@@ -1185,6 +1184,10 @@ void Layer::PushPropertiesTo(LayerImpl* layer) {
   layer->SetUpdateRect(inputs_.update_rect);
 
   layer->SetHasWillChangeTransformHint(has_will_change_transform_hint());
+  if (has_preferred_raster_scale())
+    layer->SetPreferredRasterScale(preferred_raster_scale());
+  else
+    layer->ClearPreferredRasterScale();
   layer->SetNeedsPushProperties();
 
   // Reset any state that should be cleared for the next update.
@@ -1763,6 +1766,24 @@ void Layer::SetHasWillChangeTransformHint(bool has_will_change) {
   SetNeedsCommit();
 }
 
+void Layer::SetPreferredRasterScale(float preferred_raster_scale) {
+  if (inputs_.has_preferred_raster_scale &&
+      inputs_.preferred_raster_scale == preferred_raster_scale)
+    return;
+
+  inputs_.has_preferred_raster_scale = true;
+  inputs_.preferred_raster_scale = preferred_raster_scale;
+  SetNeedsCommit();
+}
+
+void Layer::ClearPreferredRasterScale() {
+  if (!inputs_.has_preferred_raster_scale)
+    return;
+  inputs_.has_preferred_raster_scale = false;
+  inputs_.preferred_raster_scale = 1.0f;
+  SetNeedsCommit();
+}
+
 AnimationHost* Layer::GetAnimationHost() const {
   return layer_tree_ ? layer_tree_->animation_host() : nullptr;
 }
@@ -1865,6 +1886,10 @@ gfx::Transform Layer::screen_space_transform() const {
 
 LayerTree* Layer::GetLayerTree() const {
   return layer_tree_;
+}
+
+void Layer::SetLayerIdForTesting(int id) {
+  inputs_.layer_id = id;
 }
 
 }  // namespace cc

@@ -40,13 +40,12 @@ class MusBrowserCompositorOutputSurface
 
  protected:
   // cc::OutputSurface implementation.
-  void SwapBuffers(cc::CompositorFrame frame) override;
+  void SwapBuffers(cc::OutputSurfaceFrame frame) override;
   bool BindToClient(cc::OutputSurfaceClient* client) override;
 
   // ui::WindowSurfaceClient:
-  void OnResourcesReturned(
-      ui::WindowSurface* surface,
-      mojo::Array<cc::ReturnedResource> resources) override;
+  void OnResourcesReturned(ui::WindowSurface* surface,
+                           const cc::ReturnedResourceArray& resources) override;
 
  private:
   uint32_t AllocateResourceId();

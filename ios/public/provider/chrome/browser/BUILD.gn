@@ -2,6 +2,9 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//build/buildflag_header.gni")
+import("//ios/public/provider/chrome/browser/build_config.gni")
+
 source_set("browser") {
   sources = [
     "browser_constants.cc",
@@ -21,6 +24,7 @@ source_set("browser") {
     "signin/signin_error_provider.mm",
     "signin/signin_resources_provider.h",
     "signin/signin_resources_provider.mm",
+    "ui/app_rating_prompt.h",
     "ui/default_ios_web_view_factory.h",
     "ui/default_ios_web_view_factory.mm",
     "ui/infobar_view_delegate.h",
@@ -28,6 +32,15 @@ source_set("browser") {
     "ui/text_field_styling.h",
     "updatable_resource_provider.h",
     "updatable_resource_provider.mm",
+    "voice/audio_session_controller.h",
+    "voice/voice_search_language.h",
+    "voice/voice_search_language.mm",
+    "voice/voice_search_provider.h",
+    "voice/voice_search_provider.mm",
+  ]
+
+  public_deps = [
+    ":provider_flags",
   ]
 
   deps = [
@@ -39,6 +52,11 @@ source_set("browser") {
     "//ios/public/provider/web",
     "//ios/web",
   ]
+}
+
+buildflag_header("provider_flags") {
+  header = "provider_flags.h"
+  flags = [ "USE_IOS_INTERNAL_PROVIDER=$use_ios_internal_provider" ]
 }
 
 source_set("test_support") {
@@ -57,6 +75,8 @@ source_set("test_support") {
     "test_chrome_provider_initializer.mm",
     "test_updatable_resource_provider.h",
     "test_updatable_resource_provider.mm",
+    "voice/test_voice_search_provider.h",
+    "voice/test_voice_search_provider.mm",
   ]
 
   deps = [

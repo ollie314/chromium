@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/files/scoped_temp_dir.h"
 #include "base/macros.h"
 #include "base/test/histogram_tester.h"
 #include "base/time/time.h"
@@ -16,11 +17,14 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_navigator_params.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/prefs/pref_service.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/test/browser_test_utils.h"
+#include "content/public/test/download_test_observer.h"
 #include "net/http/failing_http_transaction_factory.h"
 #include "net/http/http_cache.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
@@ -36,6 +40,10 @@ class PageLoadMetricsBrowserTest : public InProcessBrowserTest {
  protected:
   void NavigateToUntrackedUrl() {
     ui_test_utils::NavigateToURL(browser(), GURL(url::kAboutBlankURL));
+  }
+
+  bool NoPageLoadMetricsRecorded() {
+    return histogram_tester_.GetTotalCountsForPrefix("PageLoad.").empty();
   }
 
   base::HistogramTester histogram_tester_;
@@ -58,11 +66,7 @@ void FailAllNetworkTransactions(net::URLRequestContextGetter* getter) {
 
 IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest, NoNavigation) {
   ASSERT_TRUE(embedded_test_server()->Start());
-
-  histogram_tester_.ExpectTotalCount(internal::kHistogramCommit, 0);
-  histogram_tester_.ExpectTotalCount(internal::kHistogramDomContentLoaded, 0);
-  histogram_tester_.ExpectTotalCount(internal::kHistogramLoad, 0);
-  histogram_tester_.ExpectTotalCount(internal::kHistogramFirstLayout, 0);
+  EXPECT_TRUE(NoPageLoadMetricsRecorded());
 }
 
 IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest, NewPage) {
@@ -80,6 +84,10 @@ IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest, NewPage) {
       internal::kHistogramParseBlockedOnScriptLoad, 1);
   histogram_tester_.ExpectTotalCount(
       internal::kHistogramParseBlockedOnScriptExecution, 1);
+
+  // Verify that NoPageLoadMetricsRecorded returns false when PageLoad metrics
+  // have been recorded.
+  EXPECT_FALSE(NoPageLoadMetricsRecorded());
 }
 
 IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest, SamePageNavigation) {
@@ -106,7 +114,6 @@ IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest, SameUrlNavigation) {
   NavigateToUntrackedUrl();
 
   // We expect one histogram sample for each navigation to title1.html.
-  histogram_tester_.ExpectTotalCount(internal::kHistogramCommit, 2);
   histogram_tester_.ExpectTotalCount(internal::kHistogramDomContentLoaded, 2);
   histogram_tester_.ExpectTotalCount(internal::kHistogramLoad, 2);
   histogram_tester_.ExpectTotalCount(internal::kHistogramFirstLayout, 2);
@@ -118,10 +125,7 @@ IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest, NonHtmlMainResource) {
   ui_test_utils::NavigateToURL(browser(),
                                embedded_test_server()->GetURL("/circle.svg"));
   NavigateToUntrackedUrl();
-
-  histogram_tester_.ExpectTotalCount(internal::kHistogramCommit, 0);
-  histogram_tester_.ExpectTotalCount(page_load_metrics::internal::kErrorEvents,
-                                     0);
+  EXPECT_TRUE(NoPageLoadMetricsRecorded());
 }
 
 IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest, NonHttpOrHttpsUrl) {
@@ -129,10 +133,7 @@ IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest, NonHttpOrHttpsUrl) {
 
   ui_test_utils::NavigateToURL(browser(), GURL(chrome::kChromeUIVersionURL));
   NavigateToUntrackedUrl();
-
-  histogram_tester_.ExpectTotalCount(internal::kHistogramCommit, 0);
-  histogram_tester_.ExpectTotalCount(page_load_metrics::internal::kErrorEvents,
-                                     0);
+  EXPECT_TRUE(NoPageLoadMetricsRecorded());
 }
 
 IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest, HttpErrorPage) {
@@ -141,10 +142,7 @@ IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest, HttpErrorPage) {
   ui_test_utils::NavigateToURL(
       browser(), embedded_test_server()->GetURL("/page_load_metrics/404.html"));
   NavigateToUntrackedUrl();
-
-  histogram_tester_.ExpectTotalCount(internal::kHistogramCommit, 0);
-  histogram_tester_.ExpectTotalCount(page_load_metrics::internal::kErrorEvents,
-                                     0);
+  EXPECT_TRUE(NoPageLoadMetricsRecorded());
 }
 
 IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest, ChromeErrorPage) {
@@ -162,10 +160,36 @@ IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest, ChromeErrorPage) {
   ui_test_utils::NavigateToURL(browser(),
                                embedded_test_server()->GetURL("/title1.html"));
   NavigateToUntrackedUrl();
+  EXPECT_TRUE(NoPageLoadMetricsRecorded());
+}
 
-  histogram_tester_.ExpectTotalCount(internal::kHistogramCommit, 0);
-  histogram_tester_.ExpectTotalCount(page_load_metrics::internal::kErrorEvents,
-                                     0);
+IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest, Ignore204Pages) {
+  ASSERT_TRUE(embedded_test_server()->Start());
+
+  ui_test_utils::NavigateToURL(browser(),
+                               embedded_test_server()->GetURL("/page204.html"));
+  NavigateToUntrackedUrl();
+  EXPECT_TRUE(NoPageLoadMetricsRecorded());
+}
+
+IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest, IgnoreDownloads) {
+  ASSERT_TRUE(embedded_test_server()->Start());
+
+  base::ScopedTempDir downloads_directory;
+  ASSERT_TRUE(downloads_directory.CreateUniqueTempDir());
+  browser()->profile()->GetPrefs()->SetFilePath(
+      prefs::kDownloadDefaultDirectory, downloads_directory.GetPath());
+  content::DownloadTestObserverTerminal downloads_observer(
+      content::BrowserContext::GetDownloadManager(browser()->profile()),
+      1,  // == wait_count (only waiting for "download-test3.gif").
+      content::DownloadTestObserver::ON_DANGEROUS_DOWNLOAD_FAIL);
+
+  ui_test_utils::NavigateToURL(
+      browser(), embedded_test_server()->GetURL("/download-test3.gif"));
+  downloads_observer.WaitForFinished();
+
+  NavigateToUntrackedUrl();
+  EXPECT_TRUE(NoPageLoadMetricsRecorded());
 }
 
 IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest, PreloadDocumentWrite) {
@@ -311,7 +335,7 @@ IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest, AbortNewNavigation) {
       browser()->tab_strip_model()->GetActiveWebContents(), url);
 
   chrome::Navigate(&params);
-  EXPECT_TRUE(manager.WaitForWillStartRequest());
+  EXPECT_TRUE(manager.WaitForRequestStart());
 
   GURL url2(embedded_test_server()->GetURL("/title2.html"));
   chrome::NavigateParams params2(browser(), url2,
@@ -334,7 +358,7 @@ IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest, AbortReload) {
       browser()->tab_strip_model()->GetActiveWebContents(), url);
 
   chrome::Navigate(&params);
-  EXPECT_TRUE(manager.WaitForWillStartRequest());
+  EXPECT_TRUE(manager.WaitForRequestStart());
 
   chrome::NavigateParams params2(browser(), url, ui::PAGE_TRANSITION_RELOAD);
   content::TestNavigationManager manager2(
@@ -355,7 +379,7 @@ IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest, AbortClose) {
       browser()->tab_strip_model()->GetActiveWebContents(), url);
 
   chrome::Navigate(&params);
-  EXPECT_TRUE(manager.WaitForWillStartRequest());
+  EXPECT_TRUE(manager.WaitForRequestStart());
 
   browser()->tab_strip_model()->GetActiveWebContents()->Close();
 
@@ -374,7 +398,7 @@ IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest, AbortMultiple) {
       browser()->tab_strip_model()->GetActiveWebContents(), url);
 
   chrome::Navigate(&params);
-  EXPECT_TRUE(manager.WaitForWillStartRequest());
+  EXPECT_TRUE(manager.WaitForRequestStart());
 
   GURL url2(embedded_test_server()->GetURL("/title2.html"));
   chrome::NavigateParams params2(browser(), url2, ui::PAGE_TRANSITION_TYPED);
@@ -382,7 +406,7 @@ IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest, AbortMultiple) {
       browser()->tab_strip_model()->GetActiveWebContents(), url2);
   chrome::Navigate(&params2);
 
-  EXPECT_TRUE(manager2.WaitForWillStartRequest());
+  EXPECT_TRUE(manager2.WaitForRequestStart());
   manager.WaitForNavigationFinished();
 
   GURL url3(embedded_test_server()->GetURL("/title3.html"));
@@ -391,7 +415,7 @@ IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest, AbortMultiple) {
       browser()->tab_strip_model()->GetActiveWebContents(), url3);
   chrome::Navigate(&params3);
 
-  EXPECT_TRUE(manager3.WaitForWillStartRequest());
+  EXPECT_TRUE(manager3.WaitForRequestStart());
   manager2.WaitForNavigationFinished();
 
   manager3.WaitForNavigationFinished();
@@ -412,7 +436,7 @@ IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest, AbortClientRedirect) {
   content::TestNavigationManager manager(
       browser()->tab_strip_model()->GetActiveWebContents(), second_url);
   chrome::Navigate(&params);
-  EXPECT_TRUE(manager.WaitForWillStartRequest());
+  EXPECT_TRUE(manager.WaitForRequestStart());
 
   {
     content::TestNavigationManager reload_manager(

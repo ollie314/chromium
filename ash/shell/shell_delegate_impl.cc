@@ -12,10 +12,10 @@
 #include "ash/common/new_window_delegate.h"
 #include "ash/common/palette_delegate.h"
 #include "ash/common/session/session_state_delegate.h"
-#include "ash/common/shell_window_ids.h"
 #include "ash/common/system/tray/default_system_tray_delegate.h"
 #include "ash/common/wm/window_state.h"
 #include "ash/default_wallpaper_delegate.h"
+#include "ash/public/cpp/shell_window_ids.h"
 #include "ash/shell.h"
 #include "ash/shell/context_menu.h"
 #include "ash/shell/example_factory.h"
@@ -137,10 +137,11 @@ class SessionStateDelegateImpl : public SessionStateDelegate {
   bool IsUserSessionBlocked() const override {
     return !IsActiveUserSessionStarted() || IsScreenLocked();
   }
-  SessionState GetSessionState() const override {
+  session_manager::SessionState GetSessionState() const override {
     // Assume that if session is not active we're at login.
-    return IsActiveUserSessionStarted() ? SESSION_STATE_ACTIVE
-                                        : SESSION_STATE_LOGIN_PRIMARY;
+    return IsActiveUserSessionStarted()
+               ? session_manager::SessionState::ACTIVE
+               : session_manager::SessionState::LOGIN_PRIMARY;
   }
   const user_manager::UserInfo* GetUserInfo(UserIndex index) const override {
     return user_info_.get();
@@ -196,7 +197,7 @@ ShellDelegateImpl::ShellDelegateImpl()
 
 ShellDelegateImpl::~ShellDelegateImpl() {}
 
-::shell::Connector* ShellDelegateImpl::GetShellConnector() const {
+::service_manager::Connector* ShellDelegateImpl::GetShellConnector() const {
   return nullptr;
 }
 

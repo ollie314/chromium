@@ -195,8 +195,6 @@ WebInspector.TargetManager.prototype = {
 
         /** @type {!WebInspector.ConsoleModel} */
         target.consoleModel = new WebInspector.ConsoleModel(target, logAgent);
-        /** @type {!WebInspector.RuntimeModel} */
-        target.runtimeModel = new WebInspector.RuntimeModel(target);
 
         var networkManager = null;
         var resourceTreeModel = null;
@@ -206,6 +204,9 @@ WebInspector.TargetManager.prototype = {
             resourceTreeModel = new WebInspector.ResourceTreeModel(target, networkManager, WebInspector.SecurityOriginManager.fromTarget(target));
             new WebInspector.NetworkLog(target, resourceTreeModel, networkManager);
         }
+
+        /** @type {!WebInspector.RuntimeModel} */
+        target.runtimeModel = new WebInspector.RuntimeModel(target);
 
         if (target.hasJSCapability())
             new WebInspector.DebuggerModel(target);
@@ -232,6 +233,38 @@ WebInspector.TargetManager.prototype = {
 
         this.addTarget(target);
         return target;
+    },
+
+    /**
+     * @param {function()} factory
+     */
+    setMainTargetFactory: function(factory)
+    {
+        this._mainTargetFactory = factory;
+    },
+
+    /**
+     * @param {function(string)} dispatch
+     * @return {!Promise<!WebInspector.RawProtocolConnection>}
+     */
+    interceptMainConnection: function(dispatch)
+    {
+        var target = WebInspector.targetManager.mainTarget();
+        if (target)
+            target.connection().close();
+
+        var fulfill;
+        var result = new Promise(resolve => fulfill = resolve);
+        InspectorFrontendHost.reattach(() => fulfill(new WebInspector.RawProtocolConnection(dispatch, yieldCallback.bind(this))));
+        return result;
+
+        /**
+         * @this {WebInspector.TargetManager}
+         */
+        function yieldCallback()
+        {
+            InspectorFrontendHost.reattach(this._mainTargetFactory());
+        }
     },
 
     /**
@@ -288,6 +321,8 @@ WebInspector.TargetManager.prototype = {
      */
     removeTarget: function(target)
     {
+        if (!this._targets.includes(target))
+            return;
         this._targets.remove(target);
         var resourceTreeModel = WebInspector.ResourceTreeModel.fromTarget(target);
         var treeModelListeners = resourceTreeModel && resourceTreeModel[WebInspector.TargetManager._listenersSymbol];

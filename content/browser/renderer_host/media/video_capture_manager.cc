@@ -34,14 +34,15 @@
 #include "media/capture/video/video_capture_device.h"
 #include "media/capture/video/video_capture_device_factory.h"
 
-#if defined(ENABLE_SCREEN_CAPTURE)
+#if defined(ENABLE_SCREEN_CAPTURE) && !defined(OS_ANDROID)
 #include "content/browser/media/capture/desktop_capture_device.h"
 #if defined(USE_AURA)
 #include "content/browser/media/capture/desktop_capture_device_aura.h"
 #endif
-#if defined(OS_ANDROID)
-#include "content/browser/media/capture/screen_capture_device_android.h"
 #endif
+
+#if defined(ENABLE_SCREEN_CAPTURE) && defined(OS_ANDROID)
+#include "content/browser/media/capture/screen_capture_device_android.h"
 #endif
 
 #if defined(OS_MACOSX)
@@ -550,8 +551,9 @@ void VideoCaptureManager::OnDeviceStarted(
 
     auto request = photo_request_queue_.begin();
     while(request != photo_request_queue_.end()) {
-      if (GetDeviceEntryBySessionId(request->first)->video_capture_device()) {
-        request->second.Run(entry->video_capture_device());
+      DeviceEntry* maybe_entry = GetDeviceEntryBySessionId(request->first);
+      if (maybe_entry && maybe_entry->video_capture_device()) {
+        request->second.Run(maybe_entry->video_capture_device());
         photo_request_queue_.erase(request);
       }
       ++request;
@@ -592,7 +594,7 @@ VideoCaptureManager::DoStartTabCaptureOnDeviceThread(
   DCHECK(IsOnDeviceThread());
 
   std::unique_ptr<VideoCaptureDevice> video_capture_device;
-  video_capture_device.reset(WebContentsVideoCaptureDevice::Create(id));
+  video_capture_device = WebContentsVideoCaptureDevice::Create(id);
 
   if (!video_capture_device) {
     device_client->OnError(FROM_HERE, "Could not create capture device");
@@ -620,7 +622,7 @@ VideoCaptureManager::DoStartDesktopCaptureOnDeviceThread(
   }
 
   if (desktop_id.type == DesktopMediaID::TYPE_WEB_CONTENTS) {
-    video_capture_device.reset(WebContentsVideoCaptureDevice::Create(id));
+    video_capture_device = WebContentsVideoCaptureDevice::Create(id);
     IncrementDesktopCaptureCounter(TAB_VIDEO_CAPTURER_CREATED);
     if (desktop_id.audio_share) {
       IncrementDesktopCaptureCounter(TAB_VIDEO_CAPTURER_CREATED_WITH_AUDIO);
@@ -630,11 +632,13 @@ VideoCaptureManager::DoStartDesktopCaptureOnDeviceThread(
   } else {
 #if defined(OS_ANDROID)
     video_capture_device = base::MakeUnique<ScreenCaptureDeviceAndroid>();
-#elif defined(USE_AURA)
+#else
+#if defined(USE_AURA)
     video_capture_device = DesktopCaptureDeviceAura::Create(desktop_id);
-#endif
+#endif  // defined(USE_AURA)
     if (!video_capture_device)
       video_capture_device = DesktopCaptureDevice::Create(desktop_id);
+#endif  // defined (OS_ANDROID)
   }
 #endif  // defined(ENABLE_SCREEN_CAPTURE)
 
@@ -655,8 +659,7 @@ void VideoCaptureManager::StartCaptureForClient(
     VideoCaptureControllerEventHandler* client_handler,
     const DoneCB& done_cb) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  DVLOG(1) << "VideoCaptureManager::StartCaptureForClient #" << session_id
-           << ", request: "
+  DVLOG(1) << __func__ << ", session_id = " << session_id << ", request: "
            << media::VideoCaptureFormat::ToString(params.requested_format);
 
   DeviceEntry* entry = GetOrCreateDeviceEntry(session_id, params);
@@ -708,21 +711,22 @@ void VideoCaptureManager::StopCaptureForClient(
     }
   } else {
     LogVideoCaptureEvent(VIDEO_CAPTURE_STOP_CAPTURE_DUE_TO_ERROR);
-    SessionMap::iterator it;
-    for (it = sessions_.begin(); it != sessions_.end(); ++it) {
-      if (it->second.type == entry->stream_type &&
-          it->second.id == entry->id) {
-        listener_->Aborted(it->second.type, it->first);
+    for (auto it : sessions_) {
+      if (it.second.type == entry->stream_type && it.second.id == entry->id) {
+        listener_->Aborted(it.second.type, it.first);
+        // Aborted() call might synchronously destroy |entry|, recheck.
+        entry = GetDeviceEntryByController(controller);
+        if (!entry)
+          return;
         break;
       }
     }
   }
 
   // Detach client from controller.
-  media::VideoCaptureSessionId session_id =
+  const media::VideoCaptureSessionId session_id =
       controller->RemoveClient(client_id, client_handler);
-  DVLOG(1) << "VideoCaptureManager::StopCaptureForClient, session_id = "
-           << session_id;
+  DVLOG(1) << __func__ << ", session_id = " << session_id;
 
   // If controller has no more clients, delete controller and device.
   DestroyDeviceEntryIfNoClients(entry);

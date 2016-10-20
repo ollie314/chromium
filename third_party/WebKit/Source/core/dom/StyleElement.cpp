@@ -33,7 +33,7 @@
 #include "core/frame/csp/ContentSecurityPolicy.h"
 #include "core/html/HTMLStyleElement.h"
 #include "core/svg/SVGStyleElement.h"
-#include "platform/TraceEvent.h"
+#include "platform/tracing/TraceEvent.h"
 #include "wtf/text/StringBuilder.h"
 
 namespace blink {
@@ -159,7 +159,7 @@ StyleElement::ProcessingResult StyleElement::createSheet(Element& element,
   bool passesContentSecurityPolicyChecks =
       shouldBypassMainWorldCSP(element) ||
       csp->allowStyleWithHash(text, ContentSecurityPolicy::InlineType::Block) ||
-      csp->allowInlineStyle(document.url(),
+      csp->allowInlineStyle(&element, document.url(),
                             element.fastGetAttribute(HTMLNames::nonceAttr),
                             m_startPosition.m_line, text);
 

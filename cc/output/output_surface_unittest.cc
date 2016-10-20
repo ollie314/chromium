@@ -7,8 +7,7 @@
 #include <utility>
 
 #include "base/memory/ptr_util.h"
-#include "cc/output/compositor_frame.h"
-#include "cc/output/output_surface.h"
+#include "cc/output/output_surface_frame.h"
 #include "cc/output/software_output_device.h"
 #include "cc/test/fake_output_surface_client.h"
 #include "cc/test/test_context_provider.h"
@@ -32,8 +31,12 @@ class TestOutputSurface : public OutputSurface {
   void EnsureBackbuffer() override {}
   void DiscardBackbuffer() override {}
   void BindFramebuffer() override {}
-  void SwapBuffers(CompositorFrame frame) override {
-    client_->DidSwapBuffersComplete();
+  void Reshape(const gfx::Size& size,
+               float device_scale_factor,
+               const gfx::ColorSpace& color_space,
+               bool has_alpha) override {}
+  void SwapBuffers(OutputSurfaceFrame frame) override {
+    client_->DidReceiveSwapBuffersAck();
   }
   uint32_t GetFramebufferCopyTextureFormat() override {
     // TestContextProvider has no real framebuffer, just use RGB.
@@ -48,7 +51,9 @@ class TestOutputSurface : public OutputSurface {
   bool HasExternalStencilTest() const override { return false; }
   void ApplyExternalStencil() override {}
 
-  void OnSwapBuffersCompleteForTesting() { client_->DidSwapBuffersComplete(); }
+  void OnSwapBuffersCompleteForTesting() {
+    client_->DidReceiveSwapBuffersAck();
+  }
 
  protected:
 };

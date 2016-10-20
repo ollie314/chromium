@@ -5,7 +5,9 @@
 #ifndef SERVICES_VIDEO_CAPTURE_VIDEO_CAPTURE_DEVICE_IMPL_H_
 #define SERVICES_VIDEO_CAPTURE_VIDEO_CAPTURE_DEVICE_IMPL_H_
 
+#include "media/base/video_capture_types.h"
 #include "media/capture/video/video_capture_device.h"
+#include "media/capture/video/video_capture_device_client.h"
 #include "services/video_capture/public/interfaces/video_capture_device_proxy.mojom.h"
 
 namespace video_capture {
@@ -14,23 +16,25 @@ namespace video_capture {
 // of media::VideoCaptureDevice.
 class VideoCaptureDeviceProxyImpl : public mojom::VideoCaptureDeviceProxy {
  public:
-  VideoCaptureDeviceProxyImpl(
-      std::unique_ptr<media::VideoCaptureDevice> device);
+  VideoCaptureDeviceProxyImpl(std::unique_ptr<media::VideoCaptureDevice> device,
+                              const media::VideoCaptureJpegDecoderFactoryCB&
+                                  jpeg_decoder_factory_callback);
   ~VideoCaptureDeviceProxyImpl() override;
 
   // mojom::VideoCaptureDeviceProxy:
   void Start(const media::VideoCaptureFormat& requested_format,
-             mojom::ResolutionChangePolicy resolution_change_policy,
-             mojom::PowerLineFrequency power_line_frequency,
-             mojom::VideoCaptureDeviceClientPtr client) override;
+             media::ResolutionChangePolicy resolution_change_policy,
+             media::PowerLineFrequency power_line_frequency,
+             mojom::VideoFrameReceiverPtr receiver) override;
 
   void Stop();
 
   void OnClientConnectionErrorOrClose();
 
  private:
-  std::unique_ptr<media::VideoCaptureDevice> device_;
-  bool device_running_ = false;
+  const std::unique_ptr<media::VideoCaptureDevice> device_;
+  media::VideoCaptureJpegDecoderFactoryCB jpeg_decoder_factory_callback_;
+  bool device_running_;
 };
 
 }  // namespace video_capture

@@ -1,7 +1,8 @@
 /*
  * Copyright (C) 2007 Alexey Proskuryakov <ap@nypop.com>.
  * Copyright (C) 2008, 2009, 2010, 2011 Apple Inc. All rights reserved.
- * Copyright (C) 2009 Torch Mobile Inc. All rights reserved. (http://www.torchmobile.com/)
+ * Copyright (C) 2009 Torch Mobile Inc. All rights reserved.
+ * (http://www.torchmobile.com/)
  * Copyright (C) 2009 Jeff Schiller <codedread@gmail.com>
  * Copyright (C) Research In Motion Limited 2010. All rights reserved.
  *
@@ -1864,7 +1865,8 @@ inline EResize CSSIdentifierValue::convertTo() const {
     case CSSValueVertical:
       return RESIZE_VERTICAL;
     case CSSValueAuto:
-      ASSERT_NOT_REACHED();  // Depends on settings, thus should be handled by the caller.
+      // Depends on settings, thus should be handled by the caller.
+      NOTREACHED();
       return RESIZE_NONE;
     case CSSValueNone:
       return RESIZE_NONE;
@@ -2116,6 +2118,21 @@ inline TextUnderlinePosition CSSIdentifierValue::convertTo() const {
 
   ASSERT_NOT_REACHED();
   return TextUnderlinePositionAuto;
+}
+
+template <>
+inline TextDecorationSkip CSSIdentifierValue::convertTo() const {
+  switch (m_valueID) {
+    case CSSValueObjects:
+      return TextDecorationSkipObjects;
+    case CSSValueInk:
+      return TextDecorationSkipInk;
+    default:
+      break;
+  }
+
+  NOTREACHED();
+  return TextDecorationSkipObjects;
 }
 
 template <>

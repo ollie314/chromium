@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "net/nqe/network_quality_estimator.h"
+#ifndef NET_NQE_NETWORK_QUALITY_ESTIMATOR_TEST_UTIL_H_
+#define NET_NQE_NETWORK_QUALITY_ESTIMATOR_TEST_UTIL_H_
 
 #include <map>
 #include <memory>
@@ -13,6 +14,7 @@
 #include "base/time/time.h"
 #include "net/base/network_change_notifier.h"
 #include "net/nqe/effective_connection_type.h"
+#include "net/nqe/network_quality_estimator.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
@@ -81,6 +83,18 @@ class TestNetworkQualityEstimator : public NetworkQualityEstimator {
   // then the base implementation is called.
   EffectiveConnectionType GetRecentEffectiveConnectionType(
       const base::TimeTicks& start_time) const override;
+
+  // Returns the effective connection type that was set using
+  // |set_effective_connection_type|. If the connection type has not been set,
+  // then the base implementation is called. |http_rtt|, |transport_rtt| and
+  // |downstream_throughput_kbps| are set to the values that were previously
+  // set by calling set_recent_http_rtt(), set_recent_transport_rtt()
+  // and set_recent_transport_rtt() methods, respectively.
+  EffectiveConnectionType GetRecentEffectiveConnectionTypeAndNetworkQuality(
+      const base::TimeTicks& start_time,
+      base::TimeDelta* http_rtt,
+      base::TimeDelta* transport_rtt,
+      int32_t* downstream_throughput_kbps) const override;
 
   void set_http_rtt(const base::TimeDelta& http_rtt) {
     http_rtt_set_ = true;
@@ -195,3 +209,5 @@ class TestNetworkQualityEstimator : public NetworkQualityEstimator {
 };
 
 }  // namespace net
+
+#endif  // NET_NQE_NETWORK_QUALITY_ESTIMATOR_TEST_UTIL_H_

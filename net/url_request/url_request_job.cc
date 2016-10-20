@@ -32,6 +32,7 @@
 #include "net/log/net_log_event_type.h"
 #include "net/log/net_log_with_source.h"
 #include "net/nqe/network_quality_estimator.h"
+#include "net/proxy/proxy_server.h"
 #include "net/url_request/url_request_context.h"
 
 namespace net {
@@ -610,24 +611,6 @@ void URLRequestJob::NotifyDone(const URLRequestStatus &status) {
     request_->set_status(status);
   }
 
-  // If the request succeeded (And wasn't cancelled) and the response code was
-  // 4xx or 5xx, record whether or not the main frame was blank.  This is
-  // intended to be a short-lived histogram, used to figure out how important
-  // fixing http://crbug.com/331745 is.
-  if (request_->status().is_success()) {
-    int response_code = GetResponseCode();
-    if (400 <= response_code && response_code <= 599) {
-      bool page_has_content = (postfilter_bytes_read_ != 0);
-      if (request_->load_flags() & net::LOAD_MAIN_FRAME_DEPRECATED) {
-        UMA_HISTOGRAM_BOOLEAN("Net.ErrorResponseHasContentMainFrame",
-                              page_has_content);
-      } else {
-        UMA_HISTOGRAM_BOOLEAN("Net.ErrorResponseHasContentNonMainFrame",
-                              page_has_content);
-      }
-    }
-  }
-
   MaybeNotifyNetworkBytes();
 
   // Complete this notification later.  This prevents us from re-entering the
@@ -811,7 +794,7 @@ const URLRequestStatus URLRequestJob::GetStatus() {
   return request_->status();
 }
 
-void URLRequestJob::SetProxyServer(const HostPortPair& proxy_server) {
+void URLRequestJob::SetProxyServer(const ProxyServer& proxy_server) {
   request_->proxy_server_ = proxy_server;
 }
 
@@ -955,12 +938,8 @@ RedirectInfo URLRequestJob::ComputeRedirectInfo(const GURL& location,
         request_->first_party_for_cookies();
   }
 
-  if (request_->context()->enable_referrer_policy_header()) {
-    redirect_info.new_referrer_policy =
-        ProcessReferrerPolicyHeaderOnRedirect(request_);
-  } else {
-    redirect_info.new_referrer_policy = request_->referrer_policy();
-  }
+  redirect_info.new_referrer_policy =
+      ProcessReferrerPolicyHeaderOnRedirect(request_);
 
   // Alter the referrer if redirecting cross-origin (especially HTTP->HTTPS).
   redirect_info.new_referrer =

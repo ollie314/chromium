@@ -38,6 +38,7 @@ class ErrorState;
 class FeatureInfo;
 class FramebufferManager;
 class MailboxManager;
+class ProgressReporter;
 class Texture;
 class TextureManager;
 class TextureRef;
@@ -499,11 +500,13 @@ class GPU_EXPORT Texture final : public TextureBase {
                                  GLenum type);
 
   static bool ColorRenderable(const FeatureInfo* feature_info,
-                              GLenum internal_format);
+                              GLenum internal_format,
+                              bool immutable);
 
   static bool TextureFilterable(const FeatureInfo* feature_info,
                                 GLenum internal_format,
-                                GLenum type);
+                                GLenum type,
+                                bool immutable);
 
   // Sets the Texture's target
   // Parameters:
@@ -707,7 +710,9 @@ struct DecoderTextureState {
         unpack_alignment_workaround_with_unpack_buffer(
             workarounds.unpack_alignment_workaround_with_unpack_buffer),
         unpack_overlapping_rows_separately_unpack_buffer(
-            workarounds.unpack_overlapping_rows_separately_unpack_buffer) {}
+            workarounds.unpack_overlapping_rows_separately_unpack_buffer),
+        unpack_image_height_workaround_with_unpack_buffer(
+            workarounds.unpack_image_height_workaround_with_unpack_buffer) {}
 
   // This indicates all the following texSubImage*D calls that are part of the
   // failed texImage*D call should be ignored. The client calls have a lock
@@ -724,6 +729,7 @@ struct DecoderTextureState {
   bool force_cube_complete;
   bool unpack_alignment_workaround_with_unpack_buffer;
   bool unpack_overlapping_rows_separately_unpack_buffer;
+  bool unpack_image_height_workaround_with_unpack_buffer;
 };
 
 // This class keeps track of the textures and their sizes so we can do NPOT and
@@ -765,7 +771,8 @@ class GPU_EXPORT TextureManager : public base::trace_event::MemoryDumpProvider {
                  GLsizei max_rectangle_texture_size,
                  GLsizei max_3d_texture_size,
                  GLsizei max_array_texture_layers,
-                 bool use_default_textures);
+                 bool use_default_textures,
+                 ProgressReporter* progress_reporter);
   ~TextureManager() override;
 
   void set_framebuffer_manager(FramebufferManager* manager) {
@@ -1168,6 +1175,12 @@ class GPU_EXPORT TextureManager : public base::trace_event::MemoryDumpProvider {
                                        const DoTexSubImageArguments& args,
                                        const PixelStoreParams& unpack_params);
 
+  void DoTexSubImageLayerByLayerWorkaround(
+      DecoderTextureState* texture_state,
+      ContextState* state,
+      const DoTexSubImageArguments& args,
+      const PixelStoreParams& unpack_params);
+
   void DoCubeMapWorkaround(
       DecoderTextureState* texture_state,
       ContextState* state,
@@ -1234,6 +1247,11 @@ class GPU_EXPORT TextureManager : public base::trace_event::MemoryDumpProvider {
   std::vector<DestructionObserver*> destruction_observers_;
 
   uint32_t current_service_id_generation_;
+
+  // Used to notify the watchdog thread of progress during destruction,
+  // preventing time-outs when destruction takes a long time. May be null when
+  // using in-process command buffer.
+  ProgressReporter* progress_reporter_;
 
   DISALLOW_COPY_AND_ASSIGN(TextureManager);
 };

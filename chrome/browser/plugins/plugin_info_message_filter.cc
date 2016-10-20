@@ -28,6 +28,7 @@
 #include "chrome/browser/ui/browser_otr_state.h"
 #include "chrome/common/chrome_content_client.h"
 #include "chrome/common/chrome_features.h"
+#include "chrome/common/features.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
 #include "components/component_updater/component_updater_service.h"
@@ -41,7 +42,9 @@
 #include "content/public/browser/plugin_service_filter.h"
 #include "content/public/common/content_constants.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
+#include "ppapi/features/features.h"
 #include "url/gurl.h"
+#include "url/origin.h"
 #include "widevine_cdm_version.h"  // In SHARED_INTERMEDIATE_DIR.
 
 #if defined(ENABLE_EXTENSIONS)
@@ -62,7 +65,7 @@ using content::WebPluginInfo;
 
 namespace {
 
-#if defined(ENABLE_PEPPER_CDMS)
+#if BUILDFLAG(ENABLE_PEPPER_CDMS)
 
 enum PluginAvailabilityStatusForUMA {
   PLUGIN_NOT_REGISTERED,
@@ -83,13 +86,13 @@ static void SendPluginAvailabilityUMA(const std::string& mime_type,
 #endif  // defined(WIDEVINE_CDM_AVAILABLE)
 }
 
-#endif  // defined(ENABLE_PEPPER_CDMS)
+#endif  // BUILDFLAG(ENABLE_PEPPER_CDMS)
 
 // Report usage metrics for Silverlight and Flash plugin instantiations to the
 // RAPPOR service.
 void ReportMetrics(const std::string& mime_type,
                    const GURL& url,
-                   const GURL& origin_url) {
+                   const url::Origin& main_frame_origin) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
   if (chrome::IsIncognitoSessionActive())
@@ -97,13 +100,15 @@ void ReportMetrics(const std::string& mime_type,
   rappor::RapporService* rappor_service = g_browser_process->rappor_service();
   if (!rappor_service)
     return;
+  if (main_frame_origin.unique())
+    return;
 
   if (mime_type == content::kFlashPluginSwfMimeType ||
       mime_type == content::kFlashPluginSplMimeType) {
     rappor_service->RecordSample(
         "Plugins.FlashOriginUrl", rappor::ETLD_PLUS_ONE_RAPPOR_TYPE,
         net::registry_controlled_domains::GetDomainAndRegistry(
-            origin_url,
+            main_frame_origin.GetURL(),
             net::registry_controlled_domains::INCLUDE_PRIVATE_REGISTRIES));
     rappor_service->RecordSample(
         "Plugins.FlashUrl", rappor::ETLD_PLUS_ONE_RAPPOR_TYPE,
@@ -184,7 +189,7 @@ bool PluginInfoMessageFilter::OnMessageReceived(const IPC::Message& message) {
   IPC_BEGIN_MESSAGE_MAP(PluginInfoMessageFilter, message)
     IPC_MESSAGE_HANDLER_DELAY_REPLY(ChromeViewHostMsg_GetPluginInfo,
                                     OnGetPluginInfo)
-#if defined(ENABLE_PEPPER_CDMS)
+#if BUILDFLAG(ENABLE_PEPPER_CDMS)
     IPC_MESSAGE_HANDLER(
         ChromeViewHostMsg_IsInternalPluginAvailableForMimeType,
         OnIsInternalPluginAvailableForMimeType)
@@ -207,22 +212,18 @@ PluginInfoMessageFilter::~PluginInfoMessageFilter() {}
 struct PluginInfoMessageFilter::GetPluginInfo_Params {
   int render_frame_id;
   GURL url;
-  GURL top_origin_url;
+  url::Origin main_frame_origin;
   std::string mime_type;
 };
 
 void PluginInfoMessageFilter::OnGetPluginInfo(
     int render_frame_id,
     const GURL& url,
-    const GURL& top_origin_url,
+    const url::Origin& main_frame_origin,
     const std::string& mime_type,
     IPC::Message* reply_msg) {
-  GetPluginInfo_Params params = {
-    render_frame_id,
-    url,
-    top_origin_url,
-    mime_type
-  };
+  GetPluginInfo_Params params = {render_frame_id, url, main_frame_origin,
+                                 mime_type};
   PluginService::GetInstance()->GetPlugins(
       base::Bind(&PluginInfoMessageFilter::PluginsLoaded,
                  weak_ptr_factory_.GetWeakPtr(),
@@ -238,7 +239,7 @@ void PluginInfoMessageFilter::PluginsLoaded(
   // This also fills in |actual_mime_type|.
   std::unique_ptr<PluginMetadata> plugin_metadata;
   if (context_.FindEnabledPlugin(params.render_frame_id, params.url,
-                                 params.top_origin_url, params.mime_type,
+                                 params.main_frame_origin, params.mime_type,
                                  &output->status, &output->plugin,
                                  &output->actual_mime_type, &plugin_metadata)) {
     context_.DecidePluginStatus(params, output->plugin, plugin_metadata.get(),
@@ -262,7 +263,7 @@ void PluginInfoMessageFilter::PluginsLoaded(
   }
 }
 
-#if defined(ENABLE_PEPPER_CDMS)
+#if BUILDFLAG(ENABLE_PEPPER_CDMS)
 
 void PluginInfoMessageFilter::OnIsInternalPluginAvailableForMimeType(
     const std::string& mime_type,
@@ -298,7 +299,7 @@ void PluginInfoMessageFilter::OnIsInternalPluginAvailableForMimeType(
       mime_type, is_plugin_disabled ? PLUGIN_DISABLED : PLUGIN_NOT_REGISTERED);
 }
 
-#endif  // defined(ENABLE_PEPPER_CDMS)
+#endif  // BUILDFLAG(ENABLE_PEPPER_CDMS)
 
 void PluginInfoMessageFilter::Context::DecidePluginStatus(
     const GetPluginInfo_Params& params,
@@ -319,19 +320,20 @@ void PluginInfoMessageFilter::Context::DecidePluginStatus(
   // Check plugin content settings. The primary URL is the top origin URL and
   // the secondary URL is the plugin URL.
   PluginUtils::GetPluginContentSetting(
-      host_content_settings_map_, plugin, params.top_origin_url, params.url,
+      host_content_settings_map_, plugin, params.main_frame_origin, params.url,
       plugin_metadata->identifier(), &plugin_setting,
       &uses_default_content_setting, &is_managed);
 
   // TODO(tommycli): Remove once we deprecate the plugin ASK policy.
   bool legacy_ask_user = plugin_setting == CONTENT_SETTING_ASK;
   plugin_setting = PluginsFieldTrial::EffectiveContentSetting(
-      CONTENT_SETTINGS_TYPE_PLUGINS, plugin_setting);
+      host_content_settings_map_, CONTENT_SETTINGS_TYPE_PLUGINS,
+      plugin_setting);
 
   DCHECK(plugin_setting != CONTENT_SETTING_DEFAULT);
   DCHECK(plugin_setting != CONTENT_SETTING_ASK);
 
-#if defined(ENABLE_PLUGIN_INSTALLATION)
+#if BUILDFLAG(ENABLE_PLUGIN_INSTALLATION)
   // Check if the plugin is outdated.
   if (plugin_status == PluginMetadata::SECURITY_STATUS_OUT_OF_DATE &&
       !allow_outdated_plugins_.GetValue()) {
@@ -367,7 +369,7 @@ void PluginInfoMessageFilter::Context::DecidePluginStatus(
 
   if (plugin_setting == CONTENT_SETTING_DETECT_IMPORTANT_CONTENT ||
       (plugin_setting == CONTENT_SETTING_ALLOW &&
-       base::FeatureList::IsEnabled(features::kPreferHtmlOverPlugins) &&
+       PluginUtils::ShouldPreferHtmlOverPlugins(host_content_settings_map_) &&
        !base::FeatureList::IsEnabled(features::kRunAllFlashInAllowMode))) {
     *status = ChromeViewHostMsg_GetPluginInfo_Status::kPlayImportantContent;
   } else if (plugin_setting == CONTENT_SETTING_BLOCK) {
@@ -397,7 +399,7 @@ void PluginInfoMessageFilter::Context::DecidePluginStatus(
 bool PluginInfoMessageFilter::Context::FindEnabledPlugin(
     int render_frame_id,
     const GURL& url,
-    const GURL& top_origin_url,
+    const url::Origin& main_frame_origin,
     const std::string& mime_type,
     ChromeViewHostMsg_GetPluginInfo_Status* status,
     WebPluginInfo* plugin,
@@ -430,12 +432,10 @@ bool PluginInfoMessageFilter::Context::FindEnabledPlugin(
       PluginService::GetInstance()->GetFilter();
   size_t i = 0;
   for (; i < matching_plugins.size(); ++i) {
-    if (!filter || filter->IsPluginAvailable(render_process_id_,
-                                             render_frame_id,
-                                             resource_context_,
-                                             url,
-                                             top_origin_url,
-                                             &matching_plugins[i])) {
+    if (!filter ||
+        filter->IsPluginAvailable(render_process_id_, render_frame_id,
+                                  resource_context_, url, main_frame_origin,
+                                  &matching_plugins[i])) {
       break;
     }
   }
@@ -447,7 +447,7 @@ bool PluginInfoMessageFilter::Context::FindEnabledPlugin(
     i = 0;
     *status = ChromeViewHostMsg_GetPluginInfo_Status::kDisabled;
 
-    if (base::FeatureList::IsEnabled(features::kPreferHtmlOverPlugins) &&
+    if (PluginUtils::ShouldPreferHtmlOverPlugins(host_content_settings_map_) &&
         matching_plugins[0].name ==
             base::ASCIIToUTF16(content::kFlashPluginName)) {
       // TODO(tommycli): This assumes that Flash can no longer be disabled
@@ -474,6 +474,12 @@ void PluginInfoMessageFilter::ComponentPluginLookupDone(
   if (cus_plugin_info) {
     output->status =
         ChromeViewHostMsg_GetPluginInfo_Status::kComponentUpdateRequired;
+#if defined(OS_LINUX)
+    if (cus_plugin_info->version != base::Version("0")) {
+      output->status =
+          ChromeViewHostMsg_GetPluginInfo_Status::kRestartRequired;
+    }
+#endif  // defined(OS_LINUX)
     plugin_metadata.reset(new PluginMetadata(
         cus_plugin_info->id, cus_plugin_info->name, false, GURL(), GURL(),
         base::ASCIIToUTF16(cus_plugin_info->id), std::string()));
@@ -499,7 +505,7 @@ void PluginInfoMessageFilter::GetPluginInfoReply(
   if (output->status != ChromeViewHostMsg_GetPluginInfo_Status::kNotFound) {
     main_thread_task_runner_->PostTask(
         FROM_HERE, base::Bind(&ReportMetrics, output->actual_mime_type,
-                              params.url, params.top_origin_url));
+                              params.url, params.main_frame_origin));
   }
 }
 

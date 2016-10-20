@@ -12,16 +12,17 @@
 #include "base/memory/ptr_util.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "components/sync/api/data_type_error_handler_impl.h"
-#include "components/sync/api/model_type_change_processor.h"
-#include "components/sync/api/model_type_service.h"
-#include "components/sync/api/sync_error.h"
-#include "components/sync/api/sync_merge_result.h"
 #include "components/sync/base/bind_to_task_runner.h"
 #include "components/sync/base/data_type_histogram.h"
-#include "components/sync/core/activation_context.h"
 #include "components/sync/driver/backend_data_type_configurer.h"
 #include "components/sync/driver/sync_client.h"
+#include "components/sync/engine/activation_context.h"
+#include "components/sync/model/data_type_error_handler_impl.h"
+#include "components/sync/model/model_type_change_processor.h"
+#include "components/sync/model/model_type_debug_info.h"
+#include "components/sync/model/model_type_service.h"
+#include "components/sync/model/sync_error.h"
+#include "components/sync/model/sync_merge_result.h"
 
 namespace syncer {
 
@@ -76,14 +77,18 @@ void ModelTypeController::LoadModels(
 void ModelTypeController::GetAllNodes(const AllNodesCallback& callback) {
   base::WeakPtr<ModelTypeService> service =
       sync_client_->GetModelTypeServiceForType(type());
-  // TODO(gangwu): Casting should happen "near" where the processor factory has
-  // code that instantiates a new processor.
-  SharedModelTypeProcessor* processor =
-      static_cast<SharedModelTypeProcessor*>(service->change_processor());
+  model_thread_->PostTask(FROM_HERE,
+                          base::Bind(&ModelTypeDebugInfo::GetAllNodes, service,
+                                     BindToCurrentThread(callback)));
+}
+
+void ModelTypeController::GetStatusCounters(
+    const StatusCountersCallback& callback) {
+  base::WeakPtr<ModelTypeService> service =
+      sync_client_->GetModelTypeServiceForType(type());
   model_thread_->PostTask(
-      FROM_HERE, base::Bind(&SharedModelTypeProcessor::GetAllNodes,
-                            base::Unretained(processor),
-                            base::ThreadTaskRunnerHandle::Get(), callback));
+      FROM_HERE,
+      base::Bind(&ModelTypeDebugInfo::GetStatusCounters, service, callback));
 }
 
 void ModelTypeController::LoadModelsDone(ConfigureResult result,

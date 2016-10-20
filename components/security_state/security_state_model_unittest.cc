@@ -28,7 +28,6 @@ class TestSecurityStateModelClient : public SecurityStateModelClient {
  public:
   TestSecurityStateModelClient()
       : url_(kHttpsUrl),
-        initial_security_level_(SecurityStateModel::SECURE),
         connection_status_(net::SSL_CONNECTION_VERSION_TLS1_2
                            << net::SSL_CONNECTION_VERSION_SHIFT),
         cert_status_(net::CERT_STATUS_SHA1_SIGNATURE_PRESENT),
@@ -60,10 +59,6 @@ class TestSecurityStateModelClient : public SecurityStateModelClient {
   void set_fails_malware_check(bool fails_malware_check) {
     fails_malware_check_ = fails_malware_check;
   }
-  void set_initial_security_level(
-      SecurityStateModel::SecurityLevel security_level) {
-    initial_security_level_ = security_level;
-  }
   void set_displayed_password_field_on_http(
       bool displayed_password_field_on_http) {
     displayed_password_field_on_http_ = displayed_password_field_on_http;
@@ -80,7 +75,7 @@ class TestSecurityStateModelClient : public SecurityStateModelClient {
       SecurityStateModel::VisibleSecurityState* state) override {
     state->connection_info_initialized = true;
     state->url = url_;
-    state->initial_security_level = initial_security_level_;
+    state->certificate = cert_;
     state->cert_status = cert_status_;
     state->connection_status = connection_status_;
     state->security_bits = 256;
@@ -92,11 +87,6 @@ class TestSecurityStateModelClient : public SecurityStateModelClient {
         displayed_credit_card_field_on_http_;
   }
 
-  bool RetrieveCert(scoped_refptr<net::X509Certificate>* cert) override {
-    *cert = cert_;
-    return true;
-  }
-
   bool UsedPolicyInstalledCertificate() override { return false; }
 
   bool IsOriginSecure(const GURL& url) override {
@@ -105,7 +95,6 @@ class TestSecurityStateModelClient : public SecurityStateModelClient {
 
  private:
   GURL url_;
-  SecurityStateModel::SecurityLevel initial_security_level_;
   scoped_refptr<net::X509Certificate> cert_;
   int connection_status_;
   net::CertStatus cert_status_;
@@ -144,7 +133,6 @@ TEST(SecurityStateModelTest, SHA1WarningMixedContent) {
             security_info1.mixed_content_status);
   EXPECT_EQ(SecurityStateModel::NONE, security_info1.security_level);
 
-  client.set_initial_security_level(SecurityStateModel::DANGEROUS);
   client.SetDisplayedMixedContent(false);
   client.SetRanMixedContent(true);
   SecurityStateModel::SecurityInfo security_info2;
@@ -162,7 +150,6 @@ TEST(SecurityStateModelTest, SHA1WarningBrokenHTTPS) {
   TestSecurityStateModelClient client;
   SecurityStateModel model;
   model.SetClient(&client);
-  client.set_initial_security_level(SecurityStateModel::DANGEROUS);
   client.AddCertStatus(net::CERT_STATUS_DATE_INVALID);
   SecurityStateModel::SecurityInfo security_info;
   model.GetSecurityInfo(&security_info);
@@ -258,12 +245,12 @@ TEST(SecurityStateModelTest, PasswordFieldWarning) {
       switches::kMarkHttpWithPasswordsOrCcWithChip);
   TestSecurityStateModelClient client;
   client.UseHttpUrl();
-  client.set_initial_security_level(SecurityStateModel::NONE);
   SecurityStateModel model;
   model.SetClient(&client);
   client.set_displayed_password_field_on_http(true);
   SecurityStateModel::SecurityInfo security_info;
   model.GetSecurityInfo(&security_info);
+  EXPECT_TRUE(security_info.displayed_private_user_data_input_on_http);
   EXPECT_EQ(SecurityStateModel::HTTP_SHOW_WARNING,
             security_info.security_level);
 }
@@ -276,12 +263,12 @@ TEST(SecurityStateModelTest, CreditCardFieldWarning) {
       switches::kMarkHttpWithPasswordsOrCcWithChip);
   TestSecurityStateModelClient client;
   client.UseHttpUrl();
-  client.set_initial_security_level(SecurityStateModel::NONE);
   SecurityStateModel model;
   model.SetClient(&client);
   client.set_displayed_credit_card_field_on_http(true);
   SecurityStateModel::SecurityInfo security_info;
   model.GetSecurityInfo(&security_info);
+  EXPECT_TRUE(security_info.displayed_private_user_data_input_on_http);
   EXPECT_EQ(SecurityStateModel::HTTP_SHOW_WARNING,
             security_info.security_level);
 }
@@ -292,13 +279,26 @@ TEST(SecurityStateModelTest, CreditCardFieldWarning) {
 TEST(SecurityStateModelTest, HttpWarningNotSetWithoutSwitch) {
   TestSecurityStateModelClient client;
   client.UseHttpUrl();
-  client.set_initial_security_level(SecurityStateModel::NONE);
   SecurityStateModel model;
   model.SetClient(&client);
   client.set_displayed_password_field_on_http(true);
   client.set_displayed_credit_card_field_on_http(true);
   SecurityStateModel::SecurityInfo security_info;
   model.GetSecurityInfo(&security_info);
+  EXPECT_TRUE(security_info.displayed_private_user_data_input_on_http);
+  EXPECT_EQ(SecurityStateModel::NONE, security_info.security_level);
+}
+
+// Tests that |displayed_private_user_data_input_on_http| is not set
+// when the corresponding VisibleSecurityState flags are not set.
+TEST(SecurityStateModelTest, PrivateUserDataNotSet) {
+  TestSecurityStateModelClient client;
+  client.UseHttpUrl();
+  SecurityStateModel model;
+  model.SetClient(&client);
+  SecurityStateModel::SecurityInfo security_info;
+  model.GetSecurityInfo(&security_info);
+  EXPECT_FALSE(security_info.displayed_private_user_data_input_on_http);
   EXPECT_EQ(SecurityStateModel::NONE, security_info.security_level);
 }
 

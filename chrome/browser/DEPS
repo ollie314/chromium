@@ -13,11 +13,12 @@ include_rules = [
   "+components",
   "+content/public/browser",
   "+courgette",
+  "+device/base",
   "+device/bluetooth",
-  "+device/core",
   "+device/geolocation",
   "+device/hid",
   "+device/media_transfer_protocol",
+  "+device/power_save_blocker",
   "+device/usb",
   "+extensions/browser",
   "+extensions/common",
@@ -35,7 +36,7 @@ include_rules = [
   "+media/cdm/cdm_paths.h",
   "+media/midi",  # For midi switches
   "+media/mojo",  # For mojo media services.
-  "+services/shell/public/cpp",
+  "+services/service_manager/public/cpp",
   "+services/ui/public",
   "+ppapi/c",  # For various types.
   "+ppapi/host",
@@ -43,7 +44,7 @@ include_rules = [
   "+ppapi/shared_impl",
   "+rlz",
   "+sandbox/win/src",  # The path doesn't say it, but this is the Windows sandbox.
-  "+services/shell",
+  "+services/service_manager",
   "+skia/ext",
   "+syzygy/kasko",
   "+third_party/cros_system_api",
@@ -77,6 +78,7 @@ include_rules = [
   "+third_party/leveldatabase",
   "+third_party/libxml",
   "+third_party/mozilla",     # Mozilla interface headers.
+  "+third_party/ocmock/gtest_support.h",
   "+third_party/protobuf/src/google/protobuf",
   "+third_party/re2",
   "+third_party/smhasher",
@@ -89,6 +91,7 @@ include_rules = [
   "+third_party/WebKit/public/platform/WebDisplayMode.h",
   "+third_party/WebKit/public/platform/WebLoadingBehaviorFlag.h",
   "+third_party/WebKit/public/platform/WebReferrerPolicy.h",
+  "+third_party/WebKit/public/platform/WebSecurityStyle.h",
   "+third_party/WebKit/public/platform/modules/app_banner/WebAppBannerPromptReply.h",
   "+third_party/WebKit/public/platform/modules/budget_service/budget_service.mojom.h",
   "+third_party/WebKit/public/platform/modules/notifications/WebNotificationConstants.h",

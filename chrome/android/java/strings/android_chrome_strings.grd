@@ -1966,6 +1966,21 @@ To obtain new licenses, connect to the internet and play your downloaded content
       <message name="IDS_NTP_LEARN_MORE_ABOUT_SUGGESTED_CONTENT" desc="Text in the footer of the New Tab Page. Part of the text is a link to a help center page where the user can learn more about suggested content.">
         <ph name="BEGIN_LINK">&lt;link&gt;</ph>Learn more<ph name="END_LINK">&lt;/link&gt;</ph> about suggested content
       </message>
+      <message name="IDS_NTP_ALL_DISMISSED_TITLE_TEXT" desc="Title text shown on the New Tab Page when all suggested content has been dismissed.">
+        That's all for now
+      </message>
+      <message name="IDS_NTP_ALL_DISMISSED_BODY_TEXT_MORNING" desc="Body text shown in the morning on the New Tab Page when all suggested content has been dismissed.">
+        More articles will appear soon. Enjoy your morning.
+      </message>
+      <message name="IDS_NTP_ALL_DISMISSED_BODY_TEXT_AFTERNOON" desc="Body text shown in the afternoon on the New Tab Page when all suggested content has been dismissed.">
+        More articles will appear soon. Enjoy your afternoon.
+      </message>
+      <message name="IDS_NTP_ALL_DISMISSED_BODY_TEXT_EVENING" desc="Body text shown in the evening on the New Tab Page when all suggested content has been dismissed.">
+        More articles will appear soon. Enjoy your evening.
+      </message>
+      <message name="IDS_NTP_ALL_DISMISSED_REFRESH" desc="Text label for button to refresh the New Tab Page when all suggested content has been dismissed. [CHAR-LIMIT=20]">
+        Refresh
+      </message>
 
       <!-- Toolbar button strings -->
       <message name="IDS_OPEN_TABS" desc="Text for button to enter the tab switcher and show tabs that are open on this device">
@@ -2047,14 +2062,8 @@ To obtain new licenses, connect to the internet and play your downloaded content
       <message name="IDS_BOOKMARK_PAGE_FAILED" desc="Message shown when the user tries to add a bookmark but the browser fails to save it.">
         Failed to add bookmark.
       </message>
-      <message name="IDS_BOOKMARK_DRAWER_ALL_ITEMS" desc="Menu item for showing all bookmark items in the bookmarks UI [CHAR-LIMIT=24]">
-        All bookmarks
-      </message>
       <message name="IDS_BOOKMARK_DRAWER_FOLDERS" desc="Title for the list of folders in the drawer view. [CHAR-LIMIT=32]">
         Folders
-      </message>
-      <message name="IDS_BOOKMARK_TITLE_BAR_ALL_ITEMS" desc="Title bar text for showing all bookmark items in the bookmarks UI [CHAR-LIMIT=32]">
-        Bookmarks
       </message>
       <message name="IDS_BOOKMARK_PARENT_FOLDER" desc="Header text for title of parent folder of the bookmark [CHAR-LIMIT=32]">
         Parent folder
@@ -2321,14 +2330,6 @@ To obtain new licenses, connect to the internet and play your downloaded content
         Pages you view in incognito tabs won’t stick around in your browser’s history, cookie store, or search history after you’ve closed all of your incognito tabs. Any files you download or bookmarks you create will be kept.
 
 However, you aren’t invisible. Going incognito doesn’t hide your browsing from your employer, your internet service provider, or the websites you visit.
-      </message>
-
-      <!-- Custom tabs -->
-      <message name="IDS_READ_IT_LATER" desc="Text describing an option for the user to save the tab to Chrome and read it in the future.">
-        Keep tab in Chrome
-      </message>
-      <message name="IDS_TAB_SENT_TO_BACKGROUND" desc="A message to show that the tab has been sent to the background Chrome.">
-        Your tab is now in the background.
       </message>
 
       <!-- Contextual Search -->
@@ -2602,6 +2603,12 @@ You can control the Physical Web in Chrome Settings.
       </message>
       <message name="IDS_KEEP_GOOGLE" desc="Text representing the option that the user wants to keep Google as the default search engine.">
         Keep Google
+      </message>
+      <message name="IDS_USING_SOGOU" desc="Text notifying users that the default search engine has been set to Sogou.">
+        Using Sogou for search
+      </message>
+      <message name="IDS_USING_GOOGLE" desc="Text notifying users that the default search engine has been set to Google.">
+        Using Google for search
       </message>
 
       <!-- Item Chooser UI strings -->

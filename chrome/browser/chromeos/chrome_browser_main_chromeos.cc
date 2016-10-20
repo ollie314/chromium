@@ -52,6 +52,8 @@
 #include "chrome/browser/chromeos/login/helper.h"
 #include "chrome/browser/chromeos/login/lock/screen_locker.h"
 #include "chrome/browser/chromeos/login/login_wizard.h"
+#include "chrome/browser/chromeos/login/quick_unlock/pin_storage.h"
+#include "chrome/browser/chromeos/login/quick_unlock/pin_storage_factory.h"
 #include "chrome/browser/chromeos/login/session/user_session_manager.h"
 #include "chrome/browser/chromeos/login/startup_utils.h"
 #include "chrome/browser/chromeos/login/users/chrome_user_manager.h"
@@ -83,6 +85,7 @@
 #include "chrome/browser/net/chrome_network_delegate.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/task_manager/task_manager_interface.h"
 #include "chrome/browser/ui/ash/ash_util.h"
 #include "chrome/browser/ui/ash/network_connect_delegate_chromeos.h"
 #include "chrome/common/channel_info.h"
@@ -136,7 +139,6 @@
 #include "device/bluetooth/dbus/bluez_dbus_manager.h"
 #include "media/audio/sounds/sounds_manager.h"
 #include "net/base/network_change_notifier.h"
-#include "net/socket/ssl_server_socket.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "printing/backend/print_backend.h"
@@ -375,10 +377,6 @@ void ChromeBrowserMainPartsChromeos::PostMainMessageLoopStart() {
 
   dbus_services_.reset(new internal::DBusServices(parameters()));
 
-  // Enable support for SSL server sockets, which must be done while still
-  // single-threaded.  This is required for remote assistance host on Chrome OS.
-  net::EnableSSLServerSockets();
-
   ChromeBrowserMainPartsLinux::PostMainMessageLoopStart();
 }
 
@@ -418,7 +416,8 @@ void ChromeBrowserMainPartsChromeos::PreMainMessageLoopRun() {
   arc_service_launcher_.reset(new arc::ArcServiceLauncher());
   arc_service_launcher_->Initialize();
 
-  chromeos::ResourceReporter::GetInstance()->StartMonitoring();
+  chromeos::ResourceReporter::GetInstance()->StartMonitoring(
+      task_manager::TaskManagerInterface::GetTaskManager());
 
   ChromeBrowserMainPartsLinux::PreMainMessageLoopRun();
 }
@@ -684,8 +683,15 @@ void ChromeBrowserMainPartsChromeos::PostProfileInit() {
   // available.
   idle_action_warning_observer_.reset(new IdleActionWarningObserver());
 
-  // Start watching for low disk space events to notify the user.
-  low_disk_notification_.reset(new LowDiskNotification());
+  // Start watching for low disk space events to notify the user if it is not a
+  // guest profile.
+  if (!user_manager::UserManager::Get()->IsLoggedInAsGuest())
+    low_disk_notification_.reset(new LowDiskNotification());
+
+  // Authenticate the user for PIN quick unlock.
+  PinStorage* pin_storage = PinStorageFactory::GetForProfile(profile());
+  if (pin_storage)
+    pin_storage->MarkStrongAuth();
 
   ChromeBrowserMainPartsLinux::PostProfileInit();
 }

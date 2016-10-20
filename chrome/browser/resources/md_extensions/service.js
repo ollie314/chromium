@@ -10,6 +10,7 @@ cr.define('extensions', function() {
    * @implements {extensions.ItemDelegate}
    * @implements {extensions.SidebarDelegate}
    * @implements {extensions.PackDialogDelegate}
+   * @implements {extensions.ErrorPageDelegate}
    */
   function Service() {}
 
@@ -24,6 +25,7 @@ cr.define('extensions', function() {
       this.manager_.sidebar.setDelegate(this);
       this.manager_.set('itemDelegate', this);
       this.manager_.packDialog.set('delegate', this);
+      this.manager_.errorPage.delegate = this;
       var keyboardShortcuts = this.manager_.keyboardShortcuts;
       keyboardShortcuts.addEventListener(
           'shortcut-updated',
@@ -45,6 +47,15 @@ cr.define('extensions', function() {
         this.extensions_ = extensions;
         for (let extension of extensions)
           this.manager_.addItem(extension);
+
+        var id = new URLSearchParams(location.search).get('id');
+        if (id) {
+          var data = this.extensions_.find(function(e) {
+            return e.id == id;
+          });
+          if (data)
+            this.manager_.showItemDetails(data);
+        }
       }.bind(this));
       chrome.developerPrivate.getProfileConfiguration(
           this.onProfileStateChanged_.bind(this));
@@ -261,6 +272,15 @@ cr.define('extensions', function() {
     updateAllExtensions: function() {
       chrome.developerPrivate.autoUpdate();
     },
+
+    /** @override */
+    deleteErrors: function(extensionId, errorIds, type) {
+      chrome.developerPrivate.deleteExtensionErrors({
+        extensionId: extensionId,
+        errorIds: errorIds,
+        type: type,
+      });
+    }
   };
 
   cr.addSingletonGetter(Service);

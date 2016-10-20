@@ -697,9 +697,16 @@ bool AddTransformNodeIfNeeded(
             node->id);
     sticky_data->constraints = StickyPositionConstraint(layer);
     sticky_data->scroll_ancestor = GetScrollParentId(data_from_ancestor, layer);
+    ScrollNode* scroll_ancestor =
+        data_for_children->property_trees->scroll_tree.Node(
+            sticky_data->scroll_ancestor);
+    if (scroll_ancestor->is_inner_viewport_scroll_layer) {
+      data_for_children->property_trees->transform_tree
+          .AddNodeAffectedByInnerViewportBoundsDelta(node->id);
+    }
     sticky_data->main_thread_offset =
         layer->position().OffsetFromOrigin() -
-        sticky_data->constraints.scroll_container_relative_sticky_box_rect
+        sticky_data->constraints.parent_relative_sticky_box_offset
             .OffsetFromOrigin();
   }
 
@@ -1436,10 +1443,6 @@ void PropertyTreeBuilder::BuildPropertyTrees(
     PropertyTrees* property_trees) {
   property_trees->is_main_thread = true;
   property_trees->is_active = false;
-  property_trees->verify_transform_tree_calculations =
-      root_layer->GetLayerTree()
-          ->GetSettings()
-          .verify_transform_tree_calculations;
   SkColor color = root_layer->GetLayerTree()->background_color();
   if (SkColorGetA(color) != 255)
     color = SkColorSetA(color, 255);
@@ -1469,10 +1472,6 @@ void PropertyTreeBuilder::BuildPropertyTrees(
     PropertyTrees* property_trees) {
   property_trees->is_main_thread = false;
   property_trees->is_active = root_layer->IsActive();
-  property_trees->verify_transform_tree_calculations =
-      root_layer->layer_tree_impl()
-          ->settings()
-          .verify_transform_tree_calculations;
   SkColor color = root_layer->layer_tree_impl()->background_color();
   if (SkColorGetA(color) != 255)
     color = SkColorSetA(color, 255);

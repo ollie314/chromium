@@ -28,8 +28,8 @@
 
 #include "core/CoreExport.h"
 #include "core/fetch/Resource.h"
-#include "platform/MemoryCacheDumpProvider.h"
 #include "platform/MemoryCoordinator.h"
+#include "platform/tracing/MemoryCacheDumpProvider.h"
 #include "public/platform/WebThread.h"
 #include "wtf/Allocator.h"
 #include "wtf/HashMap.h"
@@ -200,7 +200,8 @@ class CORE_EXPORT MemoryCache final
     m_maxPruneDeferralDelay = seconds;
   }
 
-  void evictResources();
+  enum EvictResourcePolicy { EvictAllResources, DoNotEvictUnusedPreloads };
+  void evictResources(EvictResourcePolicy = EvictAllResources);
 
   void prune();
 

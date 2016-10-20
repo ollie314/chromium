@@ -767,6 +767,7 @@ void ContainerNode::attachLayoutTree(const AttachContext& context) {
   }
 
   clearChildNeedsStyleRecalc();
+  clearChildNeedsReattachLayoutTree();
   Node::attachLayoutTree(context);
 }
 
@@ -1002,13 +1003,13 @@ void ContainerNode::focusStateChanged() {
   LayoutTheme::theme().controlStateChanged(*layoutObject(), FocusControlState);
 }
 
-void ContainerNode::setFocus(bool received) {
+void ContainerNode::setFocused(bool received) {
   // Recurse up author shadow trees to mark shadow hosts if it matches :focus.
   // TODO(kochi): Handle UA shadows which marks multiple nodes as focused such
   // as <input type="date"> the same way as author shadow.
   if (ShadowRoot* root = containingShadowRoot()) {
     if (root->type() != ShadowRootType::UserAgent)
-      ownerShadowHost()->setFocus(received);
+      ownerShadowHost()->setFocused(received);
   }
 
   // If this is an author shadow host and indirectly focused (has focused
@@ -1020,10 +1021,10 @@ void ContainerNode::setFocus(bool received) {
           received && toElement(this)->authorShadowRoot()->delegatesFocus();
   }
 
-  if (focused() == received)
+  if (isFocused() == received)
     return;
 
-  Node::setFocus(received);
+  Node::setFocused(received);
 
   focusStateChanged();
 
@@ -1042,7 +1043,7 @@ void ContainerNode::setFocus(bool received) {
 }
 
 void ContainerNode::setActive(bool down) {
-  if (down == active())
+  if (down == isActive())
     return;
 
   Node::setActive(down);
@@ -1112,7 +1113,7 @@ void ContainerNode::setDragged(bool newValue) {
 }
 
 void ContainerNode::setHovered(bool over) {
-  if (over == hovered())
+  if (over == isHovered())
     return;
 
   Node::setHovered(over);
@@ -1286,7 +1287,7 @@ void ContainerNode::recalcDescendantStyles(StyleRecalcChange change) {
     } else if (child->isElementNode()) {
       Element* element = toElement(child);
       if (element->shouldCallRecalcStyle(change))
-        element->recalcStyle(change, lastTextNode);
+        element->recalcStyle(change);
       else if (element->supportsStyleSharing())
         styleResolver.addToStyleSharingList(*element);
       if (element->layoutObject())

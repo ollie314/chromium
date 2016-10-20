@@ -5,7 +5,7 @@
 #include "components/safe_browsing_db/v4_protocol_manager_util.h"
 
 #include "base/base64.h"
-#include "base/metrics/sparse_histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/rand_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
@@ -96,6 +96,10 @@ const ListIdentifier GetUrlMalwareId() {
 const ListIdentifier GetUrlSocEngId() {
   return ListIdentifier(GetCurrentPlatformType(), URL,
                         SOCIAL_ENGINEERING_PUBLIC);
+}
+
+const ListIdentifier GetUrlUwsId() {
+  return ListIdentifier(GetCurrentPlatformType(), URL, UNWANTED_SOFTWARE);
 }
 
 // The Safe Browsing V4 server URL prefix.

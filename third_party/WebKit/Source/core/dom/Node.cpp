@@ -29,6 +29,7 @@
 #include "bindings/core/v8/DOMDataStore.h"
 #include "bindings/core/v8/ExceptionState.h"
 #include "bindings/core/v8/Microtask.h"
+#include "bindings/core/v8/ScriptWrappableVisitor.h"
 #include "bindings/core/v8/V8DOMWrapper.h"
 #include "core/HTMLNames.h"
 #include "core/MathMLNames.h"
@@ -96,8 +97,8 @@
 #include "core/svg/graphics/SVGImage.h"
 #include "platform/EventDispatchForbiddenScope.h"
 #include "platform/RuntimeEnabledFeatures.h"
-#include "platform/TraceEvent.h"
-#include "platform/TracedValue.h"
+#include "platform/tracing/TraceEvent.h"
+#include "platform/tracing/TracedValue.h"
 #include "wtf/HashSet.h"
 #include "wtf/Vector.h"
 #include "wtf/allocator/Partitions.h"
@@ -269,18 +270,18 @@ Node::Node(TreeScope* treeScope, ConstructionType type)
 #if !defined(NDEBUG) || (defined(DUMP_NODE_STATISTICS) && DUMP_NODE_STATISTICS)
   trackForDebugging();
 #endif
-  InstanceCounters::incrementCounter(InstanceCounters::NodeCounter);
+  InstanceCounters::incrementNodeCounter();
 }
 
 Node::~Node() {
   // With Oilpan, the rare data finalizer also asserts for
   // this condition (we cannot directly access it here.)
   RELEASE_ASSERT(hasRareData() || !layoutObject());
-  InstanceCounters::decrementCounter(InstanceCounters::NodeCounter);
+  InstanceCounters::decrementNodeCounter();
 }
 
 NodeRareData* Node::rareData() const {
-  ASSERT_WITH_SECURITY_IMPLICATION(hasRareData());
+  SECURITY_DCHECK(hasRareData());
   return static_cast<NodeRareData*>(m_data.m_rareData);
 }
 
@@ -294,8 +295,8 @@ NodeRareData& Node::ensureRareData() {
     m_data.m_rareData = NodeRareData::create(m_data.m_layoutObject);
 
   DCHECK(m_data.m_rareData);
-
   setFlag(HasRareDataFlag);
+  ScriptWrappableVisitor::writeBarrier(this, rareData());
   return *rareData();
 }
 
@@ -316,6 +317,7 @@ void Node::setNodeValue(const String&) {
 }
 
 NodeList* Node::childNodes() {
+  ThreadState::MainThreadGCForbiddenScope gcForbidden;
   if (isContainerNode())
     return ensureRareData().ensureNodeLists().ensureChildNodeList(
         toContainerNode(*this));
@@ -386,6 +388,18 @@ Node& Node::treeRoot() const {
 Node* Node::getRootNode(const GetRootNodeOptions& options) const {
   return (options.hasComposed() && options.composed()) ? &shadowIncludingRoot()
                                                        : &treeRoot();
+}
+
+Text* Node::nextTextSibling() const {
+  for (Node* sibling = nextSibling();
+       sibling &&
+       (!sibling->isElementNode() || !toElement(sibling)->layoutObject());
+       sibling = sibling->nextSibling()) {
+    if (sibling->isTextNode()) {
+      return toText(sibling);
+    }
+  }
+  return nullptr;
 }
 
 Node* Node::insertBefore(Node* newChild,
@@ -695,6 +709,17 @@ void Node::markAncestorsWithChildNeedsStyleRecalc() {
   document().scheduleLayoutTreeUpdateIfNeeded();
 }
 
+void Node::markAncestorsWithChildNeedsReattachLayoutTree() {
+  for (ContainerNode* p = parentOrShadowHostNode();
+       p && !p->childNeedsReattachLayoutTree(); p = p->parentOrShadowHostNode())
+    p->setChildNeedsReattachLayoutTree();
+}
+
+void Node::setNeedsReattachLayoutTree() {
+  setFlag(NeedsReattachLayoutTree);
+  markAncestorsWithChildNeedsReattachLayoutTree();
+}
+
 void Node::setNeedsStyleRecalc(StyleChangeType changeType,
                                const StyleChangeReasonForTracing& reason) {
   DCHECK(changeType != NoStyleChange);
@@ -738,7 +763,7 @@ Node* Node::focusDelegate() {
 }
 
 bool Node::shouldHaveFocusAppearance() const {
-  DCHECK(focused());
+  DCHECK(isFocused());
   return true;
 }
 
@@ -886,6 +911,7 @@ void Node::attachLayoutTree(const AttachContext&) {
           (layoutObject()->parent() || layoutObject()->isLayoutView())));
 
   clearNeedsStyleRecalc();
+  clearNeedsReattachLayoutTree();
 
   if (AXObjectCache* cache = document().axObjectCache())
     cache->updateCacheAfterNodeIsAttached(this);
@@ -928,7 +954,7 @@ const ComputedStyle* Node::virtualEnsureComputedStyle(
 }
 
 int Node::maxCharacterOffset() const {
-  ASSERT_NOT_REACHED();
+  NOTREACHED();
   return 0;
 }
 
@@ -1301,7 +1327,7 @@ void Node::setTextContent(const String& text) {
       // See crbug.com/352836 also.
       // No need to do anything if the text is identical.
       if (container->hasOneTextChild() &&
-          toText(container->firstChild())->data() == text)
+          toText(container->firstChild())->data() == text && !text.isEmpty())
         return;
 
       ChildListMutationScope mutation(*this);
@@ -1322,7 +1348,7 @@ void Node::setTextContent(const String& text) {
       // Do nothing.
       return;
   }
-  ASSERT_NOT_REACHED();
+  NOTREACHED();
 }
 
 unsigned short Node::compareDocumentPosition(
@@ -1376,7 +1402,7 @@ unsigned short Node::compareDocumentPosition(
                kDocumentPositionPreceding;
     }
 
-    ASSERT_NOT_REACHED();
+    NOTREACHED();
     return kDocumentPositionDisconnected;
   }
 
@@ -1814,7 +1840,7 @@ void Node::didMoveToNewDocument(Document& oldDocument) {
     EventHandlerRegistry::didMoveBetweenFrameHosts(
         *this, oldDocument.frameHost(), document().frameHost());
 
-  if (HeapVector<Member<MutationObserverRegistration>>* registry =
+  if (HeapVector<TraceWrapperMember<MutationObserverRegistration>>* registry =
           mutationObserverRegistry()) {
     for (size_t i = 0; i < registry->size(); ++i) {
       document().addMutationObserverTypes(registry->at(i)->mutationTypes());
@@ -1887,7 +1913,7 @@ EventTargetData& Node::ensureEventTargetData() {
   return *data;
 }
 
-HeapVector<Member<MutationObserverRegistration>>*
+HeapVector<TraceWrapperMember<MutationObserverRegistration>>*
 Node::mutationObserverRegistry() {
   if (!hasRareData())
     return nullptr;
@@ -1959,7 +1985,7 @@ void Node::registerMutationObserver(
     MutationObserverOptions options,
     const HashSet<AtomicString>& attributeFilter) {
   MutationObserverRegistration* registration = nullptr;
-  HeapVector<Member<MutationObserverRegistration>>& registry =
+  HeapVector<TraceWrapperMember<MutationObserverRegistration>>& registry =
       ensureRareData().ensureMutationObserverData().registry;
   for (size_t i = 0; i < registry.size(); ++i) {
     if (&registry[i]->observer() == &observer) {
@@ -1969,9 +1995,10 @@ void Node::registerMutationObserver(
   }
 
   if (!registration) {
-    registry.append(MutationObserverRegistration::create(
-        observer, this, options, attributeFilter));
-    registration = registry.last().get();
+    registration = MutationObserverRegistration::create(observer, this, options,
+                                                        attributeFilter);
+    registry.append(
+        TraceWrapperMember<MutationObserverRegistration>(this, registration));
   }
 
   document().addMutationObserverTypes(registration->mutationTypes());
@@ -1979,7 +2006,7 @@ void Node::registerMutationObserver(
 
 void Node::unregisterMutationObserver(
     MutationObserverRegistration* registration) {
-  HeapVector<Member<MutationObserverRegistration>>* registry =
+  HeapVector<TraceWrapperMember<MutationObserverRegistration>>* registry =
       mutationObserverRegistry();
   DCHECK(registry);
   if (!registry)
@@ -2021,7 +2048,7 @@ void Node::notifyMutationObserversNodeWillDetach() {
 
   ScriptForbiddenScope forbidScriptDuringRawIteration;
   for (Node* node = parentNode(); node; node = node->parentNode()) {
-    if (HeapVector<Member<MutationObserverRegistration>>* registry =
+    if (HeapVector<TraceWrapperMember<MutationObserverRegistration>>* registry =
             node->mutationObserverRegistry()) {
       const size_t size = registry->size();
       for (size_t i = 0; i < size; ++i)
@@ -2075,8 +2102,9 @@ DispatchEventResult Node::dispatchDOMActivateEvent(int detail,
 #if DCHECK_IS_ON()
   DCHECK(!EventDispatchForbiddenScope::isEventDispatchForbidden());
 #endif
-  UIEvent* event = UIEvent::create(EventTypeNames::DOMActivate, true, true,
-                                   document().domWindow(), detail);
+  UIEvent* event = UIEvent::create();
+  event->initUIEvent(EventTypeNames::DOMActivate, true, true,
+                     document().domWindow(), detail);
   event->setUnderlyingEvent(underlyingEvent);
   dispatchScopedEvent(event);
 
@@ -2239,7 +2267,7 @@ HTMLSlotElement* Node::assignedSlotForBinding() {
   return nullptr;
 }
 
-void Node::setFocus(bool flag) {
+void Node::setFocused(bool flag) {
   document().userActionElements().setFocused(this, flag);
 }
 
@@ -2320,7 +2348,7 @@ void Node::setV0CustomElementState(V0CustomElementState newState) {
 
   switch (newState) {
     case V0NotCustomElement:
-      ASSERT_NOT_REACHED();  // Everything starts in this state
+      NOTREACHED();  // Everything starts in this state
       return;
 
     case V0WaitingForUpgrade:
@@ -2417,7 +2445,7 @@ unsigned Node::lengthOfContents() const {
     case Node::kDocumentTypeNode:
       return 0;
   }
-  ASSERT_NOT_REACHED();
+  NOTREACHED();
   return 0;
 }
 

@@ -71,7 +71,7 @@ class MediaLog;
 class RendererFactory;
 }
 
-namespace shell {
+namespace service_manager {
 class InterfaceRegistry;
 }
 
@@ -346,14 +346,14 @@ class CONTENT_EXPORT ContentRendererClient {
   // is called from the worker thread.
   virtual void DidInitializeServiceWorkerContextOnWorkerThread(
       v8::Local<v8::Context> context,
-      int embedded_worker_id,
+      int64_t service_worker_version_id,
       const GURL& url) {}
 
   // Notifies that a service worker context will be destroyed. This function
   // is called from the worker thread.
   virtual void WillDestroyServiceWorkerContextOnWorkerThread(
       v8::Local<v8::Context> context,
-      int embedded_worker_id,
+      int64_t service_worker_version_id,
       const GURL& url) {}
 
   // Whether this renderer should enforce preferences related to the WebRTC
@@ -368,7 +368,7 @@ class CONTENT_EXPORT ContentRendererClient {
   // Allows the client to expose interfaces from the renderer process to the
   // browser process via |registry|.
   virtual void ExposeInterfacesToBrowser(
-      shell::InterfaceRegistry* interface_registry) {}
+      service_manager::InterfaceRegistry* interface_registry) {}
 
   // Overwrites the given URL to use an HTML5 embed if possible.
   // An empty URL is returned if the URL is not overriden.

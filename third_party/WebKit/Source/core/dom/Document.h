@@ -32,6 +32,7 @@
 
 #include "bindings/core/v8/ExceptionStatePlaceholder.h"
 #include "bindings/core/v8/ScriptValue.h"
+#include "bindings/core/v8/TraceWrapperMember.h"
 #include "core/CoreExport.h"
 #include "core/dom/ContainerNode.h"
 #include "core/dom/DocumentEncodingData.h"
@@ -291,6 +292,7 @@ class CORE_EXPORT Document : public ContainerNode,
   Length viewportDefaultMinWidth() const { return m_viewportDefaultMinWidth; }
 
   String outgoingReferrer() const override;
+  ReferrerPolicy getReferrerPolicy() const override;
 
   void setDoctype(DocumentType*);
   DocumentType* doctype() const { return m_docType.get(); }
@@ -327,6 +329,9 @@ class CORE_EXPORT Document : public ContainerNode,
   HeapVector<Member<Element>> elementsFromPoint(int x, int y) const;
   Range* caretRangeFromPoint(int x, int y);
   Element* scrollingElement();
+
+  void addNonAttachedStyle(Element&, RefPtr<ComputedStyle>);
+  ComputedStyle* getNonAttachedStyle(Element&);
 
   String readyState() const;
 
@@ -624,9 +629,14 @@ class CORE_EXPORT Document : public ContainerNode,
   DocumentParser* parser() const { return m_parser.get(); }
   ScriptableDocumentParser* scriptableDocumentParser() const;
 
-  bool printing() const { return m_printing; }
-  void setPrinting(bool isPrinting) { m_printing = isPrinting; }
-  bool wasPrinting() const { return m_wasPrinting; }
+  // FinishingPrinting denotes that the non-printing layout state is being
+  // restored.
+  enum PrintingState { NotPrinting, Printing, FinishingPrinting };
+  bool printing() const { return m_printing == Printing; }
+  bool finishingOrIsPrinting() {
+    return m_printing == Printing || m_printing == FinishingPrinting;
+  }
+  void setPrinting(PrintingState state) { m_printing = state; }
 
   bool paginatedForScreen() const { return m_paginatedForScreen; }
   void setPaginatedForScreen(bool p) { m_paginatedForScreen = p; }
@@ -1405,11 +1415,13 @@ class CORE_EXPORT Document : public ContainerNode,
 
   Member<LocalFrame> m_frame;
   Member<LocalDOMWindow> m_domWindow;
-  Member<HTMLImportsController> m_importsController;
+  TraceWrapperMember<HTMLImportsController> m_importsController;
 
   Member<ResourceFetcher> m_fetcher;
   Member<DocumentParser> m_parser;
   Member<ContextFeatures> m_contextFeatures;
+
+  HeapHashMap<Member<Element>, RefPtr<ComputedStyle>> m_nonAttachedStyle;
 
   bool m_wellFormed;
 
@@ -1428,12 +1440,11 @@ class CORE_EXPORT Document : public ContainerNode,
   AtomicString m_mimeType;
 
   Member<DocumentType> m_docType;
-  Member<DOMImplementation> m_implementation;
+  TraceWrapperMember<DOMImplementation> m_implementation;
 
   Member<CSSStyleSheet> m_elemSheet;
 
-  bool m_printing;
-  bool m_wasPrinting;
+  PrintingState m_printing;
   bool m_paginatedForScreen;
 
   CompatibilityMode m_compatibilityMode;
@@ -1467,8 +1478,8 @@ class CORE_EXPORT Document : public ContainerNode,
 
   MutationObserverOptions m_mutationObserverTypes;
 
-  Member<StyleEngine> m_styleEngine;
-  Member<StyleSheetList> m_styleSheetList;
+  TraceWrapperMember<StyleEngine> m_styleEngine;
+  TraceWrapperMember<StyleSheetList> m_styleSheetList;
 
   Member<FormController> m_formController;
 

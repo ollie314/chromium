@@ -52,6 +52,7 @@
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/signin/easy_unlock_service.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
+#include "chrome/browser/signin/signin_ui_util.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/sync/sync_ui_util.h"
 #include "chrome/browser/themes/theme_service.h"
@@ -66,6 +67,7 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension_constants.h"
+#include "chrome/common/features.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/chromium_strings.h"
@@ -116,7 +118,6 @@
 #if defined(OS_CHROMEOS)
 #include "ash/common/accessibility_types.h"  // nogncheck
 #include "ash/common/system/chromeos/devicetype_utils.h"  // nogncheck
-#include "ash/common/wallpaper/wallpaper_delegate.h"  // nogncheck
 #include "ash/shell.h"  // nogncheck
 #include "chrome/browser/browser_process_platform_part.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_util.h"
@@ -143,7 +144,7 @@
 #include "ui/gfx/image/image_skia.h"
 #endif  // defined(OS_CHROMEOS)
 
-#if defined(ENABLE_SERVICE_DISCOVERY)
+#if BUILDFLAG(ENABLE_SERVICE_DISCOVERY)
 #include "chrome/browser/printing/cloud_print/privet_notifications.h"
 #endif
 
@@ -199,9 +200,9 @@ BrowserOptionsHandler::BrowserOptionsHandler()
                  weak_ptr_factory_.GetWeakPtr()));
 #endif  // !defined(OS_CHROMEOS)
 
-#if defined(ENABLE_SERVICE_DISCOVERY)
+#if BUILDFLAG(ENABLE_SERVICE_DISCOVERY)
   cloud_print_mdns_ui_enabled_ = true;
-#endif  // defined(ENABLE_SERVICE_DISCOVERY)
+#endif
 }
 
 BrowserOptionsHandler::~BrowserOptionsHandler() {
@@ -557,11 +558,11 @@ void BrowserOptionsHandler::GetLocalizedValues(base::DictionaryValue* values) {
     { "backgroundModeCheckbox", IDS_OPTIONS_SYSTEM_ENABLE_BACKGROUND_MODE },
 #endif  // defined(OS_MACOSX) && !defined(OS_CHROMEOS)
 
-#if defined(ENABLE_SERVICE_DISCOVERY)
+#if BUILDFLAG(ENABLE_SERVICE_DISCOVERY)
     { "cloudPrintDevicesPageButton", IDS_LOCAL_DISCOVERY_DEVICES_PAGE_BUTTON },
     { "cloudPrintEnableNotificationsLabel",
       IDS_LOCAL_DISCOVERY_NOTIFICATIONS_ENABLE_CHECKBOX_LABEL },
-#endif  // defined(ENABLE_SERVICE_DISCOVERY)
+#endif
   };
 
   RegisterStrings(values, resources, arraysize(resources));
@@ -680,7 +681,7 @@ void BrowserOptionsHandler::GetLocalizedValues(base::DictionaryValue* values) {
       g_browser_process->gpu_mode_manager()->initial_gpu_mode_pref());
 #endif
 
-#if defined(ENABLE_SERVICE_DISCOVERY)
+#if BUILDFLAG(ENABLE_SERVICE_DISCOVERY)
   values->SetBoolean("cloudPrintHideNotificationsCheckbox",
                      !cloud_print::PrivetNotificationService::IsEnabled());
 #endif
@@ -738,10 +739,6 @@ void BrowserOptionsHandler::GetLocalizedValues(base::DictionaryValue* values) {
   bool allow_bluetooth = true;
   cros_settings->GetBoolean(chromeos::kAllowBluetooth, &allow_bluetooth);
   values->SetBoolean("allowBluetooth", allow_bluetooth);
-
-  values->SetBoolean("enableStorageManager",
-      !base::CommandLine::ForCurrentProcess()->HasSwitch(
-          chromeos::switches::kDisableStorageManager));
 
   values->SetBoolean("showQuickUnlockSettings",
                      chromeos::IsQuickUnlockEnabled());
@@ -858,7 +855,7 @@ void BrowserOptionsHandler::RegisterMessages() {
                  base::Unretained(this)));
 #endif  // defined(OS_CHROMEOS)
 
-#if defined(ENABLE_SERVICE_DISCOVERY)
+#if BUILDFLAG(ENABLE_SERVICE_DISCOVERY)
   if (cloud_print_mdns_ui_enabled_) {
     web_ui()->RegisterMessageCallback(
         "showCloudPrintDevicesPage",
@@ -1563,6 +1560,10 @@ BrowserOptionsHandler::GetSyncStateDictionary() {
 
   sync_status->SetBoolean("managed", service && service->IsManaged());
   sync_status->SetBoolean("signedIn", signin->IsAuthenticated());
+  sync_status->SetString("accountInfo",
+                         l10n_util::GetStringFUTF16(
+                             IDS_SYNC_ACCOUNT_INFO,
+                             signin_ui_util::GetAuthenticatedUsername(signin)));
   sync_status->SetBoolean("hasUnrecoverableError",
                           service && service->HasUnrecoverableError());
 
@@ -1708,8 +1709,7 @@ void BrowserOptionsHandler::ShowManageSSLCertificates(
 }
 #endif
 
-#if defined(ENABLE_SERVICE_DISCOVERY)
-
+#if BUILDFLAG(ENABLE_SERVICE_DISCOVERY)
 void BrowserOptionsHandler::ShowCloudPrintDevicesPage(
     const base::ListValue* args) {
   content::RecordAction(UserMetricsAction("Options_CloudPrintDevicesPage"));
@@ -1719,7 +1719,6 @@ void BrowserOptionsHandler::ShowCloudPrintDevicesPage(
                        ui::PAGE_TRANSITION_LINK, false);
   web_ui()->GetWebContents()->OpenURL(params);
 }
-
 #endif
 
 void BrowserOptionsHandler::SetHotwordAudioHistorySectionVisible(
@@ -1895,7 +1894,7 @@ void BrowserOptionsHandler::HandleRefreshExtensionControlIndicators(
 #if defined(OS_CHROMEOS)
 void BrowserOptionsHandler::HandleOpenWallpaperManager(
     const base::ListValue* args) {
-  ash::WmShell::Get()->wallpaper_delegate()->OpenSetWallpaperPage();
+  chromeos::WallpaperManager::Get()->Open();
 }
 
 void BrowserOptionsHandler::VirtualKeyboardChangeCallback(

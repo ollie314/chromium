@@ -48,6 +48,8 @@ WebInspector.SourcesView = function()
             this._toolbarEditorActions.appendToolbarItem(actions[i].button(this));
     }
     this._scriptViewToolbar = new WebInspector.Toolbar("", this._toolbarContainerElement);
+    this._toolbarContainerElement.createChild("div", "sources-toolbar-spacer");
+    this._bottomToolbar = new WebInspector.Toolbar("", this._toolbarContainerElement);
 
     WebInspector.startBatchUpdate();
     workspace.uiSourceCodes().forEach(this._addUISourceCode.bind(this));
@@ -74,7 +76,7 @@ WebInspector.SourcesView = function()
             return;
 
         event.returnValue = WebInspector.UIString("DevTools have unsaved changes that will be permanently lost.");
-        WebInspector.inspectorView.setCurrentPanel(WebInspector.SourcesPanel.instance());
+        WebInspector.viewManager.showView("sources");
         for (var i = 0; i < unsavedSourceCodes.length; ++i)
             WebInspector.Revealer.reveal(unsavedSourceCodes[i]);
 
@@ -145,6 +147,14 @@ WebInspector.SourcesView.prototype = {
     rightToolbar: function()
     {
         return this._editorContainer.rightToolbar();
+    },
+
+    /**
+     * @return {!WebInspector.Toolbar}
+     */
+    bottomToolbar: function()
+    {
+        return this._bottomToolbar;
     },
 
     /**

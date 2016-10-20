@@ -19,6 +19,7 @@
 #include "chrome/browser/ui/cocoa/l10n_util.h"
 #import "chrome/browser/ui/cocoa/profiles/avatar_button.h"
 #include "chrome/grit/generated_resources.h"
+#import "chrome/browser/themes/theme_properties.h"
 #include "chrome/grit/theme_resources.h"
 #include "components/signin/core/common/profile_management_switches.h"
 #include "skia/ext/skia_utils_mac.h"
@@ -35,15 +36,6 @@
 
 namespace {
 
-const ui::NinePartImageIds kNormalBorderImageIds =
-    IMAGE_GRID(IDR_AVATAR_NATIVE_BUTTON_NORMAL);
-const ui::NinePartImageIds kHoverBorderImageIds =
-    IMAGE_GRID(IDR_AVATAR_NATIVE_BUTTON_HOVER);
-const ui::NinePartImageIds kPressedBorderImageIds =
-    IMAGE_GRID(IDR_AVATAR_NATIVE_BUTTON_PRESSED);
-const ui::NinePartImageIds kThemedBorderImageIds =
-    IMAGE_GRID(IDR_AVATAR_THEMED_MAC_BUTTON_NORMAL);
-
 NSImage* GetImageFromResourceID(int resourceId) {
   return ui::ResourceBundle::GetSharedInstance().GetNativeImageNamed(
       resourceId).ToNSImage();
@@ -53,24 +45,11 @@ const SkColor kMaterialButtonHoverColor = SkColorSetARGB(20, 0, 0, 0);
 const SkColor kMaterialButtonPressedColor = SkColorSetARGB(31, 0, 0, 0);
 const SkColor kMaterialAvatarIconColor = SkColorSetRGB(0x5a, 0x5a, 0x5a);
 
-CGFloat ButtonHeight() {
-  const CGFloat kButtonHeight = 28;
-  const CGFloat kMaterialButtonHeight = 24;
-  return ui::MaterialDesignController::IsModeMaterial() ? kMaterialButtonHeight
-                                                        : kButtonHeight;
-}
+const CGFloat kButtonHeight = 24;
 
-// NSButtons have a default padding of 5px. Non-MD buttons should have a
-// padding of 8px. Meanwhile, MD buttons should have a padding of 6px.
-CGFloat ButtonExtraPadding() {
-  const CGFloat kDefaultPadding = 5;
-  const CGFloat kButtonExtraPadding = 8 - kDefaultPadding;
-  const CGFloat kMaterialButtonExtraPadding = 6 - kDefaultPadding;
-
-  return ui::MaterialDesignController::IsModeMaterial()
-             ? kMaterialButtonExtraPadding
-             : kButtonExtraPadding;
-}
+// NSButtons have a default padding of 5px. Buttons should have a padding of
+// 6px.
+const CGFloat kButtonExtraPadding = 6 - 5;
 
 // Extra padding for the MD signed out avatar button.
 const CGFloat kMaterialSignedOutWidthPadding = 2;
@@ -106,19 +85,16 @@ const CGFloat kMaterialTitleKern = 0.25;
   // An image and no error means we are drawing the generic button, which
   // is square. Otherwise, we are displaying the profile's name and an
   // optional authentication error icon.
-  if ([self image] && !hasError_) {
-    buttonSize.width = ButtonHeight();
-    if (ui::MaterialDesignController::IsModeMaterial())
-      buttonSize.width += kMaterialSignedOutWidthPadding;
-  } else {
-    buttonSize.width += 2 * ButtonExtraPadding();
-  }
-  buttonSize.height = ButtonHeight();
+  if ([self image] && !hasError_)
+    buttonSize.width = kButtonHeight + kMaterialSignedOutWidthPadding;
+  else
+    buttonSize.width += 2 * kButtonExtraPadding;
+  buttonSize.height = kButtonHeight;
   return buttonSize;
 }
 
 - (void)drawInteriorWithFrame:(NSRect)frame inView:(NSView*)controlView {
-  NSRect frameAfterPadding = NSInsetRect(frame, ButtonExtraPadding(), 0);
+  NSRect frameAfterPadding = NSInsetRect(frame, kButtonExtraPadding, 0);
   [super drawInteriorWithFrame:frameAfterPadding inView:controlView];
 }
 
@@ -138,31 +114,19 @@ const CGFloat kMaterialTitleKern = 0.25;
   HoverState hoverState =
       [base::mac::ObjCCastStrict<AvatarButton>(controlView) hoverState];
 
-  if (ui::MaterialDesignController::IsModeMaterial()) {
-    NSColor* backgroundColor = nil;
-    if (hoverState == kHoverStateMouseDown) {
-      backgroundColor = skia::SkColorToSRGBNSColor(kMaterialButtonPressedColor);
-    } else if (hoverState == kHoverStateMouseOver) {
-      backgroundColor = skia::SkColorToSRGBNSColor(kMaterialButtonHoverColor);
-    }
+  NSColor* backgroundColor = nil;
+  if (hoverState == kHoverStateMouseDown) {
+    backgroundColor = skia::SkColorToSRGBNSColor(kMaterialButtonPressedColor);
+  } else if (hoverState == kHoverStateMouseOver) {
+    backgroundColor = skia::SkColorToSRGBNSColor(kMaterialButtonHoverColor);
+  }
 
-    if (backgroundColor) {
-      [backgroundColor set];
-      NSBezierPath* path = [NSBezierPath bezierPathWithRoundedRect:frame
-                                                           xRadius:2.0f
-                                                           yRadius:2.0f];
-      [path fill];
-    }
-  } else {
-    ui::NinePartImageIds imageIds = kNormalBorderImageIds;
-    if (isThemedWindow_)
-      imageIds = kThemedBorderImageIds;
-
-    if (hoverState == kHoverStateMouseDown)
-      imageIds = kPressedBorderImageIds;
-    else if (hoverState == kHoverStateMouseOver)
-      imageIds = kHoverBorderImageIds;
-    ui::DrawNinePartImage(frame, imageIds, NSCompositeSourceOver, 1.0, true);
+  if (backgroundColor) {
+    [backgroundColor set];
+    NSBezierPath* path = [NSBezierPath bezierPathWithRoundedRect:frame
+                                                         xRadius:2.0f
+                                                         yRadius:2.0f];
+    [path fill];
   }
 }
 
@@ -251,15 +215,14 @@ const CGFloat kMaterialTitleKern = 0.25;
 }
 
 - (void)themeDidChangeNotification:(NSNotification*)aNotification {
-  // Redraw the button if the window has switched between themed and native.
+  // Redraw the button if the window has switched between themed and native
+  // or if we're in MD design.
   ThemeService* themeService =
       ThemeServiceFactory::GetForProfile(browser_->profile());
   BOOL updatedIsThemedWindow = !themeService->UsingSystemTheme();
-  if (isThemedWindow_ != updatedIsThemedWindow) {
-    isThemedWindow_ = updatedIsThemedWindow;
-    [[button_ cell] setIsThemedWindow:isThemedWindow_];
-    [self updateAvatarButtonAndLayoutParent:YES];
-  }
+  isThemedWindow_ = updatedIsThemedWindow;
+  [[button_ cell] setIsThemedWindow:isThemedWindow_];
+  [self updateAvatarButtonAndLayoutParent:YES];
 }
 
 - (void)updateAvatarButtonAndLayoutParent:(BOOL)layoutParent {
@@ -267,15 +230,11 @@ const CGFloat kMaterialTitleKern = 0.25;
   // windows, and a light text with a dark drop shadow for guest windows
   // which are themed with a dark background. If we're using MD, then there
   // should be no drop shadows.
-  BOOL isMaterial = ui::MaterialDesignController::IsModeMaterial();
-
   NSColor* foregroundColor;
-  if (browser_->profile()->IsGuestSession() && isMaterial)
-    foregroundColor = [NSColor colorWithCalibratedWhite:1.0 alpha:0.9];
-  else if (!isThemedWindow_)
-    foregroundColor = [NSColor blackColor];
-  else
-    foregroundColor = [NSColor blackColor];
+  const ui::ThemeProvider* theme =
+      &ThemeService::GetThemeProviderForProfile(browser_->profile());
+  foregroundColor = theme ? theme->GetNSColor(ThemeProperties::COLOR_TAB_TEXT)
+                          : [NSColor blackColor];
 
   ProfileAttributesStorage& storage =
       g_browser_process->profile_manager()->GetProfileAttributesStorage();
@@ -296,38 +255,20 @@ const CGFloat kMaterialTitleKern = 0.25;
       base::mac::ObjCCastStrict<AvatarButton>(button_);
 
   if (useGenericButton) {
-    if (isMaterial) {
-      NSImage* avatarIcon = NSImageFromImageSkia(
-          gfx::CreateVectorIcon(gfx::VectorIconId::USER_ACCOUNT_AVATAR, 18,
-                                kMaterialAvatarIconColor));
-      [button setDefaultImage:avatarIcon];
-      [button setHoverImage:nil];
-      [button setPressedImage:nil];
-    } else {
-      [button setDefaultImage:GetImageFromResourceID(
-                                  IDR_AVATAR_NATIVE_BUTTON_AVATAR)];
-      [button setHoverImage:GetImageFromResourceID(
-                                IDR_AVATAR_NATIVE_BUTTON_AVATAR_HOVER)];
-      [button setPressedImage:GetImageFromResourceID(
-                                  IDR_AVATAR_NATIVE_BUTTON_AVATAR_PRESSED)];
-      // This is a workaround for an issue in the HoverImageButton where the
-      // button is initially sized incorrectly unless a default image is
-      // provided.
-      // See crbug.com/298501.
-      [button setImage:GetImageFromResourceID(IDR_AVATAR_NATIVE_BUTTON_AVATAR)];
-    }
+    NSImage* avatarIcon = NSImageFromImageSkia(gfx::CreateVectorIcon(
+        gfx::VectorIconId::USER_ACCOUNT_AVATAR, 18, kMaterialAvatarIconColor));
+    [button setDefaultImage:avatarIcon];
+    [button setHoverImage:nil];
+    [button setPressedImage:nil];
     [button setImagePosition:NSImageOnly];
   } else if (hasError_) {
-    NSImage* errorIcon =
-        isMaterial
-            ? NSImageFromImageSkia(gfx::CreateVectorIcon(
-                  gfx::VectorIconId::SYNC_PROBLEM, 16, gfx::kGoogleRed700))
-            : GetImageFromResourceID(IDR_ICON_PROFILES_AVATAR_BUTTON_ERROR);
+    NSImage* errorIcon = NSImageFromImageSkia(gfx::CreateVectorIcon(
+        gfx::VectorIconId::SYNC_PROBLEM, 16, gfx::kGoogleRed700));
     [button setDefaultImage:errorIcon];
     [button setHoverImage:nil];
     [button setPressedImage:nil];
     [button setImage:errorIcon];
-    [button setImagePosition:isMaterial ? NSImageLeft : NSImageRight];
+    [button setImagePosition:NSImageLeft];
   } else {
     [button setDefaultImage:nil];
     [button setHoverImage:nil];
@@ -339,39 +280,15 @@ const CGFloat kMaterialTitleKern = 0.25;
       [[NSMutableParagraphStyle alloc] init]);
   [paragraphStyle setAlignment:NSLeftTextAlignment];
 
-  if (isMaterial) {
-    base::scoped_nsobject<NSAttributedString> attributedTitle(
-        [[NSAttributedString alloc]
-            initWithString:buttonTitle
-                attributes:@{
-                  NSForegroundColorAttributeName : foregroundColor,
-                  NSParagraphStyleAttributeName : paragraphStyle,
-                  NSKernAttributeName :
-                      [NSNumber numberWithFloat:kMaterialTitleKern]
-                }]);
-    [button_ setAttributedTitle:attributedTitle];
-  } else {
-    // Create the white drop shadow.
-    base::scoped_nsobject<NSShadow> shadow([[NSShadow alloc] init]);
-    [shadow setShadowOffset:NSMakeSize(0, -1)];
-    [shadow setShadowBlurRadius:0];
-    if (browser_->profile()->IsGuestSession())
-      [shadow setShadowColor:[NSColor colorWithCalibratedWhite:0.0 alpha:0.4]];
-    else if (!isThemedWindow_)
-      [shadow setShadowColor:[NSColor colorWithCalibratedWhite:1.0 alpha:0.7]];
-    else
-      [shadow setShadowColor:[NSColor colorWithCalibratedWhite:1.0 alpha:0.4]];
-
-    base::scoped_nsobject<NSAttributedString> attributedTitle(
-        [[NSAttributedString alloc]
-            initWithString:buttonTitle
-                attributes:@{
-                  NSShadowAttributeName : shadow.get(),
-                  NSForegroundColorAttributeName : foregroundColor,
-                  NSParagraphStyleAttributeName : paragraphStyle
-                }]);
-    [button_ setAttributedTitle:attributedTitle];
-  }
+  base::scoped_nsobject<NSAttributedString> attributedTitle([
+      [NSAttributedString alloc]
+      initWithString:buttonTitle
+          attributes:@{
+            NSForegroundColorAttributeName : foregroundColor,
+            NSParagraphStyleAttributeName : paragraphStyle,
+            NSKernAttributeName : [NSNumber numberWithFloat:kMaterialTitleKern]
+          }]);
+  [button_ setAttributedTitle:attributedTitle];
   [button_ sizeToFit];
 
   if (layoutParent) {

@@ -31,9 +31,9 @@
 #include "cc/output/context_provider.h"
 #include "cc/output/copy_output_request.h"
 #include "cc/output/dynamic_geometry_binding.h"
-#include "cc/output/gl_frame_data.h"
 #include "cc/output/layer_quad.h"
 #include "cc/output/output_surface.h"
+#include "cc/output/output_surface_frame.h"
 #include "cc/output/render_surface_filters.h"
 #include "cc/output/renderer_settings.h"
 #include "cc/output/static_geometry_binding.h"
@@ -846,7 +846,8 @@ gfx::Rect GLRenderer::GetBackdropBoundingBoxForRenderPassQuad(
     const RenderPassDrawQuad* quad,
     const gfx::Transform& contents_device_transform,
     const gfx::QuadF* clip_region,
-    bool use_aa) {
+    bool use_aa,
+    gfx::Rect* unclipped_rect) {
   gfx::QuadF scaled_region;
   if (!GetScaledRegion(quad->rect, clip_region, &scaled_region)) {
     scaled_region = SharedGeometryQuad().BoundingBox();
@@ -880,20 +881,21 @@ gfx::Rect GLRenderer::GetBackdropBoundingBoxForRenderPassQuad(
     backdrop_rect.Inset(-1, -1, -1, -1);
   }
 
+  *unclipped_rect = backdrop_rect;
   backdrop_rect.Intersect(MoveFromDrawToWindowSpace(
       frame, frame->current_render_pass->output_rect));
   return backdrop_rect;
 }
 
 std::unique_ptr<ScopedResource> GLRenderer::GetBackdropTexture(
+    DrawingFrame* frame,
     const gfx::Rect& bounding_rect) {
   std::unique_ptr<ScopedResource> device_background_texture =
       ScopedResource::Create(resource_provider_);
   // CopyTexImage2D fails when called on a texture having immutable storage.
-  device_background_texture->Allocate(bounding_rect.size(),
-                                      ResourceProvider::TEXTURE_HINT_DEFAULT,
-                                      resource_provider_->best_texture_format(),
-                                      output_surface_->device_color_space());
+  device_background_texture->Allocate(
+      bounding_rect.size(), ResourceProvider::TEXTURE_HINT_DEFAULT,
+      resource_provider_->best_texture_format(), frame->device_color_space);
   {
     ResourceProvider::ScopedWriteLockGL lock(
         resource_provider_, device_background_texture->id(), false);
@@ -905,11 +907,17 @@ std::unique_ptr<ScopedResource> GLRenderer::GetBackdropTexture(
 sk_sp<SkImage> GLRenderer::ApplyBackgroundFilters(
     const RenderPassDrawQuad* quad,
     ScopedResource* background_texture,
-    const gfx::RectF& rect) {
+    const gfx::RectF& rect,
+    const gfx::RectF& unclipped_rect) {
   DCHECK(ShouldApplyBackgroundFilters(quad));
   auto use_gr_context = ScopedUseGrContext::Create(this);
+
+  gfx::Vector2dF clipping_offset =
+      (rect.top_right() - unclipped_rect.top_right()) +
+      (rect.bottom_left() - unclipped_rect.bottom_left());
   sk_sp<SkImageFilter> filter = RenderSurfaceFilters::BuildImageFilter(
-      quad->background_filters, gfx::SizeF(background_texture->size()));
+      quad->background_filters, gfx::SizeF(background_texture->size()),
+      clipping_offset);
 
   // TODO(senorblanco): background filters should be moved to the
   // makeWithFilter fast-path, and go back to calling ApplyImageFilter().
@@ -1038,7 +1046,7 @@ void GLRenderer::DrawRenderPassQuad(DrawingFrame* frame,
     // RGBA_8888 here is arbitrary and unused.
     Resource tile_resource(tile_quad->resource_id(), tile_quad->texture_size,
                            ResourceFormat::RGBA_8888,
-                           output_surface_->device_color_space());
+                           frame->device_color_space);
     // The projection matrix used by GLRenderer has a flip.  As tile texture
     // inputs are oriented opposite to framebuffer outputs, don't flip via
     // texture coords and let the projection matrix naturallyd o it.
@@ -1130,9 +1138,10 @@ void GLRenderer::UpdateRPDQShadersForBlending(
     DCHECK(params->frame);
     // Compute a bounding box around the pixels that will be visible through
     // the quad.
+    gfx::Rect unclipped_rect;
     params->background_rect = GetBackdropBoundingBoxForRenderPassQuad(
         params->frame, quad, params->contents_device_transform,
-        params->clip_region, params->use_aa);
+        params->clip_region, params->use_aa, &unclipped_rect);
 
     if (!params->background_rect.IsEmpty()) {
       // The pixels from the filtered background should completely replace the
@@ -1144,14 +1153,15 @@ void GLRenderer::UpdateRPDQShadersForBlending(
       // This function allocates a texture, which should contribute to the
       // amount of memory used by render surfaces:
       // LayerTreeHost::CalculateMemoryForRenderSurfaces.
-      params->background_texture = GetBackdropTexture(params->background_rect);
+      params->background_texture =
+          GetBackdropTexture(params->frame, params->background_rect);
 
       if (ShouldApplyBackgroundFilters(quad) && params->background_texture) {
         // Apply the background filters to R, so that it is applied in the
         // pixels' coordinate space.
-        params->background_image =
-            ApplyBackgroundFilters(quad, params->background_texture.get(),
-                                   gfx::RectF(params->background_rect));
+        params->background_image = ApplyBackgroundFilters(
+            quad, params->background_texture.get(),
+            gfx::RectF(params->background_rect), gfx::RectF(unclipped_rect));
         if (params->background_image) {
           params->background_image_id =
               skia::GrBackendObjectToGrGLTextureInfo(
@@ -2398,7 +2408,7 @@ void GLRenderer::DrawYUVVideoQuad(const DrawingFrame* frame,
 
   if (lut_texture_location != -1) {
     unsigned int lut_texture = color_lut_cache_.GetLUT(
-        quad->video_color_space, output_surface_->device_color_space(), 32);
+        quad->video_color_space, frame->device_color_space, 32);
     gl_->ActiveTexture(GL_TEXTURE5);
     gl_->BindTexture(GL_TEXTURE_2D, lut_texture);
     gl_->Uniform1i(lut_texture_location, 5);
@@ -2884,18 +2894,17 @@ void GLRenderer::DrawQuadGeometry(const gfx::Transform& projection_matrix,
   gl_->DrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
 }
 
-void GLRenderer::SwapBuffers(CompositorFrameMetadata metadata) {
+void GLRenderer::SwapBuffers(std::vector<ui::LatencyInfo> latency_info) {
   DCHECK(visible_);
 
   TRACE_EVENT0("cc,benchmark", "GLRenderer::SwapBuffers");
   // We're done! Time to swapbuffers!
 
-  gfx::Size surface_size = output_surface_->SurfaceSize();
+  gfx::Size surface_size = surface_size_for_swap_buffers();
 
-  CompositorFrame compositor_frame;
-  compositor_frame.metadata = std::move(metadata);
-  compositor_frame.gl_frame_data = base::WrapUnique(new GLFrameData);
-  compositor_frame.gl_frame_data->size = surface_size;
+  OutputSurfaceFrame output_frame;
+  output_frame.latency_info = std::move(latency_info);
+  output_frame.size = surface_size;
   if (use_partial_swap_) {
     // If supported, we can save significant bandwidth by only swapping the
     // damaged/scissored region (clamped to the viewport).
@@ -2903,7 +2912,7 @@ void GLRenderer::SwapBuffers(CompositorFrameMetadata metadata) {
     int flipped_y_pos_of_rect_bottom = surface_size.height() -
                                        swap_buffer_rect_.y() -
                                        swap_buffer_rect_.height();
-    compositor_frame.gl_frame_data->sub_buffer_rect =
+    output_frame.sub_buffer_rect =
         gfx::Rect(swap_buffer_rect_.x(),
                   FlippedRootFramebuffer() ? flipped_y_pos_of_rect_bottom
                                            : swap_buffer_rect_.y(),
@@ -2914,13 +2923,13 @@ void GLRenderer::SwapBuffers(CompositorFrameMetadata metadata) {
     if (!swap_buffer_rect_.IsEmpty() || !allow_empty_swap_) {
       swap_buffer_rect_ = gfx::Rect(surface_size);
     }
-    compositor_frame.gl_frame_data->sub_buffer_rect = swap_buffer_rect_;
+    output_frame.sub_buffer_rect = swap_buffer_rect_;
   }
 
   swapping_overlay_resources_.push_back(std::move(pending_overlay_resources_));
   pending_overlay_resources_.clear();
 
-  output_surface_->SwapBuffers(std::move(compositor_frame));
+  output_surface_->SwapBuffers(std::move(output_frame));
 
   swap_buffer_rect_ = gfx::Rect();
 }
@@ -3886,7 +3895,7 @@ void GLRenderer::CopyRenderPassDrawQuadToOverlayResource(
   // requires creating a dummy DrawingFrame.
   {
     DrawingFrame frame;
-    gfx::Rect frame_rect = external_frame->device_viewport_rect;
+    gfx::Rect frame_rect(external_frame->device_viewport_size);
     force_drawing_frame_framebuffer_unflipped_ = true;
     InitializeViewport(&frame, frame_rect, frame_rect, frame_rect.size());
     force_drawing_frame_framebuffer_unflipped_ = false;
@@ -3916,7 +3925,7 @@ void GLRenderer::CopyRenderPassDrawQuadToOverlayResource(
 
   *resource = overlay_resource_pool_->AcquireResource(
       gfx::Size(iosurface_width, iosurface_height), ResourceFormat::RGBA_8888,
-      output_surface_->device_color_space());
+      external_frame->device_color_space);
   *new_bounds =
       gfx::RectF(updated_dst_rect.x(), updated_dst_rect.y(),
                  (*resource)->size().width(), (*resource)->size().height());

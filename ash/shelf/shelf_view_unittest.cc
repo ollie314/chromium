@@ -21,12 +21,13 @@
 #include "ash/common/shelf/shelf_widget.h"
 #include "ash/common/shelf/wm_shelf.h"
 #include "ash/common/shelf/wm_shelf_observer.h"
-#include "ash/common/shell_window_ids.h"
 #include "ash/common/system/web_notification/web_notification_tray.h"
 #include "ash/common/test/material_design_controller_test_api.h"
+#include "ash/common/test/test_system_tray_delegate.h"
 #include "ash/common/wm_root_window_controller.h"
 #include "ash/common/wm_shell.h"
 #include "ash/common/wm_window.h"
+#include "ash/public/cpp/shell_window_ids.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/test/ash_test_helper.h"
@@ -35,7 +36,6 @@
 #include "ash/test/test_shelf_delegate.h"
 #include "ash/test/test_shelf_item_delegate.h"
 #include "ash/test/test_shell_delegate.h"
-#include "ash/test/test_system_tray_delegate.h"
 #include "base/i18n/rtl.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
@@ -250,18 +250,6 @@ class TestShelfDelegateForShelfView : public ShelfDelegate {
   void set_is_app_pinned(bool is_pinned) { is_app_pinned_ = is_pinned; }
 
   // ShelfDelegate overrides:
-  void OnShelfCreated(WmShelf* shelf) override {}
-
-  void OnShelfDestroyed(WmShelf* shelf) override {}
-
-  void OnShelfAlignmentChanged(WmShelf* shelf) override {}
-
-  void OnShelfAutoHideBehaviorChanged(WmShelf* shelf) override {}
-
-  void OnShelfAutoHideStateChanged(WmShelf* shelf) override {}
-
-  void OnShelfVisibilityStateChanged(WmShelf* shelf) override {}
-
   ShelfID GetShelfIDForAppID(const std::string& app_id) override {
     ShelfID id = 0;
     EXPECT_TRUE(base::StringToInt(app_id, &id));

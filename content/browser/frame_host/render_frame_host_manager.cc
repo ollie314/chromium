@@ -230,7 +230,8 @@ RenderFrameHostImpl* RenderFrameHostManager::Navigate(
     // with the new render frame if necessary.  Note that this call needs to
     // occur before initializing the RenderView; the flow of creating the
     // RenderView can cause browser-side code to execute that expects the this
-    // RFH's shell::InterfaceRegistry to be initialized (e.g., if the site is a
+    // RFH's service_manager::InterfaceRegistry to be initialized (e.g., if the
+    // site is a
     // WebUI site that is handled via Mojo, then Mojo WebUI code in //chrome
     // will add an interface to this RFH's InterfaceRegistry).
     dest_render_frame_host->SetUpMojoIfNeeded();
@@ -456,6 +457,14 @@ void RenderFrameHostManager::OnCrossSiteResponse(
   std::vector<GURL> rest_of_chain = transfer_url_chain;
   rest_of_chain.pop_back();
 
+  // |extra_headers| passed to RequestTransferURL below are always empty for
+  // now, because there are no known scenarios where headers (from POST request
+  // made from one renderer) need to be forwarded into the renderer where that
+  // request ends up being transfered to.  In particular, XSSAuditor doesn't
+  // look at the headers (e.g. the Content-Type header) when analyzing the body
+  // of the POST request.
+  std::string extra_headers;
+
   transferring_render_frame_host->frame_tree_node()
       ->navigator()
       ->RequestTransferURL(
@@ -463,7 +472,7 @@ void RenderFrameHostManager::OnCrossSiteResponse(
           referrer, page_transition, global_request_id,
           should_replace_current_entry,
           transfer_navigation_handle_->IsPost() ? "POST" : "GET",
-          transfer_navigation_handle_->resource_request_body());
+          transfer_navigation_handle_->resource_request_body(), extra_headers);
 
   // If the navigation continued, the NavigationHandle should have been
   // transfered to a RenderFrameHost. In the other cases, it should be cleared.
@@ -653,11 +662,12 @@ void RenderFrameHostManager::DiscardUnusedFrame(
   // TODO(carlosk): this code is very similar to what can be found in
   // SwapOutOldFrame and we should see that these are unified at some point.
 
-  // If the SiteInstance for the pending RFH is being used by others don't
-  // delete the RFH. Just swap it out and it can be reused at a later point.
-  // In --site-per-process, RenderFrameHosts are not kept around and are
-  // deleted when not used, replaced by RenderFrameProxyHosts.
+  // If the SiteInstance for the pending RFH is being used by others, ensure
+  // that it is replaced by a RenderFrameProxyHost to allow other frames to
+  // communicate to this frame.
   SiteInstanceImpl* site_instance = render_frame_host->GetSiteInstance();
+  RenderViewHostImpl* rvh = render_frame_host->render_view_host();
+  RenderFrameProxyHost* proxy = nullptr;
   if (site_instance->HasSite() && site_instance->active_frame_count() > 1) {
     // Any currently suspended navigations are no longer needed.
     render_frame_host->CancelSuspendedNavigations();
@@ -667,14 +677,30 @@ void RenderFrameHostManager::DiscardUnusedFrame(
     // |render_frame_host|, as this method is only called to discard a pending
     // or speculative RenderFrameHost, i.e. one that has never hosted an actual
     // document.
-    RenderFrameProxyHost* proxy = GetRenderFrameProxyHost(site_instance);
-    if (!proxy) {
-      proxy = CreateRenderFrameProxyHost(site_instance,
-                                         render_frame_host->render_view_host());
-    }
+    proxy = GetRenderFrameProxyHost(site_instance);
+    if (!proxy)
+      proxy = CreateRenderFrameProxyHost(site_instance, rvh);
+  }
+
+  // Doing this is important in the case where the replacement proxy is created
+  // above, as the RenderViewHost will continue to exist and should be
+  // considered swapped out if it is ever reused.  When there's no replacement
+  // proxy, this doesn't really matter, as the RenderViewHost will be destroyed
+  // shortly, since |render_frame_host| is its last active frame and will be
+  // deleted below.  See https://crbug.com/627400.
+  if (frame_tree_node_->IsMainFrame()) {
+    rvh->set_main_frame_routing_id(MSG_ROUTING_NONE);
+    rvh->set_is_active(false);
+    rvh->set_is_swapped_out(true);
   }
 
   render_frame_host.reset();
+
+  // If a new RenderFrameProxyHost was created above, or if the old proxy isn't
+  // live, create the RenderFrameProxy in the renderer, so that other frames
+  // can still communicate with this frame.  See https://crbug.com/653746.
+  if (proxy && !proxy->is_render_frame_proxy_live())
+    proxy->InitRenderFrameProxy();
 }
 
 bool RenderFrameHostManager::DeleteFromPendingList(
@@ -1095,11 +1121,26 @@ bool RenderFrameHostManager::ShouldSwapBrowsingInstancesForNavigation(
   if (IsRendererDebugURL(new_effective_url))
     return false;
 
+  // Transitions across BrowserContexts should always require a
+  // BrowsingInstance swap. For example, this can happen if an extension in a
+  // normal profile opens an incognito window with a web URL using
+  // chrome.windows.create().
+  //
+  // TODO(alexmos): This check should've been enforced earlier in the
+  // navigation, in chrome::Navigate().  Verify this, and then convert this to
+  // a CHECK and remove the fallback.
+  DCHECK_EQ(browser_context,
+            render_frame_host_->GetSiteInstance()->GetBrowserContext());
+  if (browser_context !=
+      render_frame_host_->GetSiteInstance()->GetBrowserContext()) {
+    return true;
+  }
+
   // For security, we should transition between processes when one is a Web UI
   // page and one isn't, or if the WebUI types differ.
   if (ChildProcessSecurityPolicyImpl::GetInstance()->HasWebUIBindings(
           render_frame_host_->GetProcess()->GetID()) ||
-      WebUIControllerFactoryRegistry::GetInstance()->UseWebUIForURL(
+      WebUIControllerFactoryRegistry::GetInstance()->UseWebUIBindingsForURL(
           browser_context, current_effective_url)) {
     // If so, force a swap if destination is not an acceptable URL for Web UI.
     // Here, data URLs are never allowed.
@@ -1118,7 +1159,7 @@ bool RenderFrameHostManager::ShouldSwapBrowsingInstancesForNavigation(
     }
   } else {
     // Force a swap if it's a Web UI URL.
-    if (WebUIControllerFactoryRegistry::GetInstance()->UseWebUIForURL(
+    if (WebUIControllerFactoryRegistry::GetInstance()->UseWebUIBindingsForURL(
             browser_context, new_effective_url)) {
       return true;
     }
@@ -1198,10 +1239,14 @@ RenderFrameHostManager::GetSiteInstanceForNavigation(
       ConvertToSiteInstance(new_instance_descriptor, candidate_instance);
   // If |force_swap| is true, we must use a different SiteInstance than the
   // current one. If we didn't, we would have two RenderFrameHosts in the same
-  // SiteInstance and the same frame, resulting in page_id conflicts for their
-  // NavigationEntries.
+  // SiteInstance and the same frame, breaking lookup of RenderFrameHosts by
+  // SiteInstance.
   if (force_swap)
     CHECK_NE(new_instance, current_instance);
+
+  // Double-check that the new SiteInstance is associated with the right
+  // BrowserContext.
+  DCHECK_EQ(new_instance->GetBrowserContext(), browser_context);
 
   return new_instance;
 }

@@ -163,13 +163,6 @@ CFStringRef BaseBundleID_CFString() {
   return base::mac::NSToCFCast(base_bundle_id);
 }
 
-// This callback synchronizes preferences (under "org.chromium.Chromium" or
-// "com.google.Chrome"), in particular, writes them out to disk.
-void PrefsSyncCallback() {
-  if (!CFPreferencesAppSynchronize(BaseBundleID_CFString()))
-    LOG(WARNING) << "Error recording application bundle path.";
-}
-
 // Record the location of the application bundle (containing the main framework)
 // from which Chromium was loaded. This is used by app mode shims to find
 // Chromium.
@@ -187,12 +180,6 @@ void RecordLastRunAppBundlePath() {
   CFPreferencesSetAppValue(
       base::mac::NSToCFCast(app_mode::kLastRunAppBundlePathPrefsKey),
       app_bundle_path_cfstring, BaseBundleID_CFString());
-
-  // Sync after a delay avoid I/O contention on startup; 1500 ms is plenty.
-  BrowserThread::PostDelayedTask(
-      BrowserThread::FILE, FROM_HERE,
-      base::Bind(&PrefsSyncCallback),
-      base::TimeDelta::FromMilliseconds(1500));
 }
 
 bool IsProfileSignedOut(Profile* profile) {
@@ -716,7 +703,7 @@ class AppControllerProfileObserver : public ProfileAttributesStorage::Observer {
   [self openUrls:urls];
 
   if (startupIndex != TabStripModel::kNoTab &&
-      startupContent->GetVisibleURL() == GURL(chrome::kChromeUINewTabURL)) {
+      startupContent->GetVisibleURL() == chrome::kChromeUINewTabURL) {
     browser->tab_strip_model()->CloseWebContentsAt(startupIndex,
         TabStripModel::CLOSE_NONE);
   }
@@ -1587,8 +1574,8 @@ class AppControllerProfileObserver : public ProfileAttributesStorage::Observer {
 }
 
 - (void)delayedScreenParametersUpdate {
-  FOR_EACH_OBSERVER(ui::WorkAreaWatcherObserver, workAreaChangeObservers_,
-      WorkAreaChanged());
+  for (auto& observer : workAreaChangeObservers_)
+    observer.WorkAreaChanged();
 }
 
 - (BOOL)application:(NSApplication*)application

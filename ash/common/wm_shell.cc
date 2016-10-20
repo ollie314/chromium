@@ -15,13 +15,14 @@
 #include "ash/common/palette_delegate.h"
 #include "ash/common/session/session_state_delegate.h"
 #include "ash/common/shelf/app_list_shelf_item_delegate.h"
+#include "ash/common/shelf/shelf_controller.h"
 #include "ash/common/shelf/shelf_delegate.h"
 #include "ash/common/shelf/shelf_model.h"
 #include "ash/common/shelf/shelf_window_watcher.h"
 #include "ash/common/shell_delegate.h"
-#include "ash/common/shell_window_ids.h"
 #include "ash/common/system/brightness_control_delegate.h"
 #include "ash/common/system/keyboard_brightness_control_delegate.h"
+#include "ash/common/system/locale/locale_notification_controller.h"
 #include "ash/common/system/toast/toast_manager.h"
 #include "ash/common/system/tray/system_tray_controller.h"
 #include "ash/common/system/tray/system_tray_delegate.h"
@@ -37,6 +38,7 @@
 #include "ash/common/wm/window_cycle_controller.h"
 #include "ash/common/wm_root_window_controller.h"
 #include "ash/common/wm_window.h"
+#include "ash/public/cpp/shell_window_ids.h"
 #include "base/bind.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
@@ -76,7 +78,7 @@ void WmShell::Initialize(const scoped_refptr<base::SequencedWorkerPool>& pool) {
   toast_manager_.reset(new ToastManager);
 
   // Create the app list item in the shelf data model.
-  AppListShelfItemDelegate::CreateAppListItemAndDelegate(shelf_model_.get());
+  AppListShelfItemDelegate::CreateAppListItemAndDelegate(shelf_model());
 
   // Install the custom factory early on so that views::FocusManagers for Tray,
   // Shelf, and WallPaper could be created by the factory.
@@ -96,12 +98,16 @@ void WmShell::Shutdown() {
   shelf_window_watcher_.reset();
   // ShelfItemDelegate subclasses it owns have complex cleanup to run (e.g. ARC
   // shelf items in Chrome) so explicitly shutdown early.
-  shelf_model_->DestroyItemDelegates();
+  shelf_model()->DestroyItemDelegates();
   // Must be destroyed before FocusClient.
   shelf_delegate_.reset();
 
   // Balances the Install() in Initialize().
   views::FocusManagerFactory::Install(nullptr);
+}
+
+ShelfModel* WmShell::shelf_model() {
+  return shelf_controller_->model();
 }
 
 void WmShell::ShowContextMenu(const gfx::Point& location_in_screen,
@@ -117,6 +123,21 @@ void WmShell::ShowContextMenu(const gfx::Point& location_in_screen,
                                                    source_type);
 }
 
+void WmShell::CreateShelf() {
+  // Must occur after SessionStateDelegate creation and user login.
+  DCHECK(GetSessionStateDelegate());
+  DCHECK_GT(GetSessionStateDelegate()->NumberOfLoggedInUsers(), 0);
+  CreateShelfDelegate();
+
+  for (WmWindow* root_window : GetAllRootWindows())
+    root_window->GetRootWindowController()->CreateShelf();
+}
+
+void WmShell::ShowShelf() {
+  for (WmWindow* root_window : GetAllRootWindows())
+    root_window->GetRootWindowController()->ShowShelf();
+}
+
 void WmShell::CreateShelfDelegate() {
   // May be called multiple times as shelves are created and destroyed.
   if (shelf_delegate_)
@@ -126,47 +147,56 @@ void WmShell::CreateShelfDelegate() {
   // about multi-profile login state.
   DCHECK(GetSessionStateDelegate());
   DCHECK_GT(GetSessionStateDelegate()->NumberOfLoggedInUsers(), 0);
-  shelf_delegate_.reset(delegate_->CreateShelfDelegate(shelf_model_.get()));
-  shelf_window_watcher_.reset(new ShelfWindowWatcher(shelf_model_.get()));
+  shelf_delegate_.reset(delegate_->CreateShelfDelegate(shelf_model()));
+  shelf_window_watcher_.reset(new ShelfWindowWatcher(shelf_model()));
 }
 
 void WmShell::OnMaximizeModeStarted() {
-  FOR_EACH_OBSERVER(ShellObserver, shell_observers_, OnMaximizeModeStarted());
+  for (auto& observer : shell_observers_)
+    observer.OnMaximizeModeStarted();
 }
 
 void WmShell::OnMaximizeModeEnded() {
-  FOR_EACH_OBSERVER(ShellObserver, shell_observers_, OnMaximizeModeEnded());
+  for (auto& observer : shell_observers_)
+    observer.OnMaximizeModeEnded();
+}
+
+void WmShell::UpdateAfterLoginStatusChange(LoginStatus status) {
+  for (WmWindow* root_window : GetAllRootWindows()) {
+    root_window->GetRootWindowController()->UpdateAfterLoginStatusChange(
+        status);
+  }
 }
 
 void WmShell::NotifyFullscreenStateChanged(bool is_fullscreen,
                                            WmWindow* root_window) {
-  FOR_EACH_OBSERVER(ShellObserver, shell_observers_,
-                    OnFullscreenStateChanged(is_fullscreen, root_window));
+  for (auto& observer : shell_observers_)
+    observer.OnFullscreenStateChanged(is_fullscreen, root_window);
 }
 
 void WmShell::NotifyPinnedStateChanged(WmWindow* pinned_window) {
-  FOR_EACH_OBSERVER(ShellObserver, shell_observers_,
-                    OnPinnedStateChanged(pinned_window));
+  for (auto& observer : shell_observers_)
+    observer.OnPinnedStateChanged(pinned_window);
 }
 
 void WmShell::NotifyVirtualKeyboardActivated(bool activated) {
-  FOR_EACH_OBSERVER(ShellObserver, shell_observers_,
-                    OnVirtualKeyboardStateChanged(activated));
+  for (auto& observer : shell_observers_)
+    observer.OnVirtualKeyboardStateChanged(activated);
 }
 
 void WmShell::NotifyShelfCreatedForRootWindow(WmWindow* root_window) {
-  FOR_EACH_OBSERVER(ShellObserver, shell_observers_,
-                    OnShelfCreatedForRootWindow(root_window));
+  for (auto& observer : shell_observers_)
+    observer.OnShelfCreatedForRootWindow(root_window);
 }
 
 void WmShell::NotifyShelfAlignmentChanged(WmWindow* root_window) {
-  FOR_EACH_OBSERVER(ShellObserver, shell_observers_,
-                    OnShelfAlignmentChanged(root_window));
+  for (auto& observer : shell_observers_)
+    observer.OnShelfAlignmentChanged(root_window);
 }
 
 void WmShell::NotifyShelfAutoHideBehaviorChanged(WmWindow* root_window) {
-  FOR_EACH_OBSERVER(ShellObserver, shell_observers_,
-                    OnShelfAutoHideBehaviorChanged(root_window));
+  for (auto& observer : shell_observers_)
+    observer.OnShelfAutoHideBehaviorChanged(root_window);
 }
 
 void WmShell::AddShellObserver(ShellObserver* observer) {
@@ -178,8 +208,8 @@ void WmShell::RemoveShellObserver(ShellObserver* observer) {
 }
 
 void WmShell::OnLockStateEvent(LockStateObserver::EventType event) {
-  FOR_EACH_OBSERVER(LockStateObserver, lock_state_observers_,
-                    OnLockStateEvent(event));
+  for (auto& observer : lock_state_observers_)
+    observer.OnLockStateEvent(event);
 }
 
 void WmShell::AddLockStateObserver(LockStateObserver* observer) {
@@ -202,15 +232,18 @@ void WmShell::SetPaletteDelegateForTesting(
 
 WmShell::WmShell(std::unique_ptr<ShellDelegate> shell_delegate)
     : delegate_(std::move(shell_delegate)),
-      focus_cycler_(new FocusCycler),
+      focus_cycler_(base::MakeUnique<FocusCycler>()),
       immersive_context_(base::MakeUnique<ImmersiveContextAsh>()),
-      shelf_model_(new ShelfModel),  // Must create before ShelfDelegate.
-      system_tray_controller_(
-          new SystemTrayController(delegate_->GetShellConnector())),
-      system_tray_notifier_(new SystemTrayNotifier),
+      locale_notification_controller_(
+          base::MakeUnique<LocaleNotificationController>()),
+      shelf_controller_(base::MakeUnique<ShelfController>()),
+      system_tray_controller_(base::MakeUnique<SystemTrayController>(
+          delegate_->GetShellConnector())),
+      system_tray_notifier_(base::MakeUnique<SystemTrayNotifier>()),
       wallpaper_delegate_(delegate_->CreateWallpaperDelegate()),
-      window_cycle_controller_(new WindowCycleController),
-      window_selector_controller_(new WindowSelectorController) {
+      window_cycle_controller_(base::MakeUnique<WindowCycleController>()),
+      window_selector_controller_(
+          base::MakeUnique<WindowSelectorController>()) {
 #if defined(OS_CHROMEOS)
   brightness_control_delegate_.reset(new system::BrightnessControllerChromeos);
   keyboard_brightness_control_delegate_.reset(new KeyboardBrightnessController);
@@ -306,8 +339,6 @@ void WmShell::SetKeyboardUI(std::unique_ptr<KeyboardUI> keyboard_ui) {
 void WmShell::SetSystemTrayDelegate(
     std::unique_ptr<SystemTrayDelegate> delegate) {
   DCHECK(delegate);
-  DCHECK(!system_tray_delegate_);
-  // TODO(jamescook): Create via ShellDelegate once it moves to //ash/common.
   system_tray_delegate_ = std::move(delegate);
   system_tray_delegate_->Initialize();
 #if defined(OS_CHROMEOS)

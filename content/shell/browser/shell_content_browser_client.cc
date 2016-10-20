@@ -26,7 +26,7 @@
 #include "content/public/common/service_names.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/common/web_preferences.h"
-#include "content/public/test/test_mojo_app.h"
+#include "content/public/test/test_service.h"
 #include "content/shell/browser/shell.h"
 #include "content/shell/browser/shell_browser_context.h"
 #include "content/shell/browser/shell_browser_main_parts.h"
@@ -63,7 +63,7 @@
 #endif
 
 #if defined(ENABLE_MOJO_MEDIA_IN_BROWSER_PROCESS)
-#include "media/mojo/services/mojo_media_application_factory.h"  // nogncheck
+#include "media/mojo/services/media_service_factory.h"  // nogncheck
 #endif
 
 namespace content {
@@ -187,30 +187,30 @@ bool ShellContentBrowserClient::IsHandledURL(const GURL& url) {
   return false;
 }
 
-void ShellContentBrowserClient::RegisterInProcessMojoApplications(
-    StaticMojoApplicationMap* apps) {
+void ShellContentBrowserClient::RegisterInProcessServices(
+    StaticServiceMap* services) {
 #if (ENABLE_MOJO_MEDIA_IN_BROWSER_PROCESS)
-  content::MojoApplicationInfo app_info;
-  app_info.application_factory = base::Bind(&media::CreateMojoMediaApplication);
-  apps->insert(std::make_pair("mojo:media", app_info));
+  content::ServiceInfo info;
+  info.factory = base::Bind(&media::CreateMediaService);
+  services->insert(std::make_pair("service:media", info));
 #endif
 }
 
-void ShellContentBrowserClient::RegisterOutOfProcessMojoApplications(
-      OutOfProcessMojoApplicationMap* apps) {
-  apps->insert(std::make_pair(kTestMojoAppUrl,
-                              base::UTF8ToUTF16("Test Mojo App")));
+void ShellContentBrowserClient::RegisterOutOfProcessServices(
+      OutOfProcessServiceMap* services) {
+  services->insert(std::make_pair(kTestServiceUrl,
+                                  base::UTF8ToUTF16("Test Service")));
 }
 
 std::unique_ptr<base::Value>
 ShellContentBrowserClient::GetServiceManifestOverlay(
     const std::string& name) {
   int id = -1;
-  if (name == content::kBrowserMojoApplicationName)
+  if (name == content::kBrowserServiceName)
     id = IDR_CONTENT_SHELL_BROWSER_MANIFEST_OVERLAY;
-  else if (name == content::kRendererMojoApplicationName)
+  else if (name == content::kRendererServiceName)
     id = IDR_CONTENT_SHELL_RENDERER_MANIFEST_OVERLAY;
-  else if (name == content::kUtilityMojoApplicationName)
+  else if (name == content::kUtilityServiceName)
     id = IDR_CONTENT_SHELL_UTILITY_MANIFEST_OVERLAY;
   if (id == -1)
     return nullptr;

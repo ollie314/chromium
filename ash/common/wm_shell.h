@@ -34,10 +34,6 @@ class Insets;
 class Point;
 }
 
-namespace shell {
-class Connector;
-}
-
 namespace views {
 class PointerWatcher;
 enum class PointerWatcherEventTypes;
@@ -54,12 +50,14 @@ class ImmersiveFullscreenController;
 class KeyEventWatcher;
 class KeyboardBrightnessControlDelegate;
 class KeyboardUI;
+class LocaleNotificationController;
 class MaximizeModeController;
 class MruWindowTracker;
 class NewWindowDelegate;
 class PaletteDelegate;
 class ScopedDisableInternalMouseAndKeyboard;
 class SessionStateDelegate;
+class ShelfController;
 class ShelfDelegate;
 class ShelfModel;
 class ShelfWindowWatcher;
@@ -81,6 +79,7 @@ class WmRootWindowController;
 class WmWindow;
 class WorkspaceEventHandler;
 
+enum class LoginStatus;
 enum class TaskSwitchSource;
 
 namespace wm {
@@ -126,6 +125,10 @@ class ASH_EXPORT WmShell {
 
   KeyboardUI* keyboard_ui() { return keyboard_ui_.get(); }
 
+  LocaleNotificationController* locale_notification_controller() {
+    return locale_notification_controller_.get();
+  }
+
   MaximizeModeController* maximize_mode_controller() {
     return maximize_mode_controller_.get();
   }
@@ -145,9 +148,11 @@ class ASH_EXPORT WmShell {
 
   PaletteDelegate* palette_delegate() { return palette_delegate_.get(); }
 
+  ShelfController* shelf_controller() { return shelf_controller_.get(); }
+
   ShelfDelegate* shelf_delegate() { return shelf_delegate_.get(); }
 
-  ShelfModel* shelf_model() { return shelf_model_.get(); }
+  ShelfModel* shelf_model();
 
   SystemTrayController* system_tray_controller() {
     return system_tray_controller_.get();
@@ -177,7 +182,7 @@ class ASH_EXPORT WmShell {
     return window_selector_controller_.get();
   }
 
-  // Returns true when ash is running in its own mojo application/service.
+  // Returns true when ash is running as a service_manager::Service.
   virtual bool IsRunningInMash() const = 0;
 
   virtual WmWindow* NewWindow(ui::wm::WindowType window_type,
@@ -323,6 +328,12 @@ class ASH_EXPORT WmShell {
 
   virtual std::unique_ptr<KeyEventWatcher> CreateKeyEventWatcher() = 0;
 
+  // Initializes the appropriate shelves. Does nothing for any existing shelves.
+  void CreateShelf();
+
+  // Show shelf view if it was created hidden (before session has started).
+  void ShowShelf();
+
   void CreateShelfDelegate();
 
   // Called after maximize mode has started, windows might still animate though.
@@ -338,6 +349,10 @@ class ASH_EXPORT WmShell {
 
   // Called after overview mode has ended.
   virtual void OnOverviewModeEnded() = 0;
+
+  // Called when the login status changes.
+  // TODO(oshima): Investigate if we can merge this and |OnLoginStateChanged|.
+  void UpdateAfterLoginStatusChange(LoginStatus status);
 
   // Notify observers that fullscreen mode has changed for |root_window|.
   void NotifyFullscreenStateChanged(bool is_fullscreen, WmWindow* root_window);
@@ -443,6 +458,7 @@ class ASH_EXPORT WmShell {
   friend class AcceleratorControllerTest;
   friend class ScopedRootWindowForNewWindows;
   friend class Shell;
+  friend class WmShellTestApi;
 
   static WmShell* instance_;
 
@@ -457,13 +473,14 @@ class ASH_EXPORT WmShell {
   std::unique_ptr<KeyboardBrightnessControlDelegate>
       keyboard_brightness_control_delegate_;
   std::unique_ptr<KeyboardUI> keyboard_ui_;
+  std::unique_ptr<LocaleNotificationController> locale_notification_controller_;
   std::unique_ptr<MaximizeModeController> maximize_mode_controller_;
   std::unique_ptr<MediaDelegate> media_delegate_;
   std::unique_ptr<MruWindowTracker> mru_window_tracker_;
   std::unique_ptr<NewWindowDelegate> new_window_delegate_;
   std::unique_ptr<PaletteDelegate> palette_delegate_;
+  std::unique_ptr<ShelfController> shelf_controller_;
   std::unique_ptr<ShelfDelegate> shelf_delegate_;
-  std::unique_ptr<ShelfModel> shelf_model_;
   std::unique_ptr<ShelfWindowWatcher> shelf_window_watcher_;
   std::unique_ptr<SystemTrayController> system_tray_controller_;
   std::unique_ptr<SystemTrayNotifier> system_tray_notifier_;

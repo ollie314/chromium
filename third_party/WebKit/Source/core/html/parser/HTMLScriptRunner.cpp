@@ -41,8 +41,8 @@
 #include "core/html/parser/HTMLScriptRunnerHost.h"
 #include "core/html/parser/NestingLevelIncrementer.h"
 #include "platform/Histogram.h"
-#include "platform/TraceEvent.h"
-#include "platform/TracedValue.h"
+#include "platform/tracing/TraceEvent.h"
+#include "platform/tracing/TracedValue.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebFrameScheduler.h"
 #include <inttypes.h>
@@ -382,7 +382,7 @@ void HTMLScriptRunner::executeScriptsWaitingForLoad(Resource* resource) {
   TRACE_EVENT0("blink", "HTMLScriptRunner::executeScriptsWaitingForLoad");
   ASSERT(!isExecutingScript());
   ASSERT(hasParserBlockingScript());
-  ASSERT_UNUSED(resource, m_parserBlockingScript->resource() == resource);
+  DCHECK_EQ(resource, m_parserBlockingScript->resource());
   ASSERT(m_parserBlockingScript->isReady());
   executeParsingBlockingScripts();
 }

@@ -1,5 +1,6 @@
 /*
- * Copyright (C) 2004, 2005, 2006, 2007, 2008, 2009, 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006, 2007, 2008, 2009, 2010 Apple Inc. All rights
+ * reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -59,7 +60,6 @@ class CORE_EXPORT CaretBase : public GarbageCollectedFinalized<CaretBase>,
   void updateCaretRect(const VisiblePosition& caretPosition);
   IntRect absoluteBoundsForLocalRect(Node*, const LayoutRect&) const;
   bool shouldRepaintCaret(Node&) const;
-  bool shouldRepaintCaret(const LayoutViewItem) const;
   void paintCaret(Node*,
                   GraphicsContext&,
                   const LayoutPoint&,
@@ -79,8 +79,9 @@ class CORE_EXPORT CaretBase : public GarbageCollectedFinalized<CaretBase>,
   DECLARE_VIRTUAL_TRACE();
 
  private:
-  LayoutRect
-      m_caretLocalRect;  // caret rect in coords local to the layoutObject responsible for painting the caret
+  // caret rect in coords local to the layoutObject responsible for painting the
+  // caret
+  LayoutRect m_caretLocalRect;
   LayoutRect m_visualRect;
 };
 

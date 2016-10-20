@@ -42,7 +42,6 @@
     ],
     "cwd": "[BUILDER_CACHE]/Linux_remote_run_Builder",
     "env": {
-      "GCLIENT_KILL_GIT_FETCH_AFTER": "1200",
       "PATH": "%(PATH)s:RECIPE_PACKAGE_REPO[depot_tools]"
     },
     "name": "bot_update",
@@ -301,8 +300,8 @@
       "chromium.fyi",
       "--buildbot-slavename",
       "TestSlavename",
-      "--goma-deps-cache-dir",
-      "[GOMA_DEPS_CACHE]",
+      "--goma-deps-cache-file",
+      "Linux_remote_run_Builder.gomadeps",
       "--compiler",
       "goma",
       "--goma-jsonstatus",

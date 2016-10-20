@@ -12,6 +12,7 @@ import("//tools/grit/grit_rule.gni")
 grit("resources") {
   source = "common_resources.grd"
   use_qualified_include = true
+  defines = chrome_grit_defines
   output_dir = "$root_gen_dir/chrome"
   output_name = "common_resources"
   outputs = [
@@ -24,14 +25,19 @@ buildflag_header("features") {
   header = "features.h"
   flags = [
     "ANDROID_JAVA_UI=$android_java_ui",
+    "ENABLE_APP_LIST=$enable_app_list",
     "ENABLE_BACKGROUND=$enable_background",
     "ENABLE_BASIC_PRINT_DIALOG=$enable_basic_print_dialog",
+    "ENABLE_CAPTIVE_PORTAL_DETECTION=$enable_captive_portal_detection",
     "ENABLE_GOOGLE_NOW=$enable_google_now",
+    "ENABLE_HANGOUT_SERVICES_EXTENSION=$enable_hangout_services_extension",
     "ENABLE_ONE_CLICK_SIGNIN=$enable_one_click_signin",
     "ENABLE_PACKAGE_MASH_SERVICES=$enable_package_mash_services",
+    "ENABLE_PLUGIN_INSTALLATION=$enable_plugin_installation",
+    "ENABLE_SERVICE_DISCOVERY=$enable_service_discovery",
     "ENABLE_XPC_NOTIFICATIONS=$enable_xpc_notifications",
-    "USE_VULCANIZE=$use_vulcanize",
     "PGO_BUILD=$pgo_build",
+    "USE_VULCANIZE=$use_vulcanize",
   ]
 }
 
@@ -168,7 +174,7 @@ static_library("common") {
     "//chrome/common/safe_browsing:proto",
     "//chrome/common/variations:fieldtrial_testing_config",
     "//chrome/installer/util:with_no_strings",
-    "//components/autofill/content/common",
+    "//components/autofill/content/common:ipc_traits",
     "//components/autofill/core/common",
     "//components/cast_certificate",
     "//components/cdm/common",
@@ -212,11 +218,12 @@ static_library("common") {
     "//media",
     "//mojo/public/cpp/bindings",
     "//net",
+    "//ppapi/features",
     "//skia",
     "//third_party/icu",
     "//third_party/kasko:kasko_features",
     "//third_party/re2",
-    "//third_party/widevine/cdm:version_h",
+    "//third_party/widevine/cdm:headers",
     "//third_party/zlib:zip",
     "//ui/accessibility",
     "//ui/base",
@@ -259,6 +266,8 @@ static_library("common") {
       "extensions/api/url_handlers/url_handlers_parser.h",
       "extensions/api/webstore/webstore_api_constants.cc",
       "extensions/api/webstore/webstore_api_constants.h",
+      "extensions/chrome_aliases.cc",
+      "extensions/chrome_aliases.h",
       "extensions/chrome_extension_messages.h",
       "extensions/chrome_extensions_client.cc",
       "extensions/chrome_extensions_client.h",
@@ -565,17 +574,18 @@ static_library("constants") {
   ]
 
   public_deps = [
+    ":features",
     "//content/public/common:result_codes",
   ]
   deps = [
-    ":features",
     ":version_header",
     "//base",
     "//base/third_party/dynamic_annotations",
     "//components/bookmarks/common",
     "//components/nacl/common:switches",
     "//media:cdm_paths",  # Needed by chrome_paths.cc.
-    "//third_party/widevine/cdm:version_h",
+    "//ppapi/features",
+    "//third_party/widevine/cdm:headers",
   ]
 
   if (is_android) {

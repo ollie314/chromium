@@ -1,5 +1,6 @@
 /*
- * Copyright (C) 2004, 2005, 2006, 2007, 2008, 2009, 2010, 2012 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006, 2007, 2008, 2009, 2010, 2012 Apple Inc. All
+ * rights reserved.
  * Copyright (C) 2005 Alexey Proskuryakov.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -65,7 +66,7 @@ EphemeralRangeTemplate<Strategy> CharacterIteratorAlgorithm<Strategy>::range()
   PositionTemplate<Strategy> endPosition =
       range.endPosition().parentAnchoredEquivalent();
   Node* node = startPosition.computeContainerNode();
-  ASSERT_UNUSED(endPosition, node == endPosition.computeContainerNode());
+  DCHECK_EQ(node, endPosition.computeContainerNode());
   int offset = startPosition.offsetInContainerNode() + m_runOffset;
   return EphemeralRangeTemplate<Strategy>(
       PositionTemplate<Strategy>(node, offset),

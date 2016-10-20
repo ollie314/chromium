@@ -6,8 +6,8 @@
 
 #include "android_webview/browser/aw_render_thread_context_provider.h"
 #include "android_webview/browser/scoped_app_gl_state_restore.h"
-#include "cc/output/compositor_frame.h"
 #include "cc/output/output_surface_client.h"
+#include "cc/output/output_surface_frame.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
 
 namespace android_webview {
@@ -38,12 +38,9 @@ void ParentOutputSurface::BindFramebuffer() {
 void ParentOutputSurface::Reshape(const gfx::Size& size,
                                   float scale_factor,
                                   const gfx::ColorSpace& color_space,
-                                  bool has_alpha) {
-  DCHECK_EQ(1.f, scale_factor);
-  surface_size_ = size;
-}
+                                  bool has_alpha) {}
 
-void ParentOutputSurface::SwapBuffers(cc::CompositorFrame frame) {
+void ParentOutputSurface::SwapBuffers(cc::OutputSurfaceFrame frame) {
   context_provider_->ContextGL()->ShallowFlushCHROMIUM();
 }
 

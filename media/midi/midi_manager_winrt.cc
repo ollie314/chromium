@@ -31,7 +31,6 @@
 #include "base/win/scoped_comptr.h"
 #include "media/midi/midi_scheduler.h"
 
-namespace media {
 namespace midi {
 namespace {
 
@@ -43,6 +42,7 @@ using namespace ABI::Windows::Foundation;
 using namespace ABI::Windows::Storage::Streams;
 
 using base::win::ScopedComPtr;
+using mojom::Result;
 
 // Helpers for printing HRESULTs.
 struct PrintHr {
@@ -1046,4 +1046,3 @@ void MidiManagerWinrt::OnPortManagerReady() {
 }
 
 }  // namespace midi
-}  // namespace media

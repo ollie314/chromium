@@ -79,6 +79,8 @@ LayerImpl::LayerImpl(LayerTreeImpl* tree_impl, int id)
       current_draw_mode_(DRAW_MODE_NONE),
       mutable_properties_(MutableProperty::kNone),
       debug_info_(nullptr),
+      preferred_raster_scale_(1.0f),
+      has_preferred_raster_scale_(false),
       scrolls_drawn_descendant_(false),
       has_will_change_transform_hint_(false),
       needs_push_properties_(false) {
@@ -107,6 +109,16 @@ void LayerImpl::SetHasWillChangeTransformHint(bool has_will_change) {
   has_will_change_transform_hint_ = has_will_change;
 }
 
+void LayerImpl::SetPreferredRasterScale(float preferred_raster_scale) {
+  has_preferred_raster_scale_ = true;
+  preferred_raster_scale_ = preferred_raster_scale;
+}
+
+void LayerImpl::ClearPreferredRasterScale() {
+  has_preferred_raster_scale_ = false;
+  preferred_raster_scale_ = 1.0f;
+}
+
 AnimationHost* LayerImpl::GetAnimationHost() const {
   return layer_tree_impl_ ? layer_tree_impl_->animation_host() : nullptr;
 }
@@ -125,14 +137,7 @@ void LayerImpl::SetDebugInfo(
 void LayerImpl::DistributeScroll(ScrollState* scroll_state) {
   ScrollTree& scroll_tree = layer_tree_impl()->property_trees()->scroll_tree;
   ScrollNode* scroll_node = scroll_tree.Node(scroll_tree_index());
-  return scroll_tree.DistributeScroll(scroll_node, scroll_state);
-}
-
-void LayerImpl::ApplyScroll(ScrollState* scroll_state) {
-  DCHECK(scroll_state);
-  ScrollNode* node = layer_tree_impl()->property_trees()->scroll_tree.Node(
-      scroll_tree_index());
-  layer_tree_impl()->ApplyScroll(node, scroll_state);
+  scroll_tree.DistributeScroll(scroll_node, scroll_state);
 }
 
 void LayerImpl::SetTransformTreeIndex(int index) {

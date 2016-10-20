@@ -149,8 +149,8 @@ ToolbarActionsBar::~ToolbarActionsBar() {
   // the order of deletion between the views and the ToolbarActionsBar.
   DCHECK(toolbar_actions_.empty()) <<
       "Must call DeleteActions() before destruction.";
-  FOR_EACH_OBSERVER(ToolbarActionsBarObserver, observers_,
-                    OnToolbarActionsBarDestroyed());
+  for (ToolbarActionsBarObserver& observer : observers_)
+    observer.OnToolbarActionsBarDestroyed();
 }
 
 // static
@@ -336,7 +336,7 @@ ToolbarActionsBar::GetActions() const {
 }
 
 void ToolbarActionsBar::CreateActions() {
-  DCHECK(toolbar_actions_.empty());
+  CHECK(toolbar_actions_.empty());
   // If the model isn't initialized, wait for it.
   if (!model_ || !model_->actions_initialized())
     return;
@@ -453,8 +453,8 @@ void ToolbarActionsBar::OnDragEnded() {
 
   DCHECK(is_drag_in_progress_);
   is_drag_in_progress_ = false;
-  FOR_EACH_OBSERVER(ToolbarActionsBarObserver,
-                    observers_, OnToolbarActionDragDone());
+  for (ToolbarActionsBarObserver& observer : observers_)
+    observer.OnToolbarActionDragDone();
 }
 
 void ToolbarActionsBar::OnDragDrop(int dragged_index,
@@ -481,8 +481,8 @@ void ToolbarActionsBar::OnDragDrop(int dragged_index,
 void ToolbarActionsBar::OnAnimationEnded() {
   // Notify the observers now, since showing a bubble or popup could potentially
   // cause another animation to start.
-  FOR_EACH_OBSERVER(ToolbarActionsBarObserver, observers_,
-                    OnToolbarActionsBarAnimationEnded());
+  for (ToolbarActionsBarObserver& observer : observers_)
+    observer.OnToolbarActionsBarAnimationEnded();
 
   // Check if we were waiting for animation to complete to either show a
   // message bubble, or to show a popup.
@@ -633,17 +633,14 @@ void ToolbarActionsBar::set_extension_bubble_appearance_wait_time_for_testing(
 void ToolbarActionsBar::OnToolbarActionAdded(
     const ToolbarActionsModel::ToolbarItem& item,
     int index) {
-  DCHECK(GetActionForId(item.id) == nullptr)
+  CHECK(model_->actions_initialized());
+  CHECK(GetActionForId(item.id) == nullptr)
       << "Asked to add a toolbar action view for an action that already "
          "exists";
 
   toolbar_actions_.insert(toolbar_actions_.begin() + index,
                           model_->CreateActionForItem(browser_, this, item));
   delegate_->AddViewForAction(toolbar_actions_[index], index);
-
-  // If we are still initializing the container, don't bother animating.
-  if (!model_->actions_initialized())
-    return;
 
   // We may need to resize (e.g. to show the new icon, or the chevron). We don't
   // need to check if an extension is upgrading here, because ResizeDelegate()
@@ -738,8 +735,8 @@ void ToolbarActionsBar::ResizeDelegate(gfx::Tween::Type tween_type,
     delegate_->Redraw(false);
   }
 
-  FOR_EACH_OBSERVER(ToolbarActionsBarObserver,
-                    observers_, OnToolbarActionsBarDidStartResize());
+  for (ToolbarActionsBarObserver& observer : observers_)
+    observer.OnToolbarActionsBarDidStartResize();
 }
 
 void ToolbarActionsBar::OnToolbarHighlightModeChanged(bool is_highlighting) {
@@ -782,7 +779,7 @@ void ToolbarActionsBar::OnToolbarHighlightModeChanged(bool is_highlighting) {
 
 void ToolbarActionsBar::OnToolbarModelInitialized() {
   // We shouldn't have any actions before the model is initialized.
-  DCHECK(toolbar_actions_.empty());
+  CHECK(toolbar_actions_.empty());
   CreateActions();
 
   // TODO(robliao): Remove ScopedTracker below once https://crbug.com/463337 is

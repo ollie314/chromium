@@ -77,16 +77,16 @@ void InsertTextCommand::setEndingSelectionWithoutValidation(
     const Position& startPosition,
     const Position& endPosition) {
   // We could have inserted a part of composed character sequence,
-  // so we are basically treating ending selection as a range to avoid validation.
-  // <http://bugs.webkit.org/show_bug.cgi?id=15781>
+  // so we are basically treating ending selection as a range to avoid
+  // validation. <http://bugs.webkit.org/show_bug.cgi?id=15781>
   VisibleSelection forcedEndingSelection;
   forcedEndingSelection.setWithoutValidation(startPosition, endPosition);
   forcedEndingSelection.setIsDirectional(endingSelection().isDirectional());
   setEndingSelection(forcedEndingSelection);
 }
 
-// This avoids the expense of a full fledged delete operation, and avoids a layout that typically results
-// from text removal.
+// This avoids the expense of a full fledged delete operation, and avoids a
+// layout that typically results from text removal.
 bool InsertTextCommand::performTrivialReplace(const String& text,
                                               bool selectInsertedText) {
   if (!endingSelection().isRange())
@@ -101,10 +101,11 @@ bool InsertTextCommand::performTrivialReplace(const String& text,
     return false;
 
   setEndingSelectionWithoutValidation(start, endPosition);
-  if (!selectInsertedText)
-    setEndingSelection(createVisibleSelectionDeprecated(
-        endingSelection().visibleEndDeprecated(),
-        endingSelection().isDirectional()));
+  if (!selectInsertedText) {
+    document().updateStyleAndLayoutIgnorePendingStylesheets();
+    setEndingSelection(createVisibleSelection(
+        endingSelection().visibleEnd(), endingSelection().isDirectional()));
+  }
 
   return true;
 }
@@ -129,10 +130,11 @@ bool InsertTextCommand::performOverwrite(const String& text,
   Position endPosition =
       Position(textNode, start.offsetInContainerNode() + text.length());
   setEndingSelectionWithoutValidation(start, endPosition);
-  if (!selectInsertedText)
-    setEndingSelection(createVisibleSelectionDeprecated(
-        endingSelection().visibleEndDeprecated(),
-        endingSelection().isDirectional()));
+  if (!selectInsertedText) {
+    document().updateStyleAndLayoutIgnorePendingStylesheets();
+    setEndingSelection(createVisibleSelection(
+        endingSelection().visibleEnd(), endingSelection().isDirectional()));
+  }
 
   return true;
 }
@@ -148,14 +150,17 @@ void InsertTextCommand::doApply(EditingState* editingState) {
   if (endingSelection().isRange()) {
     if (performTrivialReplace(m_text, m_selectInsertedText))
       return;
+    document().updateStyleAndLayoutIgnorePendingStylesheets();
     bool endOfSelectionWasAtStartOfBlock =
-        isStartOfBlock(endingSelection().visibleEndDeprecated());
+        isStartOfBlock(endingSelection().visibleEnd());
     deleteSelection(editingState, false, true, false, false);
     if (editingState->isAborted())
       return;
-    // deleteSelection eventually makes a new endingSelection out of a Position. If that Position doesn't have
-    // a layoutObject (e.g. it is on a <frameset> in the DOM), the VisibleSelection cannot be canonicalized to
-    // anything other than NoSelection. The rest of this function requires a real endingSelection, so bail out.
+    // deleteSelection eventually makes a new endingSelection out of a Position.
+    // If that Position doesn't have a layoutObject (e.g. it is on a <frameset>
+    // in the DOM), the VisibleSelection cannot be canonicalized to anything
+    // other than NoSelection. The rest of this function requires a real
+    // endingSelection, so bail out.
     if (endingSelection().isNone())
       return;
     if (endOfSelectionWasAtStartOfBlock) {
@@ -168,29 +173,36 @@ void InsertTextCommand::doApply(EditingState* editingState) {
       return;
   }
 
+  document().updateStyleAndLayoutIgnorePendingStylesheets();
+
   Position startPosition(endingSelection().start());
 
   Position placeholder;
-  // We want to remove preserved newlines and brs that will collapse (and thus become unnecessary) when content
-  // is inserted just before them.
-  // FIXME: We shouldn't really have to do this, but removing placeholders is a workaround for 9661.
-  // If the caret is just before a placeholder, downstream will normalize the caret to it.
+  // We want to remove preserved newlines and brs that will collapse (and thus
+  // become unnecessary) when content is inserted just before them.
+  // FIXME: We shouldn't really have to do this, but removing placeholders is a
+  // workaround for 9661.
+  // If the caret is just before a placeholder, downstream will normalize the
+  // caret to it.
   Position downstream(mostForwardCaretPosition(startPosition));
   if (lineBreakExistsAtPosition(downstream)) {
     // FIXME: This doesn't handle placeholders at the end of anonymous blocks.
-    VisiblePosition caret = createVisiblePositionDeprecated(startPosition);
-    if (isEndOfBlock(caret) && isStartOfParagraphDeprecated(caret))
+    VisiblePosition caret = createVisiblePosition(startPosition);
+    if (isEndOfBlock(caret) && isStartOfParagraph(caret))
       placeholder = downstream;
-    // Don't remove the placeholder yet, otherwise the block we're inserting into would collapse before
-    // we get a chance to insert into it.  We check for a placeholder now, though, because doing so requires
-    // the creation of a VisiblePosition, and if we did that post-insertion it would force a layout.
+    // Don't remove the placeholder yet, otherwise the block we're inserting
+    // into would collapse before we get a chance to insert into it.  We check
+    // for a placeholder now, though, because doing so requires the creation of
+    // a VisiblePosition, and if we did that post-insertion it would force a
+    // layout.
   }
 
   // Insert the character at the leftmost candidate.
   startPosition = mostBackwardCaretPosition(startPosition);
 
-  // It is possible for the node that contains startPosition to contain only unrendered whitespace,
-  // and so deleteInsignificantText could remove it.  Save the position before the node in case that happens.
+  // It is possible for the node that contains startPosition to contain only
+  // unrendered whitespace, and so deleteInsignificantText could remove it.
+  // Save the position before the node in case that happens.
   DCHECK(startPosition.computeContainerNode()) << startPosition;
   Position positionBeforeStartNode(
       Position::inParentBeforeNode(*startPosition.computeContainerNode()));
@@ -233,9 +245,11 @@ void InsertTextCommand::doApply(EditingState* editingState) {
     endPosition = Position(textNode, offset + m_text.length());
 
     if (m_rebalanceType == RebalanceLeadingAndTrailingWhitespaces) {
-      // The insertion may require adjusting adjacent whitespace, if it is present.
+      // The insertion may require adjusting adjacent whitespace, if it is
+      // present.
       rebalanceWhitespaceAt(endPosition);
-      // Rebalancing on both sides isn't necessary if we've inserted only spaces.
+      // Rebalancing on both sides isn't necessary if we've inserted only
+      // spaces.
       if (!shouldRebalanceLeadingWhitespaceFor(m_text))
         rebalanceWhitespaceAt(startPosition);
     } else {
@@ -261,15 +275,19 @@ void InsertTextCommand::doApply(EditingState* editingState) {
     }
   }
 
-  if (!m_selectInsertedText)
-    setEndingSelection(createVisibleSelectionDeprecated(
+  if (!m_selectInsertedText) {
+    document().updateStyleAndLayoutIgnorePendingStylesheets();
+    setEndingSelection(createVisibleSelection(
         endingSelection().end(), endingSelection().affinity(),
         endingSelection().isDirectional()));
+  }
 }
 
 Position InsertTextCommand::insertTab(const Position& pos,
                                       EditingState* editingState) {
-  Position insertPos = createVisiblePositionDeprecated(pos).deepEquivalent();
+  document().updateStyleAndLayoutIgnorePendingStylesheets();
+
+  Position insertPos = createVisiblePosition(pos).deepEquivalent();
   if (insertPos.isNull())
     return pos;
 

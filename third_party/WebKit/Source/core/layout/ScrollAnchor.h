@@ -34,9 +34,13 @@ class CORE_EXPORT ScrollAnchor final {
   // save() and cached until the next call to clear().
   LayoutObject* anchorObject() const { return m_anchorObject; }
 
-  // Indicates that the next save() should compute a new anchor. (In certain
-  // cases the previous anchor will be reused; see comments in restore.)
+  // Indicates that the next save() should compute a new anchor for the
+  // containing scroller and all ancestor scrollers.
   void clear();
+
+  // Indicates that the next save() should compute a new anchor for the
+  // containing scroller.
+  void clearSelf();
 
   // Records the anchor's location in relation to the scroller. Should be
   // called when the scroller is about to be laid out.
@@ -64,6 +68,10 @@ class CORE_EXPORT ScrollAnchor final {
   DEFINE_INLINE_TRACE() { visitor->trace(m_scroller); }
 
  private:
+  // Releases the anchor and conditionally clears the IsScrollAnchorObject bit
+  // on the LayoutObject.
+  void clearSelf(bool unconditionally);
+
   void findAnchor();
   bool computeScrollAnchorDisablingStyleChanged();
 

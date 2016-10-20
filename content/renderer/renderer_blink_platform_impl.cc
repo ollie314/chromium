@@ -81,7 +81,7 @@
 #include "media/blink/webcontentdecryptionmodule_impl.h"
 #include "media/filters/stream_parser_factory.h"
 #include "mojo/common/common_type_converters.h"
-#include "services/shell/public/cpp/interface_provider.h"
+#include "services/service_manager/public/cpp/interface_provider.h"
 #include "storage/common/database/database_identifier.h"
 #include "storage/common/quota/quota_types.h"
 #include "third_party/WebKit/public/platform/BlameContext.h"
@@ -252,7 +252,7 @@ class RendererBlinkPlatformImpl::SandboxSupport
 
 RendererBlinkPlatformImpl::RendererBlinkPlatformImpl(
     blink::scheduler::RendererScheduler* renderer_scheduler,
-    base::WeakPtr<shell::InterfaceProvider> remote_interfaces)
+    base::WeakPtr<service_manager::InterfaceProvider> remote_interfaces)
     : BlinkPlatformImpl(renderer_scheduler->DefaultTaskRunner()),
       main_thread_(renderer_scheduler->CreateMainThread()),
       clipboard_delegate_(new RendererClipboardDelegate),
@@ -683,6 +683,12 @@ bool RendererBlinkPlatformImpl::isThreadedCompositingEnabled() {
   RenderThreadImpl* thread = RenderThreadImpl::current();
   // thread can be NULL in tests.
   return thread && thread->compositor_task_runner().get();
+}
+
+bool RendererBlinkPlatformImpl::isGPUCompositingEnabled() {
+  const base::CommandLine& command_line =
+      *base::CommandLine::ForCurrentProcess();
+  return !command_line.HasSwitch(switches::kDisableGpuCompositing);
 }
 
 bool RendererBlinkPlatformImpl::isThreadedAnimationEnabled() {

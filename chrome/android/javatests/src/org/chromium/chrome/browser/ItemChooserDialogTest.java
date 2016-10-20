@@ -5,6 +5,7 @@
 package org.chromium.chrome.browser;
 
 import android.app.Dialog;
+import android.test.UiThreadTest;
 import android.test.suitebuilder.annotation.LargeTest;
 import android.text.SpannableString;
 import android.view.View;
@@ -314,6 +315,7 @@ public class ItemChooserDialogTest extends ChromeActivityTestCaseBase<ChromeActi
     }
 
     @LargeTest
+    @UiThreadTest
     public void testAddOrUpdateItemAndRemoveItemFromList() throws InterruptedException {
         Dialog dialog = mChooserDialog.getDialogForTesting();
         assertTrue(dialog.isShowing());
@@ -391,6 +393,7 @@ public class ItemChooserDialogTest extends ChromeActivityTestCaseBase<ChromeActi
     }
 
     @LargeTest
+    @UiThreadTest
     public void testAddItemWithSameNameToListAndRemoveItemFromList() throws InterruptedException {
         Dialog dialog = mChooserDialog.getDialogForTesting();
         assertTrue(dialog.isShowing());

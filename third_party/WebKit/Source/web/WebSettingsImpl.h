@@ -68,7 +68,6 @@ class WEB_EXPORT WebSettingsImpl final
   void setAutoplayExperimentMode(const WebString&) override;
   void setAutoZoomFocusedNodeToLegibleScale(bool) override;
   void setBrowserSideNavigationEnabled(bool) override;
-  void setCaretBrowsingEnabled(bool) override;
   void setClobberUserAgentInitialScaleQuirk(bool) override;
   void setCookieEnabled(bool) override;
   void setNavigateOnDragDrop(bool) override;
@@ -136,7 +135,6 @@ class WEB_EXPORT WebSettingsImpl final
   void setPerTilePaintingEnabled(bool) override;
   void setPictographFontFamily(const WebString&,
                                UScriptCode = USCRIPT_COMMON) override;
-  void setPinchOverlayScrollbarThickness(int) override;
   void setPluginsEnabled(bool) override;
   void setAvailablePointerTypes(int) override;
   void setPrimaryPointerType(PointerType) override;

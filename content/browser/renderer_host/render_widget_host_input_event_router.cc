@@ -90,7 +90,7 @@ void RenderWidgetHostInputEventRouter::OnRenderWidgetHostViewBaseDestroyed(
     else
       last_mouse_move_target_ = nullptr;
 
-    if (!last_mouse_move_target_)
+    if (!last_mouse_move_target_ || view == last_mouse_move_root_view_)
       last_mouse_move_root_view_ = nullptr;
   }
 }
@@ -182,8 +182,9 @@ void RenderWidgetHostInputEventRouter::RouteMouseEvent(
       (event->type == blink::WebInputEvent::MouseUp ||
        event->modifiers & mouse_button_modifiers)) {
     target = mouse_capture_target_.target;
-    transformed_point = root_view->TransformPointToCoordSpaceForView(
-        gfx::Point(event->x, event->y), target);
+    if (!root_view->TransformPointToCoordSpaceForView(
+            gfx::Point(event->x, event->y), target, &transformed_point))
+      return;
     if (event->type == blink::WebInputEvent::MouseUp)
       mouse_capture_target_.target = nullptr;
   } else {
@@ -195,7 +196,8 @@ void RenderWidgetHostInputEventRouter::RouteMouseEvent(
   // events, so they have to go by the double-hop forwarding path through
   // the embedding renderer and then BrowserPluginGuest.
   if (target && target->IsRenderWidgetHostViewGuest()) {
-    root_view->ProcessMouseEvent(*event, latency);
+    ui::LatencyInfo latency_info;
+    root_view->ProcessMouseEvent(*event, latency_info);
     return;
   }
 
@@ -382,27 +384,36 @@ void RenderWidgetHostInputEventRouter::SendMouseEnterOrLeaveEvents(
   std::vector<RenderWidgetHostViewBase*> exited_views;
   RenderWidgetHostViewBase* cur_view = target;
   entered_views.push_back(cur_view);
-  while (cur_view != root_view) {
-    // Non-root RWHVs are guaranteed to be RenderWidgetHostViewChildFrames.
+  while (cur_view->IsRenderWidgetHostViewChildFrame()) {
     cur_view =
         static_cast<RenderWidgetHostViewChildFrame*>(cur_view)->GetParentView();
     // cur_view can possibly be nullptr for guestviews that are not currently
     // connected to the webcontents tree.
-    if (!cur_view)
-      break;
+    if (!cur_view) {
+      last_mouse_move_target_ = target;
+      last_mouse_move_root_view_ = root_view;
+      return;
+    }
     entered_views.push_back(cur_view);
   }
+  // Non-root RWHVs are guaranteed to be RenderWidgetHostViewChildFrames,
+  // as long as they are the only embeddable RWHVs.
+  DCHECK_EQ(cur_view, root_view);
 
   cur_view = last_mouse_move_target_;
   if (cur_view) {
     exited_views.push_back(cur_view);
-    while (cur_view != root_view) {
+    while (cur_view->IsRenderWidgetHostViewChildFrame()) {
       cur_view = static_cast<RenderWidgetHostViewChildFrame*>(cur_view)
                      ->GetParentView();
-      if (!cur_view)
-        break;
+      if (!cur_view) {
+        last_mouse_move_target_ = target;
+        last_mouse_move_root_view_ = root_view;
+        return;
+      }
       exited_views.push_back(cur_view);
     }
+    DCHECK_EQ(cur_view, root_view);
   }
 
   // This removes common ancestors from the root downward.
@@ -419,8 +430,13 @@ void RenderWidgetHostInputEventRouter::SendMouseEnterOrLeaveEvents(
   for (auto view : exited_views) {
     blink::WebMouseEvent mouse_leave(*event);
     mouse_leave.type = blink::WebInputEvent::MouseLeave;
-    transformed_point = root_view->TransformPointToCoordSpaceForView(
-        gfx::Point(event->x, event->y), view);
+    // There is a chance of a race if the last target has recently created a
+    // new compositor surface. The SurfaceID for that might not have
+    // propagated to its embedding surface, which makes it impossible to
+    // compute the transformation for it
+    if (!root_view->TransformPointToCoordSpaceForView(
+            gfx::Point(event->x, event->y), view, &transformed_point))
+      transformed_point = gfx::Point();
     mouse_leave.x = transformed_point.x();
     mouse_leave.y = transformed_point.y();
     view->ProcessMouseEvent(mouse_leave, ui::LatencyInfo());
@@ -430,8 +446,10 @@ void RenderWidgetHostInputEventRouter::SendMouseEnterOrLeaveEvents(
   if (common_ancestor && common_ancestor != target) {
     blink::WebMouseEvent mouse_move(*event);
     mouse_move.type = blink::WebInputEvent::MouseMove;
-    transformed_point = root_view->TransformPointToCoordSpaceForView(
-        gfx::Point(event->x, event->y), common_ancestor);
+    if (!root_view->TransformPointToCoordSpaceForView(
+            gfx::Point(event->x, event->y), common_ancestor,
+            &transformed_point))
+      transformed_point = gfx::Point();
     mouse_move.x = transformed_point.x();
     mouse_move.y = transformed_point.y();
     common_ancestor->ProcessMouseEvent(mouse_move, ui::LatencyInfo());
@@ -443,8 +461,9 @@ void RenderWidgetHostInputEventRouter::SendMouseEnterOrLeaveEvents(
       continue;
     blink::WebMouseEvent mouse_enter(*event);
     mouse_enter.type = blink::WebInputEvent::MouseMove;
-    transformed_point = root_view->TransformPointToCoordSpaceForView(
-        gfx::Point(event->x, event->y), view);
+    if (!root_view->TransformPointToCoordSpaceForView(
+            gfx::Point(event->x, event->y), view, &transformed_point))
+      transformed_point = gfx::Point();
     mouse_enter.x = transformed_point.x();
     mouse_enter.y = transformed_point.y();
     view->ProcessMouseEvent(mouse_enter, ui::LatencyInfo());

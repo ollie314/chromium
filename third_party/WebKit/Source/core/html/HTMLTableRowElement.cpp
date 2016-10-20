@@ -4,7 +4,8 @@
  *           (C) 1998 Waldo Bastian (bastian@kde.org)
  *           (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2003, 2004, 2005, 2006, 2007, 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2003, 2004, 2005, 2006, 2007, 2010 Apple Inc. All rights
+ * reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -74,6 +75,10 @@ int HTMLTableRowElement::rowIndex() const {
 }
 
 int HTMLTableRowElement::sectionRowIndex() const {
+  ContainerNode* maybeTable = parentNode();
+  if (!(maybeTable && (isHTMLTableSectionElement(maybeTable) ||
+                       isHTMLTableElement(maybeTable))))
+    return -1;
   int rIndex = 0;
   const Node* n = this;
   do {
@@ -109,17 +114,25 @@ void HTMLTableRowElement::deleteCell(int index,
                                      ExceptionState& exceptionState) {
   HTMLCollection* children = cells();
   int numCells = children ? children->length() : 0;
-  if (index == -1)
-    index = numCells - 1;
-  if (index >= 0 && index < numCells) {
-    Element* cell = children->item(index);
-    HTMLElement::removeChild(cell, exceptionState);
-  } else {
+  // 1. If index is less than −1 or greater than or equal to the number of
+  // elements in the cells collection, then throw "IndexSizeError".
+  if (index < -1 || index >= numCells) {
     exceptionState.throwDOMException(
         IndexSizeError, "The value provided (" + String::number(index) +
                             ") is outside the range [0, " +
                             String::number(numCells) + ").");
+    return;
   }
+  // 2. If index is −1, remove the last element in the cells collection
+  // from its parent, or do nothing if the cells collection is empty.
+  if (index == -1) {
+    if (numCells == 0)
+      return;
+    index = numCells - 1;
+  }
+  // 3. Remove the indexth element in the cells collection from its parent.
+  Element* cell = children->item(index);
+  HTMLElement::removeChild(cell, exceptionState);
 }
 
 HTMLCollection* HTMLTableRowElement::cells() {

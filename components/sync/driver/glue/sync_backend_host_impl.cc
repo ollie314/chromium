@@ -10,26 +10,27 @@
 #include "base/feature_list.h"
 #include "base/location.h"
 #include "base/logging.h"
+#include "base/memory/ptr_util.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "components/invalidation/public/invalidation_service.h"
 #include "components/invalidation/public/object_id_invalidation_map.h"
 #include "components/signin/core/browser/signin_client.h"
 #include "components/sync/base/experiments.h"
-#include "components/sync/core/activation_context.h"
-#include "components/sync/core/base_transaction.h"
-#include "components/sync/core/http_bridge.h"
-#include "components/sync/core/internal_components_factory.h"
-#include "components/sync/core/internal_components_factory_impl.h"
-#include "components/sync/core/sync_manager_factory.h"
+#include "components/sync/base/invalidation_helper.h"
+#include "components/sync/base/sync_prefs.h"
 #include "components/sync/driver/glue/sync_backend_host_core.h"
 #include "components/sync/driver/glue/sync_backend_registrar.h"
-#include "components/sync/driver/invalidation_helper.h"
 #include "components/sync/driver/sync_client.h"
 #include "components/sync/driver/sync_driver_switches.h"
 #include "components/sync/driver/sync_frontend.h"
-#include "components/sync/driver/sync_prefs.h"
+#include "components/sync/engine/activation_context.h"
+#include "components/sync/engine/engine_components_factory.h"
+#include "components/sync/engine/engine_components_factory_impl.h"
 #include "components/sync/engine/events/protocol_event.h"
+#include "components/sync/engine/net/http_bridge.h"
+#include "components/sync/engine/sync_manager_factory.h"
 #include "components/sync/engine/sync_string_conversions.h"
+#include "components/sync/syncable/base_transaction.h"
 
 // Helper macros to log with the syncer thread name; useful when there
 // are multiple syncers involved.
@@ -53,7 +54,7 @@ SyncBackendHostImpl::SyncBackendHostImpl(
       name_(name),
       initialized_(false),
       sync_prefs_(sync_prefs),
-      frontend_(NULL),
+      frontend_(nullptr),
       cached_passphrase_type_(PassphraseType::IMPLICIT_PASSPHRASE),
       invalidator_(invalidator),
       invalidation_handler_registered_(false),
@@ -83,9 +84,9 @@ void SyncBackendHostImpl::Initialize(
     const base::Closure& report_unrecoverable_error_function,
     const HttpPostProviderFactoryGetter& http_post_provider_factory_getter,
     std::unique_ptr<SyncEncryptionHandler::NigoriState> saved_nigori_state) {
-  registrar_.reset(new SyncBackendRegistrar(name_, sync_client_,
-                                            std::move(sync_thread), ui_thread_,
-                                            db_thread, file_thread));
+  registrar_ = base::MakeUnique<SyncBackendRegistrar>(
+      name_, sync_client_, std::move(sync_thread), ui_thread_, db_thread,
+      file_thread);
   CHECK(registrar_->sync_thread());
 
   frontend_ = frontend;
@@ -94,18 +95,18 @@ void SyncBackendHostImpl::Initialize(
   std::vector<scoped_refptr<ModelSafeWorker>> workers;
   registrar_->GetWorkers(&workers);
 
-  InternalComponentsFactory::Switches factory_switches = {
-      InternalComponentsFactory::ENCRYPTION_KEYSTORE,
-      InternalComponentsFactory::BACKOFF_NORMAL};
+  EngineComponentsFactory::Switches factory_switches = {
+      EngineComponentsFactory::ENCRYPTION_KEYSTORE,
+      EngineComponentsFactory::BACKOFF_NORMAL};
 
   base::CommandLine* cl = base::CommandLine::ForCurrentProcess();
   if (cl->HasSwitch(switches::kSyncShortInitialRetryOverride)) {
     factory_switches.backoff_override =
-        InternalComponentsFactory::BACKOFF_SHORT_INITIAL_RETRY_OVERRIDE;
+        EngineComponentsFactory::BACKOFF_SHORT_INITIAL_RETRY_OVERRIDE;
   }
   if (cl->HasSwitch(switches::kSyncEnableGetUpdateAvoidance)) {
     factory_switches.pre_commit_updates_policy =
-        InternalComponentsFactory::FORCE_ENABLE_PRE_COMMIT_UPDATE_AVOIDANCE;
+        EngineComponentsFactory::FORCE_ENABLE_PRE_COMMIT_UPDATE_AVOIDANCE;
   }
 
   std::map<ModelType, int64_t> invalidation_versions;
@@ -120,8 +121,8 @@ void SyncBackendHostImpl::Initialize(
       std::move(sync_manager_factory), delete_sync_data_folder,
       sync_prefs_->GetEncryptionBootstrapToken(),
       sync_prefs_->GetKeystoreEncryptionBootstrapToken(),
-      std::unique_ptr<InternalComponentsFactory>(
-          new InternalComponentsFactoryImpl(factory_switches)),
+      std::unique_ptr<EngineComponentsFactory>(
+          new EngineComponentsFactoryImpl(factory_switches)),
       unrecoverable_error_handler, report_unrecoverable_error_function,
       std::move(saved_nigori_state), invalidation_versions));
   InitCore(std::move(init_opts));
@@ -224,7 +225,7 @@ void SyncBackendHostImpl::StopSyncingForShutdown() {
   DCHECK(frontend_task_runner_->BelongsToCurrentThread());
 
   // Immediately stop sending messages to the frontend.
-  frontend_ = NULL;
+  frontend_ = nullptr;
 
   DCHECK(registrar_->sync_thread()->IsRunning());
 
@@ -247,7 +248,7 @@ std::unique_ptr<base::Thread> SyncBackendHostImpl::Shutdown(
       UnregisterInvalidationIds();
     }
     invalidator_->UnregisterInvalidationHandler(this);
-    invalidator_ = NULL;
+    invalidator_ = nullptr;
   }
   invalidation_handler_registered_ = false;
 
@@ -257,7 +258,7 @@ std::unique_ptr<base::Thread> SyncBackendHostImpl::Shutdown(
   registrar_->sync_thread()->task_runner()->PostTask(
       FROM_HERE,
       base::Bind(&SyncBackendHostCore::DoShutdown, core_, reason));
-  core_ = NULL;
+  core_ = nullptr;
 
   // Worker cleanup.
   SyncBackendRegistrar* detached_registrar = registrar_.release();
@@ -776,7 +777,7 @@ void SyncBackendHostImpl::HandleDirectoryStatusCountersUpdatedOnFrontendLoop(
     const StatusCounters& counters) {
   if (!frontend_)
     return;
-  frontend_->OnDirectoryTypeStatusCounterUpdated(type, counters);
+  frontend_->OnDatatypeStatusCounterUpdated(type, counters);
 }
 
 void SyncBackendHostImpl::UpdateInvalidationVersions(

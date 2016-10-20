@@ -1,5 +1,6 @@
 /*
- * Copyright (C) 2004, 2005, 2006, 2007, 2008, 2009, 2010, 2012 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006, 2007, 2008, 2009, 2010, 2012 Apple Inc. All
+ * rights reserved.
  * Copyright (C) 2005 Alexey Proskuryakov.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -29,16 +30,16 @@
 namespace blink {
 
 WordAwareIterator::WordAwareIterator(const Position& start, const Position& end)
-    : m_didLookAhead(
-          true)  // So we consider the first chunk from the text iterator.
-      ,
+    // So we consider the first chunk from the text iterator.
+    : m_didLookAhead(true),
       m_textIterator(start, end) {
   advance();  // Get in position over the first chunk of text.
 }
 
 WordAwareIterator::~WordAwareIterator() {}
 
-// FIXME: Performance could be bad for huge spans next to each other that don't fall on word boundaries.
+// FIXME: Performance could be bad for huge spans next to each other that don't
+// fall on word boundaries.
 
 void WordAwareIterator::advance() {
   m_buffer.clear();
@@ -63,11 +64,13 @@ void WordAwareIterator::advance() {
             m_textIterator.characterAt(m_textIterator.length() - 1)))
       return;
 
-    // If this is the first chunk that failed, save it in m_buffer before look ahead.
+    // If this is the first chunk that failed, save it in m_buffer before look
+    // ahead.
     if (m_buffer.isEmpty())
       m_textIterator.copyTextTo(&m_buffer);
 
-    // Look ahead to next chunk. If it is whitespace or a break, we can use the previous stuff
+    // Look ahead to next chunk. If it is whitespace or a break, we can use the
+    // previous stuff
     m_textIterator.advance();
     if (m_textIterator.atEnd() || !m_textIterator.length() ||
         isSpaceOrNewline(m_textIterator.text().characterAt(0))) {

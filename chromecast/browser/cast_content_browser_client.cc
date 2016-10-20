@@ -55,7 +55,7 @@
 #include "content/public/common/web_preferences.h"
 #include "net/ssl/ssl_cert_request_info.h"
 #include "net/url_request/url_request_context_getter.h"
-#include "services/shell/public/cpp/interface_registry.h"
+#include "services/service_manager/public/cpp/interface_registry.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/display/display.h"
 #include "ui/display/screen.h"
@@ -63,7 +63,7 @@
 
 #if defined(ENABLE_MOJO_MEDIA_IN_BROWSER_PROCESS)
 #include "chromecast/browser/media/cast_mojo_media_client.h"
-#include "media/mojo/services/mojo_media_application.h"  // nogncheck
+#include "media/mojo/services/media_service.h"  // nogncheck
 #endif  // ENABLE_MOJO_MEDIA_IN_BROWSER_PROCESS
 
 #if defined(OS_ANDROID)
@@ -77,7 +77,7 @@ namespace shell {
 
 namespace {
 #if defined(ENABLE_MOJO_MEDIA_IN_BROWSER_PROCESS)
-static std::unique_ptr<::shell::Service> CreateMojoMediaApplication(
+static std::unique_ptr<service_manager::Service> CreateMediaService(
     CastContentBrowserClient* browser_client,
     const base::Closure& quit_closure) {
   std::unique_ptr<media::CastMojoMediaClient> mojo_media_client(
@@ -88,9 +88,8 @@ static std::unique_ptr<::shell::Service> CreateMojoMediaApplication(
                      base::Unretained(browser_client)),
           browser_client->GetVideoResolutionPolicy(),
           browser_client->media_resource_tracker()));
-  return std::unique_ptr<::shell::Service>(
-      new ::media::MojoMediaApplication(std::move(mojo_media_client),
-                                        quit_closure));
+  return std::unique_ptr<service_manager::Service>(
+      new ::media::MediaService(std::move(mojo_media_client), quit_closure));
 }
 #endif  // defined(ENABLE_MOJO_MEDIA_IN_BROWSER_PROCESS)
 
@@ -416,7 +415,7 @@ bool CastContentBrowserClient::CanCreateWindow(
 }
 
 void CastContentBrowserClient::ExposeInterfacesToRenderer(
-    ::shell::InterfaceRegistry* registry,
+    service_manager::InterfaceRegistry* registry,
     content::RenderProcessHost* render_process_host) {
   registry->AddInterface(
       base::Bind(&media::MediaCapsImpl::AddBinding,
@@ -424,14 +423,13 @@ void CastContentBrowserClient::ExposeInterfacesToRenderer(
       base::ThreadTaskRunnerHandle::Get());
 }
 
-void CastContentBrowserClient::RegisterInProcessMojoApplications(
-    StaticMojoApplicationMap* apps) {
+void CastContentBrowserClient::RegisterInProcessServices(
+    StaticServiceMap* services) {
 #if defined(ENABLE_MOJO_MEDIA_IN_BROWSER_PROCESS)
-  content::MojoApplicationInfo app_info;
-  app_info.application_factory =
-      base::Bind(&CreateMojoMediaApplication, base::Unretained(this));
-  app_info.application_task_runner = GetMediaTaskRunner();
-  apps->insert(std::make_pair("mojo:media", app_info));
+  content::ServiceInfo info;
+  info.factory = base::Bind(&CreateMediaService, base::Unretained(this));
+  info.task_runner = GetMediaTaskRunner();
+  services->insert(std::make_pair("service:media", info));
 #endif
 }
 
@@ -439,7 +437,7 @@ std::unique_ptr<base::Value>
 CastContentBrowserClient::GetServiceManifestOverlay(
     const std::string& service_name) {
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-  if (service_name != content::kBrowserMojoApplicationName)
+  if (service_name != content::kBrowserServiceName)
     return nullptr;
   base::StringPiece manifest_contents =
       rb.GetRawDataResourceForScale(IDR_CAST_CONTENT_BROWSER_MANIFEST_OVERLAY,

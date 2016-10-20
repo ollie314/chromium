@@ -4,8 +4,8 @@
 
 #include "chrome/renderer/content_settings_observer.h"
 
+#include "chrome/common/render_messages.h"
 #include "chrome/common/ssl_insecure_content.h"
-#include "components/content_settings/content/common/content_settings_messages.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/renderer/document_state.h"
 #include "content/public/renderer/render_frame.h"
@@ -521,7 +521,7 @@ bool ContentSettingsObserver::IsWhitelistedForContentSettings() const {
 bool ContentSettingsObserver::IsWhitelistedForContentSettings(
     const WebSecurityOrigin& origin,
     const GURL& document_url) {
-  if (document_url == GURL(content::kUnreachableWebDataURL))
+  if (document_url == content::kUnreachableWebDataURL)
     return true;
 
   if (origin.isUnique())

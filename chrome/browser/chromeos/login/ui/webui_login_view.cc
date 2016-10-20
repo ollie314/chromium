@@ -79,6 +79,7 @@ const char kAccelNameDeviceRequisitionShark[] = "device_requisition_shark";
 const char kAccelNameAppLaunchBailout[] = "app_launch_bailout";
 const char kAccelNameAppLaunchNetworkConfig[] = "app_launch_network_config";
 const char kAccelNameToggleEasyBootstrap[] = "toggle_easy_bootstrap";
+const char kAccelNameBootstrappingSlave[] = "bootstrapping_slave";
 
 // A class to change arrow key traversal behavior when it's alive.
 class ScopedArrowKeyTraversal {
@@ -223,14 +224,17 @@ WebUILoginView::WebUILoginView()
                              ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN)] =
       kAccelNameAppLaunchNetworkConfig;
 
+  accel_map_[ui::Accelerator(
+      ui::VKEY_S, ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN | ui::EF_SHIFT_DOWN)] =
+      kAccelNameBootstrappingSlave;
+
   for (AccelMap::iterator i(accel_map_.begin()); i != accel_map_.end(); ++i)
     AddAccelerator(i->first);
 }
 
 WebUILoginView::~WebUILoginView() {
-  FOR_EACH_OBSERVER(web_modal::ModalDialogHostObserver,
-                    observer_list_,
-                    OnHostDestroying());
+  for (auto& observer : observer_list_)
+    observer.OnHostDestroying();
 
   if (!chrome::IsRunningInMash() &&
       ash::Shell::GetInstance()->HasPrimaryStatusArea()) {
@@ -438,9 +442,8 @@ void WebUILoginView::Layout() {
   DCHECK(webui_login_);
   webui_login_->SetBoundsRect(bounds());
 
-  FOR_EACH_OBSERVER(web_modal::ModalDialogHostObserver,
-                    observer_list_,
-                    OnPositionRequiresUpdate());
+  for (auto& observer : observer_list_)
+    observer.OnPositionRequiresUpdate();
 }
 
 void WebUILoginView::OnLocaleChanged() {

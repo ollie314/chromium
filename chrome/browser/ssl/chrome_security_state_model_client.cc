@@ -20,8 +20,11 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/safe_browsing/ui_manager.h"
+#include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "content/public/browser/navigation_entry.h"
+#include "content/public/browser/navigation_handle.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/security_style_explanation.h"
 #include "content/public/browser/security_style_explanations.h"
 #include "content/public/browser/ssl_status.h"
@@ -40,52 +43,27 @@ using security_state::SecurityStateModel;
 
 namespace {
 
-// Converts a content::SecurityStyle (an indicator of a request's
-// overall security level computed by //content) into a
-// SecurityStateModel::SecurityLevel (a finer-grained SecurityStateModel
-// concept that can express all of SecurityStateModel's policies that
-// //content doesn't necessarily know about).
-SecurityStateModel::SecurityLevel GetSecurityLevelForSecurityStyle(
-    content::SecurityStyle style) {
-  switch (style) {
-    case content::SECURITY_STYLE_UNKNOWN:
-      NOTREACHED();
-      return SecurityStateModel::NONE;
-    case content::SECURITY_STYLE_UNAUTHENTICATED:
-      return SecurityStateModel::NONE;
-    case content::SECURITY_STYLE_AUTHENTICATION_BROKEN:
-      return SecurityStateModel::DANGEROUS;
-    case content::SECURITY_STYLE_WARNING:
-      // content currently doesn't use this style.
-      NOTREACHED();
-      return SecurityStateModel::SECURITY_WARNING;
-    case content::SECURITY_STYLE_AUTHENTICATED:
-      return SecurityStateModel::SECURE;
-  }
-  return SecurityStateModel::NONE;
-}
-
 // Note: This is a lossy operation. Not all of the policies that can be
 // expressed by a SecurityLevel (a //chrome concept) can be expressed by
-// a content::SecurityStyle.
-content::SecurityStyle SecurityLevelToSecurityStyle(
+// a blink::WebSecurityStyle.
+blink::WebSecurityStyle SecurityLevelToSecurityStyle(
     SecurityStateModel::SecurityLevel security_level) {
   switch (security_level) {
     case SecurityStateModel::NONE:
     case SecurityStateModel::HTTP_SHOW_WARNING:
-      return content::SECURITY_STYLE_UNAUTHENTICATED;
+      return blink::WebSecurityStyleUnauthenticated;
     case SecurityStateModel::SECURITY_WARNING:
     case SecurityStateModel::SECURE_WITH_POLICY_INSTALLED_CERT:
-      return content::SECURITY_STYLE_WARNING;
+      return blink::WebSecurityStyleWarning;
     case SecurityStateModel::EV_SECURE:
     case SecurityStateModel::SECURE:
-      return content::SECURITY_STYLE_AUTHENTICATED;
+      return blink::WebSecurityStyleAuthenticated;
     case SecurityStateModel::DANGEROUS:
-      return content::SECURITY_STYLE_AUTHENTICATION_BROKEN;
+      return blink::WebSecurityStyleAuthenticationBroken;
   }
 
   NOTREACHED();
-  return content::SECURITY_STYLE_UNKNOWN;
+  return blink::WebSecurityStyleUnknown;
 }
 
 void AddConnectionExplanation(
@@ -107,12 +85,12 @@ void AddConnectionExplanation(
   const char* cipher;
   const char* mac;
   bool is_aead;
+  bool is_tls13;
   uint16_t cipher_suite =
       net::SSLConnectionStatusToCipherSuite(security_info.connection_status);
   net::SSLCipherSuiteToStrings(&key_exchange, &cipher, &mac, &is_aead,
-                               cipher_suite);
+                               &is_tls13, cipher_suite);
   base::string16 protocol_name = base::ASCIIToUTF16(protocol);
-  base::string16 key_exchange_name = base::ASCIIToUTF16(key_exchange);
   const base::string16 cipher_name =
       (mac == NULL) ? base::ASCIIToUTF16(cipher)
                     : l10n_util::GetStringFUTF16(IDS_CIPHER_WITH_MAC,
@@ -120,15 +98,17 @@ void AddConnectionExplanation(
                                                  base::ASCIIToUTF16(mac));
 
   // Include the key exchange group (previously known as curve) if specified.
-  //
-  // TODO(davidben): When TLS 1.3's new negotiation is implemented, omit the
-  // "key exchange" if empty and only display the group, which is the true key
-  // exchange. See https://crbug.com/639495.
-  if (security_info.key_exchange_group != 0) {
+  base::string16 key_exchange_name;
+  if (is_tls13) {
+    key_exchange_name = base::ASCIIToUTF16(
+        SSL_get_curve_name(security_info.key_exchange_group));
+  } else if (security_info.key_exchange_group != 0) {
     key_exchange_name = l10n_util::GetStringFUTF16(
-        IDS_SSL_KEY_EXCHANGE_WITH_GROUP, key_exchange_name,
+        IDS_SSL_KEY_EXCHANGE_WITH_GROUP, base::ASCIIToUTF16(key_exchange),
         base::ASCIIToUTF16(
             SSL_get_curve_name(security_info.key_exchange_group)));
+  } else {
+    key_exchange_name = base::ASCIIToUTF16(key_exchange);
   }
 
   if (security_info.obsolete_ssl_status == net::OBSOLETE_SSL_NONE) {
@@ -182,7 +162,6 @@ void CheckSafeBrowsingStatus(content::NavigationEntry* entry,
   if (sb_ui_manager->IsUrlWhitelistedOrPendingForWebContents(
           entry->GetURL(), false, entry, web_contents, false)) {
     state->fails_malware_check = true;
-    state->initial_security_level = SecurityStateModel::DANGEROUS;
   }
 }
 
@@ -190,19 +169,43 @@ void CheckSafeBrowsingStatus(content::NavigationEntry* entry,
 
 ChromeSecurityStateModelClient::ChromeSecurityStateModelClient(
     content::WebContents* web_contents)
-    : web_contents_(web_contents),
-      security_state_model_(new SecurityStateModel()) {
+    : content::WebContentsObserver(web_contents),
+      web_contents_(web_contents),
+      security_state_model_(new SecurityStateModel()),
+      logged_http_warning_on_current_navigation_(false) {
   security_state_model_->SetClient(this);
 }
 
 ChromeSecurityStateModelClient::~ChromeSecurityStateModelClient() {}
 
 // static
-content::SecurityStyle ChromeSecurityStateModelClient::GetSecurityStyle(
+blink::WebSecurityStyle ChromeSecurityStateModelClient::GetSecurityStyle(
     const security_state::SecurityStateModel::SecurityInfo& security_info,
     content::SecurityStyleExplanations* security_style_explanations) {
-  const content::SecurityStyle security_style =
+  const blink::WebSecurityStyle security_style =
       SecurityLevelToSecurityStyle(security_info.security_level);
+
+  if (security_info.security_level ==
+      security_state::SecurityStateModel::HTTP_SHOW_WARNING) {
+    // If the HTTP_SHOW_WARNING field trial is in use, display an
+    // unauthenticated explanation explaining why the omnibox warning is
+    // present.
+    security_style_explanations->unauthenticated_explanations.push_back(
+        content::SecurityStyleExplanation(
+            l10n_util::GetStringUTF8(IDS_PRIVATE_USER_DATA_INPUT),
+            l10n_util::GetStringUTF8(IDS_PRIVATE_USER_DATA_INPUT_DESCRIPTION)));
+  } else if (security_info.security_level ==
+                 security_state::SecurityStateModel::NONE &&
+             security_info.displayed_private_user_data_input_on_http) {
+    // If the HTTP_SHOW_WARNING field trial isn't in use yet, display an
+    // informational note that the omnibox will contain a warning for
+    // this site in a future version of Chrome.
+    security_style_explanations->info_explanations.push_back(
+        content::SecurityStyleExplanation(
+            l10n_util::GetStringUTF8(IDS_PRIVATE_USER_DATA_INPUT),
+            l10n_util::GetStringUTF8(
+                IDS_PRIVATE_USER_DATA_INPUT_FUTURE_DESCRIPTION)));
+  }
 
   security_style_explanations->ran_insecure_content_style =
       SecurityLevelToSecurityStyle(
@@ -211,8 +214,8 @@ content::SecurityStyle ChromeSecurityStateModelClient::GetSecurityStyle(
       SecurityLevelToSecurityStyle(
           SecurityStateModel::kDisplayedInsecureContentLevel);
 
-  // Check if the page is HTTP; if so, no explanations are needed. Note
-  // that SECURITY_STYLE_UNAUTHENTICATED does not necessarily mean that
+  // Check if the page is HTTP; if so, no more explanations are needed. Note
+  // that SecurityStyleUnauthenticated does not necessarily mean that
   // the page is loaded over HTTP, because the security style merely
   // represents how the embedder wishes to display the security state of
   // the page, and the embedder can choose to display HTTPS page as HTTP
@@ -325,14 +328,32 @@ void ChromeSecurityStateModelClient::GetSecurityInfo(
   security_state_model_->GetSecurityInfo(result);
 }
 
-bool ChromeSecurityStateModelClient::RetrieveCert(
-    scoped_refptr<net::X509Certificate>* cert) {
-  content::NavigationEntry* entry =
-      web_contents_->GetController().GetVisibleEntry();
-  if (!entry || !entry->GetSSL().certificate)
-    return false;
-  *cert = entry->GetSSL().certificate;
-  return true;
+void ChromeSecurityStateModelClient::VisibleSSLStateChanged() {
+  if (logged_http_warning_on_current_navigation_)
+    return;
+
+  security_state::SecurityStateModel::SecurityInfo security_info;
+  GetSecurityInfo(&security_info);
+  if (security_info.security_level ==
+      security_state::SecurityStateModel::HTTP_SHOW_WARNING) {
+    web_contents_->GetMainFrame()->AddMessageToConsole(
+        content::CONSOLE_MESSAGE_LEVEL_WARNING,
+        "In Chrome M56 (Jan 2017), this page will be marked "
+        "as \"not secure\" in the URL bar. For more "
+        "information, see https://goo.gl/zmWq3m");
+    logged_http_warning_on_current_navigation_ = true;
+  }
+}
+
+void ChromeSecurityStateModelClient::DidFinishNavigation(
+    content::NavigationHandle* navigation_handle) {
+  if (navigation_handle->IsInMainFrame() &&
+      !navigation_handle->IsSynchronousNavigation()) {
+    // Only reset the console message flag for main-frame navigations,
+    // and not for synchronous navigations like reference fragments and
+    // pushState.
+    logged_http_warning_on_current_navigation_ = false;
+  }
 }
 
 bool ChromeSecurityStateModelClient::UsedPolicyInstalledCertificate() {
@@ -359,7 +380,7 @@ void ChromeSecurityStateModelClient::GetVisibleSecurityState(
     return;
   }
 
-  if (entry->GetSSL().security_style == content::SECURITY_STYLE_UNKNOWN) {
+  if (!entry->GetSSL().initialized) {
     *state = SecurityStateModel::VisibleSecurityState();
     // Connection security information is still being initialized, but malware
     // status might already be known.
@@ -370,8 +391,6 @@ void ChromeSecurityStateModelClient::GetVisibleSecurityState(
   state->connection_info_initialized = true;
   state->url = entry->GetURL();
   const content::SSLStatus& ssl = entry->GetSSL();
-  state->initial_security_level =
-      GetSecurityLevelForSecurityStyle(ssl.security_style);
   state->certificate = ssl.certificate;
   state->cert_status = ssl.cert_status;
   state->connection_status = ssl.connection_status;

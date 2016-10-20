@@ -428,9 +428,8 @@ void GpuCommandBufferStub::Destroy() {
     // don't leak resources.
     have_context = decoder_->GetGLContext()->MakeCurrent(surface_.get());
   }
-  FOR_EACH_OBSERVER(DestructionObserver,
-                    destruction_observers_,
-                    OnWillDestroyStub());
+  for (auto& observer : destruction_observers_)
+    observer.OnWillDestroyStub();
 
   if (decoder_) {
     decoder_->Destroy(have_context);
@@ -469,7 +468,8 @@ bool GpuCommandBufferStub::Initialize(
         manager->shader_translator_cache(),
         manager->framebuffer_completeness_cache(), feature_info,
         init_params.attribs.bind_generates_resource,
-        gmb_factory ? gmb_factory->AsImageFactory() : nullptr);
+        gmb_factory ? gmb_factory->AsImageFactory() : nullptr,
+        channel_->watchdog() /* progress_reporter */);
   }
 
 #if defined(OS_MACOSX)

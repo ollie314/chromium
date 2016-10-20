@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "base/at_exit.h"
+#include "base/bind.h"
 #include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/strings/string16.h"
@@ -26,7 +27,7 @@
 #include "components/content_settings/core/common/content_settings_types.h"
 #include "components/infobars/core/infobar.h"
 #include "content/public/browser/ssl_status.h"
-#include "device/core/mock_device_client.h"
+#include "device/base/mock_device_client.h"
 #include "device/usb/mock_usb_device.h"
 #include "device/usb/mock_usb_service.h"
 #include "net/cert/cert_status_flags.h"
@@ -70,11 +71,23 @@ class MockWebsiteSettingsUI : public WebsiteSettingsUI {
  public:
   virtual ~MockWebsiteSettingsUI() {}
   MOCK_METHOD1(SetCookieInfo, void(const CookieInfoList& cookie_info_list));
-  MOCK_METHOD2(SetPermissionInfo,
-               void(const PermissionInfoList& permission_info_list,
-                    const ChosenObjectInfoList& chosen_object_info_list));
+  MOCK_METHOD0(SetPermissionInfoStub, void());
   MOCK_METHOD1(SetIdentityInfo, void(const IdentityInfo& identity_info));
   MOCK_METHOD1(SetSelectedTab, void(TabId tab_id));
+
+  void SetPermissionInfo(
+      const PermissionInfoList& permission_info_list,
+      ChosenObjectInfoList chosen_object_info_list) override {
+    SetPermissionInfoStub();
+    if (set_permission_info_callback_) {
+      set_permission_info_callback_.Run(permission_info_list,
+                                        std::move(chosen_object_info_list));
+    }
+  }
+
+  base::Callback<void(const PermissionInfoList& permission_info_list,
+                      ChosenObjectInfoList chosen_object_info_list)>
+      set_permission_info_callback_;
 };
 
 class WebsiteSettingsTest : public ChromeRenderViewHostTestHarness {
@@ -99,8 +112,10 @@ class WebsiteSettingsTest : public ChromeRenderViewHostTestHarness {
 
     // Setup mock ui.
     mock_ui_.reset(new MockWebsiteSettingsUI());
-    ON_CALL(*mock_ui_, SetPermissionInfo(_, _))
-        .WillByDefault(Invoke(this, &WebsiteSettingsTest::SetPermissionInfo));
+    // Use this rather than gmock's ON_CALL.WillByDefault(Invoke(... because
+    // gmock doesn't handle move-only types well.
+    mock_ui_->set_permission_info_callback_ = base::Bind(
+        &WebsiteSettingsTest::SetPermissionInfo, base::Unretained(this));
   }
 
   void TearDown() override {
@@ -112,7 +127,7 @@ class WebsiteSettingsTest : public ChromeRenderViewHostTestHarness {
 
   void SetDefaultUIExpectations(MockWebsiteSettingsUI* mock_ui) {
     // During creation |WebsiteSettings| makes the following calls to the ui.
-    EXPECT_CALL(*mock_ui, SetPermissionInfo(_, _));
+    EXPECT_CALL(*mock_ui, SetPermissionInfoStub());
     EXPECT_CALL(*mock_ui, SetIdentityInfo(_));
     EXPECT_CALL(*mock_ui, SetCookieInfo(_));
   }
@@ -120,11 +135,10 @@ class WebsiteSettingsTest : public ChromeRenderViewHostTestHarness {
   void SetURL(const std::string& url) { url_ = GURL(url); }
 
   void SetPermissionInfo(const PermissionInfoList& permission_info_list,
-                         const ChosenObjectInfoList& chosen_object_info_list) {
+                         ChosenObjectInfoList chosen_object_info_list) {
     last_chosen_object_info_.clear();
-    for (WebsiteSettingsUI::ChosenObjectInfo* chosen_object_info :
-         chosen_object_info_list)
-      last_chosen_object_info_.push_back(base::WrapUnique(chosen_object_info));
+    for (auto& chosen_object_info : chosen_object_info_list)
+      last_chosen_object_info_.push_back(std::move(chosen_object_info));
   }
 
   void ResetMockUI() { mock_ui_.reset(new MockWebsiteSettingsUI()); }
@@ -207,9 +221,9 @@ TEST_F(WebsiteSettingsTest, OnPermissionsChanged) {
   // OnSitePermissionChanged() is called.
 #if !defined(ENABLE_PLUGINS)
   // SetPermissionInfo for plugins didn't get called.
-  EXPECT_CALL(*mock_ui(), SetPermissionInfo(_, _)).Times(6);
+  EXPECT_CALL(*mock_ui(), SetPermissionInfoStub()).Times(6);
 #else
-  EXPECT_CALL(*mock_ui(), SetPermissionInfo(_, _)).Times(7);
+  EXPECT_CALL(*mock_ui(), SetPermissionInfoStub()).Times(7);
 #endif
   EXPECT_CALL(*mock_ui(), SetSelectedTab(
       WebsiteSettingsUI::TAB_ID_PERMISSIONS));
@@ -268,7 +282,7 @@ TEST_F(WebsiteSettingsTest, OnPermissionsChanged_Fullscreen) {
 
   // SetPermissionInfo() is called once initially, and then again every time
   // OnSitePermissionChanged() is called.
-  EXPECT_CALL(*mock_ui(), SetPermissionInfo(_, _)).Times(3);
+  EXPECT_CALL(*mock_ui(), SetPermissionInfoStub()).Times(3);
 
   // Execute code under tests.
   website_settings()->OnSitePermissionChanged(CONTENT_SETTINGS_TYPE_FULLSCREEN,
@@ -296,7 +310,7 @@ TEST_F(WebsiteSettingsTest, OnPermissionsChanged_Fullscreen) {
 }
 
 TEST_F(WebsiteSettingsTest, OnSiteDataAccessed) {
-  EXPECT_CALL(*mock_ui(), SetPermissionInfo(_, _));
+  EXPECT_CALL(*mock_ui(), SetPermissionInfoStub());
   EXPECT_CALL(*mock_ui(), SetIdentityInfo(_));
   EXPECT_CALL(*mock_ui(), SetCookieInfo(_)).Times(2);
   EXPECT_CALL(*mock_ui(), SetSelectedTab(
@@ -320,7 +334,7 @@ TEST_F(WebsiteSettingsTest, OnChosenObjectDeleted) {
   // Access WebsiteSettings so that SetPermissionInfo is called once to populate
   // |last_chosen_object_info_|. It will be called again by
   // OnSiteChosenObjectDeleted.
-  EXPECT_CALL(*mock_ui(), SetPermissionInfo(_, _)).Times(2);
+  EXPECT_CALL(*mock_ui(), SetPermissionInfoStub()).Times(2);
   website_settings();
 
   ASSERT_EQ(1u, last_chosen_object_info().size());
@@ -842,7 +856,7 @@ TEST_F(WebsiteSettingsTest, ShowInfoBar) {
   EXPECT_CALL(*mock_ui(), SetIdentityInfo(_));
   EXPECT_CALL(*mock_ui(), SetCookieInfo(_));
 
-  EXPECT_CALL(*mock_ui(), SetPermissionInfo(_, _)).Times(2);
+  EXPECT_CALL(*mock_ui(), SetPermissionInfoStub()).Times(2);
 
   EXPECT_CALL(*mock_ui(), SetSelectedTab(
       WebsiteSettingsUI::TAB_ID_PERMISSIONS));
@@ -866,6 +880,9 @@ TEST_F(WebsiteSettingsTest, AboutBlankPage) {
   EXPECT_EQ(base::string16(), website_settings()->organization_name());
 }
 
+// On desktop, internal URLs aren't handled by WebsiteSettings class. Instead, a
+// custom and simpler popup is shown, so no need to test.
+#if defined(OS_ANDROID) || defined(OS_IOS)
 TEST_F(WebsiteSettingsTest, InternalPage) {
   SetURL("chrome://bookmarks");
   SetDefaultUIExpectations(mock_ui());
@@ -875,3 +892,4 @@ TEST_F(WebsiteSettingsTest, InternalPage) {
             website_settings()->site_identity_status());
   EXPECT_EQ(base::string16(), website_settings()->organization_name());
 }
+#endif

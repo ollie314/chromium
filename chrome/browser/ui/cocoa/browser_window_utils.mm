@@ -20,10 +20,6 @@ namespace {
 
 CGFloat GetPatternVerticalOffsetWithTabStrip(bool tabStripVisible) {
   // Without tab strip, offset an extra pixel (determined by experimentation).
-  if (!ui::MaterialDesignController::IsModeMaterial()) {
-    return tabStripVisible ? 2 : 3;
-  }
-
   return tabStripVisible ? -1 : 0;
 }
 
@@ -147,7 +143,7 @@ const CGFloat kPatternHorizontalOffset = -5;
   // Per http://crbug.com/73779 and http://crbug.com/75223, we need this to
   // properly activate windows if Chrome is not the active application.
   [[controller window] makeKeyAndOrderFront:controller];
-  [[NSRunningApplication currentApplication] activateWithOptions:0];
+  [NSApp activateIgnoringOtherApps:YES];
 }
 
 @end

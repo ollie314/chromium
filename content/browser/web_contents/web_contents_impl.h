@@ -51,7 +51,7 @@
 
 struct ViewHostMsg_DateTimeDialogValue_Params;
 
-namespace shell {
+namespace service_manager {
 class InterfaceProvider;
 }
 
@@ -303,8 +303,6 @@ class CONTENT_EXPORT WebContentsImpl
   const base::string16& GetTitle() const override;
   void UpdateTitleForEntry(NavigationEntry* entry,
                            const base::string16& title) override;
-  int32_t GetMaxPageID() override;
-  int32_t GetMaxPageIDForSiteInstance(SiteInstance* site_instance) override;
   SiteInstanceImpl* GetSiteInstance() const override;
   SiteInstanceImpl* GetPendingSiteInstance() const override;
   bool IsLoading() const override;
@@ -414,29 +412,29 @@ class CONTENT_EXPORT WebContentsImpl
   void GetManifest(const GetManifestCallback& callback) override;
   void ExitFullscreen(bool will_cause_resize) override;
   void ResumeLoadingCreatedWebContents() override;
-  void OnMediaSessionStateChanged();
   void ResumeMediaSession() override;
   void SuspendMediaSession() override;
   void StopMediaSession() override;
+  void OnPasswordInputShownOnHttp() override;
+  void OnCreditCardInputShownOnHttp() override;
 
 #if defined(OS_ANDROID)
   base::android::ScopedJavaLocalRef<jobject> GetJavaWebContents() override;
   virtual WebContentsAndroid* GetWebContentsAndroid();
   void ActivateNearestFindResult(float x, float y) override;
   void RequestFindMatchRects(int current_version) override;
-  shell::InterfaceProvider* GetJavaInterfaces() override;
+  service_manager::InterfaceProvider* GetJavaInterfaces() override;
 #elif defined(OS_MACOSX)
   void SetAllowOtherViews(bool allow) override;
   bool GetAllowOtherViews() override;
 #endif
 
-  // Returns true if this is a secure page which has displayed content
-  // loaded over insecure HTTP.
-  bool DisplayedInsecureContent() const;
-
-  // Returns true if this page has displayed content loaded over HTTPS
-  // with certificate errors.
-  bool DisplayedContentWithCertErrors() const;
+  // This method is called when the MediaSession state has changed, and will
+  // notify the WebContents observers.
+  void OnMediaSessionStateChanged();
+  // This method is called when the MediaSession metadata has changed, and will
+  // notify the WebContents observers.
+  void OnMediaSessionMetadataChanged();
 
   // Implementation of PageNavigator.
   WebContents* OpenURL(const OpenURLParams& params) override;
@@ -474,7 +472,6 @@ class CONTENT_EXPORT WebContentsImpl
   void UpdateStateForFrame(RenderFrameHost* render_frame_host,
                            const PageState& page_state) override;
   void UpdateTitle(RenderFrameHost* render_frame_host,
-                   int32_t page_id,
                    const base::string16& title,
                    base::i18n::TextDirection title_direction) override;
   void UpdateEncoding(RenderFrameHost* render_frame_host,
@@ -490,7 +487,7 @@ class CONTENT_EXPORT WebContentsImpl
       RenderFrameHost* render_frame_host,
       int browser_plugin_instance_id) override;
   device::GeolocationServiceContext* GetGeolocationServiceContext() override;
-  WakeLockServiceContext* GetWakeLockServiceContext() override;
+  device::WakeLockServiceContext* GetWakeLockServiceContext() override;
   void EnterFullscreenMode(const GURL& origin) override;
   void ExitFullscreenMode(bool will_cause_resize) override;
   bool ShouldRouteMessageEvent(
@@ -515,7 +512,6 @@ class CONTENT_EXPORT WebContentsImpl
                             int error_code) override;
   void RenderViewDeleted(RenderViewHost* render_view_host) override;
   void UpdateState(RenderViewHost* render_view_host,
-                   int32_t page_id,
                    const PageState& page_state) override;
   void UpdateTargetURL(RenderViewHost* render_view_host,
                        const GURL& url) override;
@@ -564,11 +560,12 @@ class CONTENT_EXPORT WebContentsImpl
   SessionStorageNamespace* GetSessionStorageNamespace(
       SiteInstance* instance) override;
   SessionStorageNamespaceMap GetSessionStorageNamespaceMap() override;
+  double GetPendingPageZoomLevel() override;
   FrameTree* GetFrameTree() override;
   void SetIsVirtualKeyboardRequested(bool requested) override;
   bool IsVirtualKeyboardRequested() override;
   bool IsOverridingUserAgent() override;
-  double GetPendingPageZoomLevel() override;
+  bool IsJavaScriptDialogShowing() const override;
 
   // NavigatorDelegate ---------------------------------------------------------
 
@@ -653,16 +650,13 @@ class CONTENT_EXPORT WebContentsImpl
   void ReplicatePageFocus(bool is_focused) override;
   RenderWidgetHostImpl* GetFocusedRenderWidgetHost(
       RenderWidgetHostImpl* receiving_widget) override;
-  void RendererUnresponsive(
-      RenderWidgetHostImpl* render_widget_host,
-      RenderWidgetHostDelegate::RendererUnresponsiveType type) override;
+  void RendererUnresponsive(RenderWidgetHostImpl* render_widget_host,
+                            RendererUnresponsiveType type) override;
   void RendererResponsive(RenderWidgetHostImpl* render_widget_host) override;
   void RequestToLockMouse(RenderWidgetHostImpl* render_widget_host,
                           bool user_gesture,
                           bool last_unlocked_by_target,
                           bool privileged) override;
-  gfx::Rect GetRootWindowResizerRect(
-      RenderWidgetHostImpl* render_widget_host) const override;
   bool IsFullscreenForCurrentTab() const override;
   blink::WebDisplayMode GetDisplayMode(
       RenderWidgetHostImpl* render_widget_host) const override;
@@ -734,20 +728,6 @@ class CONTENT_EXPORT WebContentsImpl
   // page, making it unsafe to show the pending URL. Always false after the
   // first commit.
   bool HasAccessedInitialDocument() override;
-
-  // Updates the max page ID for the current SiteInstance in this
-  // WebContentsImpl to be at least |page_id|.
-  void UpdateMaxPageID(int32_t page_id) override;
-
-  // Updates the max page ID for the given SiteInstance in this WebContentsImpl
-  // to be at least |page_id|.
-  void UpdateMaxPageIDForSiteInstance(SiteInstance* site_instance,
-                                      int32_t page_id) override;
-
-  // Copy the current map of SiteInstance ID to max page ID from another tab.
-  // This is necessary when this tab adopts the NavigationEntries from
-  // |web_contents|.
-  void CopyMaxPageIDsFrom(WebContents* web_contents) override;
 
   // Sets the history for this WebContentsImpl to |history_length| entries, with
   // an offset of |history_offset|.  This notifies all renderers involved in
@@ -1042,12 +1022,6 @@ class CONTENT_EXPORT WebContentsImpl
   // not provided since it may be invalid/changed after being committed. The
   // current navigation entry is in the NavigationController at this point.
 
-  // If our controller was restored, update the max page ID associated with the
-  // given RenderViewHost to be larger than the number of restored entries.
-  // This is called in CreateRenderView before any navigations in the RenderView
-  // have begun, to prevent any races in updating RenderView::next_page_id.
-  void UpdateMaxPageIDIfNecessary(RenderViewHost* rvh);
-
   // Helper for CreateNewWidget/CreateNewFullscreenWidget.
   void CreateNewWidget(int32_t render_process_id,
                        int32_t route_id,
@@ -1207,11 +1181,6 @@ class CONTENT_EXPORT WebContentsImpl
   // "waiting" or "loading."
   bool waiting_for_response_;
 
-  // Map of SiteInstance ID to max page ID for this tab. A page ID is specific
-  // to a given tab and SiteInstance, and must be valid for the lifetime of the
-  // WebContentsImpl.
-  std::map<int32_t, int32_t> max_page_ids_;
-
   // The current load state and the URL associated with it.
   net::LoadStateWithParam load_state_;
   base::string16 load_state_host_;
@@ -1241,14 +1210,6 @@ class CONTENT_EXPORT WebContentsImpl
 
   // The canonicalized character encoding.
   std::string canonical_encoding_;
-
-  // True if this is a secure page which displayed mixed content (loaded
-  // over HTTP).
-  bool displayed_insecure_content_;
-
-  // True if this page displayed subresources loaded with HTTPS
-  // certificate errors.
-  bool displayed_content_with_cert_errors_;
 
   // Whether the initial empty page has been accessed by another page, making it
   // unsafe to show the pending URL. Usually false unless another window tries
@@ -1293,6 +1254,9 @@ class CONTENT_EXPORT WebContentsImpl
   // Pointer to the JavaScript dialog manager, lazily assigned. Used because the
   // delegate of this WebContentsImpl is nulled before its destructor is called.
   JavaScriptDialogManager* dialog_manager_;
+
+  // Set to true when there is an active JavaScript dialog showing.
+  bool is_showing_javascript_dialog_ = false;
 
   // Set to true when there is an active "before unload" dialog.  When true,
   // we've forced the throbber to start in Navigate, and we need to remember to
@@ -1412,7 +1376,7 @@ class CONTENT_EXPORT WebContentsImpl
   std::unique_ptr<device::GeolocationServiceContext>
       geolocation_service_context_;
 
-  std::unique_ptr<WakeLockServiceContext> wake_lock_service_context_;
+  std::unique_ptr<device::WakeLockServiceContext> wake_lock_service_context_;
 
   std::unique_ptr<ScreenOrientationDispatcherHost>
       screen_orientation_dispatcher_host_;
@@ -1463,7 +1427,7 @@ class CONTENT_EXPORT WebContentsImpl
   RenderWidgetHostImpl* mouse_lock_widget_;
 
 #if defined(OS_ANDROID)
-  std::unique_ptr<shell::InterfaceProvider> java_interfaces_;
+  std::unique_ptr<service_manager::InterfaceProvider> java_interfaces_;
 #endif
 
   base::WeakPtrFactory<WebContentsImpl> loading_weak_factory_;

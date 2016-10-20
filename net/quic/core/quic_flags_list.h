@@ -9,7 +9,7 @@
 
 // If true, QUIC BBR congestion control may be enabled via Finch and/or via QUIC
 // connection options.
-QUIC_FLAG(bool, FLAGS_quic_allow_bbr, false)
+QUIC_FLAG(bool, FLAGS_quic_allow_new_bbr, true)
 
 // Time period for which a given connection_id should live in the time-wait
 // state.
@@ -43,17 +43,13 @@ QUIC_FLAG(bool, FLAGS_quic_require_handshake_confirmation, false)
 // If true, disable pacing in QUIC.
 QUIC_FLAG(bool, FLAGS_quic_disable_pacing_for_perf_tests, false)
 
-// If true, QUIC connections can do bandwidth resumption with an initial window
-// of < 10 packets.
-QUIC_FLAG(bool, FLAGS_quic_no_lower_bw_resumption_limit, true)
-
 // If true, QUIC public reset packets will have the \"pre-v33\" public header
 // flags.
 QUIC_FLAG(bool, FLAGS_quic_use_old_public_reset_packets, true)
 
 // If true, QUIC will use cheap stateless rejects without creating a full
 // connection.
-QUIC_FLAG(bool, FLAGS_quic_use_cheap_stateless_rejects, false)
+QUIC_FLAG(bool, FLAGS_quic_use_cheap_stateless_rejects, true)
 
 // If true, QUIC respect HTTP2 SETTINGS frame rather than always close the
 // connection.
@@ -75,25 +71,9 @@ QUIC_FLAG(bool, FLAGS_quic_require_handshake_confirmation_pre33, false)
 // If true, defer creation of new connection till its CHLO arrives.
 QUIC_FLAG(bool, FLAGS_quic_buffer_packet_till_chlo, true)
 
-// If true, disables QUIC version less than 32.
-QUIC_FLAG(bool, FLAGS_quic_disable_pre_32, true)
-
-// If true, QUIC will enforce the MTU limit for connections that may require a
-// small MTU.
-QUIC_FLAG(bool, FLAGS_quic_enforce_mtu_limit, false)
-
 // Disable MTU probing if MTU probe causes ERR_MSG_TOO_BIG instead of aborting
 // the connection.
 QUIC_FLAG(bool, FLAGS_graceful_emsgsize_on_mtu_probe, true)
-
-// If true, set a QUIC connection's last_sent_for_timeout_ to the send time of
-// the first packet sent after receiving a packet, even if the sent packet is
-// a retransmission
-QUIC_FLAG(bool, FLAGS_quic_better_last_send_for_timeout, true)
-
-// If true, send an explicit TTL in QUIC REJ messages to mitigate client clock
-// skew.
-QUIC_FLAG(bool, FLAGS_quic_send_scfg_ttl, true)
 
 // If true, only open limited number of quic sessions per epoll event. Leave the
 // rest to next event. This flag can be turned on only if
@@ -119,11 +99,11 @@ QUIC_FLAG(bool, FLAGS_quic_packet_numbers_largest_received, true)
 QUIC_FLAG(bool, FLAGS_quic_only_5rto_client_side, true)
 
 // If true, QUIC server push will enabled by default.
-QUIC_FLAG(bool, FLAGS_quic_enable_server_push_by_default, false)
+QUIC_FLAG(bool, FLAGS_quic_enable_server_push_by_default, true)
 
 // Only inform the QuicSentPacketManager of packets that were sent,
 // not those that we tried to send.
-QUIC_FLAG(bool, FLAGS_quic_only_track_sent_packets, false)
+QUIC_FLAG(bool, FLAGS_quic_only_track_sent_packets, true)
 
 // If true, connection is closed when packet generator is trying to
 // add a frame which alone cannot fit into a packet.
@@ -150,3 +130,39 @@ QUIC_FLAG(bool, FLAGS_quic_stream_sequencer_buffer_debug, true)
 // If true, release QuicCryptoStream\'s read buffer when stream are less
 // frequently used.
 QUIC_FLAG(bool, FLAGS_quic_release_crypto_stream_buffer, false)
+
+// Use a more conservative backoff of 2x instead of 1.5x for handshake
+// retransmissions, as well as a larger minimum.
+QUIC_FLAG(bool, FLAGS_quic_conservative_handshake_retransmits, true)
+
+// If true, buffer packets while parsing public headers instead of parsing down
+// if CHLO is already buffered.
+QUIC_FLAG(bool, FLAGS_quic_buffer_packets_after_chlo, false)
+
+// Previously QUIC didn't register a packet as received until it was fully
+// processed, but now that flow control is implemented, it can be received once
+// decrypted.
+QUIC_FLAG(bool, FLAGS_quic_receive_packet_once_decrypted, false)
+
+// If true, enable the Lazy FACK style loss detection in QUIC.
+QUIC_FLAG(bool, FLAGS_quic_enable_lazy_fack, true)
+
+// If true, do not override a connection in global map if exists. Only create
+// QUIC session if it is successfully inserted to the global map. Toss the
+// packet if insertion fails.
+QUIC_FLAG(bool, FLAGS_quic_create_session_after_insertion, false)
+
+// If true, rejected packet number is removed from public reset packet.
+QUIC_FLAG(bool, FLAGS_quic_remove_packet_number_from_public_reset, false)
+
+// If true, will send QUIC_PUSH_STREAM_TIMED_OUT when push stream is unclaimed
+// and times out.
+QUIC_FLAG(bool, FLAGS_quic_send_push_stream_timed_out_error, true)
+
+// If true, enable bugfix for FHOL experiment (fin-only
+// WritevStreamData).
+QUIC_FLAG(bool, FLAGS_quic_bugfix_fhol_writev_fin_only_v2, true)
+
+// If true, v33 QUIC client uses 1 bit to specify 8-byte connection id in
+// public flag.
+QUIC_FLAG(bool, FLAGS_quic_remove_v33_hacks2, false)

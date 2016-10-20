@@ -176,12 +176,24 @@ class V4Store {
 
   std::string DebugString() const;
 
+  // Schedules the destruction of the V4Store object pointed to by |v4_store|,
+  // on the task runner.
+  static void Destroy(std::unique_ptr<V4Store> v4_store);
+
   // Reads the store file from disk and populates the in-memory representation
   // of the hash prefixes.
   void Initialize();
 
-  // Reset internal state and delete the backing file.
-  virtual bool Reset();
+  // Reset internal state.
+  void Reset();
+
+  // Scheduled after reading the store file from disk on startup. When run, it
+  // ensures that the checksum of the hash prefixes in lexicographical sorted
+  // order matches the expected value in |expected_checksum_|. Returns true if
+  // it matches; false otherwise. Checksum verification can take a long time,
+  // so it is performed outside of the hotpath of loading SafeBrowsing database,
+  // which blocks resource loads.
+  bool VerifyChecksum();
 
  private:
   FRIEND_TEST_ALL_PREFIXES(V4StoreTest, TestReadFromEmptyFile);
@@ -246,6 +258,9 @@ class V4Store {
   FRIEND_TEST_ALL_PREFIXES(V4StoreTest, TestAdditionsWithRiceEncodingSucceeds);
   FRIEND_TEST_ALL_PREFIXES(V4StoreTest, TestRemovalsWithRiceEncodingSucceeds);
   FRIEND_TEST_ALL_PREFIXES(V4StoreTest, TestMergeUpdatesFailsChecksum);
+  FRIEND_TEST_ALL_PREFIXES(V4StoreTest, TestChecksumErrorOnStartup);
+  FRIEND_TEST_ALL_PREFIXES(V4StoreTest, WriteToDiskFails);
+  FRIEND_TEST_ALL_PREFIXES(V4StoreTest, FullUpdateFailsChecksumSynchronously);
   friend class V4StoreTest;
 
   // If |prefix_size| is within expected range, and |raw_hashes_length| is a
@@ -293,57 +308,77 @@ class V4Store {
   // Merges the prefix map from the old store (|old_hash_prefix_map|) and the
   // update (additions_map) to populate the prefix map for the current store.
   // The indices in the |raw_removals| list, which may be NULL, are not merged.
-  // The SHA256 checksum of the final list of hash prefixes, in lexographically
-  // sorted order, must match |expected_checksum| (if it's not empty).
-  ApplyUpdateResult MergeUpdate(const HashPrefixMap& old_hash_prefix_map,
-                                const HashPrefixMap& additions_map,
-                                const ::google::protobuf::RepeatedField<
-                                    ::google::protobuf::int32>* raw_removals,
-                                const std::string& expected_checksum);
+  // The SHA256 checksum of the final list of hash prefixes, in
+  // lexicographically sorted order, must match |expected_checksum| (if it's not
+  // empty).
+  ApplyUpdateResult MergeUpdate(
+      const HashPrefixMap& old_hash_prefix_map,
+      const HashPrefixMap& additions_map,
+      const ::google::protobuf::RepeatedField<::google::protobuf::int32>*
+          raw_removals,
+      const std::string& expected_checksum);
 
   // Processes the FULL_UPDATE |response| from the server, and writes the
   // merged V4Store to disk. If processing the |response| succeeds, it returns
-  // APPLY_UPDATE_SUCCESS.
+  // APPLY_UPDATE_SUCCESS. The UMA metrics for all interesting sub-operations
+  // use the prefix |metric|.
   // This method is only called when we receive a FULL_UPDATE from the server.
   ApplyUpdateResult ProcessFullUpdateAndWriteToDisk(
+      const std::string& metric,
       std::unique_ptr<ListUpdateResponse> response);
 
   // Processes a FULL_UPDATE |response| and updates the V4Store. If processing
   // the |response| succeeds, it returns APPLY_UPDATE_SUCCESS.
   // This method is called when we receive a FULL_UPDATE from the server, and
-  // when we read a store file from disk on startup.
+  // when we read a store file from disk on startup. The UMA metrics for all
+  // interesting sub-operations use the prefix |metric|. Delays the checksum
+  // check if |delay_checksum_check| is true.
   ApplyUpdateResult ProcessFullUpdate(
-      const std::unique_ptr<ListUpdateResponse>& response);
+      const std::string& metric,
+      const std::unique_ptr<ListUpdateResponse>& response,
+      bool delay_checksum_check);
 
   // Merges the hash prefixes in |hash_prefix_map_old| and |response|, updates
   // the |hash_prefix_map_| and |state_| in the V4Store, and writes the merged
   // store to disk. If processing succeeds, it returns APPLY_UPDATE_SUCCESS.
   // This method is only called when we receive a PARTIAL_UPDATE from the
-  // server.
+  // server. The UMA metrics for all interesting sub-operations use the prefix
+  // |metric|.
   ApplyUpdateResult ProcessPartialUpdateAndWriteToDisk(
+      const std::string& metric,
       const HashPrefixMap& hash_prefix_map_old,
       std::unique_ptr<ListUpdateResponse> response);
 
   // Merges the hash prefixes in |hash_prefix_map_old| and |response|, and
   // updates the |hash_prefix_map_| and |state_| in the V4Store. If processing
-  // succeeds, it returns APPLY_UPDATE_SUCCESS.
+  // succeeds, it returns APPLY_UPDATE_SUCCESS. The UMA metrics for all
+  // interesting sub-operations use the prefix |metric|. Delays the checksum
+  // check if |delay_checksum_check| is true.
   ApplyUpdateResult ProcessUpdate(
+      const std::string& metric,
       const HashPrefixMap& hash_prefix_map_old,
-      const std::unique_ptr<ListUpdateResponse>& response);
+      const std::unique_ptr<ListUpdateResponse>& response,
+      bool delay_checksum_check);
 
   // Reads the state of the store from the file on disk and returns the reason
   // for the failure or reports success.
   StoreReadResult ReadFromDisk();
 
   // Updates the |additions_map| with the additions received in the partial
-  // update from the server.
+  // update from the server. The UMA metrics for all interesting sub-operations
+  // use the prefix |metric|.
   ApplyUpdateResult UpdateHashPrefixMapFromAdditions(
+      const std::string& metric,
       const ::google::protobuf::RepeatedPtrField<ThreatEntrySet>& additions,
       HashPrefixMap* additions_map);
 
-  // Writes the FULL_UPDATE |response| to disk as a V4StoreFileFormat proto.
-  StoreWriteResult WriteToDisk(
-      std::unique_ptr<ListUpdateResponse> response) const;
+  // Writes the hash_prefix_map_ to disk as a V4StoreFileFormat proto.
+  // |checksum| is used to set the |checksum| field in the final proto.
+  StoreWriteResult WriteToDisk(const Checksum& checksum) const;
+
+  // The checksum value as read from the disk, until it is verified. Once
+  // verified, it is cleared.
+  std::string expected_checksum_;
 
   // The state of the store as returned by the PVer4 server in the last applied
   // update response.

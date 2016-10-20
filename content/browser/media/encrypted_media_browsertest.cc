@@ -35,6 +35,7 @@ const char kWebMVorbisAudioOnly[] = "audio/webm; codecs=\"vorbis\"";
 #if !defined(DISABLE_ENCRYPTED_MEDIA_PLAYBACK_TESTS)
 const char kWebMOpusAudioOnly[] = "audio/webm; codecs=\"opus\"";
 const char kWebMVP8VideoOnly[] = "video/webm; codecs=\"vp8\"";
+const char kWebMVP9VideoOnly[] = "video/webm; codecs=\"vp9\"";
 const char kWebMOpusAudioVP9Video[] = "video/webm; codecs=\"opus, vp9\"";
 #endif
 const char kWebMVorbisAudioVP8Video[] = "video/webm; codecs=\"vorbis, vp8\"";
@@ -162,6 +163,16 @@ IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, Playback_VideoOnly_WebM) {
   TestSimplePlayback("bear-320x240-v_enc-v.webm", kWebMVP8VideoOnly);
 }
 
+IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, Playback_VideoOnly_WebM_Fullsample) {
+  TestSimplePlayback("bear-320x240-v-vp9_fullsample_enc-v.webm",
+                     kWebMVP9VideoOnly);
+}
+
+IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, Playback_VideoOnly_WebM_Subsample) {
+  TestSimplePlayback("bear-320x240-v-vp9_subsample_enc-v.webm",
+                     kWebMVP9VideoOnly);
+}
+
 IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, Playback_VideoClearAudio_WebM) {
   TestSimplePlayback("bear-320x240-av_enc-v.webm", kWebMVorbisAudioVP8Video);
 }
@@ -195,7 +206,14 @@ IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, ConfigChangeVideo) {
   TestConfigChange();
 }
 
-IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, FrameSizeChangeVideo) {
+#if defined(OS_ANDROID)
+// Flaky on android: https://crbug.com/655630
+#define MAYBE_FrameSizeChangeVideo DISABLED_FrameSizeChangeVideo
+#else
+#define MAYBE_FrameSizeChangeVideo FrameSizeChangeVideo
+#endif
+
+IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, MAYBE_FrameSizeChangeVideo) {
   TestFrameSizeChange();
 }
 #endif  // !defined(DISABLE_ENCRYPTED_MEDIA_PLAYBACK_TESTS)

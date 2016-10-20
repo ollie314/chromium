@@ -49,8 +49,8 @@ class SynchronousCompositorFrameSinkClient {
  public:
   virtual void DidActivatePendingTree() = 0;
   virtual void Invalidate() = 0;
-  virtual void SwapBuffers(uint32_t compositor_frame_sink_id,
-                           cc::CompositorFrame frame) = 0;
+  virtual void SubmitCompositorFrame(uint32_t compositor_frame_sink_id,
+                                     cc::CompositorFrame frame) = 0;
 
  protected:
   virtual ~SynchronousCompositorFrameSinkClient() {}
@@ -84,7 +84,7 @@ class SynchronousCompositorFrameSink
   // cc::CompositorFrameSink implementation.
   bool BindToClient(cc::CompositorFrameSinkClient* sink_client) override;
   void DetachFromClient() override;
-  void SwapBuffers(cc::CompositorFrame frame) override;
+  void SubmitCompositorFrame(cc::CompositorFrame frame) override;
   void Invalidate() override;
 
   // Partial SynchronousCompositor API implementation.
@@ -119,7 +119,6 @@ class SynchronousCompositorFrameSink
   const uint32_t compositor_frame_sink_id_;
   SynchronousCompositorRegistry* const registry_;  // Not owned.
   IPC::Sender* const sender_;                      // Not owned.
-  bool registered_ = false;
 
   // Not owned.
   SynchronousCompositorFrameSinkClient* sync_client_ = nullptr;
@@ -129,7 +128,7 @@ class SynchronousCompositorFrameSink
 
   cc::ManagedMemoryPolicy memory_policy_;
   bool in_software_draw_ = false;
-  bool did_swap_ = false;
+  bool did_submit_frame_ = false;
   scoped_refptr<FrameSwapMessageQueue> frame_swap_message_queue_;
 
   base::CancelableClosure fallback_tick_;
@@ -148,8 +147,8 @@ class SynchronousCompositorFrameSink
   // is owned/destroyed on the compositor thread.
   std::unique_ptr<cc::SurfaceManager> surface_manager_;
   std::unique_ptr<cc::SurfaceIdAllocator> surface_id_allocator_;
-  cc::SurfaceId root_surface_id_;
-  cc::SurfaceId child_surface_id_;
+  cc::LocalFrameId root_local_frame_id_;
+  cc::LocalFrameId child_local_frame_id_;
   // Uses surface_manager_.
   std::unique_ptr<cc::SurfaceFactory> surface_factory_;
   StubDisplayClient display_client_;

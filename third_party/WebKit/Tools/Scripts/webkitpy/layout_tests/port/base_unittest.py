@@ -33,6 +33,7 @@ import unittest
 from webkitpy.common.system.executive import ScriptError
 from webkitpy.common.system import executive_mock
 from webkitpy.common.system.filesystem_mock import MockFileSystem
+from webkitpy.common.system.platforminfo_mock import MockPlatformInfo
 from webkitpy.common.system.outputcapture import OutputCapture
 from webkitpy.common.system.executive_mock import MockExecutive2
 from webkitpy.common.system.systemhost import SystemHost
@@ -199,7 +200,7 @@ class PortTest(unittest.TestCase):
 
         # Simple additional platform directory
         port._options.additional_platform_directory = ['/tmp/local-baselines']
-        port._filesystem.write_text_file('/tmp/local-baselines/fast/test-expected.txt', 'foo')
+        port.host.filesystem.write_text_file('/tmp/local-baselines/fast/test-expected.txt', 'foo')
         self.assertEqual(
             port.expected_baselines(test_file, '.txt'),
             [('/tmp/local-baselines', 'fast/test-expected.txt')])
@@ -221,19 +222,21 @@ class PortTest(unittest.TestCase):
         port = self.make_port(port_name='foo')
         port.expectations_files = lambda: ['/mock-checkout/third_party/WebKit/LayoutTests/platform/exists/TestExpectations',
                                            '/mock-checkout/third_party/WebKit/LayoutTests/platform/nonexistant/TestExpectations']
-        port._filesystem.write_text_file('/mock-checkout/third_party/WebKit/LayoutTests/platform/exists/TestExpectations', '')
+        port.host.filesystem.write_text_file('/mock-checkout/third_party/WebKit/LayoutTests/platform/exists/TestExpectations', '')
         self.assertEqual('\n'.join(port.expectations_dict().keys()),
                          '/mock-checkout/third_party/WebKit/LayoutTests/platform/exists/TestExpectations')
 
     def test_additional_expectations(self):
         port = self.make_port(port_name='foo')
         port.port_name = 'foo'
-        port._filesystem.write_text_file('/mock-checkout/third_party/WebKit/LayoutTests/platform/foo/TestExpectations', '')
-        port._filesystem.write_text_file(
+        port.host.filesystem.write_text_file(
+            '/mock-checkout/third_party/WebKit/LayoutTests/platform/foo/TestExpectations', '')
+        port.host.filesystem.write_text_file(
             '/tmp/additional-expectations-1.txt', 'content1\n')
-        port._filesystem.write_text_file(
+        port.host.filesystem.write_text_file(
             '/tmp/additional-expectations-2.txt', 'content2\n')
-        port._filesystem.write_text_file('/mock-checkout/third_party/WebKit/LayoutTests/FlagExpectations/special-flag', 'content3')
+        port.host.filesystem.write_text_file(
+            '/mock-checkout/third_party/WebKit/LayoutTests/FlagExpectations/special-flag', 'content3')
 
         self.assertEqual('\n'.join(port.expectations_dict().values()), '')
 
@@ -251,6 +254,19 @@ class PortTest(unittest.TestCase):
 
         port._options.additional_driver_flag = ['--special-flag']
         self.assertEqual('\n'.join(port.expectations_dict().values()), 'content3\ncontent1\n\ncontent2\n')
+
+    def test_flag_specific_expectations(self):
+        port = self.make_port(port_name='foo')
+        port.port_name = 'foo'
+        port.host.filesystem.write_text_file(
+            '/mock-checkout/third_party/WebKit/LayoutTests/FlagExpectations/special-flag-a', 'aa')
+        port.host.filesystem.write_text_file(
+            '/mock-checkout/third_party/WebKit/LayoutTests/FlagExpectations/special-flag-b', 'bb')
+        port.host.filesystem.write_text_file(
+            '/mock-checkout/third_party/WebKit/LayoutTests/FlagExpectations/README.txt', 'cc')
+
+        self.assertEqual('\n'.join(port.expectations_dict().values()), '')
+        self.assertEqual('\n'.join(port.all_expectations_dict().values()), 'bb\naa')
 
     def test_additional_env_var(self):
         port = self.make_port(options=optparse.Values({'additional_env_var': ['FOO=BAR', 'BAR=FOO']}))
@@ -427,18 +443,18 @@ class PortTest(unittest.TestCase):
 
     def test_good_virtual_test_suite_file(self):
         port = self.make_port()
-        fs = port._filesystem
-        fs.write_text_file(fs.join(port.layout_tests_dir(), 'VirtualTestSuites'),
-                           '[{"prefix": "bar", "base": "fast/bar", "args": ["--bar"]}]')
+        port.host.filesystem.write_text_file(
+            port.host.filesystem.join(port.layout_tests_dir(), 'VirtualTestSuites'),
+            '[{"prefix": "bar", "base": "fast/bar", "args": ["--bar"]}]')
 
         # If this call returns successfully, we found and loaded the LayoutTests/VirtualTestSuites.
         _ = port.virtual_test_suites()
 
     def test_virtual_test_suite_file_is_not_json(self):
         port = self.make_port()
-        fs = port._filesystem
-        fs.write_text_file(fs.join(port.layout_tests_dir(), 'VirtualTestSuites'),
-                           '{[{[')
+        port.host.filesystem.write_text_file(
+            port.host.filesystem.join(port.layout_tests_dir(), 'VirtualTestSuites'),
+            '{[{[')
         self.assertRaises(ValueError, port.virtual_test_suites)
 
     def test_missing_virtual_test_suite_file(self):
@@ -458,8 +474,32 @@ class PortTest(unittest.TestCase):
     def test_results_directory(self):
         port = self.make_port(options=optparse.Values({'results_directory': 'some-directory/results'}))
         # A results directory can be given as an option, and it is relative to current working directory.
-        self.assertEqual(port._filesystem.cwd, '/')
+        self.assertEqual(port.host.filesystem.cwd, '/')
         self.assertEqual(port.results_directory(), '/some-directory/results')
+
+    def _assert_config_file_for_platform(self, port, platform, config_file):
+        port.host.platform = MockPlatformInfo(os_name=platform)
+        self.assertEqual(port._apache_config_file_name_for_platform(), config_file)  # pylint: disable=protected-access
+
+    def _assert_config_file_for_linux_distribution(self, port, distribution, config_file):
+        port.host.platform = MockPlatformInfo(os_name='linux', linux_distribution=distribution)
+        self.assertEqual(port._apache_config_file_name_for_platform(), config_file)  # pylint: disable=protected-access
+
+    def test_apache_config_file_name_for_platform(self):
+        port = self.make_port()
+        # pylint: disable=protected-access
+        port._apache_version = lambda: '2.2'
+        self._assert_config_file_for_platform(port, 'cygwin', 'cygwin-httpd.conf')
+        self._assert_config_file_for_platform(port, 'linux', 'apache2-httpd-2.2.conf')
+        self._assert_config_file_for_linux_distribution(port, 'arch', 'arch-httpd-2.2.conf')
+        self._assert_config_file_for_linux_distribution(port, 'debian', 'debian-httpd-2.2.conf')
+        self._assert_config_file_for_linux_distribution(port, 'slackware', 'apache2-httpd-2.2.conf')
+        self._assert_config_file_for_linux_distribution(port, 'redhat', 'redhat-httpd-2.2.conf')
+
+        self._assert_config_file_for_platform(port, 'mac', 'apache2-httpd-2.2.conf')
+        # win32 isn't a supported sys.platform.  AppleWin/WinCairo/WinCE ports all use cygwin.
+        self._assert_config_file_for_platform(port, 'win32', 'apache2-httpd-2.2.conf')
+        self._assert_config_file_for_platform(port, 'barf', 'apache2-httpd-2.2.conf')
 
 
 class NaturalCompareTest(unittest.TestCase):

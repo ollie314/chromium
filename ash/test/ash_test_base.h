@@ -82,8 +82,8 @@ class AshTestBase : public testing::Test {
   // primary root Window.
   aura::Window* CurrentContext();
 
-  // Creates and shows a widget. See ash/common/shell_window_ids.h for values
-  // for |container_id|.
+  // Creates and shows a widget. See ash/public/cpp/shell_window_ids.h for
+  // values for |container_id|.
   static std::unique_ptr<views::Widget> CreateTestWidget(
       views::WidgetDelegate* delegate,
       int container_id,
@@ -113,6 +113,14 @@ class AshTestBase : public testing::Test {
   // across multiple displays. It createse a new generator if it
   // hasn't been created yet.
   ui::test::EventGenerator& GetEventGenerator();
+
+  // Convenience method to return the DisplayManager.
+  DisplayManager* display_manager();
+
+  // Test if moving a mouse to |point_in_screen| warps it to another
+  // display.
+  bool TestIfMouseWarpsAt(ui::test::EventGenerator& event_generator,
+                          const gfx::Point& point_in_screen);
 
  protected:
   enum UserSessionBlockReason {
@@ -157,7 +165,6 @@ class AshTestBase : public testing::Test {
   // is called.
   void SetSessionStarting();
   void SetUserLoggedIn(bool user_logged_in);
-  void SetCanLockScreen(bool can_lock_screen);
   void SetShouldLockScreenBeforeSuspending(bool should_lock);
   void SetUserAddingScreenRunning(bool user_adding_screen_running);
 
@@ -167,6 +174,9 @@ class AshTestBase : public testing::Test {
   void UnblockUserSession();
 
   void DisableIME();
+
+  // Swap the primary display with the secondary.
+  void SwapPrimaryDisplay();
 
  private:
   friend class ash::AshTestImplAura;

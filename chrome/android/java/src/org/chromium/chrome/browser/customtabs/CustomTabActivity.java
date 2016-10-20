@@ -34,7 +34,6 @@ import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.IntentHandler;
 import org.chromium.chrome.browser.IntentHandler.ExternalAppId;
 import org.chromium.chrome.browser.KeyboardShortcuts;
@@ -45,6 +44,7 @@ import org.chromium.chrome.browser.compositor.layouts.LayoutManagerDocument;
 import org.chromium.chrome.browser.datausage.DataUseTabUIManager;
 import org.chromium.chrome.browser.document.ChromeLauncherActivity;
 import org.chromium.chrome.browser.externalnav.ExternalNavigationDelegateImpl;
+import org.chromium.chrome.browser.fullscreen.ChromeFullscreenManager;
 import org.chromium.chrome.browser.metrics.PageLoadMetrics;
 import org.chromium.chrome.browser.net.spdyproxy.DataReductionProxySettings;
 import org.chromium.chrome.browser.pageinfo.WebsiteSettingsPopup;
@@ -127,17 +127,19 @@ public class CustomTabActivity extends ChromeActivity {
 
     private static class CustomTabCreator extends ChromeTabCreator {
         private final boolean mSupportsUrlBarHiding;
+        private final boolean mIsOpenedByChrome;
 
         public CustomTabCreator(
                 ChromeActivity activity, WindowAndroid nativeWindow, boolean incognito,
-                boolean supportsUrlBarHiding) {
+                boolean supportsUrlBarHiding, boolean isOpenedByChrome) {
             super(activity, nativeWindow, incognito);
             mSupportsUrlBarHiding = supportsUrlBarHiding;
+            mIsOpenedByChrome = isOpenedByChrome;
         }
 
         @Override
         public TabDelegateFactory createDefaultTabDelegateFactory() {
-            return new CustomTabDelegateFactory(mSupportsUrlBarHiding);
+            return new CustomTabDelegateFactory(mSupportsUrlBarHiding, mIsOpenedByChrome);
         }
     }
 
@@ -273,15 +275,19 @@ public class CustomTabActivity extends ChromeActivity {
         super.postInflationStartup();
         TabPersistencePolicy persistencePolicy = new CustomTabTabPersistencePolicy(
                 getTaskId(), getSavedInstanceState() != null);
-        setTabModelSelector(new TabModelSelectorImpl(
-                this, persistencePolicy, getWindowAndroid(), false));
+
+        setTabModelSelector(new TabModelSelectorImpl(this, this, getFullscreenManager(),
+                persistencePolicy, false));
+
         setTabCreators(
                 new CustomTabCreator(
                         this, getWindowAndroid(), false,
-                        mIntentDataProvider.shouldEnableUrlBarHiding()),
+                        mIntentDataProvider.shouldEnableUrlBarHiding(),
+                        mIntentDataProvider.isOpenedByChrome()),
                 new CustomTabCreator(
                         this, getWindowAndroid(), true,
-                        mIntentDataProvider.shouldEnableUrlBarHiding()));
+                        mIntentDataProvider.shouldEnableUrlBarHiding(),
+                        mIntentDataProvider.isOpenedByChrome()));
 
         getToolbarManager().setCloseButtonDrawable(mIntentDataProvider.getCloseButtonDrawable());
         getToolbarManager().setShowTitle(mIntentDataProvider.getTitleVisibilityState()
@@ -342,11 +348,10 @@ public class CustomTabActivity extends ChromeActivity {
             getTabModelSelector().getModel(false).addTab(mMainTab, 0, mMainTab.getLaunchType());
         }
 
-        ToolbarControlContainer controlContainer = (ToolbarControlContainer) findViewById(
-                R.id.control_container);
         LayoutManagerDocument layoutDriver = new CustomTabLayoutManager(getCompositorViewHolder());
         initializeCompositorContent(layoutDriver, findViewById(R.id.url_bar),
-                (ViewGroup) findViewById(android.R.id.content), controlContainer);
+                (ViewGroup) findViewById(android.R.id.content),
+                (ToolbarControlContainer) findViewById(R.id.control_container));
         mFindToolbarManager = new FindToolbarManager(this,
                 getToolbarManager().getActionModeController().getActionModeCallback());
         if (getContextualSearchManager() != null) {
@@ -362,7 +367,6 @@ public class CustomTabActivity extends ChromeActivity {
                     }
                 });
 
-        mMainTab.setFullscreenManager(getFullscreenManager());
         mCustomTabContentHandler = new CustomTabContentHandler() {
             @Override
             public void loadUrlAndTrackFromTimestamp(LoadUrlParams params, long timestamp) {
@@ -459,9 +463,12 @@ public class CustomTabActivity extends ChromeActivity {
             webContents = WarmupManager.getInstance().takeSpareWebContents(false, false);
         }
         if (webContents == null) webContents = WebContentsFactory.createWebContents(false, false);
-        tab.initialize(webContents, getTabContentManager(),
-                new CustomTabDelegateFactory(mIntentDataProvider.shouldEnableUrlBarHiding()), false,
-                false);
+        tab.initialize(
+                webContents, getTabContentManager(),
+                new CustomTabDelegateFactory(
+                        mIntentDataProvider.shouldEnableUrlBarHiding(),
+                        mIntentDataProvider.isOpenedByChrome()),
+                false, false);
         initializeMainTab(tab);
         return tab;
     }
@@ -604,6 +611,11 @@ public class CustomTabActivity extends ChromeActivity {
     }
 
     @Override
+    protected int getToolbarLayoutId() {
+        return R.layout.custom_tabs_toolbar;
+    }
+
+    @Override
     public int getControlContainerHeightResource() {
         return R.dimen.custom_tabs_control_container_height;
     }
@@ -732,12 +744,8 @@ public class CustomTabActivity extends ChromeActivity {
                 || id == R.id.open_history_menu_id) {
             return true;
         } else if (id == R.id.open_in_browser_id) {
-            openCurrentUrlInBrowser(false, true);
+            openCurrentUrlInBrowser(false);
             RecordUserAction.record("CustomTabsMenuOpenInChrome");
-            return true;
-        } else if (id == R.id.read_it_later_id) {
-            openCurrentUrlInBrowser(false, false);
-            RecordUserAction.record("CustomTabsMenuReadItLater");
             return true;
         } else if (id == R.id.info_menu_id) {
             if (getTabModelSelector().getCurrentTab() == null) return false;
@@ -783,10 +791,10 @@ public class CustomTabActivity extends ChromeActivity {
     /**
      * Opens the URL currently being displayed in the Custom Tab in the regular browser.
      * @param forceReparenting Whether tab reparenting should be forced for testing.
-     * @param stayInChrome     Whether the user stays in Chrome after the tab is reparented.
+     *
      * @return Whether or not the tab was sent over successfully.
      */
-    boolean openCurrentUrlInBrowser(boolean forceReparenting, boolean stayInChrome) {
+    boolean openCurrentUrlInBrowser(boolean forceReparenting) {
         Tab tab = getActivityTab();
         if (tab == null) return false;
 
@@ -798,10 +806,6 @@ public class CustomTabActivity extends ChromeActivity {
         Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
         intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         intent.putExtra(ChromeLauncherActivity.EXTRA_IS_ALLOWED_TO_RETURN_TO_PARENT, false);
-        if (ChromeFeatureList.isEnabled("ReadItLaterInMenu")) {
-            // In this trial both "open in chrome" and "read it later" should target Chrome.
-            intent.setPackage(getPackageName());
-        }
 
         boolean willChromeHandleIntent = getIntentDataProvider().isOpenedByChrome();
         StrictMode.ThreadPolicy oldPolicy = StrictMode.allowThreadDiskReads();
@@ -824,8 +828,7 @@ public class CustomTabActivity extends ChromeActivity {
             };
 
             mMainTab = null;
-            tab.detachAndStartReparenting(intent, startActivityOptions, finalizeCallback,
-                    stayInChrome);
+            tab.detachAndStartReparenting(intent, startActivityOptions, finalizeCallback);
         } else {
             // Temporarily allowing disk access while fixing. TODO: http://crbug.com/581860
             StrictMode.allowThreadDiskReads();
@@ -849,5 +852,12 @@ public class CustomTabActivity extends ChromeActivity {
             url = DataReductionProxySettings.getInstance().maybeRewriteWebliteUrl(url);
         }
         return url;
+    }
+
+    @Override
+    protected ChromeFullscreenManager createFullscreenManager() {
+        return new ChromeFullscreenManager(this,
+                (ToolbarControlContainer) findViewById(R.id.control_container),
+                getControlContainerHeightResource(), true);
     }
 }

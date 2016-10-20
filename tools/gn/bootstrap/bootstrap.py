@@ -288,7 +288,7 @@ def write_gn_ninja(path, root_gen_dir, options):
   else:
     cc = os.environ.get('CC', 'cc')
     cxx = os.environ.get('CXX', 'c++')
-    ld = os.environ.get('LD', cxx)
+    ld = cxx
     ar = os.environ.get('AR', 'ar')
 
   cflags = os.environ.get('CFLAGS', '').split()
@@ -299,7 +299,7 @@ def write_gn_ninja(path, root_gen_dir, options):
 
   # //base/allocator/allocator_extension.cc needs this macro defined,
   # otherwise there would be link errors.
-  cflags.extend(['-DNO_TCMALLOC'])
+  cflags.extend(['-DNO_TCMALLOC', '-D__STDC_FORMAT_MACROS'])
 
   if is_posix:
     if options.debug:
@@ -504,7 +504,6 @@ def write_gn_ninja(path, root_gen_dir, options):
       'base/trace_event/trace_event_synthetic_delay.cc',
       'base/trace_event/trace_log.cc',
       'base/trace_event/trace_log_constants.cc',
-      'base/trace_event/trace_sampling_thread.cc',
       'base/trace_event/tracing_agent.cc',
       'base/tracked_objects.cc',
       'base/tracking_info.cc',
@@ -536,7 +535,6 @@ def write_gn_ninja(path, root_gen_dir, options):
         'base/sys_info_posix.cc',
         'base/threading/platform_thread_internal_posix.cc',
         'base/threading/platform_thread_posix.cc',
-        'base/threading/thread_local_posix.cc',
         'base/threading/thread_local_storage_posix.cc',
         'base/threading/worker_pool_posix.cc',
         'base/time/time_posix.cc',

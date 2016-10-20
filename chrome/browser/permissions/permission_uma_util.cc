@@ -129,6 +129,11 @@ void RecordPermissionRequest(PermissionType permission,
           "ContentSettings.PermissionRequested.Midi.Url2",
           rappor::LOW_FREQUENCY_ETLD_PLUS_ONE_RAPPOR_TYPE,
           rappor::GetDomainAndRegistrySampleFromGURL(requesting_origin));
+    } else if (permission == PermissionType::PROTECTED_MEDIA_IDENTIFIER) {
+      rappor_service->RecordSample(
+          "ContentSettings.PermissionRequested.ProtectedMedia.Url2",
+          rappor::LOW_FREQUENCY_ETLD_PLUS_ONE_RAPPOR_TYPE,
+          rappor::GetDomainAndRegistrySampleFromGURL(requesting_origin));
     }
   }
 
@@ -331,8 +336,8 @@ void PermissionUmaUtil::PermissionIgnored(
   // RecordPermission* methods need to be called before RecordIgnore in the
   // blocker because they record the number of prior ignore and dismiss values,
   // and we don't want to include the current ignore.
-  PermissionDecisionAutoBlocker(profile).RecordIgnore(requesting_origin,
-                                                      permission);
+  PermissionDecisionAutoBlocker::RecordIgnore(requesting_origin, permission,
+                                              profile);
 }
 
 void PermissionUmaUtil::PermissionRevoked(PermissionType permission,

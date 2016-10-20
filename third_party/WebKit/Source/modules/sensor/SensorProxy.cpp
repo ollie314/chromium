@@ -55,8 +55,6 @@ void SensorProxy::initialize() {
       WTF::bind(&SensorProxy::onSensorCreated, wrapWeakPersistent(this)));
   m_provider->sensorProvider()->GetSensor(m_type, mojo::GetProxy(&m_sensor),
                                           callback);
-  m_sensor.set_connection_error_handler(convertToBaseCallback(
-      WTF::bind(&SensorProxy::handleSensorError, wrapWeakPersistent(this))));
 }
 
 void SensorProxy::addConfiguration(
@@ -101,8 +99,14 @@ const device::mojom::blink::SensorConfiguration* SensorProxy::defaultConfig()
 
 void SensorProxy::updateInternalReading() {
   DCHECK(isInitialized());
-  Reading* reading = static_cast<Reading*>(m_sharedBuffer.get());
-  m_reading = *reading;
+  int readAttempts = 0;
+  const int kMaxReadAttemptsCount = 10;
+  while (!tryReadFromBuffer()) {
+    if (++readAttempts == kMaxReadAttemptsCount) {
+      handleSensorError();
+      return;
+    }
+  }
 }
 
 void SensorProxy::RaiseError() {
@@ -114,7 +118,9 @@ void SensorProxy::SensorReadingChanged() {
     observer->onSensorReadingChanged();
 }
 
-void SensorProxy::handleSensorError() {
+void SensorProxy::handleSensorError(ExceptionCode code,
+                                    const String& sanitizedMessage,
+                                    const String& unsanitizedMessage) {
   m_state = Uninitialized;
   m_sensor.reset();
   m_sharedBuffer.reset();
@@ -123,18 +129,19 @@ void SensorProxy::handleSensorError() {
   m_clientBinding.Close();
 
   for (Observer* observer : m_observers)
-    observer->onSensorError();
+    observer->onSensorError(code, sanitizedMessage, unsanitizedMessage);
 }
 
 void SensorProxy::onSensorCreated(SensorInitParamsPtr params,
                                   SensorClientRequest clientRequest) {
   DCHECK_EQ(Initializing, m_state);
   if (!params) {
-    handleSensorError();
+    handleSensorError(NotFoundError, "Sensor is not present on the platform.");
     return;
   }
+  const size_t kReadBufferSize = sizeof(ReadingBuffer);
 
-  DCHECK_EQ(0u, params->buffer_offset % SensorInitParams::kReadBufferSize);
+  DCHECK_EQ(0u, params->buffer_offset % kReadBufferSize);
 
   m_mode = params->mode;
   m_defaultConfig = std::move(params->default_configuration);
@@ -148,17 +155,36 @@ void SensorProxy::onSensorCreated(SensorInitParamsPtr params,
 
   m_sharedBufferHandle = std::move(params->memory);
   DCHECK(!m_sharedBuffer);
-  m_sharedBuffer = m_sharedBufferHandle->MapAtOffset(
-      SensorInitParams::kReadBufferSize, params->buffer_offset);
+  m_sharedBuffer =
+      m_sharedBufferHandle->MapAtOffset(kReadBufferSize, params->buffer_offset);
 
   if (!m_sharedBuffer) {
     handleSensorError();
     return;
   }
 
+  auto errorCallback =
+      WTF::bind(&SensorProxy::handleSensorError, wrapWeakPersistent(this),
+                UnknownError, String("Internal error"), String());
+  m_sensor.set_connection_error_handler(
+      convertToBaseCallback(std::move(errorCallback)));
+
   m_state = Initialized;
   for (Observer* observer : m_observers)
     observer->onSensorInitialized();
+}
+
+bool SensorProxy::tryReadFromBuffer() {
+  DCHECK(isInitialized());
+  const ReadingBuffer* buffer =
+      static_cast<const ReadingBuffer*>(m_sharedBuffer.get());
+  const device::OneWriterSeqLock& seqlock = buffer->seqlock.value();
+  auto version = seqlock.ReadBegin();
+  auto reading = buffer->reading;
+  if (seqlock.ReadRetry(version))
+    return false;
+  m_reading = reading;
+  return true;
 }
 
 }  // namespace blink

@@ -22,7 +22,6 @@
 #include "core/streams/ReadableStreamOperations.h"
 #include "modules/fetch/BlobBytesConsumer.h"
 #include "modules/fetch/BodyStreamBuffer.h"
-#include "modules/fetch/DataConsumerHandleUtil.h"
 #include "modules/fetch/FormDataBytesConsumer.h"
 #include "modules/fetch/ResponseInit.h"
 #include "platform/network/EncodedFormData.h"
@@ -204,8 +203,8 @@ Response* Response::create(ScriptState* scriptState,
                            ExceptionState& exceptionState) {
   unsigned short status = init.status;
 
-  // "1. If |init|'s status member is not in the range 200 to 599, inclusive, throw a
-  // RangeError."
+  // "1. If |init|'s status member is not in the range 200 to 599, inclusive,
+  //     throw a RangeError."
   if (status < 200 || 599 < status) {
     exceptionState.throwRangeError(
         ExceptionMessages::indexOutsideRange<unsigned>(

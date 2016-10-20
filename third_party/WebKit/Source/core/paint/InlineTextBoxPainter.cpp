@@ -96,8 +96,9 @@ void InlineTextBoxPainter::paint(const PaintInfo& paintInfo,
     return;
   }
 
-  // The text clip phase already has a LayoutObjectDrawingRecorder. Text clips are initiated only in BoxPainter::paintFillLayer,
-  // which is already within a LayoutObjectDrawingRecorder.
+  // The text clip phase already has a LayoutObjectDrawingRecorder. Text clips
+  // are initiated only in BoxPainter::paintFillLayer, which is already within a
+  // LayoutObjectDrawingRecorder.
   Optional<DrawingRecorder> drawingRecorder;
   if (paintInfo.phase != PaintPhaseTextClip) {
     if (DrawingRecorder::useCachedDrawingIfPossible(
@@ -184,12 +185,14 @@ void InlineTextBoxPainter::paint(const PaintInfo& paintInfo,
 
   // Set our font.
   const Font& font = styleToUse.font();
+  const SimpleFontData* fontData = font.primaryFont();
+  DCHECK(fontData);
 
-  LayoutPoint textOrigin(boxOrigin.x(),
-                         boxOrigin.y() + font.getFontMetrics().ascent());
+  int ascent = fontData ? fontData->getFontMetrics().ascent() : 0;
+  LayoutPoint textOrigin(boxOrigin.x(), boxOrigin.y() + ascent);
 
-  // 1. Paint backgrounds behind text if needed. Examples of such backgrounds include selection
-  // and composition highlights.
+  // 1. Paint backgrounds behind text if needed. Examples of such backgrounds
+  // include selection and composition highlights.
   if (paintInfo.phase != PaintPhaseSelection &&
       paintInfo.phase != PaintPhaseTextClip && !isPrinting) {
     paintDocumentMarkers(paintInfo, boxOrigin, styleToUse, font,
@@ -207,7 +210,8 @@ void InlineTextBoxPainter::paint(const PaintInfo& paintInfo,
     }
   }
 
-  // 2. Now paint the foreground, including text and decorations like underline/overline (in quirks mode only).
+  // 2. Now paint the foreground, including text and decorations like
+  // underline/overline (in quirks mode only).
   int selectionStart = 0;
   int selectionEnd = 0;
   if (paintSelectedTextOnly || paintSelectedTextSeparately)
@@ -244,8 +248,9 @@ void InlineTextBoxPainter::paint(const PaintInfo& paintInfo,
       startOffset = selectionEnd;
       endOffset = selectionStart;
     }
-    // Where the text and its flow have opposite directions then our offset into the text given by |truncation| is at
-    // the start of the part that will be visible.
+    // Where the text and its flow have opposite directions then our offset into
+    // the text given by |truncation| is at the start of the part that will be
+    // visible.
     if (m_inlineTextBox.truncation() != cNoTruncation &&
         m_inlineTextBox.getLineLayoutItem()
                 .containingBlock()
@@ -402,12 +407,14 @@ void InlineTextBoxPainter::paintDocumentMarkers(
           m_inlineTextBox.getLineLayoutItem().node());
   DocumentMarkerVector::const_iterator markerIt = markers.begin();
 
-  // Give any document markers that touch this run a chance to draw before the text has been drawn.
-  // Note end() points at the last char, not one past it like endOffset and ranges do.
+  // Give any document markers that touch this run a chance to draw before the
+  // text has been drawn.  Note end() points at the last char, not one past it
+  // like endOffset and ranges do.
   for (; markerIt != markers.end(); ++markerIt) {
     DocumentMarker* marker = *markerIt;
 
-    // Paint either the background markers or the foreground markers, but not both
+    // Paint either the background markers or the foreground markers, but not
+    // both.
     switch (marker->type()) {
       case DocumentMarker::Grammar:
       case DocumentMarker::Spelling:
@@ -422,8 +429,9 @@ void InlineTextBoxPainter::paintDocumentMarkers(
     }
 
     if (marker->endOffset() <= m_inlineTextBox.start()) {
-      // marker is completely before this run.  This might be a marker that sits before the
-      // first run we draw, or markers that were within runs we skipped due to truncation.
+      // marker is completely before this run.  This might be a marker that sits
+      // before the first run we draw, or markers that were within runs we
+      // skipped due to truncation.
       continue;
     }
     if (marker->startOffset() > m_inlineTextBox.end()) {
@@ -537,24 +545,31 @@ void InlineTextBoxPainter::paintDocumentMarker(GraphicsContext& context,
     width = LayoutUnit(markerRect.width());
   }
 
-  // IMPORTANT: The misspelling underline is not considered when calculating the text bounds, so we have to
-  // make sure to fit within those bounds.  This means the top pixel(s) of the underline will overlap the
-  // bottom pixel(s) of the glyphs in smaller font sizes.  The alternatives are to increase the line spacing (bad!!)
-  // or decrease the underline thickness.  The overlap is actually the most useful, and matches what AppKit does.
-  // So, we generally place the underline at the bottom of the text, but in larger fonts that's not so good so
-  // we pin to two pixels under the baseline.
+  // IMPORTANT: The misspelling underline is not considered when calculating the
+  // text bounds, so we have to make sure to fit within those bounds.  This
+  // means the top pixel(s) of the underline will overlap the bottom pixel(s) of
+  // the glyphs in smaller font sizes.  The alternatives are to increase the
+  // line spacing (bad!!) or decrease the underline thickness.  The overlap is
+  // actually the most useful, and matches what AppKit does.  So, we generally
+  // place the underline at the bottom of the text, but in larger fonts that's
+  // not so good so we pin to two pixels under the baseline.
   int lineThickness = misspellingLineThickness;
-  int baseline = m_inlineTextBox.getLineLayoutItem()
-                     .style(m_inlineTextBox.isFirstLineStyle())
-                     ->getFontMetrics()
-                     .ascent();
+
+  const SimpleFontData* fontData =
+      m_inlineTextBox.getLineLayoutItem()
+          .style(m_inlineTextBox.isFirstLineStyle())
+          ->font()
+          .primaryFont();
+  DCHECK(fontData);
+  int baseline = fontData ? fontData->getFontMetrics().ascent() : 0;
   int descent = (m_inlineTextBox.logicalHeight() - baseline).toInt();
   int underlineOffset;
   if (descent <= (lineThickness + 2)) {
     // Place the underline at the very bottom of the text in small/medium fonts.
     underlineOffset = (m_inlineTextBox.logicalHeight() - lineThickness).toInt();
   } else {
-    // In larger fonts, though, place the underline up near the baseline to prevent a big gap.
+    // In larger fonts, though, place the underline up near the baseline to
+    // prevent a big gap.
     underlineOffset = baseline + 2;
   }
   context.drawLineForDocumentMarker(
@@ -580,8 +595,8 @@ void InlineTextBoxPainter::paintSelection(GraphicsContext& context,
   if (!c.alpha())
     return;
 
-  // If the text color ends up being the same as the selection background, invert the selection
-  // background.
+  // If the text color ends up being the same as the selection background,
+  // invert the selection background.
   if (textColor == c)
     c = Color(0xff - c.red(), 0xff - c.green(), 0xff - c.blue());
 
@@ -615,7 +630,8 @@ void InlineTextBoxPainter::paintSelection(GraphicsContext& context,
 
   if (options == InlineTextBoxPainter::PaintOptions::CombinedText) {
     ASSERT(combinedText);
-    // We can't use the height of m_inlineTextBox because LayoutTextCombine's inlineTextBox is horizontal within vertical flow
+    // We can't use the height of m_inlineTextBox because LayoutTextCombine's
+    // inlineTextBox is horizontal within vertical flow
     combinedText->transformToInlineCoordinates(context, boxRect, true);
     context.drawHighlightForText(font, textRun, FloatPoint(boxRect.location()),
                                  boxRect.height().toInt(), c, sPos, ePos);
@@ -636,7 +652,8 @@ void InlineTextBoxPainter::paintSelection(GraphicsContext& context,
   LayoutRect selectionRect = LayoutRect(
       font.selectionRectForText(textRun, localOrigin, selHeight, sPos, ePos));
   if (m_inlineTextBox.hasWrappedSelectionNewline()
-      // For line breaks, just painting a selection where the line break itself is rendered is sufficient.
+      // For line breaks, just painting a selection where the line break itself
+      // is rendered is sufficient.
       && !m_inlineTextBox.isLineBreak())
     expandToIncludeNewlineForSelection(selectionRect);
 
@@ -676,8 +693,8 @@ static int computeUnderlineOffset(const TextUnderlinePosition underlinePosition,
   // Underline position of zero means draw underline on Baseline Position,
   // in Blink we need at least 1-pixel gap to adding following check.
   // Positive underline Position means underline should be drawn above baselin e
-  // and negative value means drawing below baseline, negating the value as in Blink
-  // downward Y-increases.
+  // and negative value means drawing below baseline, negating the value as in
+  // Blink downward Y-increases.
 
   if (fontMetrics.underlinePosition())
     gap = -fontMetrics.underlinePosition();
@@ -690,7 +707,8 @@ static int computeUnderlineOffset(const TextUnderlinePosition underlinePosition,
       return fontMetrics.ascent() +
              gap;  // Position underline near the alphabetic baseline.
     case TextUnderlinePositionUnder: {
-      // Position underline relative to the under edge of the lowest element's content box.
+      // Position underline relative to the under edge of the lowest element's
+      // content box.
       const LayoutUnit offset =
           inlineTextBox->root().maxLogicalTop() - inlineTextBox->logicalTop();
       if (offset > 0)
@@ -760,9 +778,9 @@ static void adjustStepToDecorationLength(float& step,
 }
 
 /*
- * Draw one cubic Bezier curve and repeat the same pattern long the the decoration's axis.
- * The start point (p1), controlPoint1, controlPoint2 and end point (p2) of the Bezier curve
- * form a diamond shape:
+ * Draw one cubic Bezier curve and repeat the same pattern long the the
+ * decoration's axis.  The start point (p1), controlPoint1, controlPoint2 and
+ * end point (p2) of the Bezier curve form a diamond shape:
  *
  *                              step
  *                         |-----------|
@@ -797,9 +815,10 @@ static void strokeWavyTextDecoration(GraphicsContext& context,
   path.moveTo(p1);
 
   // Distance between decoration's axis and Bezier curve's control points.
-  // The height of the curve is based on this distance. Use a minimum of 6 pixels distance since
-  // the actual curve passes approximately at half of that distance, that is 3 pixels.
-  // The minimum height of the curve is also approximately 3 pixels. Increases the curve's height
+  // The height of the curve is based on this distance. Use a minimum of 6
+  // pixels distance since the actual curve passes approximately at half of that
+  // distance, that is 3 pixels.  The minimum height of the curve is also
+  // approximately 3 pixels. Increases the curve's height
   // as strockThickness increases to make the curve looks better.
   float controlPointDistance = 3 * std::max<float>(2, strokeThickness);
 
@@ -940,15 +959,22 @@ void InlineTextBoxPainter::paintDecoration(const PaintInfo& paintInfo,
 
   const ComputedStyle& styleToUse =
       textBoxLayoutObject.styleRef(m_inlineTextBox.isFirstLineStyle());
-  float baseline = styleToUse.getFontMetrics().ascent();
+  const SimpleFontData* fontData = styleToUse.font().primaryFont();
+  DCHECK(fontData);
+  float baseline = fontData ? fontData->getFontMetrics().ascent() : 0;
 
-  // Set the thick of the line to be 10% (or something else ?)of the computed font size and not less than 1px.
-  // Using computedFontSize should take care of zoom as well.
+  // Set the thick of the line to be 10% (or something else ?)of the computed
+  // font size and not less than 1px.  Using computedFontSize should take care
+  // of zoom as well.
 
-  // Update Underline thickness, in case we have Faulty Font Metrics calculating underline thickness by old method.
-  float textDecorationThickness =
-      styleToUse.getFontMetrics().underlineThickness();
-  int fontHeightInt = (int)(styleToUse.getFontMetrics().floatHeight() + 0.5);
+  // Update Underline thickness, in case we have Faulty Font Metrics calculating
+  // underline thickness by old method.
+  float textDecorationThickness = 0.0;
+  int fontHeightInt = 0;
+  if (fontData) {
+    textDecorationThickness = fontData->getFontMetrics().underlineThickness();
+    fontHeightInt = (int)(fontData->getFontMetrics().floatHeight() + 0.5);
+  }
   if ((textDecorationThickness == 0.f) ||
       (textDecorationThickness >= (fontHeightInt >> 1)))
     textDecorationThickness =
@@ -962,9 +988,9 @@ void InlineTextBoxPainter::paintDecoration(const PaintInfo& paintInfo,
   // Offset between lines - always non-zero, so lines never cross each other.
   float doubleOffset = textDecorationThickness + 1.f;
 
-  if (deco & TextDecorationUnderline) {
+  if ((deco & TextDecorationUnderline) && fontData) {
     const int underlineOffset = computeUnderlineOffset(
-        styleToUse.getTextUnderlinePosition(), styleToUse.getFontMetrics(),
+        styleToUse.getTextUnderlinePosition(), fontData->getFontMetrics(),
         &m_inlineTextBox, textDecorationThickness);
     paintAppliedDecoration(
         context, FloatPoint(localOrigin) + FloatPoint(0, underlineOffset),
@@ -1026,26 +1052,32 @@ void InlineTextBoxPainter::paintCompositionUnderline(
         paintFrom, paintLength, LayoutUnit(m_inlineTextBox.textPos() + start),
         flowIsLTR ? LTR : RTL, m_inlineTextBox.isFirstLineStyle());
   }
-  // In RTL mode, start and width are computed from the right end of the text box:
-  // starting at |logicalWidth| - |start| and continuing left by |width| to
-  // |logicalWidth| - |start| - |width|. We will draw that line, but
-  // backwards: |logicalWidth| - |start| - |width| to |logicalWidth| - |start|.
+  // In RTL mode, start and width are computed from the right end of the text
+  // box: starting at |logicalWidth| - |start| and continuing left by |width| to
+  // |logicalWidth| - |start| - |width|. We will draw that line, but backwards:
+  // |logicalWidth| - |start| - |width| to |logicalWidth| - |start|.
   if (!flowIsLTR)
     start = m_inlineTextBox.logicalWidth().toFloat() - width - start;
 
-  // Thick marked text underlines are 2px thick as long as there is room for the 2px line under the baseline.
-  // All other marked text underlines are 1px thick.
-  // If there's not enough space the underline will touch or overlap characters.
+  // Thick marked text underlines are 2px thick as long as there is room for the
+  // 2px line under the baseline.  All other marked text underlines are 1px
+  // thick.  If there's not enough space the underline will touch or overlap
+  // characters.
   int lineThickness = 1;
-  int baseline = m_inlineTextBox.getLineLayoutItem()
-                     .style(m_inlineTextBox.isFirstLineStyle())
-                     ->getFontMetrics()
-                     .ascent();
+  const SimpleFontData* fontData =
+      m_inlineTextBox.getLineLayoutItem()
+          .style(m_inlineTextBox.isFirstLineStyle())
+          ->font()
+          .primaryFont();
+  DCHECK(fontData);
+  int baseline = fontData ? fontData->getFontMetrics().ascent() : 0;
   if (underline.thick() && m_inlineTextBox.logicalHeight() - baseline >= 2)
     lineThickness = 2;
 
-  // We need to have some space between underlines of subsequent clauses, because some input methods do not use different underline styles for those.
-  // We make each line shorter, which has a harmless side effect of shortening the first and last clauses, too.
+  // We need to have some space between underlines of subsequent clauses,
+  // because some input methods do not use different underline styles for those.
+  // We make each line shorter, which has a harmless side effect of shortening
+  // the first and last clauses, too.
   start += 1;
   width -= 2;
 
@@ -1068,7 +1100,8 @@ void InlineTextBoxPainter::paintTextMatchMarkerForeground(
   if (!inlineLayoutObject().frame()->editor().markedTextMatchesAreHighlighted())
     return;
 
-  // TODO(ramya.v): Extract this into a helper function and share many copies of this code.
+  // TODO(ramya.v): Extract this into a helper function and share many copies of
+  // this code.
   int sPos =
       std::max(marker->startOffset() - m_inlineTextBox.start(), (unsigned)0);
   int ePos = std::min(marker->endOffset() - m_inlineTextBox.start(),
@@ -1079,6 +1112,12 @@ void InlineTextBoxPainter::paintTextMatchMarkerForeground(
       LayoutTheme::theme().platformTextSearchColor(marker->activeMatch());
   if (style.visitedDependentColor(CSSPropertyColor) == textColor)
     return;
+
+  const SimpleFontData* fontData = font.primaryFont();
+  DCHECK(fontData);
+  if (!fontData)
+    return;
+
   TextPainter::Style textStyle;
   textStyle.currentColor = textStyle.fillColor = textStyle.strokeColor =
       textStyle.emphasisMarkColor = textColor;
@@ -1088,7 +1127,7 @@ void InlineTextBoxPainter::paintTextMatchMarkerForeground(
   LayoutRect boxRect(boxOrigin, LayoutSize(m_inlineTextBox.logicalWidth(),
                                            m_inlineTextBox.logicalHeight()));
   LayoutPoint textOrigin(boxOrigin.x(),
-                         boxOrigin.y() + font.getFontMetrics().ascent());
+                         boxOrigin.y() + fontData->getFontMetrics().ascent());
   TextPainter textPainter(paintInfo.context, font, run, textOrigin, boxRect,
                           m_inlineTextBox.isHorizontal());
 

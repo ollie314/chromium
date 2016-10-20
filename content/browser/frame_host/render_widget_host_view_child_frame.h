@@ -53,7 +53,7 @@ class CONTENT_EXPORT RenderWidgetHostViewChildFrame
       public cc::SurfaceFactoryClient,
       public cc::BeginFrameObserver {
  public:
-  explicit RenderWidgetHostViewChildFrame(RenderWidgetHost* widget);
+  static RenderWidgetHostViewChildFrame* Create(RenderWidgetHost* widget);
   ~RenderWidgetHostViewChildFrame() override;
 
   void SetCrossProcessFrameConnector(
@@ -133,12 +133,15 @@ class CONTENT_EXPORT RenderWidgetHostViewChildFrame
   void ProcessGestureEvent(const blink::WebGestureEvent& event,
                            const ui::LatencyInfo& latency) override;
   gfx::Point TransformPointToRootCoordSpace(const gfx::Point& point) override;
-  gfx::Point TransformPointToLocalCoordSpace(
+  bool TransformPointToLocalCoordSpace(const gfx::Point& point,
+                                       const cc::SurfaceId& original_surface,
+                                       gfx::Point* transformed_point) override;
+  bool TransformPointToCoordSpaceForView(
       const gfx::Point& point,
-      const cc::SurfaceId& original_surface) override;
-  gfx::Point TransformPointToCoordSpaceForView(
-      const gfx::Point& point,
-      RenderWidgetHostViewBase* target_view) override;
+      RenderWidgetHostViewBase* target_view,
+      gfx::Point* transformed_point) override;
+
+  bool IsRenderWidgetHostViewChildFrame() override;
 
 #if defined(OS_MACOSX)
   // RenderWidgetHostView implementation.
@@ -196,6 +199,9 @@ class CONTENT_EXPORT RenderWidgetHostViewChildFrame
   friend class RenderWidgetHostViewChildFrameTest;
   friend class RenderWidgetHostViewGuestSurfaceTest;
 
+  explicit RenderWidgetHostViewChildFrame(RenderWidgetHost* widget);
+  void Init();
+
   // Clears current compositor surface, if one is in use.
   void ClearCompositorSurfaceIfNecessary();
 
@@ -214,7 +220,7 @@ class CONTENT_EXPORT RenderWidgetHostViewChildFrame
   // Surface-related state.
   std::unique_ptr<cc::SurfaceIdAllocator> id_allocator_;
   std::unique_ptr<cc::SurfaceFactory> surface_factory_;
-  cc::SurfaceId surface_id_;
+  cc::LocalFrameId local_frame_id_;
   uint32_t next_surface_sequence_;
   uint32_t last_compositor_frame_sink_id_;
   gfx::Size current_surface_size_;

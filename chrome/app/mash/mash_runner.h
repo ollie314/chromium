@@ -8,9 +8,9 @@
 #include <memory>
 
 #include "base/macros.h"
-#include "services/shell/public/interfaces/service.mojom.h"
+#include "services/service_manager/public/interfaces/service.mojom.h"
 
-namespace shell {
+namespace service_manager {
 class Service;
 }
 
@@ -26,9 +26,9 @@ class MashRunner {
   void RunMain();
   void RunChild();
 
-  void StartChildApp(shell::mojom::ServiceRequest service_request);
+  void StartChildApp(service_manager::mojom::ServiceRequest service_request);
 
-  std::unique_ptr<shell::Service> service_;
+  std::unique_ptr<service_manager::Service> service_;
 
   DISALLOW_COPY_AND_ASSIGN(MashRunner);
 };

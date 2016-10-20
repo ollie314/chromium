@@ -439,6 +439,9 @@ RenderWidgetHostViewAura::RenderWidgetHostViewAura(RenderWidgetHost* host,
       has_composition_text_(false),
       accept_return_character_(false),
       begin_frame_source_(nullptr),
+      needs_begin_frames_(false),
+      needs_flush_input_(false),
+      added_frame_observer_(false),
       synthetic_move_sent_(false),
       cursor_visibility_state_in_renderer_(UNKNOWN),
 #if defined(OS_WIN)
@@ -454,9 +457,17 @@ RenderWidgetHostViewAura::RenderWidgetHostViewAura(RenderWidgetHost* host,
       last_active_widget_process_id_(ChildProcessHost::kInvalidUniqueID),
       last_active_widget_routing_id_(MSG_ROUTING_NONE),
       weak_ptr_factory_(this) {
+  // GuestViews have two RenderWidgetHostViews and so we need to make sure
+  // we don't have FrameSinkId collisions.
   ImageTransportFactory* factory = ImageTransportFactory::GetInstance();
-  delegated_frame_host_ = base::MakeUnique<DelegatedFrameHost>(
-      factory->GetContextFactory()->AllocateFrameSinkId(), this);
+  cc::FrameSinkId frame_sink_id =
+      is_guest_view_hack_
+          ? factory->GetContextFactory()->AllocateFrameSinkId()
+          : cc::FrameSinkId(
+                base::checked_cast<uint32_t>(host_->GetProcess()->GetID()),
+                base::checked_cast<uint32_t>(host_->GetRoutingID()));
+  delegated_frame_host_ =
+      base::MakeUnique<DelegatedFrameHost>(frame_sink_id, this);
 
   if (!is_guest_view_hack_)
     host_->SetView(this);
@@ -715,10 +726,25 @@ ui::TextInputClient* RenderWidgetHostViewAura::GetTextInputClient() {
 }
 
 void RenderWidgetHostViewAura::SetNeedsBeginFrames(bool needs_begin_frames) {
+  needs_begin_frames_ = needs_begin_frames;
+  UpdateNeedsBeginFramesInternal();
+}
+
+void RenderWidgetHostViewAura::OnSetNeedsFlushInput() {
+  needs_flush_input_ = true;
+  UpdateNeedsBeginFramesInternal();
+}
+
+void RenderWidgetHostViewAura::UpdateNeedsBeginFramesInternal() {
   if (!begin_frame_source_)
     return;
 
-  if (needs_begin_frames)
+  bool needs_frame = needs_begin_frames_ || needs_flush_input_;
+  if (needs_frame == added_frame_observer_)
+    return;
+
+  added_frame_observer_ = needs_frame;
+  if (needs_frame)
     begin_frame_source_->AddObserver(this);
   else
     begin_frame_source_->RemoveObserver(this);
@@ -726,6 +752,9 @@ void RenderWidgetHostViewAura::SetNeedsBeginFrames(bool needs_begin_frames) {
 
 void RenderWidgetHostViewAura::OnBeginFrame(
     const cc::BeginFrameArgs& args) {
+  needs_flush_input_ = false;
+  host_->FlushInput();
+  UpdateNeedsBeginFramesInternal();
   host_->Send(new ViewMsg_BeginFrame(host_->GetRoutingID(), args));
   last_begin_frame_args_ = args;
 }
@@ -1878,7 +1907,7 @@ void RenderWidgetHostViewAura::OnMouseEvent(ui::MouseEvent* event) {
       }
     }
 
-    ModifyEventMovementAndCoords(&mouse_event);
+    ModifyEventMovementAndCoords(*event, &mouse_event);
 
     bool should_not_forward = is_move_to_center_event && synthetic_move_sent_;
     if (should_not_forward) {
@@ -1957,7 +1986,7 @@ void RenderWidgetHostViewAura::OnMouseEvent(ui::MouseEvent* event) {
 
       blink::WebMouseEvent mouse_event = ui::MakeWebMouseEvent(
           *event, base::Bind(&GetScreenLocationFromEvent));
-      ModifyEventMovementAndCoords(&mouse_event);
+      ModifyEventMovementAndCoords(*event, &mouse_event);
       if (ShouldRouteEvent(event)) {
         host_->delegate()->GetInputEventRouter()->RouteMouseEvent(
             this, &mouse_event, *event->latency());
@@ -2034,27 +2063,31 @@ void RenderWidgetHostViewAura::ProcessGestureEvent(
   host_->ForwardGestureEventWithLatencyInfo(event, latency);
 }
 
-gfx::Point RenderWidgetHostViewAura::TransformPointToLocalCoordSpace(
+bool RenderWidgetHostViewAura::TransformPointToLocalCoordSpace(
     const gfx::Point& point,
-    const cc::SurfaceId& original_surface) {
-  gfx::Point transformed_point;
+    const cc::SurfaceId& original_surface,
+    gfx::Point* transformed_point) {
   // Transformations use physical pixels rather than DIP, so conversion
   // is necessary.
   gfx::Point point_in_pixels =
       gfx::ConvertPointToPixel(device_scale_factor_, point);
-  transformed_point = delegated_frame_host_->TransformPointToLocalCoordSpace(
-      point_in_pixels, original_surface);
-  return gfx::ConvertPointToDIP(device_scale_factor_, transformed_point);
+  if (!delegated_frame_host_->TransformPointToLocalCoordSpace(
+          point_in_pixels, original_surface, transformed_point))
+    return false;
+  *transformed_point =
+      gfx::ConvertPointToDIP(device_scale_factor_, *transformed_point);
+  return true;
 }
 
-gfx::Point RenderWidgetHostViewAura::TransformPointToCoordSpaceForView(
+bool RenderWidgetHostViewAura::TransformPointToCoordSpaceForView(
     const gfx::Point& point,
-    RenderWidgetHostViewBase* target_view) {
+    RenderWidgetHostViewBase* target_view,
+    gfx::Point* transformed_point) {
   // In TransformPointToLocalCoordSpace() there is a Point-to-Pixel conversion,
   // but it is not necessary here because the final target view is responsible
   // for converting before computing the final transform.
-  return delegated_frame_host_->TransformPointToCoordSpaceForView(point,
-                                                                  target_view);
+  return delegated_frame_host_->TransformPointToCoordSpaceForView(
+      point, target_view, transformed_point);
 }
 
 void RenderWidgetHostViewAura::FocusedNodeChanged(
@@ -2503,12 +2536,14 @@ void RenderWidgetHostViewAura::FinishImeCompositionSession() {
 }
 
 void RenderWidgetHostViewAura::ModifyEventMovementAndCoords(
+    const ui::MouseEvent& ui_mouse_event,
     blink::WebMouseEvent* event) {
   // If the mouse has just entered, we must report zero movementX/Y. Hence we
   // reset any global_mouse_position set previously.
-  if (event->type == blink::WebInputEvent::MouseEnter ||
-      event->type == blink::WebInputEvent::MouseLeave)
-    global_mouse_position_.SetPoint(event->globalX, event->globalY);
+  if (ui_mouse_event.type() == ui::ET_MOUSE_ENTERED ||
+      ui_mouse_event.type() == ui::ET_MOUSE_EXITED) {
+      global_mouse_position_.SetPoint(event->globalX, event->globalY);
+  }
 
   // Movement is computed by taking the difference of the new cursor position
   // and the previous. Under mouse lock the cursor will be warped back to the
@@ -2927,12 +2962,12 @@ void RenderWidgetHostViewAura::DelegatedFrameHostOnLostCompositorResources() {
 
 void RenderWidgetHostViewAura::SetBeginFrameSource(
     cc::BeginFrameSource* source) {
-  bool needs_begin_frames = host_->needs_begin_frames();
-  if (begin_frame_source_ && needs_begin_frames)
+  if (begin_frame_source_ && added_frame_observer_) {
     begin_frame_source_->RemoveObserver(this);
+    added_frame_observer_ = false;
+  }
   begin_frame_source_ = source;
-  if (begin_frame_source_ && needs_begin_frames)
-    begin_frame_source_->AddObserver(this);
+  UpdateNeedsBeginFramesInternal();
 }
 
 bool RenderWidgetHostViewAura::IsAutoResizeEnabled() const {

@@ -35,12 +35,12 @@
 #include "ipc/ipc_listener.h"
 #include "ipc/ipc_sender.h"
 #include "third_party/WebKit/public/platform/WebDisplayMode.h"
+#include "third_party/WebKit/public/platform/WebInputEvent.h"
 #include "third_party/WebKit/public/platform/WebRect.h"
+#include "third_party/WebKit/public/platform/WebTextInputInfo.h"
 #include "third_party/WebKit/public/web/WebCompositionUnderline.h"
-#include "third_party/WebKit/public/web/WebInputEvent.h"
 #include "third_party/WebKit/public/web/WebPopupType.h"
 #include "third_party/WebKit/public/web/WebTextDirection.h"
-#include "third_party/WebKit/public/web/WebTextInputInfo.h"
 #include "third_party/WebKit/public/web/WebTouchAction.h"
 #include "third_party/WebKit/public/web/WebWidget.h"
 #include "third_party/WebKit/public/web/WebWidgetClient.h"
@@ -164,7 +164,6 @@ class CONTENT_EXPORT RenderWidget
   bool is_hidden() const { return is_hidden_; }
   // Temporary for debugging purposes...
   bool closing() const { return closing_; }
-  bool is_swapped_out() { return is_swapped_out_; }
   bool has_host_context_menu_location() {
     return has_host_context_menu_location_;
   }
@@ -181,6 +180,14 @@ class CONTENT_EXPORT RenderWidget
 
   // ScreenInfo exposed so it can be passed to subframe RenderWidgets.
   ScreenInfo screen_info() const { return screen_info_; }
+
+  // Sets whether this RenderWidget has been swapped out to be displayed by
+  // a RenderWidget in a different process.  If so, no new IPC messages will be
+  // sent (only ACKs) and the process is free to exit when there are no other
+  // active RenderWidgets.
+  void SetSwappedOut(bool is_swapped_out);
+
+  bool is_swapped_out() { return is_swapped_out_; }
 
   // Manage edit commands to be used for the next keyboard event.
   const EditCommands& edit_commands() const { return edit_commands_; }
@@ -269,7 +276,6 @@ class CONTENT_EXPORT RenderWidget
   void setToolTipText(const blink::WebString& text,
                       blink::WebTextDirection hint) override;
   void setWindowRect(const blink::WebRect&) override;
-  blink::WebRect windowResizerRect() override;
   blink::WebScreenInfo screenInfo() override;
   void resetInputMethod() override;
   void didHandleGestureEvent(const blink::WebGestureEvent& event,
@@ -440,12 +446,6 @@ class CONTENT_EXPORT RenderWidget
               blink::WebWidget* web_widget,
               IPC::SyncMessage* create_widget_message);
 
-  // Sets whether this RenderWidget has been swapped out to be displayed by
-  // a RenderWidget in a different process.  If so, no new IPC messages will be
-  // sent (only ACKs) and the process is free to exit when there are no other
-  // active RenderWidgets.
-  void SetSwappedOut(bool is_swapped_out);
-
   // Allows the process to exit once the unload handler has finished, if there
   // are no other active RenderWidgets.
   void WasSwappedOut();
@@ -480,7 +480,6 @@ class CONTENT_EXPORT RenderWidget
   virtual void OnResize(const ResizeParams& params);
   void OnEnableDeviceEmulation(const blink::WebDeviceEmulationParams& params);
   void OnDisableDeviceEmulation();
-  void OnChangeResizeRect(const gfx::Rect& resizer_rect);
   virtual void OnWasHidden();
   virtual void OnWasShown(bool needs_repainting,
                           const ui::LatencyInfo& latency_info);
@@ -659,9 +658,6 @@ class CONTENT_EXPORT RenderWidget
   // The size of the visible viewport in DPI-adjusted pixels.
   gfx::Size visible_viewport_size_;
 
-  // The area that must be reserved for drawing the resize corner.
-  gfx::Rect resizer_rect_;
-
   // Flags for the next ViewHostMsg_UpdateRect message.
   int next_paint_flags_;
 
@@ -814,6 +810,11 @@ class CONTENT_EXPORT RenderWidget
   std::unique_ptr<MouseLockDispatcher::LockTarget> webwidget_mouse_lock_target_;
 
  private:
+  // Applies/Removes the DevTools device emulation transformation to/from a
+  // window rect.
+  void ScreenRectToEmulatedIfNeeded(blink::WebRect* window_rect) const;
+  void EmulatedToScreenRectIfNeeded(blink::WebRect* window_rect) const;
+
   // Indicates whether this widget has focus.
   bool has_focus_;
 

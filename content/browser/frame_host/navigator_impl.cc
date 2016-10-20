@@ -8,7 +8,9 @@
 
 #include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/strings/string_util.h"
 #include "base/time/time.h"
+#include "content/browser/child_process_security_policy_impl.h"
 #include "content/browser/frame_host/debug_urls.h"
 #include "content/browser/frame_host/frame_tree.h"
 #include "content/browser/frame_host/frame_tree_node.h"
@@ -148,6 +150,15 @@ void NavigatorImpl::DidStartProvisionalLoad(
   GURL validated_url(url);
   RenderProcessHost* render_process_host = render_frame_host->GetProcess();
   render_process_host->FilterURL(false, &validated_url);
+
+  // Do not allow browser plugin guests to navigate to non-web URLs, since they
+  // cannot swap processes or grant bindings.
+  ChildProcessSecurityPolicyImpl* policy =
+      ChildProcessSecurityPolicyImpl::GetInstance();
+  if (render_process_host->IsForGuestsOnly() &&
+      !policy->IsWebSafeScheme(validated_url.scheme())) {
+    validated_url = GURL(url::kAboutBlankURL);
+  }
 
   if (is_main_frame && !is_error_page) {
     DidStartMainFrameNavigation(validated_url,
@@ -378,6 +389,14 @@ bool NavigatorImpl::NavigateToEntry(
     if (is_transfer)
       dest_render_frame_host->set_is_loading(true);
 
+    // A session history navigation should have been accompanied by state.
+    // TODO(creis): This is known to be failing in UseSubframeNavigationEntries
+    // in https://crbug.com/568703, when the PageState on a FrameNavigationEntry
+    // is unexpectedly empty.  Until the cause is found, keep this as a DCHECK
+    // and load the URL without PageState.
+    if (is_pending_entry && controller_->GetPendingEntryIndex() != -1)
+      DCHECK(frame_entry.page_state().IsValid());
+
     // Navigate in the desired RenderFrameHost.
     // We can skip this step in the rare case that this is a transfer navigation
     // which began in the chosen RenderFrameHost, since the request has already
@@ -414,10 +433,10 @@ bool NavigatorImpl::NavigateToEntry(
     CHECK_EQ(controller_->GetPendingEntry(), &entry);
 
   if (controller_->GetPendingEntryIndex() == -1 &&
-      IsRendererDebugURL(dest_url)) {
+      dest_url.SchemeIs(url::kJavaScriptScheme)) {
     // If the pending entry index is -1 (which means a new navigation rather
-    // than a history one), and the user typed in a debug URL, don't add it to
-    // the session history.
+    // than a history one), and the user typed in a javascript: URL, don't add
+    // it to the session history.
     //
     // This is a hack. What we really want is to avoid adding to the history any
     // URL that doesn't generate content, and what would be great would be if we
@@ -444,7 +463,8 @@ bool NavigatorImpl::NavigateToPendingEntry(
 }
 
 bool NavigatorImpl::NavigateNewChildFrame(
-    RenderFrameHostImpl* render_frame_host) {
+    RenderFrameHostImpl* render_frame_host,
+    const GURL& default_url) {
   NavigationEntryImpl* entry =
       controller_->GetEntryWithUniqueID(render_frame_host->nav_entry_id());
   if (!entry)
@@ -454,6 +474,26 @@ bool NavigatorImpl::NavigateNewChildFrame(
       entry->GetFrameEntry(render_frame_host->frame_tree_node());
   if (!frame_entry)
     return false;
+
+  // Track how often history navigations load a different URL into a subframe
+  // than the frame's default URL.
+  bool restoring_different_url = frame_entry->url() != default_url;
+  UMA_HISTOGRAM_BOOLEAN("SessionRestore.RestoredSubframeURL",
+                        restoring_different_url);
+  // If this frame's unique name uses a frame path, record the name length.
+  // If these names are long in practice, then a proposed plan to truncate
+  // unique names might affect restore behavior, since it is complex to deal
+  // with truncated names inside frame paths.
+  if (restoring_different_url) {
+    const std::string& unique_name =
+        render_frame_host->frame_tree_node()->unique_name();
+    const char kFramePathPrefix[] = "<!--framePath ";
+    if (base::StartsWith(unique_name, kFramePathPrefix,
+                         base::CompareCase::SENSITIVE)) {
+      UMA_HISTOGRAM_COUNTS("SessionRestore.RestoreSubframeFramePathLength",
+                           unique_name.size());
+    }
+  }
 
   return NavigateToEntry(render_frame_host->frame_tree_node(), *frame_entry,
                          *entry, ReloadType::NONE, false, true, false, nullptr);
@@ -649,7 +689,7 @@ void NavigatorImpl::DidNavigate(
 bool NavigatorImpl::ShouldAssignSiteForURL(const GURL& url) {
   // about:blank should not "use up" a new SiteInstance.  The SiteInstance can
   // still be used for a normal web site.
-  if (url == GURL(url::kAboutBlankURL))
+  if (url == url::kAboutBlankURL)
     return false;
 
   // The embedder will then have the opportunity to determine if the URL
@@ -662,6 +702,7 @@ void NavigatorImpl::RequestOpenURL(
     const GURL& url,
     bool uses_post,
     const scoped_refptr<ResourceRequestBodyImpl>& body,
+    const std::string& extra_headers,
     SiteInstance* source_site_instance,
     const Referrer& referrer,
     WindowOpenDisposition disposition,
@@ -707,6 +748,7 @@ void NavigatorImpl::RequestOpenURL(
                        true /* is_renderer_initiated */);
   params.uses_post = uses_post;
   params.post_data = body;
+  params.extra_headers = extra_headers;
   params.source_site_instance = source_site_instance;
   if (redirect_chain.size() > 0)
     params.redirect_chain = redirect_chain;
@@ -749,7 +791,8 @@ void NavigatorImpl::RequestTransferURL(
     const GlobalRequestID& transferred_global_request_id,
     bool should_replace_current_entry,
     const std::string& method,
-    scoped_refptr<ResourceRequestBodyImpl> post_body) {
+    scoped_refptr<ResourceRequestBodyImpl> post_body,
+    const std::string& extra_headers) {
   // |method != "POST"| should imply absence of |post_body|.
   if (method != "POST" && post_body) {
     NOTREACHED();
@@ -809,7 +852,7 @@ void NavigatorImpl::RequestTransferURL(
     CHECK(SiteIsolationPolicy::UseSubframeNavigationEntries());
     if (controller_->GetLastCommittedEntry()) {
       entry = controller_->GetLastCommittedEntry()->Clone();
-      entry->SetPageID(-1);
+      entry->set_extra_headers(extra_headers);
     } else {
       // If there's no last committed entry, create an entry for about:blank
       // with a subframe entry for our destination.
@@ -817,7 +860,7 @@ void NavigatorImpl::RequestTransferURL(
       entry = NavigationEntryImpl::FromNavigationEntry(
           controller_->CreateNavigationEntry(
               GURL(url::kAboutBlankURL), referrer_to_use, page_transition,
-              is_renderer_initiated, std::string(),
+              is_renderer_initiated, extra_headers,
               controller_->GetBrowserContext()));
     }
     entry->AddOrUpdateFrameEntry(
@@ -830,7 +873,7 @@ void NavigatorImpl::RequestTransferURL(
     entry = NavigationEntryImpl::FromNavigationEntry(
         controller_->CreateNavigationEntry(
             dest_url, referrer_to_use, page_transition, is_renderer_initiated,
-            std::string(), controller_->GetBrowserContext()));
+            extra_headers, controller_->GetBrowserContext()));
     entry->root_node()->frame_entry->set_source_site_instance(
         static_cast<SiteInstanceImpl*>(source_site_instance));
     entry->SetRedirectChain(redirect_chain);
@@ -954,7 +997,12 @@ void NavigatorImpl::FailedNavigation(FrameTreeNode* frame_tree_node,
   NavigationRequest* navigation_request = frame_tree_node->navigation_request();
   DCHECK(navigation_request);
 
-  DiscardPendingEntryIfNeeded(navigation_request->navigation_handle());
+  // With PlzNavigate, debug URLs will give a failed navigation because the
+  // WebUI backend won't find a handler for them. They will be processed in the
+  // renderer, however do not discard the pending entry so that the URL bar
+  // shows them correctly.
+  if (!IsRendererDebugURL(navigation_request->navigation_handle()->GetURL()))
+    DiscardPendingEntryIfNeeded(navigation_request->navigation_handle());
 
   // If the request was canceled by the user do not show an error page.
   if (error_code == net::ERR_ABORTED) {

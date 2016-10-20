@@ -10,6 +10,7 @@
 
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "base/optional.h"
 #include "base/time/time.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_config.h"
 #include "net/base/network_interfaces.h"
@@ -23,6 +24,7 @@ class TickClock;
 namespace net {
 class NetworkQualityEstimator;
 class NetLog;
+class ProxyServer;
 }
 
 namespace data_reduction_proxy {
@@ -101,8 +103,26 @@ class TestDataReductionProxyConfig : public DataReductionProxyConfig {
 
   base::TimeTicks GetTicksNow() const override;
 
+  bool WasDataReductionProxyUsed(
+      const net::URLRequest* request,
+      DataReductionProxyTypeInfo* proxy_info) const override;
+
+  // Sets the data reduction proxy as not used. Subsequent calls to
+  // WasDataReductionProxyUsed() would return false.
+  void SetWasDataReductionProxyNotUsed();
+
+  // Sets the proxy index of the data reduction proxy. Subsequent calls to
+  // WasDataReductionProxyUsed are affected.
+  void SetWasDataReductionProxyUsedProxyIndex(int proxy_index);
+
+  // Resets the behavior of WasDataReductionProxyUsed() calls.
+  void ResetWasDataReductionProxyUsed();
+
  private:
   base::TickClock* tick_clock_;
+
+  base::Optional<bool> was_data_reduction_proxy_used_;
+  base::Optional<int> proxy_index_;
 
   std::unique_ptr<net::NetworkInterfaceList> network_interfaces_;
 
@@ -133,7 +153,7 @@ class MockDataReductionProxyConfig : public TestDataReductionProxyConfig {
                void(SecureProxyCheckFetchResult result));
   MOCK_METHOD2(SetProxyPrefs, void(bool enabled, bool at_startup));
   MOCK_CONST_METHOD2(IsDataReductionProxy,
-                     bool(const net::HostPortPair& host_port_pair,
+                     bool(const net::ProxyServer& proxy_server,
                           DataReductionProxyTypeInfo* proxy_info));
   MOCK_CONST_METHOD2(WasDataReductionProxyUsed,
                      bool(const net::URLRequest*,

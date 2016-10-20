@@ -102,7 +102,7 @@
 #import "ios/web/webui/mojo_facade.h"
 #import "net/base/mac/url_conversions.h"
 #include "net/base/net_errors.h"
-#include "services/shell/public/cpp/interface_registry.h"
+#include "services/service_manager/public/cpp/interface_registry.h"
 #include "ui/base/page_transition_types.h"
 #include "url/gurl.h"
 #include "url/url_constants.h"
@@ -2426,7 +2426,7 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
 
 - (web::MojoFacade*)mojoFacade {
   if (!_mojoFacade) {
-    shell::mojom::InterfaceProvider* interfaceProvider =
+    service_manager::mojom::InterfaceProvider* interfaceProvider =
         _webStateImpl->GetMojoInterfaceRegistry();
     _mojoFacade.reset(new web::MojoFacade(interfaceProvider, self));
   }
@@ -4290,6 +4290,10 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
     params.referrer_policy =
         web::ReferrerPolicyFromString(base::SysNSStringToUTF8(referrerPolicy));
   }
+  NSString* innerText = element[@"innerText"];
+  if ([innerText length] > 0) {
+    params.link_text.reset([innerText copy]);
+  }
   return params;
 }
 
@@ -4962,6 +4966,19 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
   // The page will not be changed until this navigation is commited, so the
   // retrieved state will be pending until |didCommitNavigation| callback.
   [self updatePendingNavigationInfoFromNavigationAction:action];
+
+  // Invalid URLs should not be loaded.  However, simply doing nothing upon
+  // tapping a link or button is a jarring user experience.  Instead, cancel
+  // the invalid navigation and load about:blank.
+  GURL requestURL = net::GURLWithNSURL(action.request.URL);
+  if (!requestURL.is_valid()) {
+    decisionHandler(WKNavigationActionPolicyCancel);
+    GURL aboutBlankURL(url::kAboutBlankURL);
+    web::NavigationManager::WebLoadParams loadParams(aboutBlankURL);
+    loadParams.referrer = [self currentReferrer];
+    self.webState->GetNavigationManager()->LoadURLWithParams(loadParams);
+    return;
+  }
 
   BOOL allowLoad = [self shouldAllowLoadWithNavigationAction:action];
 

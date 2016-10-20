@@ -28,7 +28,7 @@
 #include "headless/lib/browser/headless_browser_impl.h"
 #include "headless/lib/browser/headless_browser_main_parts.h"
 #include "headless/lib/browser/headless_devtools_client_impl.h"
-#include "services/shell/public/cpp/interface_registry.h"
+#include "services/service_manager/public/cpp/interface_registry.h"
 #include "ui/aura/window.h"
 
 namespace headless {
@@ -154,7 +154,7 @@ void HeadlessWebContentsImpl::RenderFrameCreated(
         content::BINDINGS_POLICY_HEADLESS);
   }
 
-  shell::InterfaceRegistry* interface_registry =
+  service_manager::InterfaceRegistry* interface_registry =
       render_frame_host->GetInterfaceRegistry();
 
   for (const MojoService& service : mojo_services_) {

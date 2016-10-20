@@ -11,13 +11,14 @@
 #include "base/logging.h"
 #include "base/message_loop/message_loop.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "components/arc/arc_bridge_service.h"
 #include "components/arc/common/video_accelerator.mojom.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/gpu_service_registry.h"
 #include "mojo/edk/embedder/embedder.h"
 #include "mojo/edk/embedder/platform_channel_pair.h"
 #include "mojo/public/cpp/bindings/strong_binding.h"
-#include "services/shell/public/cpp/interface_provider.h"
+#include "services/service_manager/public/cpp/interface_provider.h"
 
 namespace arc {
 
@@ -56,8 +57,7 @@ class VideoAcceleratorFactoryService : public mojom::VideoAcceleratorFactory {
   DISALLOW_COPY_AND_ASSIGN(VideoAcceleratorFactoryService);
 };
 
-GpuArcVideoServiceHost::GpuArcVideoServiceHost(
-    arc::ArcBridgeService* bridge_service)
+GpuArcVideoServiceHost::GpuArcVideoServiceHost(ArcBridgeService* bridge_service)
     : ArcService(bridge_service), binding_(this) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   arc_bridge_service()->video()->AddObserver(this);

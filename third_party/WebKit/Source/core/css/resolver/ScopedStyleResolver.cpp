@@ -1,6 +1,7 @@
 /*
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
- * Copyright (C) 2003, 2004, 2005, 2006, 2007, 2008, 2009, 2010, 2011 Apple Inc. All rights reserved.
+ * Copyright (C) 2003, 2004, 2005, 2006, 2007, 2008, 2009, 2010, 2011 Apple Inc.
+ * All rights reserved.
  * Copyright (C) 2012 Google Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -65,7 +66,8 @@ void ScopedStyleResolver::addKeyframeRules(const RuleSet& ruleSet) {
 }
 
 void ScopedStyleResolver::addFontFaceRules(const RuleSet& ruleSet) {
-  // FIXME(BUG 72461): We don't add @font-face rules of scoped style sheets for the moment.
+  // FIXME(BUG 72461): We don't add @font-face rules of scoped style sheets for
+  // the moment.
   if (!treeScope().rootNode().isDocumentNode())
     return;
 
@@ -101,6 +103,22 @@ void ScopedStyleResolver::appendCSSStyleSheet(
       ruleSet.viewportDependentMediaQueryResults());
   treeScope().document().styleResolver()->addDeviceDependentMediaQueries(
       ruleSet.deviceDependentMediaQueryResults());
+}
+
+void ScopedStyleResolver::appendActiveStyleSheets(
+    unsigned index,
+    const ActiveStyleSheetVector& activeSheets) {
+  for (auto activeIterator = activeSheets.begin() + index;
+       activeIterator != activeSheets.end(); activeIterator++) {
+    CSSStyleSheet* sheet = activeIterator->first;
+    if (!activeIterator->second)
+      continue;
+    const RuleSet& ruleSet = *activeIterator->second;
+    m_authorStyleSheets.append(sheet);
+    addKeyframeRules(ruleSet);
+    addFontFaceRules(ruleSet);
+    addTreeBoundaryCrossingRules(ruleSet, sheet, index++);
+  }
 }
 
 void ScopedStyleResolver::collectFeaturesTo(
@@ -155,7 +173,8 @@ void ScopedStyleResolver::addKeyframeStyle(StyleRuleKeyframes* rule) {
   }
 }
 
-static Node& invalidationRootFor(const TreeScope& treeScope) {
+ContainerNode& ScopedStyleResolver::invalidationRootForTreeScope(
+    const TreeScope& treeScope) {
   if (treeScope.rootNode() == treeScope.document())
     return treeScope.document();
   return toShadowRoot(treeScope.rootNode()).host();
@@ -188,7 +207,7 @@ void ScopedStyleResolver::keyframesRulesAdded(const TreeScope& treeScope) {
     // rules were found for the animation-name, we need to recalculate style
     // for the elements in the scope, including its shadow host if
     // applicable.
-    invalidationRootFor(treeScope).setNeedsStyleRecalc(
+    invalidationRootForTreeScope(treeScope).setNeedsStyleRecalc(
         SubtreeStyleChange, StyleChangeReasonForTracing::create(
                                 StyleChangeReason::StyleSheetChange));
     return;
@@ -234,7 +253,8 @@ void ScopedStyleResolver::collectMatchingTreeBoundaryCrossingRules(
 }
 
 void ScopedStyleResolver::matchPageRules(PageRuleCollector& collector) {
-  // Only consider the global author RuleSet for @page rules, as per the HTML5 spec.
+  // Only consider the global author RuleSet for @page rules, as per the HTML5
+  // spec.
   ASSERT(m_scope->rootNode().isDocumentNode());
   for (size_t i = 0; i < m_authorStyleSheets.size(); ++i)
     collector.matchPageRules(&m_authorStyleSheets[i]->contents()->ruleSet());

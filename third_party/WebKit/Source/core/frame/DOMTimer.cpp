@@ -29,7 +29,7 @@
 #include "core/dom/ExecutionContext.h"
 #include "core/inspector/InspectorInstrumentation.h"
 #include "core/inspector/InspectorTraceEvents.h"
-#include "platform/TraceEvent.h"
+#include "platform/tracing/TraceEvent.h"
 #include "wtf/CurrentTime.h"
 
 namespace blink {
@@ -108,9 +108,17 @@ DOMTimer::DOMTimer(ExecutionContext* context,
 
 DOMTimer::~DOMTimer() {}
 
-void DOMTimer::disposeTimer() {
-  m_action = nullptr;
+void DOMTimer::stop() {
+  InspectorInstrumentation::asyncTaskCanceled(getExecutionContext(), this);
   m_userGestureToken = nullptr;
+  // Need to release JS objects potentially protected by ScheduledAction
+  // because they can form circular references back to the ExecutionContext
+  // which will cause a memory leak.
+  m_action = nullptr;
+  SuspendableTimer::stop();
+}
+
+void DOMTimer::contextDestroyed() {
   stop();
 }
 
@@ -119,7 +127,8 @@ void DOMTimer::fired() {
   ASSERT(context);
   context->timers()->setTimerNestingLevel(m_nestingLevel);
   ASSERT(!context->activeDOMObjectsAreSuspended());
-  // Only the first execution of a multi-shot timer should get an affirmative user gesture indicator.
+  // Only the first execution of a multi-shot timer should get an affirmative
+  // user gesture indicator.
   UserGestureIndicator gestureIndicator(m_userGestureToken.release());
 
   TRACE_EVENT1("devtools.timeline", "TimerFire", "data",
@@ -160,15 +169,6 @@ void DOMTimer::fired() {
   executionContext->timers()->setTimerNestingLevel(0);
   // Eagerly unregister as ExecutionContext observer.
   clearContext();
-}
-
-void DOMTimer::stop() {
-  InspectorInstrumentation::asyncTaskCanceled(getExecutionContext(), this);
-  SuspendableTimer::stop();
-  // Need to release JS objects potentially protected by ScheduledAction
-  // because they can form circular references back to the ExecutionContext
-  // which will cause a memory leak.
-  m_action.clear();
 }
 
 WebTaskRunner* DOMTimer::timerTaskRunner() const {

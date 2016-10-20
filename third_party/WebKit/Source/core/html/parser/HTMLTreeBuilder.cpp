@@ -219,12 +219,10 @@ HTMLTreeBuilder::HTMLTreeBuilder(HTMLDocumentParser* parser,
                                  Document& document,
                                  ParserContentPolicy parserContentPolicy,
                                  const HTMLParserOptions& options)
-    : m_framesetOk(true)
+    : m_framesetOk(true),
 #if ENABLE(ASSERT)
-      ,
-      m_isAttached(true)
+      m_isAttached(true),
 #endif
-      ,
       m_tree(parser->reentryPermit(), document, parserContentPolicy),
       m_insertionMode(InitialMode),
       m_originalInsertionMode(InitialMode),
@@ -550,7 +548,7 @@ void HTMLTreeBuilder::processStartTagForInBody(AtomicHTMLToken* token) {
       token->name() == noframesTag || token->name() == scriptTag ||
       token->name() == styleTag || token->name() == titleTag) {
     bool didProcess = processStartTagForInHead(token);
-    ASSERT_UNUSED(didProcess, didProcess);
+    DCHECK(didProcess);
     return;
   }
   if (token->name() == bodyTag) {
@@ -1200,7 +1198,7 @@ void HTMLTreeBuilder::processStartTag(AtomicHTMLToken* token) {
           token->name() == linkTag || token->name() == metaTag ||
           token->name() == noframesTag || token->name() == styleTag) {
         bool didProcess = processStartTagForInHead(token);
-        ASSERT_UNUSED(didProcess, didProcess);
+        DCHECK(didProcess);
         return;
       }
       if (token->name() == htmlTag || token->name() == noscriptTag) {
@@ -1308,7 +1306,7 @@ void HTMLTreeBuilder::processStartTag(AtomicHTMLToken* token) {
       }
       if (token->name() == scriptTag) {
         bool didProcess = processStartTagForInHead(token);
-        ASSERT_UNUSED(didProcess, didProcess);
+        DCHECK(didProcess);
         return;
       }
       if (token->name() == templateTag) {

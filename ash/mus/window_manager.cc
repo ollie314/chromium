@@ -8,7 +8,6 @@
 
 #include <utility>
 
-#include "ash/common/shell_window_ids.h"
 #include "ash/mus/accelerators/accelerator_handler.h"
 #include "ash/mus/accelerators/accelerator_ids.h"
 #include "ash/mus/app_list_presenter_mus.h"
@@ -23,7 +22,7 @@
 #include "ash/mus/shadow_controller.h"
 #include "ash/mus/shell_delegate_mus.h"
 #include "ash/mus/window_manager_observer.h"
-#include "ash/public/interfaces/container.mojom.h"
+#include "ash/public/cpp/shell_window_ids.h"
 #include "base/memory/ptr_util.h"
 #include "services/ui/common/event_matcher_util.h"
 #include "services/ui/common/types.h"
@@ -42,7 +41,7 @@
 namespace ash {
 namespace mus {
 
-WindowManager::WindowManager(shell::Connector* connector)
+WindowManager::WindowManager(service_manager::Connector* connector)
     : connector_(connector) {}
 
 WindowManager::~WindowManager() {
@@ -80,6 +79,9 @@ void WindowManager::Init(
                               this, pointer_watcher_event_router_.get()));
   shell_->Initialize(blocking_pool);
   lookup_.reset(new WmLookupMus);
+
+  // TODO: this should be called when logged in. See http://crbug.com/654606.
+  shell_->CreateShelf();
 }
 
 void WindowManager::SetScreenLocked(bool is_locked) {
@@ -158,12 +160,14 @@ RootWindowController* WindowManager::CreateRootWindowController(
       root_window_controller_ptr.get();
   root_window_controllers_.insert(std::move(root_window_controller_ptr));
 
-  FOR_EACH_OBSERVER(WindowManagerObserver, observers_,
-                    OnRootWindowControllerAdded(root_window_controller));
+  // TODO: this should be called when logged in. See http://crbug.com/654606.
+  root_window_controller->wm_root_window_controller()->CreateShelf();
 
-  FOR_EACH_OBSERVER(display::DisplayObserver,
-                    *screen_->display_list()->observers(),
-                    OnDisplayAdded(root_window_controller->display()));
+  for (auto& observer : observers_)
+    observer.OnRootWindowControllerAdded(root_window_controller);
+
+  for (auto& observer : *screen_->display_list()->observers())
+    observer.OnDisplayAdded(root_window_controller->display());
 
   return root_window_controller;
 }
@@ -193,8 +197,8 @@ void WindowManager::Shutdown() {
 
   // Observers can rely on WmShell from the callback. So notify the observers
   // before destroying it.
-  FOR_EACH_OBSERVER(WindowManagerObserver, observers_,
-                    OnWindowTreeClientDestroyed());
+  for (auto& observer : observers_)
+    observer.OnWindowTreeClientDestroyed();
 
   // Primary RootWindowController must be destroyed last.
   RootWindowController* primary_root_window_controller =

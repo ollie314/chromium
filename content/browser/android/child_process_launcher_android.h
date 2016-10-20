@@ -32,10 +32,6 @@ void StartChildProcess(
     const std::map<int, base::MemoryMappedFile::Region>& regions,
     const StartChildProcessCallback& callback);
 
-// Starts the background download process if it hasn't been started.
-// TODO(qinmin): pass the download parameters here and pass it to java side.
-void StartDownloadProcessIfNecessary();
-
 // Stops a child process based on the handle returned form
 // StartChildProcess.
 void StopChildProcess(base::ProcessHandle handle);
@@ -44,13 +40,6 @@ bool IsChildProcessOomProtected(base::ProcessHandle handle);
 
 void SetChildProcessInForeground(base::ProcessHandle handle,
                                  bool in_foreground);
-
-void RegisterViewSurface(int surface_id,
-                         const base::android::JavaRef<jobject>& j_surface);
-
-void UnregisterViewSurface(int surface_id);
-
-gl::ScopedJavaSurface GetViewSurface(int surface_id);
 
 void CreateSurfaceTextureSurface(int surface_texture_id,
                                  int client_id,

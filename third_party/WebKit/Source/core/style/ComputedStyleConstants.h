@@ -2,9 +2,11 @@
  * Copyright (C) 2000 Lars Knoll (knoll@kde.org)
  *           (C) 2000 Antti Koivisto (koivisto@kde.org)
  *           (C) 2000 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2003, 2005, 2006, 2007, 2008, 2009, 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2003, 2005, 2006, 2007, 2008, 2009, 2010 Apple Inc. All rights
+ * reserved.
  * Copyright (C) 2006 Graham Dennis (graham.dennis@gmail.com)
- * Copyright (C) 2009 Torch Mobile Inc. All rights reserved. (http://www.torchmobile.com/)
+ * Copyright (C) 2009 Torch Mobile Inc. All rights reserved.
+ * (http://www.torchmobile.com/)
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -36,9 +38,11 @@ namespace blink {
 // underlying type prevents msvc from interpreting enums as negative numbers.
 // See: crbug.com/628043
 
-// Sides used when drawing borders and outlines. The values should run clockwise from top.
+// Sides used when drawing borders and outlines. The values should run clockwise
+// from top.
 enum BoxSide { BSTop, BSRight, BSBottom, BSLeft };
 
+// See core/dom/stylerecalc.md for an explanation on what each state means
 enum StyleRecalcChange {
   NoChange,
   NoInherit,
@@ -56,7 +60,8 @@ enum PrintColorAdjust { PrintColorAdjustEconomy, PrintColorAdjustExact };
 // Static pseudo styles. Dynamic ones are produced on the fly.
 enum PseudoId {
   // The order must be NOP ID, public IDs, and then internal IDs.
-  // If you add or remove a public ID, you must update _pseudoBits in ComputedStyle.
+  // If you add or remove a public ID, you must update _pseudoBits in
+  // ComputedStyle.
   PseudoIdNone,
   PseudoIdFirstLine,
   PseudoIdFirstLetter,
@@ -91,8 +96,9 @@ enum ColumnSpan { ColumnSpanNone = 0, ColumnSpanAll };
 
 enum EBorderCollapse { BorderCollapseSeparate = 0, BorderCollapseCollapse = 1 };
 
-// These have been defined in the order of their precedence for border-collapsing. Do
-// not change this order! This order also must match the order in CSSValueKeywords.in.
+// These have been defined in the order of their precedence for
+// border-collapsing. Do not change this order! This order also must match the
+// order in CSSValueKeywords.in.
 enum EBorderStyle {
   BorderStyleNone,
   BorderStyleHidden,
@@ -262,7 +268,8 @@ enum LineBreak {
 
 enum EResize { RESIZE_NONE, RESIZE_BOTH, RESIZE_HORIZONTAL, RESIZE_VERTICAL };
 
-// The order of this enum must match the order of the list style types in CSSValueKeywords.in.
+// The order of this enum must match the order of the list style types in
+// CSSValueKeywords.in.
 enum EListStyleType {
   Disc,
   Circle,
@@ -328,7 +335,8 @@ enum EAnimPlayState { AnimPlayStatePlaying, AnimPlayStatePaused };
 
 enum EWhiteSpace { NORMAL, PRE, PRE_WRAP, PRE_LINE, NOWRAP, KHTML_NOWRAP };
 
-// The order of this enum must match the order of the text align values in CSSValueKeywords.in.
+// The order of this enum must match the order of the text align values in
+// CSSValueKeywords.in.
 enum ETextAlign {
   LEFT,
   RIGHT,
@@ -366,6 +374,22 @@ enum TextDecorationStyle {
   TextDecorationStyleWavy
 };
 
+static const size_t TextDecorationSkipBits = 3;
+enum TextDecorationSkip {
+  TextDecorationSkipNone = 0x0,
+  TextDecorationSkipObjects = 0x1,
+  TextDecorationSkipInk = 0x2
+};
+inline TextDecorationSkip operator|(TextDecorationSkip a,
+                                    TextDecorationSkip b) {
+  return TextDecorationSkip(static_cast<unsigned>(a) |
+                            static_cast<unsigned>(b));
+}
+inline TextDecorationSkip& operator|=(TextDecorationSkip& a,
+                                      TextDecorationSkip b) {
+  return a = a | b;
+}
+
 enum TextAlignLast {
   TextAlignLastAuto,
   TextAlignLastStart,
@@ -387,8 +411,9 @@ enum EBreak {
   BreakAvoid,
   BreakAvoidColumn,
   BreakAvoidPage,
-  // Values below are only allowed for break-after and break-before. Values above are also
-  // allowed for break-inside (in addition to break-after and break-before).
+  // Values below are only allowed for break-after and break-before. Values
+  // above are also allowed for break-inside (in addition to break-after and
+  // break-before).
   BreakValueLastAllowedForBreakInside = BreakAvoidPage,
   BreakColumn,
   BreakLeft,
@@ -397,7 +422,8 @@ enum EBreak {
   BreakRight,
   BreakVerso,
   BreakValueLastAllowedForBreakAfterAndBefore = BreakVerso,
-  BreakAlways  // Only needed by {page,-webkit-column}-break-{after,before} shorthands.
+  BreakAlways  // Only needed by {page,-webkit-column}-break-{after,before}
+               // shorthands.
 };
 
 enum class EEmptyCells : unsigned { Show, Hide };
@@ -448,7 +474,8 @@ enum ECursor {
   CURSOR_NONE
 };
 
-// The order of this enum must match the order of the display values in CSSValueKeywords.in.
+// The order of this enum must match the order of the display values in
+// CSSValueKeywords.in.
 enum class EDisplay : unsigned {
   Inline,
   Block,
@@ -625,7 +652,8 @@ inline Containment& operator|=(Containment& a, Containment b) {
 }
 
 enum ItemPosition {
-  ItemPositionAuto,  // It will mean 'normal' after running the StyleAdjuster to avoid resolving the initial values.
+  ItemPositionAuto,  // It will mean 'normal' after running the StyleAdjuster to
+                     // avoid resolving the initial values.
   ItemPositionNormal,
   ItemPositionStretch,
   ItemPositionBaseline,
@@ -670,7 +698,8 @@ enum ContentDistributionType {
   ContentDistributionStretch
 };
 
-// Reasonable maximum to prevent insane font sizes from causing crashes on some platforms (such as Windows).
+// Reasonable maximum to prevent insane font sizes from causing crashes on some
+// platforms (such as Windows).
 static const float maximumAllowedFontSize = 10000.0f;
 
 enum TextIndentLine { TextIndentFirstLine, TextIndentEachLine };

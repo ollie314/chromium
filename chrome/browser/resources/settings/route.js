@@ -96,6 +96,8 @@ cr.define('settings', function() {
   r.SIGN_OUT = r.BASIC.createChild('/signOut');
   r.CLEAR_BROWSER_DATA = r.ADVANCED.createChild('/clearBrowserData');
   r.RESET_DIALOG = r.ADVANCED.createChild('/resetProfileSettings');
+  r.TRIGGERED_RESET_DIALOG =
+      r.ADVANCED.createChild('/triggeredResetProfileSettings');
 
 <if expr="chromeos">
   r.INTERNET = r.BASIC.createSection('/internet', 'internet');
@@ -129,6 +131,7 @@ cr.define('settings', function() {
   r.KEYBOARD = r.DEVICE.createChild('/keyboard-overlay');
   r.DISPLAY = r.DEVICE.createChild('/display');
   r.STYLUS = r.DEVICE.createChild('/stylus');
+  r.STORAGE = r.DEVICE.createChild('/storage');
 </if>
 
   r.PRIVACY = r.ADVANCED.createSection('/privacy', 'privacy');
@@ -224,8 +227,14 @@ cr.define('settings', function() {
       assert(routeObservers_.delete(this));
     },
 
-    /** @abstract */
-    currentRouteChanged: assertNotReached,
+    /**
+     * @param {!settings.Route|undefined} opt_newRoute
+     * @param {!settings.Route|undefined} opt_oldRoute
+     * @abstract
+     */
+    currentRouteChanged: function(opt_newRoute, opt_oldRoute) {
+      assertNotReached();
+    },
   };
 
   /**

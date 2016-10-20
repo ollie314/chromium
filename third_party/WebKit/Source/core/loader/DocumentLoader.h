@@ -199,7 +199,7 @@ class CORE_EXPORT DocumentLoader
 
   void ensureWriter(const AtomicString& mimeType,
                     const KURL& overridingURL = KURL());
-  void endWriting(DocumentWriter*);
+  void endWriting();
 
   FrameLoader* frameLoader() const;
 
@@ -211,8 +211,8 @@ class CORE_EXPORT DocumentLoader
 
   void finishedLoading(double finishTime);
   void cancelLoadAfterXFrameOptionsOrCSPDenied(const ResourceResponse&);
-  void redirectReceived(Resource*,
-                        ResourceRequest&,
+  bool redirectReceived(Resource*,
+                        const ResourceRequest&,
                         const ResourceResponse&) final;
   void responseReceived(Resource*,
                         const ResourceResponse&,

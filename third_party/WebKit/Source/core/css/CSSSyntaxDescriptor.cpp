@@ -132,7 +132,6 @@ const CSSValue* consumeSingleType(const CSSSyntaxComponent& syntax,
                                   CSSParserTokenRange& range) {
   using namespace CSSPropertyParserHelpers;
 
-  // TODO(timloh): Calc values need to be normalized
   switch (syntax.m_type) {
     case CSSSyntaxType::Ident:
       if (range.peek().type() == IdentToken &&
@@ -153,7 +152,8 @@ const CSSValue* consumeSingleType(const CSSSyntaxComponent& syntax,
     case CSSSyntaxType::Color:
       return consumeColor(range, HTMLStandardMode);
     case CSSSyntaxType::Image:
-      // TODO(timloh): This probably needs a proper parser context for relative URL resolution.
+      // TODO(timloh): This probably needs a proper parser context for relative
+      // URL resolution.
       return consumeImage(range, strictCSSParserContext());
     case CSSSyntaxType::Url:
       return consumeUrl(range);
@@ -194,15 +194,19 @@ const CSSValue* consumeSyntaxComponent(const CSSSyntaxComponent& syntax,
   return result;
 }
 
-const CSSValue* CSSSyntaxDescriptor::parse(CSSParserTokenRange range) const {
-  if (isTokenStream())
-    return CSSVariableParser::parseRegisteredPropertyValue(range, false);
+const CSSValue* CSSSyntaxDescriptor::parse(CSSParserTokenRange range,
+                                           bool isAnimationTainted) const {
+  if (isTokenStream()) {
+    return CSSVariableParser::parseRegisteredPropertyValue(range, false,
+                                                           isAnimationTainted);
+  }
   range.consumeWhitespace();
   for (const CSSSyntaxComponent& component : m_syntaxComponents) {
     if (const CSSValue* result = consumeSyntaxComponent(component, range))
       return result;
   }
-  return CSSVariableParser::parseRegisteredPropertyValue(range, true);
+  return CSSVariableParser::parseRegisteredPropertyValue(range, true,
+                                                         isAnimationTainted);
 }
 
 }  // namespace blink

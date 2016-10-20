@@ -1,5 +1,6 @@
 /*
- * Copyright (C) 2007, 2008, 2009, 2010, 2011, 2012, 2013 Apple Inc. All rights reserved.
+ * Copyright (C) 2007, 2008, 2009, 2010, 2011, 2012, 2013 Apple Inc. All rights
+ * reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,6 +29,7 @@
 
 #include "bindings/core/v8/ActiveScriptWrappable.h"
 #include "bindings/core/v8/ScriptPromise.h"
+#include "bindings/core/v8/TraceWrapperMember.h"
 #include "core/CoreExport.h"
 #include "core/dom/ActiveDOMObject.h"
 #include "core/dom/ExceptionCode.h"
@@ -89,6 +91,7 @@ class CORE_EXPORT HTMLMediaElement : public HTMLElement,
 
   static void setMediaStreamRegistry(URLRegistry*);
   static bool isMediaStreamURL(const String& url);
+  static bool isHLSURL(const KURL&);
 
   DECLARE_VIRTUAL_TRACE();
 
@@ -216,7 +219,8 @@ class CORE_EXPORT HTMLMediaElement : public HTMLElement,
   void textTracksChanged();
   void notifyMediaPlayerOfTextTrackChanges();
 
-  // Implements the "forget the media element's media-resource-specific tracks" algorithm in the HTML5 spec.
+  // Implements the "forget the media element's media-resource-specific tracks"
+  // algorithm in the HTML5 spec.
   void forgetResourceSpecificTracks();
 
   void didAddTrackElement(HTMLTrackElement*);
@@ -289,9 +293,12 @@ class CORE_EXPORT HTMLMediaElement : public HTMLElement,
   // Returns the "effective media volume" value as specified in the HTML5 spec.
   double effectiveMediaVolume() const;
 
-  // Predicates also used when dispatching wrapper creation (cf. [SpecialWrapFor] IDL attribute usage.)
+  // Predicates also used when dispatching wrapper creation (cf.
+  // [SpecialWrapFor] IDL attribute usage.)
   virtual bool isHTMLAudioElement() const { return false; }
   virtual bool isHTMLVideoElement() const { return false; }
+
+  void videoWillBeDrawnToCanvas() const;
 
   // Temporary callback for crbug.com/487345,402044
   void notifyPositionMayHaveChanged(const IntRect&);
@@ -346,7 +353,7 @@ class CORE_EXPORT HTMLMediaElement : public HTMLElement,
   void defaultEventHandler(Event*) final;
 
   // ActiveDOMObject functions.
-  void stop() final;
+  void contextDestroyed() final;
 
   virtual void updateDisplayState() {}
 
@@ -397,9 +404,8 @@ class CORE_EXPORT HTMLMediaElement : public HTMLElement,
   void checkIfSeekNeeded();
   void addPlayedRange(double start, double end);
 
-  void scheduleEvent(
-      const AtomicString&
-          eventName);  // FIXME: Rename to scheduleNamedEvent for clarity.
+  // FIXME: Rename to scheduleNamedEvent for clarity.
+  void scheduleEvent(const AtomicString& eventName);
 
   // loading
   void invokeLoadAlgorithm();
@@ -451,8 +457,9 @@ class CORE_EXPORT HTMLMediaElement : public HTMLElement,
   bool stoppedDueToErrors() const;
   bool couldPlayIfEnoughData() const;
 
-  // Generally the presence of the loop attribute should be considered to mean playback
-  // has not "ended", as "ended" and "looping" are mutually exclusive. See
+  // Generally the presence of the loop attribute should be considered to mean
+  // playback has not "ended", as "ended" and "looping" are mutually exclusive.
+  // See
   // https://html.spec.whatwg.org/multipage/embedded-content.html#ended-playback
   enum class LoopCondition { Included, Ignored };
   bool endedPlayback(LoopCondition = LoopCondition::Included) const;
@@ -480,10 +487,11 @@ class CORE_EXPORT HTMLMediaElement : public HTMLElement,
   enum DirectionOfPlayback { Backward, Forward };
   DirectionOfPlayback getDirectionOfPlayback() const;
 
-  // Creates placeholder AudioTrack and/or VideoTrack objects when WebMemediaPlayer objects
-  // advertise they have audio and/or video, but don't explicitly signal them via
-  // addAudioTrack() and addVideoTrack().
-  // FIXME: Remove this once all WebMediaPlayer implementations properly report their track info.
+  // Creates placeholder AudioTrack and/or VideoTrack objects when
+  // WebMemediaPlayer objects advertise they have audio and/or video, but don't
+  // explicitly signal them via addAudioTrack() and addVideoTrack().
+  // FIXME: Remove this once all WebMediaPlayer implementations properly report
+  // their track info.
   void createPlaceholderTracksIfNecessary();
 
   // Sets the selected/enabled tracks if they aren't set before we initially
@@ -632,9 +640,9 @@ class CORE_EXPORT HTMLMediaElement : public HTMLElement,
   // Whether this element is in overlay fullscreen mode.
   bool m_inOverlayFullscreenVideo : 1;
 
-  Member<AudioTrackList> m_audioTracks;
-  Member<VideoTrackList> m_videoTracks;
-  Member<TextTrackList> m_textTracks;
+  TraceWrapperMember<AudioTrackList> m_audioTracks;
+  TraceWrapperMember<VideoTrackList> m_videoTracks;
+  TraceWrapperMember<TextTrackList> m_textTracks;
   HeapVector<Member<TextTrack>> m_textTracksWhenResourceSelectionBegan;
 
   Member<CueTimeline> m_cueTimeline;
@@ -647,7 +655,8 @@ class CORE_EXPORT HTMLMediaElement : public HTMLElement,
   ExceptionCode m_playPromiseErrorCode;
 
   // This is a weak reference, since m_audioSourceNode holds a reference to us.
-  // TODO(Oilpan): Consider making this a strongly traced pointer with oilpan where strong cycles are not a problem.
+  // TODO(Oilpan): Consider making this a strongly traced pointer with oilpan
+  // where strong cycles are not a problem.
   GC_PLUGIN_IGNORE("http://crbug.com/404577")
   WeakMember<AudioSourceProviderClient> m_audioSourceNode;
 

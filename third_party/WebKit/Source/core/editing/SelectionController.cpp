@@ -1,5 +1,6 @@
 /*
- * Copyright (C) 2006, 2007, 2008, 2009, 2010, 2011 Apple Inc. All rights reserved.
+ * Copyright (C) 2006, 2007, 2008, 2009, 2010, 2011 Apple Inc. All rights
+ * reserved.
  * Copyright (C) 2006 Alexey Proskuryakov (ap@webkit.org)
  * Copyright (C) 2012 Digia Plc. and/or its subsidiary(-ies)
  * Copyright (C) 2015 Google Inc. All rights reserved.
@@ -132,7 +133,8 @@ bool SelectionController::handleMousePressEventSingleClick(
   if (!(innerNode && innerNode->layoutObject() && m_mouseDownMayStartSelect))
     return false;
 
-  // Extend the selection if the Shift key is down, unless the click is in a link or image.
+  // Extend the selection if the Shift key is down, unless the click is in a
+  // link or image.
   bool extendSelection = isExtendingSelection(event);
 
   // Don't restart the selection when the mouse is pressed on an
@@ -157,9 +159,14 @@ bool SelectionController::handleMousePressEventSingleClick(
   TextGranularity granularity = CharacterGranularity;
 
   if (extendSelection && !newSelection.isNone()) {
-    const VisibleSelectionInFlatTree selectionInUserSelectAll(
-        expandSelectionToRespectUserSelectAll(innerNode,
-                                              createVisibleSelection(pos)));
+    // Note: "fast/events/shift-click-user-select-none.html" makes
+    // |pos.isNull()| true.
+    SelectionInFlatTree::Builder builder;
+    if (pos.isNotNull())
+      builder.collapse(pos);
+    const VisibleSelectionInFlatTree& selectionInUserSelectAll =
+        expandSelectionToRespectUserSelectAll(
+            innerNode, createVisibleSelection(builder.build()));
     if (selectionInUserSelectAll.isRange()) {
       if (selectionInUserSelectAll.start().compareTo(newSelection.start()) < 0)
         pos = selectionInUserSelectAll.start();
@@ -189,11 +196,18 @@ bool SelectionController::handleMousePressEventSingleClick(
       newSelection.expandUsingGranularity(selection().granularity());
     }
   } else if (m_selectionState != SelectionState::ExtendedSelection) {
-    newSelection = expandSelectionToRespectUserSelectAll(
-        innerNode, createVisibleSelection(visiblePos));
+    if (visiblePos.isNull()) {
+      newSelection = VisibleSelectionInFlatTree();
+    } else {
+      SelectionInFlatTree::Builder builder;
+      builder.collapse(visiblePos.toPositionWithAffinity());
+      newSelection = expandSelectionToRespectUserSelectAll(
+          innerNode, createVisibleSelection(builder.build()));
+    }
   }
 
-  // Updating the selection is considered side-effect of the event and so it doesn't impact the handled state.
+  // Updating the selection is considered side-effect of the event and so it
+  // doesn't impact the handled state.
   updateSelectionForMouseDownDispatchingSelectStart(innerNode, newSelection,
                                                     granularity);
   return false;
@@ -225,7 +239,8 @@ void SelectionController::updateSelectionForMouseDrag(
     return;
 
   // Restart the selection if this is the first mouse move. This work is usually
-  // done in handleMousePressEvent, but not if the mouse press was on an existing selection.
+  // done in handleMousePressEvent, but not if the mouse press was on an
+  // existing selection.
   VisibleSelectionInFlatTree newSelection =
       selection().visibleSelection<EditingInFlatTreeStrategy>();
 
@@ -253,7 +268,9 @@ void SelectionController::updateSelectionForMouseDrag(
   if (m_selectionState != SelectionState::ExtendedSelection) {
     // Always extend selection here because it's caused by a mouse drag
     m_selectionState = SelectionState::ExtendedSelection;
-    newSelection = createVisibleSelection(targetPosition);
+    SelectionInFlatTree::Builder builder;
+    builder.collapse(targetPosition.toPositionWithAffinity());
+    newSelection = createVisibleSelection(builder.build());
   }
 
   if (RuntimeEnabledFeatures::userSelectAllEnabled()) {
@@ -271,7 +288,8 @@ void SelectionController::updateSelectionForMouseDrag(
           PositionInFlatTree::afterNode(rootUserSelectAllForMousePressNode),
           CanCrossEditingBoundary));
     } else {
-      // Reset base for user select all when base is inside user-select-all area and extent < base.
+      // Reset base for user select all when base is inside user-select-all area
+      // and extent < base.
       if (rootUserSelectAllForMousePressNode) {
         PositionInFlatTree eventPosition = toPositionInFlatTree(
             target->layoutObject()
@@ -370,7 +388,9 @@ void SelectionController::selectClosestWordFromHitTestResult(
   const VisiblePositionInFlatTree& pos =
       visiblePositionOfHitTestResult(adjustedHitTestResult);
   if (pos.isNotNull()) {
-    newSelection = createVisibleSelection(pos);
+    SelectionInFlatTree::Builder builder;
+    builder.collapse(pos.toPositionWithAffinity());
+    newSelection = createVisibleSelection(builder.build());
     newSelection.expandUsingGranularity(WordGranularity);
   }
 
@@ -545,7 +565,9 @@ bool SelectionController::handleMousePressEventTripleClick(
   const VisiblePositionInFlatTree& pos =
       visiblePositionOfHitTestResult(event.hitTestResult());
   if (pos.isNotNull()) {
-    newSelection = createVisibleSelection(pos);
+    SelectionInFlatTree::Builder builder;
+    builder.collapse(pos.toPositionWithAffinity());
+    newSelection = createVisibleSelection(builder.build());
     newSelection.expandUsingGranularity(ParagraphGranularity);
   }
 
@@ -637,13 +659,14 @@ bool SelectionController::handleMouseReleaseEvent(
 
     VisibleSelectionInFlatTree newSelection;
     Node* node = event.innerNode();
-    bool caretBrowsing =
-        m_frame->settings() && m_frame->settings()->caretBrowsingEnabled();
-    if (node && node->layoutObject() &&
-        (caretBrowsing || hasEditableStyle(*node))) {
+    if (node && node->layoutObject() && hasEditableStyle(*node)) {
       const VisiblePositionInFlatTree pos =
           visiblePositionOfHitTestResult(event.hitTestResult());
-      newSelection = createVisibleSelection(pos);
+      if (pos.isNotNull()) {
+        SelectionInFlatTree::Builder builder;
+        builder.collapse(pos.toPositionWithAffinity());
+        newSelection = createVisibleSelection(builder.build());
+      }
     }
 
     setSelectionIfNeeded(selection(), newSelection);
@@ -658,7 +681,8 @@ bool SelectionController::handleMouseReleaseEvent(
   if (event.event().pointerProperties().button ==
           WebPointerProperties::Button::Middle &&
       !event.isOverLink()) {
-    // Ignore handled, since we want to paste to where the caret was placed anyway.
+    // Ignore handled, since we want to paste to where the caret was placed
+    // anyway.
     handled = handlePasteGlobalSelection(event.event()) || handled;
   }
 
@@ -747,11 +771,12 @@ void SelectionController::sendContextMenuEvent(
     const LayoutPoint& position) {
   if (!selection().isAvailable())
     return;
-  if (selection().contains(position) || mev.scrollbar()
-      // FIXME: In the editable case, word selection sometimes selects content that isn't underneath the mouse.
-      // If the selection is non-editable, we do word selection to make it easier to use the contextual menu items
-      // available for text selections.  But only if we're above text.
-      ||
+  if (selection().contains(position) || mev.scrollbar() ||
+      // FIXME: In the editable case, word selection sometimes selects content
+      // that isn't underneath the mouse.
+      // If the selection is non-editable, we do word selection to make it
+      // easier to use the contextual menu items available for text selections.
+      // But only if we're above text.
       !(selection().isContentEditable() ||
         (mev.innerNode() && mev.innerNode()->isTextNode())))
     return;
@@ -785,8 +810,13 @@ void SelectionController::passMousePressEventToSubframe(
 
   const VisiblePositionInFlatTree& visiblePos =
       visiblePositionOfHitTestResult(mev.hitTestResult());
-  VisibleSelectionInFlatTree newSelection = createVisibleSelection(visiblePos);
-  selection().setSelection(newSelection);
+  if (visiblePos.isNull()) {
+    selection().setSelection(VisibleSelectionInFlatTree());
+    return;
+  }
+  SelectionInFlatTree::Builder builder;
+  builder.collapse(visiblePos.toPositionWithAffinity());
+  selection().setSelection(createVisibleSelection(builder.build()));
 }
 
 void SelectionController::initializeSelectionState() {

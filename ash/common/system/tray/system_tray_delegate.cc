@@ -20,6 +20,9 @@ NetworkIconInfo::~NetworkIconInfo() {}
 BluetoothDeviceInfo::BluetoothDeviceInfo()
     : connected(false), connecting(false), paired(false) {}
 
+BluetoothDeviceInfo::BluetoothDeviceInfo(const BluetoothDeviceInfo& other) =
+    default;
+
 BluetoothDeviceInfo::~BluetoothDeviceInfo() {}
 
 UpdateInfo::UpdateInfo()
@@ -34,10 +37,6 @@ SystemTrayDelegate::SystemTrayDelegate() {}
 SystemTrayDelegate::~SystemTrayDelegate() {}
 
 void SystemTrayDelegate::Initialize() {}
-
-bool SystemTrayDelegate::GetTrayVisibilityOnStartup() {
-  return false;
-}
 
 LoginStatus SystemTrayDelegate::GetUserLoginStatus() const {
   return LoginStatus::NOT_LOGGED_IN;
@@ -82,12 +81,6 @@ bool SystemTrayDelegate::ShouldShowSettings() {
 }
 
 void SystemTrayDelegate::ShowSetTimeDialog() {}
-
-void SystemTrayDelegate::ShowNetworkSettingsForGuid(const std::string& guid) {}
-
-bool SystemTrayDelegate::ShouldShowDisplayNotification() {
-  return false;
-}
 
 void SystemTrayDelegate::ShowEnterpriseInfo() {}
 

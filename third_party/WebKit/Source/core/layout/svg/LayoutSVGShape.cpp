@@ -47,15 +47,13 @@ namespace blink {
 
 LayoutSVGShape::LayoutSVGShape(SVGGeometryElement* node)
     : LayoutSVGModelObject(node),
-      m_needsBoundariesUpdate(
-          false)  // Default is false, the cached rects are empty from the beginning.
-      ,
-      m_needsShapeUpdate(
-          true)  // Default is true, so we grab a Path object once from SVGGeometryElement.
-      ,
-      m_needsTransformUpdate(
-          true)  // Default is true, so we grab a AffineTransform object once from SVGGeometryElement.
-{}
+      // Default is false, the cached rects are empty from the beginning.
+      m_needsBoundariesUpdate(false),
+      // Default is true, so we grab a Path object once from SVGGeometryElement.
+      m_needsShapeUpdate(true),
+      // Default is true, so we grab a AffineTransform object once from
+      // SVGGeometryElement.
+      m_needsTransformUpdate(true) {}
 
 LayoutSVGShape::~LayoutSVGShape() {}
 
@@ -87,7 +85,8 @@ FloatRect LayoutSVGShape::hitTestStrokeBoundingBox() const {
   if (style()->svgStyle().hasStroke())
     return m_strokeBoundingBox;
 
-  // Implementation of http://dev.w3.org/fxtf/css-masking-1/#compute-stroke-bounding-box
+  // Implementation of
+  // http://dev.w3.org/fxtf/css-masking-1/#compute-stroke-bounding-box
   // for the <rect> / <ellipse> / <circle> case except that we ignore whether
   // the stroke is none.
 
@@ -216,7 +215,8 @@ Path* LayoutSVGShape::nonScalingStrokePath(
 AffineTransform LayoutSVGShape::nonScalingStrokeTransform() const {
   AffineTransform t = toSVGGraphicsElement(element())->getScreenCTM(
       SVGGraphicsElement::DisallowStyleUpdate);
-  // Width of non-scaling stroke is independent of translation, so zero it out here.
+  // Width of non-scaling stroke is independent of translation, so zero it out
+  // here.
   t.setE(0);
   t.setF(0);
   return t;

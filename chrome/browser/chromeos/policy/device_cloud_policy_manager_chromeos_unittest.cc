@@ -197,8 +197,9 @@ class DeviceCloudPolicyManagerChromeOSTest
     base::RunLoop loop;
     chromeos::InstallAttributes::LockResult result;
     install_attributes_->LockDevice(
-        PolicyBuilder::kFakeUsername,
         DEVICE_MODE_ENTERPRISE,
+        PolicyBuilder::kFakeDomain,
+        std::string(),  // realm
         PolicyBuilder::kFakeDeviceId,
         base::Bind(&CopyLockResult, &loop, &result));
     loop.Run();
@@ -613,7 +614,8 @@ class DeviceCloudPolicyManagerChromeOSEnrollmentTest
     if (ShouldRegisterWithCert()) {
       em::CertificateBasedDeviceRegistrationData data;
       const em::SignedData& signed_request =
-          register_request_.cert_based_register_request().signed_request();
+          register_request_.certificate_based_register_request()
+              .signed_request();
       EXPECT_TRUE(data.ParseFromString(signed_request.data().substr(
           0,
           signed_request.data().size() - signed_request.extra_data_bytes())));

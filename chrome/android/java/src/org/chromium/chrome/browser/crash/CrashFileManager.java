@@ -4,19 +4,24 @@
 
 package org.chromium.chrome.browser.crash;
 
+import android.support.annotation.Nullable;
+
 import org.chromium.base.Log;
 import org.chromium.base.VisibleForTesting;
 
 import java.io.File;
 import java.io.FilenameFilter;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.Date;
 import java.util.HashSet;
+import java.util.List;
+import java.util.NoSuchElementException;
+import java.util.Scanner;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
@@ -41,7 +46,7 @@ public class CrashFileManager {
             Pattern.compile("\\.dmp([0-9]+)$\\z");
 
     private static final Pattern MINIDUMP_PATTERN =
-            Pattern.compile("\\.dmp([0-9]*)(\\.try[0-9])?\\z");
+            Pattern.compile("\\.dmp([0-9]*)(\\.try([0-9]+))?\\z");
 
     private static final Pattern UPLOADED_MINIDUMP_PATTERN = Pattern.compile("\\.up([0-9]*)\\z");
 
@@ -99,7 +104,7 @@ public class CrashFileManager {
     }
 
     public File[] getMinidumpWithoutLogcat() {
-        return getMatchingFiles(MINIDUMP_FIRST_TRY_PATTERN);
+        return listCrashFiles(MINIDUMP_FIRST_TRY_PATTERN);
     }
 
     public static boolean isMinidumpMIMEFirstTry(String path) {
@@ -169,16 +174,14 @@ public class CrashFileManager {
         int tryIndex = filename.lastIndexOf(UPLOAD_ATTEMPT_DELIMITER);
         if (tryIndex >= 0) {
             tryIndex += UPLOAD_ATTEMPT_DELIMITER.length();
-            // To avoid out of bound exceptions
-            if (tryIndex < filename.length()) {
-                // We don't try more than 3 times.
-                String numTriesString = filename.substring(
-                        tryIndex, tryIndex + 1);
-                try {
-                    return Integer.parseInt(numTriesString);
-                } catch (NumberFormatException ignored) {
-                    return 0;
-                }
+            String numTriesString = filename.substring(tryIndex);
+            Scanner numTriesScanner = new Scanner(numTriesString).useDelimiter("[^0-9]+");
+            try {
+                int nextInt = numTriesScanner.nextInt();
+                // Only return the number if it occurs just after the UPLOAD_ATTEMPT_DELIMITER.
+                return numTriesString.indexOf(Integer.toString(nextInt)) == 0 ? nextInt : 0;
+            } catch (NoSuchElementException e) {
+                return 0;
             }
         }
         return 0;
@@ -237,26 +240,13 @@ public class CrashFileManager {
         mCacheDir = cacheDir;
     }
 
-    public File[] getAllMinidumpFiles() {
-        return getMatchingFiles(MINIDUMP_PATTERN);
-    }
-
-    public File[] getAllMinidumpFilesSorted() {
-        File[] minidumps = getAllMinidumpFiles();
-        Arrays.sort(minidumps, sFileComparator);
-        return minidumps;
-    }
-
-    @VisibleForTesting
-    protected File[] getAllFilesSorted() {
-        File crashDir = getCrashDirectoryIfExists();
-        if (crashDir == null) {
-            return new File[] {};
-        }
-
-        File[] files = crashDir.listFiles();
-        Arrays.sort(files, sFileComparator);
-        return files;
+    /**
+     * Returns all minidump files that could still be uploaded, sorted by modification time stamp.
+     * Forced uploads are not included. Only returns files that we have tried to upload less
+     * than {@param maxTries} number of times.
+     */
+    public File[] getAllMinidumpFiles(int maxTries) {
+        return getFilesBelowMaxTries(listCrashFiles(MINIDUMP_PATTERN), maxTries);
     }
 
     public void cleanOutAllNonFreshMinidumpFiles() {
@@ -268,7 +258,7 @@ public class CrashFileManager {
         }
 
         Set<String> recentCrashes = new HashSet<String>();
-        for (File f : getAllFilesSorted()) {
+        for (File f : listCrashFiles(null)) {
             // The uploads.log file should always be preserved, as it stores the metadata that
             // powers the chrome://crashes UI.
             if (f.getName().equals(CRASH_DUMP_LOGFILE)) {
@@ -295,48 +285,52 @@ public class CrashFileManager {
         }
     }
 
+    /**
+     * Filters a set of files to keep the ones we have tried to upload only a few times.
+     * Given a set of files {@param unfilteredFiles}, returns only the files in that set which we
+     * have tried to upload less than {@param maxTries} times.
+     */
     @VisibleForTesting
-    File[] getMatchingFiles(final Pattern pattern) {
-        // Get dump dir and get all files with specified suffix. The path
-        // constructed here must match chrome_paths.cc (see case
-        // chrome::DIR_CRASH_DUMPS).
-        File crashDir = getCrashDirectoryIfExists();
-        if (crashDir == null) {
+    static File[] getFilesBelowMaxTries(File[] unfilteredFiles, int maxTries) {
+        List<File> filesBelowMaxTries = new ArrayList<>(unfilteredFiles.length);
+        for (File file : unfilteredFiles) {
+            if (readAttemptNumber(file.getName()) < maxTries) {
+                filesBelowMaxTries.add(file);
+            }
+        }
+        return filesBelowMaxTries.toArray(new File[filesBelowMaxTries.size()]);
+    }
+
+    @VisibleForTesting
+    File[] listCrashFiles(@Nullable final Pattern pattern) {
+        File crashDir = getCrashDirectory();
+
+        FilenameFilter filter = null;
+        if (pattern != null) {
+            filter = new FilenameFilter() {
+                @Override
+                public boolean accept(File dir, String filename) {
+                    return pattern.matcher(filename).find();
+                }
+            };
+        }
+        File[] minidumps = crashDir.listFiles(filter);
+        if (minidumps == null) {
+            Log.w(TAG, crashDir.getAbsolutePath() + " does not exist or is not a directory");
             return new File[] {};
         }
-        File[] minidumps = crashDir.listFiles(new FilenameFilter() {
-            @Override
-            public boolean accept(File dir, String filename) {
-                Matcher match = pattern.matcher(filename);
-                int tries = readAttemptNumber(filename);
-                return match.find() && tries < MinidumpUploadService.MAX_TRIES_ALLOWED;
-            }
-        });
+        Arrays.sort(minidumps, sFileComparator);
         return minidumps;
     }
 
     @VisibleForTesting
     File[] getAllUploadedFiles() {
-        return getMatchingFiles(UPLOADED_MINIDUMP_PATTERN);
+        return listCrashFiles(UPLOADED_MINIDUMP_PATTERN);
     }
 
     @VisibleForTesting
     File getCrashDirectory() {
         return new File(mCacheDir, CRASH_DUMP_DIR);
-    }
-
-    @VisibleForTesting
-    File getCrashDirectoryIfExists() {
-        File crashDirectory = getCrashDirectory();
-        if (!crashDirectory.exists()) {
-            Log.w(TAG, crashDirectory.getAbsolutePath() + " does not exist!");
-            return null;
-        }
-        if (!crashDirectory.isDirectory()) {
-            Log.w(TAG, crashDirectory.getAbsolutePath() + " is not a directory!");
-            return null;
-        }
-        return crashDirectory;
     }
 
     public File createNewTempFile(String name) throws IOException {
@@ -365,7 +359,7 @@ public class CrashFileManager {
      * @return The matching File, or null if no matching file is found.
      */
     File getCrashFileWithLocalId(String localId) {
-        for (File f : getAllFilesSorted()) {
+        for (File f : listCrashFiles(null)) {
             // Only match non-uploaded or previously skipped files. In particular, do not match
             // successfully uploaded files; nor files which are not minidump files, such as logcat
             // files.
@@ -388,6 +382,6 @@ public class CrashFileManager {
     }
 
     private File[] getAllTempFiles() {
-        return getMatchingFiles(TMP_PATTERN);
+        return listCrashFiles(TMP_PATTERN);
     }
 }

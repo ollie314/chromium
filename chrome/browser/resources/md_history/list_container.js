@@ -41,6 +41,14 @@ Polymer({
     this.initializeResults_(info, results);
     this.closeMenu_();
 
+    if (info.term && !this.queryState.incremental) {
+      Polymer.IronA11yAnnouncer.requestAvailability();
+      this.fire('iron-announce', {
+        text:
+            md_history.HistoryItem.searchResultsTitle(results.length, info.term)
+      });
+    }
+
     if (this.selectedPage_ == 'grouped-list') {
       this.$$('#grouped-list').historyData = results;
       return;

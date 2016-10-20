@@ -227,6 +227,14 @@ class PersistentBase {
   }
 
   void uninitialize() {
+    // TODO(haraken): This is a short-term hack to prevent use-after-frees
+    // during a shutdown sequence.
+    // 1) blink::shutdown() frees the underlying storage for persistent nodes.
+    // 2) ~MessageLoop() destructs some Chromium-side objects that hold
+    //    Persistent. It touches the underlying storage and crashes.
+    if (WTF::isShutdown())
+      return;
+
     if (crossThreadnessConfiguration == CrossThreadPersistentConfiguration) {
       if (acquireLoad(reinterpret_cast<void* volatile*>(&m_persistentNode)))
         ProcessHeap::crossThreadPersistentRegion().freePersistentNode(
@@ -453,6 +461,11 @@ class CrossThreadPersistent
   CrossThreadPersistent(WTF::HashTableDeletedValueType x) : Parent(x) {}
 
   T* atomicGet() { return Parent::atomicGet(); }
+
+  // Instead of using release(), assign then clear() instead.
+  // Using release() with per thread heap enabled can cause the object to be
+  // destroyed before assigning it to a new handle.
+  T* release() = delete;
 
   template <typename U>
   CrossThreadPersistent& operator=(U* other) {

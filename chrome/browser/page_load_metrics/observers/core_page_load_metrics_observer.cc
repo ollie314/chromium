@@ -73,11 +73,6 @@ void RecordFirstMeaningfulPaintStatus(
 
 namespace internal {
 
-const char kHistogramCommit[] = "PageLoad.Timing2.NavigationToCommit";
-
-const char kBackgroundHistogramCommit[] =
-    "PageLoad.Timing2.NavigationToCommit.Background";
-
 const char kHistogramDomContentLoaded[] =
     "PageLoad.DocumentTiming.NavigationToDOMContentLoadedEventFired";
 const char kBackgroundHistogramDomContentLoaded[] =
@@ -167,17 +162,9 @@ const char kHistogramLoadTypeParseStartForwardBackNoStore[] =
 const char kHistogramLoadTypeParseStartNewNavigation[] =
     "PageLoad.ParseTiming.NavigationToParseStart.LoadType.NewNavigation";
 
-const char kHistogramFirstBackground[] =
-    "PageLoad.Timing2.NavigationToFirstBackground";
 const char kHistogramFirstForeground[] =
     "PageLoad.Timing2.NavigationToFirstForeground";
 
-const char kHistogramBackgroundBeforePaint[] =
-    "PageLoad.Timing2.NavigationToFirstBackground.AfterCommit.BeforePaint";
-const char kHistogramBackgroundBeforeCommit[] =
-    "PageLoad.Timing2.NavigationToFirstBackground.BeforeCommit";
-const char kHistogramBackgroundDuringParse[] =
-    "PageLoad.Timing2.NavigationToFirstBackground.DuringParse";
 const char kHistogramFailedProvisionalLoad[] =
     "PageLoad.Timing2.NavigationToFailedProvisionalLoad";
 
@@ -193,6 +180,9 @@ const char kHistogramTotalRequestsParseStop[] =
 
 const char kRapporMetricsNameCoarseTiming[] =
     "PageLoad.CoarseTiming.NavigationToFirstContentfulPaint";
+
+const char kRapporMetricsNameFirstMeaningfulPaintNotRecorded[] =
+    "PageLoad.Experimental.PaintTiming.FirstMeaningfulPaintNotRecorded";
 
 const char kHistogramFirstContentfulPaintUserInitiated[] =
     "PageLoad.PaintTiming.NavigationToFirstContentfulPaint.UserInitiated";
@@ -512,11 +502,6 @@ void CorePageLoadMetricsObserver::OnComplete(
 void CorePageLoadMetricsObserver::OnFailedProvisionalLoad(
     const page_load_metrics::FailedProvisionalLoadInfo& failed_load_info,
     const page_load_metrics::PageLoadExtraInfo& extra_info) {
-  if (extra_info.started_in_foreground && extra_info.first_background_time) {
-    PAGE_LOAD_HISTOGRAM(internal::kHistogramBackgroundBeforeCommit,
-                        extra_info.first_background_time.value());
-  }
-
   // Only handle actual failures; provisional loads that failed due to another
   // committed load or due to user action are recorded in
   // AbortsPageLoadMetricsObserver.
@@ -568,34 +553,9 @@ void CorePageLoadMetricsObserver::OnUserInput(
 void CorePageLoadMetricsObserver::RecordTimingHistograms(
     const page_load_metrics::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& info) {
-  const base::TimeDelta time_to_commit = info.time_to_commit.value();
-  if (WasStartedInForegroundOptionalEventInForeground(info.time_to_commit,
-                                                      info)) {
-    PAGE_LOAD_HISTOGRAM(internal::kHistogramCommit, time_to_commit);
-  } else {
-    PAGE_LOAD_HISTOGRAM(internal::kBackgroundHistogramCommit, time_to_commit);
-  }
-
   // Log time to first foreground / time to first background. Log counts that we
   // started a relevant page load in the foreground / background.
-  if (info.started_in_foreground) {
-    if (info.first_background_time) {
-      const base::TimeDelta first_background_time =
-          info.first_background_time.value();
-
-      PAGE_LOAD_HISTOGRAM(internal::kHistogramFirstBackground,
-                          first_background_time);
-      if (!timing.first_paint || timing.first_paint > first_background_time) {
-        PAGE_LOAD_HISTOGRAM(internal::kHistogramBackgroundBeforePaint,
-                            first_background_time);
-      }
-      if (timing.parse_start && first_background_time >= timing.parse_start &&
-          (!timing.parse_stop || timing.parse_stop > first_background_time)) {
-        PAGE_LOAD_HISTOGRAM(internal::kHistogramBackgroundDuringParse,
-                            first_background_time);
-      }
-    }
-  } else {
+  if (!info.started_in_foreground) {
     if (info.first_foreground_time)
       PAGE_LOAD_HISTOGRAM(internal::kHistogramFirstForeground,
                           info.first_foreground_time.value());
@@ -621,26 +581,34 @@ void CorePageLoadMetricsObserver::RecordRappor(
   rappor::RapporService* rappor_service = g_browser_process->rappor_service();
   if (!rappor_service)
     return;
-  if (!info.time_to_commit)
+  if (info.committed_url.is_empty())
     return;
-  DCHECK(!info.committed_url.is_empty());
+
   // Log the eTLD+1 of sites that show poor loading performance.
-  if (!WasStartedInForegroundOptionalEventInForeground(
+  if (WasStartedInForegroundOptionalEventInForeground(
           timing.first_contentful_paint, info)) {
-    return;
+    std::unique_ptr<rappor::Sample> sample =
+        rappor_service->CreateSample(rappor::UMA_RAPPOR_TYPE);
+    sample->SetStringField(
+        "Domain",
+        rappor::GetDomainAndRegistrySampleFromGURL(info.committed_url));
+    uint64_t bucket_index =
+        RapporHistogramBucketIndex(timing.first_contentful_paint.value());
+    sample->SetFlagsField("Bucket", uint64_t(1) << bucket_index,
+                          kNumRapporHistogramBuckets);
+    // The IsSlow flag is just a one bit boolean if the first contentful paint
+    // was > 10s.
+    sample->SetFlagsField(
+        "IsSlow", timing.first_contentful_paint.value().InSecondsF() >= 10, 1);
+    rappor_service->RecordSampleObj(internal::kRapporMetricsNameCoarseTiming,
+                                    std::move(sample));
   }
-  std::unique_ptr<rappor::Sample> sample =
-      rappor_service->CreateSample(rappor::UMA_RAPPOR_TYPE);
-  sample->SetStringField(
-      "Domain", rappor::GetDomainAndRegistrySampleFromGURL(info.committed_url));
-  uint64_t bucket_index =
-      RapporHistogramBucketIndex(timing.first_contentful_paint.value());
-  sample->SetFlagsField("Bucket", uint64_t(1) << bucket_index,
-                        kNumRapporHistogramBuckets);
-  // The IsSlow flag is just a one bit boolean if the first contentful paint
-  // was > 10s.
-  sample->SetFlagsField(
-      "IsSlow", timing.first_contentful_paint.value().InSecondsF() >= 10, 1);
-  rappor_service->RecordSampleObj(internal::kRapporMetricsNameCoarseTiming,
-                                  std::move(sample));
+
+  // Log the eTLD+1 of sites that did not report first meaningful paint.
+  if (timing.first_paint && !timing.first_meaningful_paint) {
+    rappor::SampleDomainAndRegistryFromGURL(
+        rappor_service,
+        internal::kRapporMetricsNameFirstMeaningfulPaintNotRecorded,
+        info.committed_url);
+  }
 }

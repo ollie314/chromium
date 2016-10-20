@@ -207,6 +207,8 @@ WebInspector.FileSystemWorkspaceBinding.FileSystem = function(fileSystemWorkspac
     this.populate();
 }
 
+WebInspector.FileSystemWorkspaceBinding._metadata = Symbol("FileSystemWorkspaceBinding.Metadata");
+
 WebInspector.FileSystemWorkspaceBinding.FileSystem.prototype = {
     /**
      * @return {string}
@@ -223,6 +225,32 @@ WebInspector.FileSystemWorkspaceBinding.FileSystem.prototype = {
     _filePathForUISourceCode: function(uiSourceCode)
     {
         return uiSourceCode.url().substring(this._fileSystemPath.length);
+    },
+
+    /**
+     * @override
+     * @param {!WebInspector.UISourceCode} uiSourceCode
+     * @return {!Promise<?WebInspector.UISourceCodeMetadata>}
+     */
+    requestMetadata: function(uiSourceCode)
+    {
+        if (uiSourceCode[WebInspector.FileSystemWorkspaceBinding._metadata])
+            return uiSourceCode[WebInspector.FileSystemWorkspaceBinding._metadata];
+        var relativePath = this._filePathForUISourceCode(uiSourceCode);
+        var promise = this._fileSystem.getMetadata(relativePath).then(onMetadata);
+        uiSourceCode[WebInspector.FileSystemWorkspaceBinding._metadata] = promise;
+        return promise;
+
+        /**
+         * @param {?{modificationTime: !Date, size: number}} metadata
+         * @return {?WebInspector.UISourceCodeMetadata}
+         */
+        function onMetadata(metadata)
+        {
+            if (!metadata)
+                return null;
+            return new WebInspector.UISourceCodeMetadata(metadata.modificationTime, metadata.size);
+        }
     },
 
     /**
@@ -412,7 +440,22 @@ WebInspector.FileSystemWorkspaceBinding.FileSystem.prototype = {
 
     populate: function()
     {
-        this._fileSystem.requestFilesRecursive("", this._addFile.bind(this));
+        var chunkSize = 1000;
+        var filePaths = this._fileSystem.filePaths();
+        reportFileChunk.call(this, 0);
+
+        /**
+         * @param {number} from
+         * @this {WebInspector.FileSystemWorkspaceBinding.FileSystem}
+         */
+        function reportFileChunk(from)
+        {
+            var to = Math.min(from + chunkSize, filePaths.length);
+            for (var i = from; i < to; ++i)
+                this._addFile(filePaths[i]);
+            if (to < filePaths.length)
+                setTimeout(reportFileChunk.bind(this, to), 100);
+        }
     },
 
     /**
@@ -499,9 +542,6 @@ WebInspector.FileSystemWorkspaceBinding.FileSystem.prototype = {
      */
     _addFile: function(filePath)
     {
-        if (!filePath)
-            console.assert(false);
-
         var extension = this._extensionForPath(filePath);
         var contentType = WebInspector.FileSystemWorkspaceBinding._contentTypeForExtension(extension);
 
@@ -521,6 +561,7 @@ WebInspector.FileSystemWorkspaceBinding.FileSystem.prototype = {
             this.addUISourceCode(this.createUISourceCode(path, contentType));
             return;
         }
+        uiSourceCode[WebInspector.FileSystemWorkspaceBinding._metadata] = null;
         uiSourceCode.checkContentUpdated();
     },
 

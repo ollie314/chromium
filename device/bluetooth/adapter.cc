@@ -6,43 +6,52 @@
 #include <utility>
 #include <vector>
 
-#include "base/memory/ptr_util.h"
-#include "base/strings/utf_string_conversions.h"
 #include "device/bluetooth/adapter.h"
-#include "device/bluetooth/bluetooth_adapter_factory.h"
-#include "mojo/public/cpp/bindings/string.h"
+#include "device/bluetooth/device.h"
 #include "mojo/public/cpp/bindings/strong_binding.h"
 
 namespace bluetooth {
 
-Adapter::Adapter() : client_(nullptr), weak_ptr_factory_(this) {}
-
-Adapter::~Adapter() {
-  if (adapter_) {
-    adapter_->RemoveObserver(this);
-    adapter_ = nullptr;
-  }
+Adapter::Adapter(scoped_refptr<device::BluetoothAdapter> adapter)
+    : adapter_(std::move(adapter)), client_(nullptr), weak_ptr_factory_(this) {
+  adapter_->AddObserver(this);
 }
 
-// static
-void Adapter::Create(mojom::AdapterRequest request) {
-  mojo::MakeStrongBinding(base::MakeUnique<Adapter>(), std::move(request));
+Adapter::~Adapter() {
+  adapter_->RemoveObserver(this);
+  adapter_ = nullptr;
+}
+
+void Adapter::GetInfo(const GetInfoCallback& callback) {
+  mojom::AdapterInfoPtr adapter_info = mojom::AdapterInfo::New();
+  adapter_info->address = adapter_->GetAddress();
+  adapter_info->name = adapter_->GetName();
+  adapter_info->initialized = adapter_->IsInitialized();
+  adapter_info->present = adapter_->IsPresent();
+  adapter_info->powered = adapter_->IsPowered();
+  adapter_info->discoverable = adapter_->IsDiscoverable();
+  adapter_info->discovering = adapter_->IsDiscovering();
+  callback.Run(std::move(adapter_info));
+}
+
+void Adapter::GetDevice(const std::string& address,
+                        const GetDeviceCallback& callback) {
+  mojom::DevicePtr device_ptr;
+  mojo::MakeStrongBinding(base::MakeUnique<Device>(address, adapter_),
+                          mojo::GetProxy(&device_ptr));
+  callback.Run(std::move(device_ptr));
 }
 
 void Adapter::GetDevices(const GetDevicesCallback& callback) {
-  if (!adapter_) {
-    if (device::BluetoothAdapterFactory::IsBluetoothAdapterAvailable()) {
-      base::Closure c = base::Bind(&Adapter::GetDevicesImpl,
-                                   weak_ptr_factory_.GetWeakPtr(), callback);
+  std::vector<mojom::DeviceInfoPtr> devices;
 
-      device::BluetoothAdapterFactory::GetAdapter(base::Bind(
-          &Adapter::OnGetAdapter, weak_ptr_factory_.GetWeakPtr(), c));
-      return;
-    }
-    callback.Run(std::vector<mojom::DeviceInfoPtr>());
-    return;
+  for (const device::BluetoothDevice* device : adapter_->GetDevices()) {
+    mojom::DeviceInfoPtr device_info =
+        Device::ConstructDeviceInfoStruct(device);
+    devices.push_back(std::move(device_info));
   }
-  GetDevicesImpl(callback);
+
+  callback.Run(std::move(devices));
 }
 
 void Adapter::SetClient(mojom::AdapterClientPtr client) {
@@ -52,7 +61,7 @@ void Adapter::SetClient(mojom::AdapterClientPtr client) {
 void Adapter::DeviceAdded(device::BluetoothAdapter* adapter,
                           device::BluetoothDevice* device) {
   if (client_) {
-    auto device_info = ConstructDeviceInfoStruct(device);
+    auto device_info = Device::ConstructDeviceInfoStruct(device);
     client_->DeviceAdded(std::move(device_info));
   }
 }
@@ -60,43 +69,9 @@ void Adapter::DeviceAdded(device::BluetoothAdapter* adapter,
 void Adapter::DeviceRemoved(device::BluetoothAdapter* adapter,
                             device::BluetoothDevice* device) {
   if (client_) {
-    auto device_info = ConstructDeviceInfoStruct(device);
+    auto device_info = Device::ConstructDeviceInfoStruct(device);
     client_->DeviceRemoved(std::move(device_info));
   }
-}
-
-mojom::DeviceInfoPtr Adapter::ConstructDeviceInfoStruct(
-    const device::BluetoothDevice* device) const {
-  mojom::DeviceInfoPtr device_info = mojom::DeviceInfo::New();
-
-  device_info->name = device->GetName();
-  device_info->name_for_display =
-      base::UTF16ToUTF8(device->GetNameForDisplay());
-  device_info->id = device->GetIdentifier();
-  device_info->address = device->GetAddress();
-
-  return device_info;
-}
-
-void Adapter::GetDevicesImpl(const GetDevicesCallback& callback) {
-  std::vector<mojom::DeviceInfoPtr> devices;
-
-  for (const device::BluetoothDevice* device : adapter_->GetDevices()) {
-    mojom::DeviceInfoPtr device_info = ConstructDeviceInfoStruct(device);
-    devices.push_back(std::move(device_info));
-  }
-
-  callback.Run(std::move(devices));
-}
-
-void Adapter::OnGetAdapter(const base::Closure& continuation,
-                           scoped_refptr<device::BluetoothAdapter> adapter) {
-  if (!adapter_) {
-    VLOG(1) << "Adapter acquired";
-    adapter_ = adapter;
-    adapter_->AddObserver(this);
-  }
-  continuation.Run();
 }
 
 }  // namespace bluetooth

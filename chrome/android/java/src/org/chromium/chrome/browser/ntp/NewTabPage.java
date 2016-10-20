@@ -199,6 +199,11 @@ public class NewTabPage
          *                   just tapped the fakebox.
          */
         void requestUrlFocusFromFakebox(String pastedText);
+
+        /**
+         * @return whether the provided native page is the one currently displayed to the user.
+         */
+        boolean isCurrentPage(NativePage nativePage);
     }
 
     /**
@@ -308,14 +313,12 @@ public class NewTabPage
 
         @Override
         public void trackSnippetImpression(SnippetArticle article) {
-            mSnippetsBridge.onSuggestionShown(article.mGlobalPosition, article.mCategory,
-                    article.mPosition, article.mPublishTimestampMilliseconds, article.mScore);
+            mSnippetsBridge.onSuggestionShown(article);
         }
 
         @Override
         public void trackSnippetMenuOpened(SnippetArticle article) {
-            mSnippetsBridge.onSuggestionMenuOpened(article.mGlobalPosition, article.mCategory,
-                    article.mPosition, article.mPublishTimestampMilliseconds, article.mScore);
+            mSnippetsBridge.onSuggestionMenuOpened(article);
         }
 
         @Override
@@ -330,9 +333,8 @@ public class NewTabPage
 
         @Override
         public void openSnippet(int windowOpenDisposition, SnippetArticle article) {
-            mSnippetsBridge.onSuggestionOpened(article.mGlobalPosition, article.mCategory,
-                    article.mPosition, article.mPublishTimestampMilliseconds, article.mScore,
-                    windowOpenDisposition);
+            mSnippetsBridge.onSuggestionOpened(article, windowOpenDisposition);
+            NewTabPageUma.recordAction(NewTabPageUma.ACTION_OPENED_SNIPPET);
             NewTabPageUma.monitorContentSuggestionVisit(mTab, article.mCategory);
             LoadUrlParams loadUrlParams =
                     new LoadUrlParams(article.mUrl, PageTransition.AUTO_BOOKMARK);
@@ -665,6 +667,13 @@ public class NewTabPage
             mSignInStateObserver = signInStateObserver;
             SigninManager.get(mActivity).addSignInStateObserver(mSignInStateObserver);
         }
+
+        @Override
+        public boolean isCurrentPage() {
+            if (mIsDestroyed) return false;
+            if (mFakeboxDelegate == null) return false;
+            return mFakeboxDelegate.isCurrentPage(NewTabPage.this);
+        }
     };
 
     /**
@@ -682,7 +691,7 @@ public class NewTabPage
         mProfile = tab.getProfile();
 
         mTitle = activity.getResources().getString(R.string.button_new_tab);
-        mBackgroundColor = NtpStyleUtils.getBackgroundColorResource(activity.getResources(), false);
+        mBackgroundColor = ApiCompatibilityUtils.getColor(activity.getResources(), R.color.ntp_bg);
         mThemeColor = ApiCompatibilityUtils.getColor(
                 activity.getResources(), R.color.default_primary_color);
         TemplateUrlService.getInstance().addObserver(this);
@@ -989,9 +998,7 @@ public class NewTabPage
 
     @Override
     public int getThemeColor() {
-        return isLocationBarShownInNTP()
-                ? NtpStyleUtils.getBackgroundColorResource(mActivity.getResources(), false)
-                : mThemeColor;
+        return isLocationBarShownInNTP() ? mBackgroundColor : mThemeColor;
     }
 
     @Override

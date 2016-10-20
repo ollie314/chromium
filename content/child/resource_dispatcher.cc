@@ -101,6 +101,11 @@ class URLLoaderClientImpl final : public mojom::URLLoaderClient {
   }
 
   void OnComplete(const ResourceRequestCompletionStatus& status) override {
+    if (!body_consumer_) {
+      resource_dispatcher_->OnMessageReceived(
+          ResourceMsg_RequestComplete(request_id_, status));
+      return;
+    }
     body_consumer_->OnComplete(status);
   }
 
@@ -452,6 +457,10 @@ bool ResourceDispatcher::RemovePendingRequest(int request_id) {
   bool release_downloaded_file = request_info->download_to_file;
 
   ReleaseResourcesInMessageQueue(&request_info->deferred_message_queue);
+
+  // Clear URLLoaderClient to stop receiving further Mojo IPC from the browser
+  // process.
+  it->second->url_loader_client = nullptr;
 
   // Always delete the pending_request asyncly so that cancelling the request
   // doesn't delete the request context info while its response is still being

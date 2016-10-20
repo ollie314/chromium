@@ -239,12 +239,13 @@ std::unique_ptr<KeyEventWatcher> WmShellAura::CreateKeyEventWatcher() {
 }
 
 void WmShellAura::OnOverviewModeStarting() {
-  FOR_EACH_OBSERVER(ShellObserver, *shell_observers(),
-                    OnOverviewModeStarting());
+  for (auto& observer : *shell_observers())
+    observer.OnOverviewModeStarting();
 }
 
 void WmShellAura::OnOverviewModeEnded() {
-  FOR_EACH_OBSERVER(ShellObserver, *shell_observers(), OnOverviewModeEnded());
+  for (auto& observer : *shell_observers())
+    observer.OnOverviewModeEnded();
 }
 
 SessionStateDelegate* WmShellAura::GetSessionStateDelegate() {
@@ -308,26 +309,26 @@ void WmShellAura::OnWindowActivated(
   WmWindow* lost_active_wm = WmWindowAura::Get(lost_active);
   if (gained_active_wm)
     set_root_window_for_new_windows(gained_active_wm->GetRootWindow());
-  FOR_EACH_OBSERVER(WmActivationObserver, activation_observers_,
-                    OnWindowActivated(gained_active_wm, lost_active_wm));
+  for (auto& observer : activation_observers_)
+    observer.OnWindowActivated(gained_active_wm, lost_active_wm);
 }
 
 void WmShellAura::OnAttemptToReactivateWindow(aura::Window* request_active,
                                               aura::Window* actual_active) {
-  FOR_EACH_OBSERVER(
-      WmActivationObserver, activation_observers_,
-      OnAttemptToReactivateWindow(WmWindowAura::Get(request_active),
-                                  WmWindowAura::Get(actual_active)));
+  for (auto& observer : activation_observers_) {
+    observer.OnAttemptToReactivateWindow(WmWindowAura::Get(request_active),
+                                         WmWindowAura::Get(actual_active));
+  }
 }
 
 void WmShellAura::OnDisplayConfigurationChanging() {
-  FOR_EACH_OBSERVER(WmDisplayObserver, display_observers_,
-                    OnDisplayConfigurationChanging());
+  for (auto& observer : display_observers_)
+    observer.OnDisplayConfigurationChanging();
 }
 
 void WmShellAura::OnDisplayConfigurationChanged() {
-  FOR_EACH_OBSERVER(WmDisplayObserver, display_observers_,
-                    OnDisplayConfigurationChanged());
+  for (auto& observer : display_observers_)
+    observer.OnDisplayConfigurationChanged();
 }
 
 }  // namespace ash

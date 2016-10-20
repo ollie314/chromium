@@ -33,6 +33,13 @@ Polymer({
     entries_: Array,
 
     /**
+     * The cookie nodes to show in the dialog.
+     * @type {!Array<CookieDataForDisplay>}
+     * @private
+     */
+    cookieNodes_: Object,
+
+    /**
      * The index of the last selected item.
      */
      lastSelectedIndex_: Number,
@@ -81,7 +88,7 @@ Polymer({
       this.$.clear.textContent =
           loadTimeData.getString('siteSettingsCookieRemove');
     } else {
-      this.$.picker.selected = this.entries_[0].id;
+      this.$.picker.value = this.entries_[0].id;
       this.lastSelectedIndex_ = 0;
     }
 
@@ -118,16 +125,9 @@ Polymer({
    * @private
    */
   populateItem_: function(id, site) {
-    // Out with the old...
-    var root = this.$.content;
-    while (root.lastChild) {
-      root.removeChild(root.lastChild);
-    }
-
-    // In with the new...
     var node = site.fetchNodeById(id, true);
     if (node)
-      site.addCookieData(root, node);
+      this.cookieNodes_ = site.getCookieData(node);
   },
 
   /**
@@ -145,7 +145,7 @@ Polymer({
     if (this.entries_.length <= this.lastSelectedIndex_)
       this.lastSelectedIndex_ = this.entries_.length - 1;
     var selectedId = this.entries_[this.lastSelectedIndex_].id;
-    this.$.picker.selected = selectedId;
+    this.$.picker.value = selectedId;
     this.populateItem_(selectedId, this.site_);
   },
 
@@ -153,13 +153,14 @@ Polymer({
    * A handler for when the user changes the dropdown box (switches cookies).
    * @private
    */
-  onItemSelected_: function(event) {
-    this.populateItem_(event.detail.selected, this.site_);
+  onItemSelected_: function() {
+    var selectedItem = this.$.picker.value;
+    this.populateItem_(selectedItem, this.site_);
 
     // Store the index of what was selected so we can re-select the next value
     // when things get deleted.
     for (var i = 0; i < this.entries_.length; ++i) {
-      if (this.entries_[i].data.id == event.detail.selected) {
+      if (this.entries_[i].data.id == selectedItem) {
         this.lastSelectedIndex_ = i;
         break;
       }
@@ -171,7 +172,7 @@ Polymer({
     // of '1 cookie', '1 cookie', ... etc, it is better to show the title of the
     // cookie to differentiate them.
     if (item.data.type == 'cookie')
-      return item.title;
+      return loadTimeData.getStringF('siteSettingsCookie', item.title);
 
     return getCookieDataCategoryText(item.data.type, item.data.totalUsage);
   },
@@ -182,7 +183,7 @@ Polymer({
    */
   onRemove_: function(event) {
     this.browserProxy.removeCookie(this.nodePath_(
-        this.site_, this.site_.data_.id, this.$.picker.selected));
+        this.site_, this.site_.data_.id, this.$.picker.value));
   },
 
   /**

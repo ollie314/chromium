@@ -7,14 +7,14 @@
 namespace video_capture {
 
 MockDeviceVideoCaptureServiceTest::MockDeviceVideoCaptureServiceTest()
-    : shell::test::ServiceTest("exe:video_capture_unittests") {}
+    : service_manager::test::ServiceTest("exe:video_capture_unittests") {}
 
 MockDeviceVideoCaptureServiceTest::~MockDeviceVideoCaptureServiceTest() =
     default;
 
 void MockDeviceVideoCaptureServiceTest::SetUp() {
   ServiceTest::SetUp();
-  connector()->ConnectToInterface("mojo:video_capture", &service_);
+  connector()->ConnectToInterface("service:video_capture", &service_);
   service_->ConnectToMockDeviceFactory(mojo::GetProxy(&factory_));
 
   // Set up a mock device and add it to the factory
@@ -30,13 +30,12 @@ void MockDeviceVideoCaptureServiceTest::SetUp() {
       mock_descriptor->Clone(), mojo::GetProxy(&device_proxy_),
       base::Bind([](mojom::DeviceAccessResultCode result_code) {}));
 
-  // Start the mock device with an arbitrary format
   requested_format_.frame_size = gfx::Size(800, 600);
   requested_format_.frame_rate = 15;
   requested_format_.pixel_format = media::PIXEL_FORMAT_I420;
   requested_format_.pixel_storage = media::PIXEL_STORAGE_CPU;
-  mock_client_ = base::MakeUnique<MockVideoCaptureDeviceClient>(
-      mojo::GetProxy(&mock_client_proxy_));
+  mock_receiver_ = base::MakeUnique<MockVideoFrameReceiver>(
+      mojo::GetProxy(&mock_receiver_proxy_));
 }
 
 }  // namespace video_capture

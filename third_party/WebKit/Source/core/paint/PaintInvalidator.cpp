@@ -20,14 +20,6 @@
 
 namespace blink {
 
-// TODO(wangxianzhu): Avoid using function when possible. For example, we can
-// avoid it by avoiding unnecessary conversions between LayoutRects and
-// FloatRects.
-static LayoutRect enclosingLayoutRectIfNotEmpty(const FloatRect& floatRect) {
-  return floatRect.isEmpty() ? LayoutRect(floatRect)
-                             : enclosingLayoutRect(floatRect);
-}
-
 static LayoutRect slowMapToVisualRectInAncestorSpace(
     const LayoutObject& object,
     const LayoutBoxModelObject& ancestor,
@@ -39,7 +31,7 @@ static LayoutRect slowMapToVisualRectInAncestorSpace(
     return result;
   }
 
-  LayoutRect result = enclosingLayoutRectIfNotEmpty(rect);
+  LayoutRect result(rect);
   if (object.isLayoutView())
     toLayoutView(object).mapToVisualRectInAncestorSpace(
         &ancestor, result, InputIsInFrameCoordinates, DefaultVisualRectFlags);
@@ -80,7 +72,7 @@ static LayoutRect mapLocalRectToPaintInvalidationBacking(
   if (RuntimeEnabledFeatures::slimmingPaintV2Enabled()) {
     // In SPv2, visual rects are in the space of their local transform node.
     rect.moveBy(FloatPoint(context.treeBuilderContext.current.paintOffset));
-    return enclosingLayoutRectIfNotEmpty(rect);
+    return LayoutRect(rect);
   }
 
   LayoutRect result;
@@ -89,7 +81,7 @@ static LayoutRect mapLocalRectToPaintInvalidationBacking(
     result = slowMapToVisualRectInAncestorSpace(
         object, *context.paintInvalidationContainer, rect);
   } else if (object == context.paintInvalidationContainer) {
-    result = enclosingLayoutRectIfNotEmpty(rect);
+    result = LayoutRect(rect);
   } else {
     rect.moveBy(FloatPoint(context.treeBuilderContext.current.paintOffset));
 
@@ -98,16 +90,15 @@ static LayoutRect mapLocalRectToPaintInvalidationBacking(
         context.treeBuilderContext.current.clip,
         context.treeBuilderContext.currentEffect,
         context.treeBuilderContext.current.scroll);
-    const ObjectPaintProperties* containerPaintProperties =
-        context.paintInvalidationContainer->objectPaintProperties();
+    const auto* containerPaintProperties =
+        context.paintInvalidationContainer->paintProperties();
     auto containerContentsProperties =
         containerPaintProperties->contentsProperties();
 
     bool success = false;
-    result = enclosingLayoutRectIfNotEmpty(
-        geometryMapper.mapToVisualRectInDestinationSpace(
-            rect, currentTreeState,
-            containerContentsProperties.propertyTreeState, success));
+    result = LayoutRect(geometryMapper.mapToVisualRectInDestinationSpace(
+        rect, currentTreeState, containerContentsProperties.propertyTreeState,
+        success));
     DCHECK(success);
 
     // Convert the result to the container's contents space.
@@ -160,8 +151,8 @@ LayoutPoint PaintInvalidator::computeLocationFromPaintInvalidationBacking(
         context.treeBuilderContext.current.clip,
         context.treeBuilderContext.currentEffect,
         context.treeBuilderContext.current.scroll);
-    const ObjectPaintProperties* containerPaintProperties =
-        context.paintInvalidationContainer->objectPaintProperties();
+    const auto* containerPaintProperties =
+        context.paintInvalidationContainer->paintProperties();
     auto containerContentsProperties =
         containerPaintProperties->contentsProperties();
 
@@ -215,9 +206,11 @@ void PaintInvalidator::updatePaintingLayer(const LayoutObject& object,
 
 namespace {
 
-// This is temporary to workaround paint invalidation issues in non-rootLayerScrolls mode.
-// It undos FrameView's content clip and scroll for paint invalidation of frame
-// scroll controls and the LayoutView to which the content clip and scroll don't apply.
+// This is temporary to workaround paint invalidation issues in
+// non-rootLayerScrolls mode.
+// It undoes FrameView's content clip and scroll for paint invalidation of frame
+// scroll controls and the LayoutView to which the content clip and scroll don't
+// apply.
 class ScopedUndoFrameViewContentClipAndScroll {
  public:
   ScopedUndoFrameViewContentClipAndScroll(const FrameView& frameView,
@@ -258,22 +251,25 @@ void PaintInvalidator::updateContext(const LayoutObject& object,
       context.paintInvalidationContainerForStackedContents =
           toLayoutBoxModelObject(&object);
   } else if (object.isLayoutView()) {
-    // paintInvalidationContainerForStackedContents is only for stacked descendants in its own frame,
-    // because it doesn't establish stacking context for stacked contents in sub-frames.
-    // Contents stacked in the root stacking context in this frame should use this frame's paintInvalidationContainer.
+    // paintInvalidationContainerForStackedContents is only for stacked
+    // descendants in its own frame, because it doesn't establish stacking
+    // context for stacked contents in sub-frames.
+    // Contents stacked in the root stacking context in this frame should use
+    // this frame's paintInvalidationContainer.
     context.paintInvalidationContainerForStackedContents =
         context.paintInvalidationContainer;
     if (!RuntimeEnabledFeatures::rootLayerScrollingEnabled())
       undoFrameViewContentClipAndScroll.emplace(
           *toLayoutView(object).frameView(), context);
-  } else if (
-      object.styleRef().isStacked()
-      // This is to exclude some objects (e.g. LayoutText) inheriting stacked style from parent but aren't actually stacked.
-      && object.hasLayer() &&
-      context.paintInvalidationContainer !=
-          context.paintInvalidationContainerForStackedContents) {
-    // The current object is stacked, so we should use m_paintInvalidationContainerForStackedContents as its
-    // paint invalidation container on which the current object is painted.
+  } else if (object.styleRef().isStacked() &&
+             // This is to exclude some objects (e.g. LayoutText) inheriting
+             // stacked style from parent but aren't actually stacked.
+             object.hasLayer() &&
+             context.paintInvalidationContainer !=
+                 context.paintInvalidationContainerForStackedContents) {
+    // The current object is stacked, so we should use
+    // m_paintInvalidationContainerForStackedContents as its paint invalidation
+    // container on which the current object is painted.
     context.paintInvalidationContainer =
         context.paintInvalidationContainerForStackedContents;
     if (context.forcedSubtreeInvalidationFlags &
@@ -289,8 +285,9 @@ void PaintInvalidator::updateContext(const LayoutObject& object,
     // descending into a different invalidation container. (For instance if
     // our parents were moved, the entire container will just move.)
     if (object != context.paintInvalidationContainerForStackedContents) {
-      // However, we need to keep the ForcedSubtreeFullInvalidationForStackedContents flag
-      // if the current object isn't the paint invalidation container of stacked contents.
+      // However, we need to keep the
+      // ForcedSubtreeFullInvalidationForStackedContents flag if the current
+      // object isn't the paint invalidation container of stacked contents.
       context.forcedSubtreeInvalidationFlags &= PaintInvalidatorContext::
           ForcedSubtreeFullInvalidationForStackedContents;
     } else {
@@ -306,7 +303,8 @@ void PaintInvalidator::updateContext(const LayoutObject& object,
     context.forcedSubtreeInvalidationFlags |=
         PaintInvalidatorContext::ForcedSubtreeInvalidationChecking;
 
-  // TODO(crbug.com/637313): This is temporary before we support filters in paint property tree.
+  // TODO(crbug.com/637313): This is temporary before we support filters in
+  // paint property tree.
   // TODO(crbug.com/648274): This is a workaround for multi-column contents.
   if (object.hasFilterInducingProperty() || object.isLayoutFlowThread())
     context.forcedSubtreeInvalidationFlags |=
@@ -393,7 +391,8 @@ void PaintInvalidator::invalidatePaintIfNeeded(
            .shouldCheckForPaintInvalidationRegardlessOfPaintInvalidationState() &&
       context.forcedSubtreeInvalidationFlags ==
           PaintInvalidatorContext::ForcedSubtreeInvalidationRectUpdate) {
-    // We are done updating the paint invalidation rect. No other paint invalidation work to do for this object.
+    // We are done updating the paint invalidation rect. No other paint
+    // invalidation work to do for this object.
     return;
   }
 
@@ -420,17 +419,19 @@ void PaintInvalidator::invalidatePaintIfNeeded(
     context.forcedSubtreeInvalidationFlags |=
         PaintInvalidatorContext::ForcedSubtreeInvalidationChecking;
 
-  // TODO(crbug.com/533277): This is a workaround for the bug. Remove when we detect paint offset change.
+  // TODO(crbug.com/533277): This is a workaround for the bug. Remove when we
+  // detect paint offset change.
   if (reason != PaintInvalidationNone &&
       hasPercentageTransform(object.styleRef()))
     context.forcedSubtreeInvalidationFlags |=
         PaintInvalidatorContext::ForcedSubtreeInvalidationChecking;
 
-  // TODO(crbug.com/490725): This is a workaround for the bug, to force descendant to update paint invalidation
-  // rects on clipping change.
+  // TODO(crbug.com/490725): This is a workaround for the bug, to force
+  // descendant to update paint invalidation rects on clipping change.
   if (!RuntimeEnabledFeatures::slimmingPaintV2Enabled() &&
       context.oldBounds != context.newBounds
-      // Note that isLayoutView() below becomes unnecessary after the launch of root layer scrolling.
+      // Note that isLayoutView() below becomes unnecessary after the launch of
+      // root layer scrolling.
       && (object.hasOverflowClip() || object.isLayoutView()) &&
       !toLayoutBox(object).usesCompositedScrolling())
     context.forcedSubtreeInvalidationFlags |=

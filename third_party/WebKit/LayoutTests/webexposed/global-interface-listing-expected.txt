@@ -46,7 +46,7 @@ interface AnimationEffectReadOnly
     getter timing
     method constructor
     method getComputedTiming
-interface AnimationEffectTiming
+interface AnimationEffectTiming : AnimationEffectTimingReadOnly
     attribute @@toStringTag
     getter delay
     getter direction
@@ -65,6 +65,17 @@ interface AnimationEffectTiming
     setter fill
     setter iterationStart
     setter iterations
+interface AnimationEffectTimingReadOnly
+    attribute @@toStringTag
+    getter delay
+    getter direction
+    getter duration
+    getter easing
+    getter endDelay
+    getter fill
+    getter iterationStart
+    getter iterations
+    method constructor
 interface AnimationEvent : Event
     attribute @@toStringTag
     getter animationName
@@ -176,23 +187,18 @@ interface AudioDestinationNode : AudioNode
     method constructor
 interface AudioListener
     attribute @@toStringTag
-    getter dopplerFactor
     getter forwardX
     getter forwardY
     getter forwardZ
     getter positionX
     getter positionY
     getter positionZ
-    getter speedOfSound
     getter upX
     getter upY
     getter upZ
     method constructor
     method setOrientation
     method setPosition
-    method setVelocity
-    setter dopplerFactor
-    setter speedOfSound
 interface AudioNode : EventTarget
     attribute @@toStringTag
     getter channelCount
@@ -388,7 +394,6 @@ interface CSS
     static method escape
     static method registerProperty
     static method supports
-    static method unregisterProperty
     attribute @@toStringTag
     method constructor
 interface CSSAngleValue : CSSStyleValue
@@ -415,6 +420,10 @@ interface CSSCalcLength : CSSLengthValue
     getter vmax
     getter vmin
     getter vw
+    method constructor
+interface CSSConditionRule : CSSGroupingRule
+    attribute @@toStringTag
+    getter conditionText
     method constructor
 interface CSSFontFaceRule : CSSRule
     attribute @@toStringTag
@@ -490,7 +499,7 @@ interface CSSMatrixTransformComponent : CSSTransformComponent
     getter m43
     getter m44
     method constructor
-interface CSSMediaRule : CSSGroupingRule
+interface CSSMediaRule : CSSConditionRule
     attribute @@toStringTag
     getter media
     method constructor
@@ -609,13 +618,9 @@ interface CSSStyleValue
     attribute @@toStringTag
     getter cssText
     method constructor
-interface CSSSupportsRule : CSSRule
+interface CSSSupportsRule : CSSConditionRule
     attribute @@toStringTag
-    getter conditionText
-    getter cssRules
     method constructor
-    method deleteRule
-    method insertRule
 interface CSSTransformComponent
     attribute @@toStringTag
     getter cssText
@@ -860,6 +865,14 @@ interface CompositorWorker : EventTarget
     method terminate
     setter onerror
     setter onmessage
+interface ConstantSourceNode : AudioSourceNode
+    attribute @@toStringTag
+    getter offset
+    getter onended
+    method constructor
+    method start
+    method stop
+    setter onended
 interface ConvolverNode : AudioNode
     attribute @@toStringTag
     getter buffer
@@ -976,8 +989,8 @@ interface DOMMatrix : DOMMatrixReadOnly
     method invertSelf
     method multiplySelf
     method preMultiplySelf
+    method rotateAxisAngleSelf
     method scale3dSelf
-    method scaleNonUniformSelf
     method scaleSelf
     method skewXSelf
     method skewYSelf
@@ -1038,9 +1051,9 @@ interface DOMMatrixReadOnly
     method flipY
     method inverse
     method multiply
+    method rotateAxisAngle
     method scale
     method scale3d
-    method scaleNonUniform
     method skewX
     method skewY
     method toFloat32Array
@@ -3751,6 +3764,12 @@ interface MediaError
     attribute MEDIA_ERR_SRC_NOT_SUPPORTED
     getter code
     method constructor
+interface MediaImage
+    attribute @@toStringTag
+    getter sizes
+    getter src
+    getter type
+    method constructor
 interface MediaKeyMessageEvent : Event
     attribute @@toStringTag
     getter message
@@ -3804,6 +3823,13 @@ interface MediaList
     method deleteMedium
     method item
     setter mediaText
+interface MediaMetadata
+    attribute @@toStringTag
+    getter album
+    getter artist
+    getter artwork
+    getter title
+    method constructor
 interface MediaQueryList : EventTarget
     attribute @@toStringTag
     getter matches
@@ -3846,11 +3872,31 @@ interface MediaRecorder : EventTarget
     setter onresume
     setter onstart
     setter onstop
+interface MediaSession : EventTarget
+    attribute @@toStringTag
+    getter metadata
+    getter onnexttrack
+    getter onpause
+    getter onplay
+    getter onplaypause
+    getter onprevioustrack
+    getter onseekbackward
+    getter onseekforward
+    method constructor
+    setter metadata
+    setter onnexttrack
+    setter onpause
+    setter onplay
+    setter onplaypause
+    setter onprevioustrack
+    setter onseekbackward
+    setter onseekforward
 interface MediaSettingsRange
     attribute @@toStringTag
     getter current
     getter max
     getter min
+    getter step
     method constructor
 interface MediaSource : EventTarget
     static method isTypeSupported
@@ -4046,6 +4092,13 @@ interface NamedNodeMap
     method removeNamedItemNS
     method setNamedItem
     method setNamedItemNS
+interface NavigationPreloadManager
+    attribute @@toStringTag
+    method constructor
+    method disable
+    method enable
+    method getState
+    method setHeaderValue
 interface Navigator
     attribute @@toStringTag
     getter appCodeName
@@ -4063,6 +4116,7 @@ interface Navigator
     getter languages
     getter maxTouchPoints
     getter mediaDevices
+    getter mediaSession
     getter mimeTypes
     getter nfc
     getter onLine
@@ -4353,7 +4407,6 @@ interface PannerNode : AudioNode
     method constructor
     method setOrientation
     method setPosition
-    method setVelocity
     setter coneInnerAngle
     setter coneOuterAngle
     setter coneOuterGain
@@ -4433,12 +4486,10 @@ interface Performance : EventTarget
     getter memory
     getter navigation
     getter onframetimingbufferfull
-    getter onlongtasktimingbufferfull
     getter onresourcetimingbufferfull
     getter onwebkitresourcetimingbufferfull
     getter timing
     method clearFrameTimings
-    method clearLongTaskTimings
     method clearMarks
     method clearMeasures
     method clearResourceTimings
@@ -4450,12 +4501,11 @@ interface Performance : EventTarget
     method measure
     method now
     method setFrameTimingBufferSize
-    method setLongTaskTimingBufferSize
     method setResourceTimingBufferSize
+    method toJSON
     method webkitClearResourceTimings
     method webkitSetResourceTimingBufferSize
     setter onframetimingbufferfull
-    setter onlongtasktimingbufferfull
     setter onresourcetimingbufferfull
     setter onwebkitresourcetimingbufferfull
 interface PerformanceCompositeTiming : PerformanceEntry
@@ -4485,6 +4535,7 @@ interface PerformanceNavigation
     getter redirectCount
     getter type
     method constructor
+    method toJSON
 interface PerformanceObserver
     attribute @@toStringTag
     method constructor
@@ -4796,18 +4847,17 @@ interface RelatedEvent : Event
     method constructor
 interface RemotePlayback : EventTarget
     attribute @@toStringTag
-    getter onstatechange
+    getter onconnect
+    getter onconnecting
+    getter ondisconnect
     getter state
+    method cancelWatchAvailability
     method constructor
-    method getAvailability
     method prompt
-    setter onstatechange
-interface RemotePlaybackAvailability : EventTarget
-    attribute @@toStringTag
-    getter onchange
-    getter value
-    method constructor
-    setter onchange
+    method watchAvailability
+    setter onconnect
+    setter onconnecting
+    setter ondisconnect
 interface Request
     attribute @@toStringTag
     getter bodyUsed
@@ -5994,6 +6044,7 @@ interface SecurityPolicyViolationEvent : Event
     attribute @@toStringTag
     getter blockedURI
     getter columnNumber
+    getter disposition
     getter documentURI
     getter effectiveDirective
     getter lineNumber
@@ -6045,8 +6096,9 @@ interface Sensor : EventTarget
     setter onchange
     setter onerror
     setter onstatechange
-interface SensorErrorEvent : ErrorEvent
+interface SensorErrorEvent : Event
     attribute @@toStringTag
+    getter error
     method constructor
 interface SensorReading
     attribute @@toStringTag
@@ -6090,6 +6142,7 @@ interface ServiceWorkerRegistration : EventTarget
     attribute @@toStringTag
     getter active
     getter installing
+    getter navigationPreload
     getter onupdatefound
     getter pushManager
     getter scope

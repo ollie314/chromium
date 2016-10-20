@@ -246,8 +246,8 @@
       "client.v8.fyi",
       "--buildbot-slavename",
       "TestSlavename",
-      "--goma-deps-cache-dir",
-      "[GOMA_DEPS_CACHE]",
+      "--goma-deps-cache-file",
+      "V8_Blink_Linux_64.gomadeps",
       "--compiler",
       "goma",
       "--goma-jsonstatus",
@@ -492,8 +492,8 @@
       "client.v8.fyi",
       "--buildbot-slavename",
       "TestSlavename",
-      "--goma-deps-cache-dir",
-      "[GOMA_DEPS_CACHE]",
+      "--goma-deps-cache-file",
+      "V8_Blink_Linux_64.gomadeps",
       "--compiler",
       "goma",
       "--goma-jsonstatus",
@@ -577,6 +577,23 @@
       "@@@STEP_TEXT@<br/>ignored:<br/>bad/totally-bad-probably.html<br/>tricky/totally-maybe-not-awesome.html<br/>@@@",
       "@@@STEP_WARNINGS@@@"
     ]
+  },
+  {
+    "cmd": [
+      "python",
+      "-u",
+      "RECIPE_PACKAGE_REPO[build]/scripts/slave/chromium/archive_layout_test_retry_summary.py",
+      "--retry-summary-json",
+      "{\"failures\": [], \"ignored\": [\"bad/totally-bad-probably.html\", \"tricky/totally-maybe-not-awesome.html\"]}",
+      "--build-number",
+      "571",
+      "--builder-name",
+      "V8-Blink Linux 64",
+      "--gs-bucket",
+      "gs://chromium-layout-test-archives"
+    ],
+    "cwd": "[BUILDER_CACHE]/V8_Blink_Linux_64",
+    "name": "archive_retry_summary"
   },
   {
     "name": "$result",

@@ -12,7 +12,6 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
-import android.content.pm.PackageManager.NameNotFoundException;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Looper;
@@ -41,11 +40,9 @@ import org.chromium.android_webview.AwContentsClient;
 import org.chromium.android_webview.AwContentsStatics;
 import org.chromium.android_webview.AwCookieManager;
 import org.chromium.android_webview.AwDevToolsServer;
-import org.chromium.android_webview.AwGeolocationPermissions;
 import org.chromium.android_webview.AwNetworkChangeNotifierRegistrationPolicy;
 import org.chromium.android_webview.AwQuotaManagerBridge;
 import org.chromium.android_webview.AwResource;
-import org.chromium.android_webview.AwServiceWorkerController;
 import org.chromium.android_webview.AwSettings;
 import org.chromium.android_webview.HttpAuthDatabase;
 import org.chromium.android_webview.ResourcesContextWrapperFactory;
@@ -53,6 +50,7 @@ import org.chromium.base.BuildConfig;
 import org.chromium.base.CommandLine;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.MemoryPressureListener;
+import org.chromium.base.PackageUtils;
 import org.chromium.base.PathService;
 import org.chromium.base.PathUtils;
 import org.chromium.base.ThreadUtils;
@@ -82,6 +80,7 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
     private static final String CHROMIUM_PREFS_NAME = "WebViewChromiumPrefs";
     private static final String VERSION_CODE_PREF = "lastVersionCodeUsed";
     private static final String COMMAND_LINE_FILE = "/data/local/tmp/webview-command-line";
+    private static final String HTTP_AUTH_DATABASE_FILE = "http_auth.db";
 
     private class WebViewChromiumRunQueue {
         public WebViewChromiumRunQueue() {
@@ -409,6 +408,17 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
                         TraceEvent.setATraceEnabled(enabled);
                     }
                 });
+
+        // Initialize thread-unsafe singletons.
+        AwBrowserContext awBrowserContext = getBrowserContextOnUiThread();
+        mGeolocationPermissions = new GeolocationPermissionsAdapter(
+                this, awBrowserContext.getGeolocationPermissions());
+        mWebStorage = new WebStorageAdapter(this, AwQuotaManagerBridge.getInstance());
+        if (Build.VERSION.SDK_INT > Build.VERSION_CODES.M) {
+            mServiceWorkerController = new ServiceWorkerControllerAdapter(
+                    awBrowserContext.getServiceWorkerController());
+        }
+
         mStarted = true;
         mRunQueue.drainQueue();
     }
@@ -519,30 +529,47 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
         return new WebViewChromium(this, webView, privateAccess, mShouldDisableThreadChecking);
     }
 
-    // Check this as a workaround for https://crbug.com/622151.
+    // Workaround for IME thread crashes on grandfathered OEM apps.
     private boolean shouldDisableThreadChecking(Context context) {
-        if (Build.VERSION.SDK_INT > Build.VERSION_CODES.M) return false;
-        final String htcMailPackageId = "com.htc.android.mail";
-        if (!htcMailPackageId.equals(context.getPackageName())) return false;
-        try {
-            PackageInfo packageInfo =
-                    context.getPackageManager().getPackageInfo(htcMailPackageId, 0);
-            if (packageInfo == null) return false;
+        String appName = context.getPackageName();
+        int versionCode = PackageUtils.getPackageVersion(context, appName);
+        int appTargetSdkVersion = context.getApplicationInfo().targetSdkVersion;
 
-            // These values are provided by HTC.
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M
-                    && packageInfo.versionCode >= 864021756) return false;
-            if (Build.VERSION.SDK_INT == Build.VERSION_CODES.M
-                    && packageInfo.versionCode >= 866001861) return false;
+        boolean shouldDisable = false;
 
-            Log.w(TAG, "Disabling thread check in WebView (http://crbug.com/622151). "
-                    + "APK name: " + htcMailPackageId + ", versionCode: "
-                    + packageInfo.versionCode);
-            return true;
-        } catch (NameNotFoundException e) {
-            // Ignore this exception and return false.
+        // crbug.com/651706
+        final String lgeMailPackageId = "com.lge.email";
+        if (lgeMailPackageId.equals(appName)) {
+            // The version code is provided by LGE.
+            if (versionCode == -1 || versionCode >= 67700000) return false;
+            shouldDisable = true;
         }
-        return false;
+
+        // crbug.com/655759
+        // Also want to cover ".att" variant suffix package name.
+        final String yahooMailPackageId = "com.yahoo.mobile.client.android.mail";
+        if (appName.startsWith(yahooMailPackageId)) {
+            if (appTargetSdkVersion > Build.VERSION_CODES.M) return false;
+            if (versionCode == -1 || versionCode > 1315849) return false;
+            shouldDisable = true;
+        }
+
+        // crbug.com/622151
+        final String htcMailPackageId = "com.htc.android.mail";
+        if (htcMailPackageId.equals(appName)) {
+            if (appTargetSdkVersion > Build.VERSION_CODES.M) return false;
+            if (versionCode == -1) return false;
+            // This value is provided by HTC.
+            if (versionCode >= 866001861) return false;
+            shouldDisable = true;
+        }
+
+        if (shouldDisable) {
+            Log.w(TAG, "Disabling thread check in WebView. "
+                            + "APK name: " + appName + ", versionCode: " + versionCode
+                            + ", targetSdkVersion: " + appTargetSdkVersion);
+        }
+        return shouldDisable;
     }
 
     @Override
@@ -550,16 +577,6 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
         synchronized (mLock) {
             if (mGeolocationPermissions == null) {
                 ensureChromiumStartedLocked(true);
-                AwGeolocationPermissions awGelocationPermissions = ThreadUtils.runningOnUiThread()
-                        ? getBrowserContextOnUiThread().getGeolocationPermissions()
-                        : runOnUiThreadBlocking(new Callable<AwGeolocationPermissions>() {
-                            @Override
-                            public AwGeolocationPermissions call() {
-                                return getBrowserContextOnUiThread().getGeolocationPermissions();
-                            }
-                        });
-                mGeolocationPermissions =
-                        new GeolocationPermissionsAdapter(this, awGelocationPermissions);
             }
         }
         return mGeolocationPermissions;
@@ -580,17 +597,6 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
         synchronized (mLock) {
             if (mServiceWorkerController == null) {
                 ensureChromiumStartedLocked(true);
-                AwServiceWorkerController awServiceWorkerController =
-                        ThreadUtils.runningOnUiThread()
-                        ? getBrowserContextOnUiThread().getServiceWorkerController()
-                        : runOnUiThreadBlocking(new Callable<AwServiceWorkerController>() {
-                            @Override
-                            public AwServiceWorkerController call() {
-                                return getBrowserContextOnUiThread().getServiceWorkerController();
-                            }
-                        });
-                mServiceWorkerController =
-                        new ServiceWorkerControllerAdapter(awServiceWorkerController);
             }
         }
         return (ServiceWorkerController) mServiceWorkerController;
@@ -621,15 +627,6 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
         synchronized (mLock) {
             if (mWebStorage == null) {
                 ensureChromiumStartedLocked(true);
-                AwQuotaManagerBridge awQuotaManager = ThreadUtils.runningOnUiThread()
-                        ? AwQuotaManagerBridge.getInstance()
-                        : runOnUiThreadBlocking(new Callable<AwQuotaManagerBridge>() {
-                            @Override
-                            public AwQuotaManagerBridge call() {
-                                return AwQuotaManagerBridge.getInstance();
-                            }
-                        });
-                mWebStorage = new WebStorageAdapter(this, awQuotaManager);
             }
         }
         return mWebStorage;
@@ -640,15 +637,8 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
         synchronized (mLock) {
             if (mWebViewDatabase == null) {
                 ensureChromiumStartedLocked(true);
-                HttpAuthDatabase awDatabase = ThreadUtils.runningOnUiThread()
-                        ? getBrowserContextOnUiThread().getHttpAuthDatabase(context)
-                        : runOnUiThreadBlocking(new Callable<HttpAuthDatabase>() {
-                            @Override
-                            public HttpAuthDatabase call() {
-                                return getBrowserContextOnUiThread().getHttpAuthDatabase(context);
-                            }
-                        });
-                mWebViewDatabase = new WebViewDatabaseAdapter(this, awDatabase);
+                mWebViewDatabase = new WebViewDatabaseAdapter(
+                        this, HttpAuthDatabase.newInstance(context, HTTP_AUTH_DATABASE_FILE));
             }
         }
         return mWebViewDatabase;

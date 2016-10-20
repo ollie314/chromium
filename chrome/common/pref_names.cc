@@ -6,6 +6,7 @@
 
 #include "base/macros.h"
 #include "build/build_config.h"
+#include "chrome/common/features.h"
 #include "chrome/common/pref_font_webkit_names.h"
 
 namespace prefs {
@@ -13,7 +14,7 @@ namespace prefs {
 // *************** PROFILE PREFS ***************
 // These are attached to the user profile
 
-#if defined(OS_CHROMEOS) && defined(ENABLE_APP_LIST)
+#if defined(OS_CHROMEOS) && BUILDFLAG(ENABLE_APP_LIST)
 // A preference to keep list of Android apps and their state.
 const char kArcApps[] = "arc.apps";
 // A preference to store backup and restore state for Android apps.
@@ -881,6 +882,14 @@ const char kAllowScreenLock[] = "allow_screen_lock";
 // or dismissed HaTS (happiness-tracking) survey.
 const char kHatsLastInteractionTimestamp[] = "hats_last_interaction_timestamp";
 
+// An int64 pref. This is the timestamp that indicates the end of the most
+// recent survey cycle.
+const char kHatsSurveyCycleEndTimestamp[] = "hats_survey_cycle_end_timestamp";
+
+// A boolean pref. Indicates if the device is selected for HaTS in the current
+// survey cycle.
+const char kHatsDeviceIsSelected[] = "hats_device_is_selected";
+
 // A boolean pref. Indicates if we've already shown a notification to inform the
 // current user about the quick unlock feature.
 const char kQuickUnlockFeatureNotificationShown[] =
@@ -927,8 +936,9 @@ const char kMdHistoryMenuPromoShown[] = "history.menu_promo_shown";
 // Boolean controlling whether SafeSearch is mandatory for Google Web Searches.
 const char kForceGoogleSafeSearch[] = "settings.force_google_safesearch";
 
-// Boolean controlling whether Safety Mode is mandatory on YouTube.
-const char kForceYouTubeSafetyMode[] = "settings.force_youtube_safety_mode";
+// Integer controlling whether Restrict Mode (moderate/strict) is mandatory on
+// YouTube. See |safe_search_util::YouTubeRestrictMode| for possible values.
+const char kForceYouTubeRestrict[] = "settings.force_youtube_restrict";
 
 // Boolean controlling whether history is recorded via Session Sync
 // (for supervised users).
@@ -980,6 +990,10 @@ const char kPluginsDisabledPluginsExceptions[] =
 // List pref containing names of plugins that are enabled by policy.
 const char kPluginsEnabledPlugins[] = "plugins.plugins_enabled";
 
+// Whether Chrome should use its internal PDF viewer or not.
+const char kPluginsAlwaysOpenPdfExternally[] =
+    "plugins.always_open_pdf_externally";
+
 #if defined(ENABLE_PLUGINS)
 // Whether about:plugins is shown in the details mode or not.
 const char kPluginsShowDetails[] = "plugins.show_details";
@@ -992,7 +1006,7 @@ const char kPluginsAllowOutdated[] = "plugins.allow_outdated";
 // be always allowed or not.
 const char kPluginsAlwaysAuthorize[] = "plugins.always_authorize";
 
-#if defined(ENABLE_PLUGIN_INSTALLATION)
+#if BUILDFLAG(ENABLE_PLUGIN_INSTALLATION)
 // Dictionary holding plugins metadata.
 const char kPluginsMetadata[] = "plugins.metadata";
 
@@ -1836,6 +1850,15 @@ const char kCustomizationDefaultWallpaperURL[] =
 // System uptime, when last logout started.
 // This is saved to file and cleared after chrome process starts.
 const char kLogoutStartedLast[] = "chromeos.logout-started";
+
+// The role of the device in the OOBE bootstrapping process. If it's a "slave"
+// device, then it's eligible to be enrolled by a "master" device (which could
+// be an Android app).
+const char kIsBootstrappingSlave[] = "is_oobe_bootstrapping_slave";
+
+// A preference that controlles Android status reporting.
+const char kReportArcStatusEnabled[] = "arc.status_reporting_enabled";
+
 #endif  // defined(OS_CHROMEOS)
 
 // Whether there is a Flash version installed that supports clearing LSO data.
@@ -2058,7 +2081,7 @@ const char kRLZBrand[] = "rlz.brand";
 const char kRLZDisabled[] = "rlz.disabled";
 #endif
 
-#if defined(ENABLE_APP_LIST)
+#if BUILDFLAG(ENABLE_APP_LIST)
 // The directory in user data dir that contains the profile to be used with the
 // app launcher.
 const char kAppListProfile[] = "app_list.profile";
@@ -2102,7 +2125,7 @@ const char kAppLauncherDriveAppMapping[] =
 // A list of Drive app ids that tracks the uninstallable Drive apps.
 const char kAppLauncherUninstalledDriveApps[] =
     "apps.app_launcher.uninstalled_drive_apps";
-#endif  // defined(ENABLE_APP_LIST)
+#endif  // BUILDFLAG(ENABLE_APP_LIST)
 
 #if defined(OS_WIN)
 // If set, the user requested to launch the app with this extension id while

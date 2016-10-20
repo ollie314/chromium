@@ -16,6 +16,7 @@ import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.device.DeviceClassManager;
 import org.chromium.chrome.browser.physicalweb.PhysicalWeb;
 import org.chromium.chrome.browser.preferences.PrefServiceBridge;
+import org.chromium.components.minidump_uploader.util.CrashReportingPermissionManager;
 
 /**
  * Reads, writes, and migrates preferences related to network usage and privacy.
@@ -74,7 +75,12 @@ public class PrivacyPreferencesManager implements CrashReportingPermissionManage
                              .getString(DEPRECATED_PREF_CRASH_DUMP_UPLOAD, crashDumpNeverUpload)
                              .equals(crashDumpNeverUpload));
 
+            // Remove both this preference and the related one. If the related one is not removed
+            // now, later migrations could read from it and clobber the state.
             editor.remove(DEPRECATED_PREF_CRASH_DUMP_UPLOAD);
+            if (mSharedPreferences.contains(DEPRECATED_PREF_CRASH_DUMP_UPLOAD_NO_CELLULAR)) {
+                editor.remove(DEPRECATED_PREF_CRASH_DUMP_UPLOAD_NO_CELLULAR);
+            }
         } else if (mSharedPreferences.contains(DEPRECATED_PREF_CRASH_DUMP_UPLOAD_NO_CELLULAR)) {
             setUsageAndCrashReporting(mSharedPreferences.getBoolean(
                     DEPRECATED_PREF_CRASH_DUMP_UPLOAD_NO_CELLULAR, false));

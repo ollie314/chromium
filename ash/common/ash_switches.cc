@@ -57,10 +57,6 @@ const char kAshEnableMagnifierKeyScroller[] =
 // Enables the palette next to the status area.
 const char kAshEnablePalette[] = "ash-enable-palette";
 
-// Enables experimental ash palette tools.
-const char kAshEnablePaletteExperimentalFeatures[] =
-    "ash-enable-palette-experimental-features";
-
 // Enables the palette on every display, instead of only the internal one.
 const char kAshEnablePaletteOnAllDisplays[] =
     "ash-enable-palette-on-all-displays";
@@ -72,13 +68,6 @@ const char kAshEnableTouchView[] = "enable-touchview";
 
 // Enables mirrored screen.
 const char kAshEnableMirroredScreen[] = "ash-enable-mirrored-screen";
-
-// Enables / disables a stable order between overview sessions, independent of
-// the MRU order which attempts to preserve relative window positions.
-const char kAshDisableStableOverviewOrder[] =
-    "ash-disable-stable-overview-order";
-const char kAshEnableStableOverviewOrder[] = "ash-enable-stable-overview-order";
-
 
 // Enables touch view testing.
 // TODO(skuhne): Remove DEBUG_TOGGLE_TOUCH_VIEW accelerator once this flag is
@@ -96,16 +85,6 @@ const char kAshMaterialDesign[] = "ash-md";
 const char kAshMaterialDesignDisabled[] = "disabled";
 const char kAshMaterialDesignEnabled[] = "enabled";
 const char kAshMaterialDesignExperimental[] = "experimental";
-
-// Specifies a maximum number of preview windows in overview mode that still
-// allows using mask layers to hide the original window header and use rounded
-// corners.
-const char kAshMaxWindowsToUseMaskInOverview[] = "ash-max-previews-to-use-mask";
-
-// Specifies a maximum number of preview windows in overview mode that still
-// allows using alpha shapes to hide the original window header.
-const char kAshMaxWindowsToUseShapeInOverview[] =
-    "ash-max-previews-to-use-shape";
 
 // Enables the heads-up display for tracking touch points.
 const char kAshTouchHud[] = "ash-touch-hud";

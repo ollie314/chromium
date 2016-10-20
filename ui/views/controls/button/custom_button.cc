@@ -18,6 +18,7 @@
 #include "ui/views/controls/button/label_button.h"
 #include "ui/views/controls/button/menu_button.h"
 #include "ui/views/controls/button/radio_button.h"
+#include "ui/views/controls/button/toggle_button.h"
 #include "ui/views/widget/widget.h"
 
 #if defined(USE_AURA)
@@ -54,6 +55,7 @@ CustomButton* CustomButton::AsCustomButton(views::View* view) {
         !strcmp(classname, ImageButton::kViewClassName) ||
         !strcmp(classname, LabelButton::kViewClassName) ||
         !strcmp(classname, RadioButton::kViewClassName) ||
+        !strcmp(classname, ToggleButton::kViewClassName) ||
         !strcmp(classname, MenuButton::kViewClassName)) {
       return static_cast<CustomButton*>(view);
     }
@@ -92,6 +94,8 @@ void CustomButton::SetState(ButtonState state) {
 }
 
 void CustomButton::StartThrobbing(int cycles_til_stop) {
+  if (!animate_on_state_change_)
+    return;
   is_throbbing_ = true;
   hover_animation_.StartThrobbing(cycles_til_stop);
 }
@@ -401,7 +405,6 @@ CustomButton::CustomButton(ButtonListener* listener)
     : Button(listener),
       state_(STATE_NORMAL),
       hover_animation_(this),
-      animate_on_state_change_(true),
       is_throbbing_(false),
       triggerable_event_flags_(ui::EF_LEFT_MOUSE_BUTTON),
       request_focus_on_press_(false),

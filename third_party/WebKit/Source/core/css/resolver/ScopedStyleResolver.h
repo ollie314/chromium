@@ -1,6 +1,7 @@
 /*
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
- * Copyright (C) 2003, 2004, 2005, 2006, 2007, 2008, 2009, 2010, 2011 Apple Inc. All rights reserved.
+ * Copyright (C) 2003, 2004, 2005, 2006, 2007, 2008, 2009, 2010, 2011 Apple Inc.
+ * All rights reserved.
  * Copyright (C) 2012 Google Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -28,6 +29,7 @@
 #ifndef ScopedStyleResolver_h
 #define ScopedStyleResolver_h
 
+#include "core/css/ActiveStyleSheets.h"
 #include "core/css/ElementRuleCollector.h"
 #include "core/css/RuleSet.h"
 #include "core/dom/TreeScope.h"
@@ -40,7 +42,8 @@ class PageRuleCollector;
 class StyleSheetContents;
 class ViewportStyleResolver;
 
-// This class selects a ComputedStyle for a given element based on a collection of stylesheets.
+// This class selects a ComputedStyle for a given element based on a collection
+// of stylesheets.
 class ScopedStyleResolver final : public GarbageCollected<ScopedStyleResolver> {
   WTF_MAKE_NONCOPYABLE(ScopedStyleResolver);
 
@@ -56,6 +59,7 @@ class ScopedStyleResolver final : public GarbageCollected<ScopedStyleResolver> {
       const StringImpl* animationName);
 
   void appendCSSStyleSheet(CSSStyleSheet&, const MediaQueryEvaluator&);
+  void appendActiveStyleSheets(unsigned index, const ActiveStyleSheetVector&);
   void collectMatchingAuthorRules(ElementRuleCollector&,
                                   CascadeOrder = ignoreCascadeOrder);
   void collectMatchingShadowHostRules(ElementRuleCollector&,
@@ -72,6 +76,7 @@ class ScopedStyleResolver final : public GarbageCollected<ScopedStyleResolver> {
   bool hasDeepOrShadowSelector() const { return m_hasDeepOrShadowSelector; }
   void setHasUnresolvedKeyframesRule() { m_hasUnresolvedKeyframesRule = true; }
   static void keyframesRulesAdded(const TreeScope&);
+  static ContainerNode& invalidationRootForTreeScope(const TreeScope&);
 
   DECLARE_TRACE();
 

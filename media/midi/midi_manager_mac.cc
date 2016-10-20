@@ -18,12 +18,12 @@
 using base::IntToString;
 using base::SysCFStringRefToUTF8;
 using std::string;
+using midi::mojom::Result;
 
 // NB: System MIDI types are pointer types in 32-bit and integer types in
 // 64-bit. Therefore, the initialization is the simplest one that satisfies both
 // (if possible).
 
-namespace media {
 namespace midi {
 
 namespace {
@@ -387,4 +387,3 @@ void MidiManagerMac::SendMidiData(MidiManagerClient* client,
 }
 
 }  // namespace midi
-}  // namespace media

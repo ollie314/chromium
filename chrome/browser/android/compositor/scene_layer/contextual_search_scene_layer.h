@@ -20,7 +20,6 @@ class Layer;
 class SolidColorLayer;
 }
 
-namespace chrome {
 namespace android {
 
 class ContextualSearchLayer;
@@ -73,7 +72,9 @@ class ContextualSearchSceneLayer : public SceneLayer,
       jfloat search_bar_margin_side,
       jfloat search_bar_height,
       jfloat search_context_opacity,
+      jfloat search_text_layer_min_height,
       jfloat search_term_opacity,
+      jfloat search_term_caption_spacing,
       jfloat search_caption_animation_percentage,
       jboolean search_caption_visible,
       jboolean search_bar_border_visible,
@@ -127,6 +128,5 @@ class ContextualSearchSceneLayer : public SceneLayer,
 bool RegisterContextualSearchSceneLayer(JNIEnv* env);
 
 }  // namespace android
-}  // namespace chrome
 
 #endif  // CHROME_BROWSER_ANDROID_COMPOSITOR_SCENE_LAYER_CONTEXTUAL_SEARCH_SCENE_LAYER_H_

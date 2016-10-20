@@ -41,8 +41,8 @@
 #include "media/blink/webmediaplayer_params.h"
 #include "media/mojo/interfaces/remoting.mojom.h"
 #include "mojo/public/cpp/bindings/binding.h"
-#include "services/shell/public/interfaces/connector.mojom.h"
-#include "services/shell/public/interfaces/interface_provider.mojom.h"
+#include "services/service_manager/public/interfaces/connector.mojom.h"
+#include "services/service_manager/public/interfaces/interface_provider.mojom.h"
 #include "third_party/WebKit/public/platform/WebEffectiveConnectionType.h"
 #include "third_party/WebKit/public/platform/WebFocusType.h"
 #include "third_party/WebKit/public/platform/WebLoadingBehaviorFlag.h"
@@ -82,6 +82,7 @@ class SyncMessage;
 }
 
 namespace blink {
+class InterfaceRegistry;
 class WebContentDecryptionModule;
 class WebMouseEvent;
 class WebPresentationClient;
@@ -105,13 +106,14 @@ class CdmFactory;
 class DecoderFactory;
 class MediaPermission;
 class MediaServiceProvider;
+class RemotingController;
 class RendererWebMediaPlayerDelegate;
 class SurfaceManager;
 class UrlIndex;
 class WebEncryptedMediaClientImpl;
 }
 
-namespace shell {
+namespace service_manager {
 class InterfaceRegistry;
 class InterfaceProvider;
 }
@@ -123,6 +125,7 @@ class Origin;
 namespace content {
 
 class AssociatedInterfaceProviderImpl;
+class BlinkInterfaceRegistryImpl;
 class ChildFrameCompositingHelper;
 class CompositorDependencies;
 class DevToolsAgent;
@@ -418,8 +421,8 @@ class CONTENT_EXPORT RenderFrameImpl
   void ExecuteJavaScript(const base::string16& javascript) override;
   bool IsMainFrame() override;
   bool IsHidden() override;
-  shell::InterfaceRegistry* GetInterfaceRegistry() override;
-  shell::InterfaceProvider* GetRemoteInterfaces() override;
+  service_manager::InterfaceRegistry* GetInterfaceRegistry() override;
+  service_manager::InterfaceProvider* GetRemoteInterfaces() override;
   AssociatedInterfaceRegistry* GetAssociatedInterfaceRegistry() override;
   AssociatedInterfaceProvider* GetRemoteAssociatedInterfaces() override;
 #if defined(ENABLE_PLUGINS)
@@ -451,7 +454,7 @@ class CONTENT_EXPORT RenderFrameImpl
 
   // mojom::Frame implementation:
   void GetInterfaceProvider(
-      shell::mojom::InterfaceProviderRequest request) override;
+      service_manager::mojom::InterfaceProviderRequest request) override;
 
   // blink::WebFrameClient implementation:
   blink::WebPlugin* createPlugin(blink::WebLocalFrame* frame,
@@ -462,7 +465,6 @@ class CONTENT_EXPORT RenderFrameImpl
       blink::WebMediaPlayerEncryptedMediaClient* encrypted_client,
       blink::WebContentDecryptionModule* initial_cdm,
       const blink::WebString& sink_id) override;
-  blink::WebMediaSession* createMediaSession() override;
   blink::WebApplicationCacheHost* createApplicationCacheHost(
       blink::WebApplicationCacheHostClient* client) override;
   blink::WebWorkerContentSettingsClientProxy*
@@ -645,6 +647,7 @@ class CONTENT_EXPORT RenderFrameImpl
       const blink::WebSecurityOrigin& security_origin,
       blink::WebSetSinkIdCallbacks* web_callbacks) override;
   blink::InterfaceProvider* interfaceProvider() override;
+  blink::InterfaceRegistry* interfaceRegistry() override;
   blink::WebPageVisibilityState visibilityState() const override;
 
   // WebFrameSerializerClient implementation:
@@ -818,6 +821,7 @@ class CONTENT_EXPORT RenderFrameImpl
       const std::vector<blink::WebCompositionUnderline>& underlines);
   void OnExecuteNoValueEditCommand(const std::string& name);
   void OnExtendSelectionAndDelete(int before, int after);
+  void OnDeleteSurroundingText(int before, int after);
   void OnReload(bool bypass_cache);
   void OnReloadLoFiImages();
   void OnTextSurroundingSelectionRequest(uint32_t max_length);
@@ -874,6 +878,14 @@ class CONTENT_EXPORT RenderFrameImpl
   void OnCopyToFindPboard();
 #endif
 
+  // Callback scheduled from OnSerializeAsMHTML for when writing serialized
+  // MHTML to file has been completed in the file thread.
+  void OnWriteMHTMLToDiskComplete(
+      int job_id,
+      std::set<std::string> serialized_resources_uri_digests,
+      base::TimeDelta main_thread_use_time,
+      bool success);
+
   // Requests that the browser process navigates to |url|. If
   // |is_history_navigation_in_new_child| is true, the browser process should
   // look for a matching FrameNavigationEntry in the last committed entry to use
@@ -882,6 +894,7 @@ class CONTENT_EXPORT RenderFrameImpl
       const GURL& url,
       bool uses_post,
       const scoped_refptr<ResourceRequestBodyImpl>& resource_request_body,
+      const std::string& extra_headers,
       const Referrer& referrer,
       blink::WebNavigationPolicy policy,
       bool should_replace_current_entry,
@@ -1021,10 +1034,13 @@ class CONTENT_EXPORT RenderFrameImpl
   bool AreSecureCodecsSupported();
 
 #if defined(ENABLE_MOJO_MEDIA)
-  shell::mojom::InterfaceProvider* GetMediaInterfaceProvider();
+  service_manager::mojom::InterfaceProvider* GetMediaInterfaceProvider();
 #endif
 
+#if BUILDFLAG(ENABLE_MEDIA_REMOTING)
   media::mojom::RemoterFactory* GetRemoterFactory();
+#endif
+
   media::CdmFactory* GetCdmFactory();
   media::DecoderFactory* GetDecoderFactory();
 
@@ -1051,6 +1067,12 @@ class CONTENT_EXPORT RenderFrameImpl
                      bool final_status_update);
 
   void InitializeBlameContext(RenderFrameImpl* parent_frame);
+
+#if BUILDFLAG(ENABLE_MEDIA_REMOTING)
+  // Creates the RemotingController to control whether to switch to/from media
+  // remoting from/to local playback.
+  std::unique_ptr<media::RemotingController> CreateRemotingController();
+#endif
 
   // Stores the WebLocalFrame we are associated with.  This is null from the
   // constructor until BindToWebFrame is called, and it is null after
@@ -1190,9 +1212,11 @@ class CONTENT_EXPORT RenderFrameImpl
 
   media::SurfaceManager* media_surface_manager_;
 
+#if BUILDFLAG(ENABLE_MEDIA_REMOTING)
   // Lazy-bound pointer to the RemoterFactory service in the browser
   // process. Always use the GetRemoterFactory() accessor instead of this.
   media::mojom::RemoterFactoryPtr remoter_factory_;
+#endif
 
   // The CDM and decoder factory attached to this frame, lazily initialized.
   std::unique_ptr<media::CdmFactory> cdm_factory_;
@@ -1212,14 +1236,15 @@ class CONTENT_EXPORT RenderFrameImpl
   // initialized.
   PresentationDispatcher* presentation_dispatcher_;
 
-  std::unique_ptr<shell::InterfaceRegistry> interface_registry_;
-  std::unique_ptr<shell::InterfaceProvider> remote_interfaces_;
+  std::unique_ptr<service_manager::InterfaceRegistry> interface_registry_;
+  std::unique_ptr<service_manager::InterfaceProvider> remote_interfaces_;
   std::unique_ptr<BlinkInterfaceProviderImpl> blink_interface_provider_;
-  shell::mojom::InterfaceProviderRequest
+  std::unique_ptr<BlinkInterfaceRegistryImpl> blink_interface_registry_;
+  service_manager::mojom::InterfaceProviderRequest
       pending_remote_interface_provider_request_;
 
-  // The shell proxy used to connect to Mojo applications.
-  shell::mojom::ConnectorPtr connector_;
+  // The Connector proxy used to connect to services.
+  service_manager::mojom::ConnectorPtr connector_;
 
   // The screen orientation dispatcher attached to the frame, lazily
   // initialized.
@@ -1296,6 +1321,10 @@ class CONTENT_EXPORT RenderFrameImpl
   AssociatedInterfaceRegistryImpl associated_interfaces_;
   std::unique_ptr<AssociatedInterfaceProviderImpl>
       remote_associated_interfaces_;
+
+  // TODO(dcheng): Remove these members.
+  bool committed_first_load_ = false;
+  bool name_changed_before_first_commit_ = false;
 
   base::WeakPtrFactory<RenderFrameImpl> weak_factory_;
 

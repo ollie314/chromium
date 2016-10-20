@@ -77,7 +77,6 @@ class ChannelIDService;
 class ClientCertStore;
 class CookieStore;
 class CTVerifier;
-class FtpTransactionFactory;
 class HttpServerProperties;
 class HttpTransactionFactory;
 class ProxyConfigService;
@@ -86,6 +85,7 @@ class ReportSender;
 class SSLConfigService;
 class TransportSecurityPersister;
 class TransportSecurityState;
+class URLRequestContextStorage;
 class URLRequestJobFactoryImpl;
 }  // namespace net
 
@@ -94,10 +94,6 @@ class PolicyCertVerifier;
 class PolicyHeaderIOHelper;
 class URLBlacklistManager;
 }  // namespace policy
-
-namespace previews {
-class PreviewsIOData;
-}
 
 // Conceptually speaking, the ProfileIOData represents data that lives on the IO
 // thread that is owned by a Profile, such as, but not limited to, network
@@ -257,10 +253,6 @@ class ProfileIOData {
     return data_reduction_proxy_io_data_.get();
   }
 
-  previews::PreviewsIOData* previews_io_data() const {
-    return previews_io_data_.get();
-  }
-
   // This function is to be used to check if the |url| is defined in
   // blacklist or whitelist policy.
   virtual policy::URLBlacklist::URLBlacklistState GetURLBlacklistState(
@@ -369,13 +361,20 @@ class ProfileIOData {
   void InitializeOnUIThread(Profile* profile);
   void ApplyProfileParamsToContext(net::URLRequestContext* context) const;
 
+  // Does common setup of the URLRequestJobFactories. Adds default
+  // ProtocolHandlers to |job_factory|, adds URLRequestInterceptors in front of
+  // it as needed, and returns the result.
+  //
+  // |protocol_handler_interceptor| is configured to intercept URLRequests
+  //     before all other URLRequestInterceptors, if non-null.
+  // |host_resolver| is needed to set up the FtpProtocolHandler.
   std::unique_ptr<net::URLRequestJobFactory> SetUpJobFactoryDefaults(
       std::unique_ptr<net::URLRequestJobFactoryImpl> job_factory,
       content::URLRequestInterceptorScopedVector request_interceptors,
       std::unique_ptr<ProtocolHandlerRegistry::JobInterceptorFactory>
           protocol_handler_interceptor,
       net::NetworkDelegate* network_delegate,
-      net::FtpTransactionFactory* ftp_transaction_factory) const;
+      net::HostResolver* host_resolver) const;
 
   // Called when the Profile is destroyed. |context_getters| must include all
   // URLRequestContextGetters that refer to the ProfileIOData's
@@ -386,31 +385,23 @@ class ProfileIOData {
   void ShutdownOnUIThread(
       std::unique_ptr<ChromeURLRequestContextGetterVector> context_getters);
 
-  // A ChannelIDService object is created by a derived class of
-  // ProfileIOData, and the derived class calls this method to set the
-  // channel_id_service_ member and transfers ownership to the base
-  // class.
-  void set_channel_id_service(
-      net::ChannelIDService* channel_id_service) const;
-
   void set_data_reduction_proxy_io_data(
       std::unique_ptr<data_reduction_proxy::DataReductionProxyIOData>
           data_reduction_proxy_io_data) const;
-
-  void set_previews_io_data(
-      std::unique_ptr<previews::PreviewsIOData> previews_io_data) const;
 
   net::ProxyService* proxy_service() const {
     return proxy_service_.get();
   }
 
-  net::HttpServerProperties* http_server_properties() const;
-
-  void set_http_server_properties(
-      std::unique_ptr<net::HttpServerProperties> http_server_properties) const;
-
   net::URLRequestContext* main_request_context() const {
     return main_request_context_.get();
+  }
+
+  // Storage for |main_request_context_|, to allow objects created by subclasses
+  // to live until the ProfileIOData destructor is invoked, so it can safely
+  // cancel URLRequests.
+  net::URLRequestContextStorage* main_request_context_storage() const {
+    return main_request_context_storage_.get();
   }
 
   bool initialized() const {
@@ -551,7 +542,7 @@ class ProfileIOData {
   mutable BooleanPrefMember enable_referrers_;
   mutable BooleanPrefMember enable_do_not_track_;
   mutable BooleanPrefMember force_google_safesearch_;
-  mutable BooleanPrefMember force_youtube_safety_mode_;
+  mutable IntegerPrefMember force_youtube_restrict_;
   mutable BooleanPrefMember safe_browsing_enabled_;
   mutable StringPrefMember allowed_domains_for_apps_;
   mutable BooleanPrefMember sync_disabled_;
@@ -572,19 +563,15 @@ class ProfileIOData {
 #if defined(ENABLE_EXTENSIONS)
   mutable scoped_refptr<extensions::InfoMap> extension_info_map_;
 #endif
-  mutable std::unique_ptr<net::ChannelIDService> channel_id_service_;
 
   mutable std::unique_ptr<data_reduction_proxy::DataReductionProxyIOData>
       data_reduction_proxy_io_data_;
-
-  mutable std::unique_ptr<previews::PreviewsIOData> previews_io_data_;
 
   mutable std::unique_ptr<net::ProxyService> proxy_service_;
   mutable std::unique_ptr<net::TransportSecurityState>
       transport_security_state_;
   mutable std::unique_ptr<net::CTVerifier> cert_transparency_verifier_;
   mutable std::unique_ptr<ChromeExpectCTReporter> expect_ct_reporter_;
-  mutable std::unique_ptr<net::HttpServerProperties> http_server_properties_;
 #if defined(OS_CHROMEOS)
   // Set to |cert_verifier_| if it references a PolicyCertVerifier. In that
   // case, the verifier is owned by  |cert_verifier_|. Otherwise, set to NULL.
@@ -602,9 +589,14 @@ class ProfileIOData {
   mutable std::unique_ptr<certificate_transparency::CTPolicyManager>
       ct_policy_manager_;
 
-  // These are only valid in between LazyInitialize() and their accessor being
-  // called.
+  // Owns the subset of URLRequestContext's elements that are created by
+  // subclasses of ProfileImplIOData, to ensure proper destruction ordering.
+  // TODO(mmenke):  Move ownship of net objects owned by the ProfileIOData
+  // itself to this class, to improve destruction ordering.
+  mutable std::unique_ptr<net::URLRequestContextStorage>
+      main_request_context_storage_;
   mutable std::unique_ptr<net::URLRequestContext> main_request_context_;
+
   mutable std::unique_ptr<net::URLRequestContext> extensions_request_context_;
   // One URLRequestContext per isolated app for main and media requests.
   mutable URLRequestContextMap app_request_context_map_;

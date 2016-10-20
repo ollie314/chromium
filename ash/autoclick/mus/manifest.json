@@ -1,12 +1,15 @@
 {
   "manifest_version":  1,
-  "name": "mojo:accessibility_autoclick",
+  "name": "service:accessibility_autoclick",
   "display_name": "Autoclick",
   "capabilities": {
-    "provided": { "mash:launchable": ["mash::mojom::Launchable"] },
+    "provided": {
+      "mash:launchable": [ "mash::mojom::Launchable" ],
+      "ash:autoclick": [ "ash::autoclick::mojom::AutoclickController" ]
+    },
     "required": {
-      "*": { "classes": [ "app" ] },
-      "mojo:shell": { "interfaces": [ "shell::mojom::Shell" ] }
+      "*": [ "app" ],
+      "service:service_manager": [ "service_manager:service_manager" ]
     }
   }
 }

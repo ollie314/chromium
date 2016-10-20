@@ -145,9 +145,9 @@ static bool isRectInDirection(WebFocusType type,
 // document. In case it is, one can scroll in direction or take any different
 // desired action later on.
 bool hasOffscreenRect(Node* node, WebFocusType type) {
-  // Get the FrameView in which |node| is (which means the current viewport if |node|
-  // is not in an inner document), so we can check if its content rect is visible
-  // before we actually move the focus to it.
+  // Get the FrameView in which |node| is (which means the current viewport if
+  // |node| is not in an inner document), so we can check if its content rect is
+  // visible before we actually move the focus to it.
   FrameView* frameView = node->document().view();
   if (!frameView)
     return true;
@@ -157,8 +157,8 @@ bool hasOffscreenRect(Node* node, WebFocusType type) {
   LayoutRect containerViewportRect(frameView->visibleContentRect());
   // We want to select a node if it is currently off screen, but will be
   // exposed after we scroll. Adjust the viewport to post-scrolling position.
-  // If the container has overflow:hidden, we cannot scroll, so we do not pass direction
-  // and we do not adjust for scrolling.
+  // If the container has overflow:hidden, we cannot scroll, so we do not pass
+  // direction and we do not adjust for scrolling.
   int pixelsPerLineStep =
       ScrollableArea::pixelsPerLineStep(frameView->getHostWindow());
   switch (type) {
@@ -221,7 +221,7 @@ bool scrollInDirection(LocalFrame* frame, WebFocusType type) {
         return false;
     }
 
-    frame->view()->scrollBy(IntSize(dx, dy), UserScroll);
+    frame->view()->scrollBy(ScrollOffset(dx, dy), UserScroll);
     return true;
   }
   return false;
@@ -244,39 +244,29 @@ bool scrollInDirection(Node* container, WebFocusType type) {
         frameView ? frameView->getHostWindow() : nullptr);
     switch (type) {
       case WebFocusTypeLeft:
-        dx = -std::min(pixelsPerLineStep,
-                       container->layoutBox()->scrollLeft().toInt());
+        dx = -pixelsPerLineStep;
         break;
       case WebFocusTypeRight:
         ASSERT(container->layoutBox()->scrollWidth() >
                (container->layoutBox()->scrollLeft() +
                 container->layoutBox()->clientWidth()));
-        dx = std::min(pixelsPerLineStep,
-                      (container->layoutBox()->scrollWidth() -
-                       (container->layoutBox()->scrollLeft() +
-                        container->layoutBox()->clientWidth()))
-                          .toInt());
+        dx = pixelsPerLineStep;
         break;
       case WebFocusTypeUp:
-        dy = -std::min(pixelsPerLineStep,
-                       container->layoutBox()->scrollTop().toInt());
+        dy = -pixelsPerLineStep;
         break;
       case WebFocusTypeDown:
         ASSERT(container->layoutBox()->scrollHeight() -
                (container->layoutBox()->scrollTop() +
                 container->layoutBox()->clientHeight()));
-        dy = std::min(pixelsPerLineStep,
-                      (container->layoutBox()->scrollHeight() -
-                       (container->layoutBox()->scrollTop() +
-                        container->layoutBox()->clientHeight()))
-                          .toInt());
+        dy = pixelsPerLineStep;
         break;
       default:
         ASSERT_NOT_REACHED();
         return false;
     }
 
-    container->layoutBox()->scrollByRecursively(IntSize(dx, dy));
+    container->layoutBox()->scrollByRecursively(ScrollOffset(dx, dy));
     return true;
   }
 
@@ -377,7 +367,7 @@ bool canScrollInDirection(const LocalFrame* frame, WebFocusType type) {
       ScrollbarAlwaysOff == verticalMode)
     return false;
   LayoutSize size(frame->view()->contentsSize());
-  LayoutSize offset(frame->view()->scrollOffset());
+  LayoutSize offset(frame->view()->scrollOffsetInt());
   LayoutRect rect(frame->view()->visibleContentRect(IncludeScrollbars));
 
   switch (type) {
@@ -409,7 +399,7 @@ static LayoutRect rectToAbsoluteCoordinates(LocalFrame* initialFrame,
         LayoutObject* layoutObject = element->layoutObject();
         element = layoutObject ? layoutObject->offsetParent() : nullptr;
       } while (element);
-      rect.move((-toLocalFrame(frame)->view()->scrollOffset()));
+      rect.move((-toLocalFrame(frame)->view()->scrollOffsetInt()));
     }
   }
   return rect;
@@ -424,8 +414,8 @@ LayoutRect nodeRectInAbsoluteCoordinates(Node* node, bool ignoreBorder) {
   LayoutRect rect =
       rectToAbsoluteCoordinates(node->document().frame(), node->boundingBox());
 
-  // For authors that use border instead of outline in their CSS, we compensate by ignoring the border when calculating
-  // the rect of the focused element.
+  // For authors that use border instead of outline in their CSS, we compensate
+  // by ignoring the border when calculating the rect of the focused element.
   if (ignoreBorder) {
     rect.move(node->layoutObject()->style()->borderLeftWidth(),
               node->layoutObject()->style()->borderTopWidth());
@@ -444,10 +434,10 @@ LayoutRect frameRectInAbsoluteCoordinates(LocalFrame* frame) {
       frame, LayoutRect(frame->view()->visibleContentRect()));
 }
 
-// This method calculates the exitPoint from the startingRect and the entryPoint into the candidate rect.
-// The line between those 2 points is the closest distance between the 2 rects.
-// Takes care of overlapping rects, defining points so that the distance between them
-// is zero where necessary
+// This method calculates the exitPoint from the startingRect and the entryPoint
+// into the candidate rect.  The line between those 2 points is the closest
+// distance between the 2 rects.  Takes care of overlapping rects, defining
+// points so that the distance between them is zero where necessary
 void entryAndExitPointsForDirection(WebFocusType type,
                                     const LayoutRect& startingRect,
                                     const LayoutRect& potentialRect,
@@ -648,9 +638,9 @@ bool canBeScrolledIntoView(WebFocusType type, const FocusCandidate& candidate) {
 }
 
 // The starting rect is the rect of the focused node, in document coordinates.
-// Compose a virtual starting rect if there is no focused node or if it is off screen.
-// The virtual rect is the edge of the container or frame. We select which
-// edge depending on the direction of the navigation.
+// Compose a virtual starting rect if there is no focused node or if it is off
+// screen.  The virtual rect is the edge of the container or frame. We select
+// which edge depending on the direction of the navigation.
 LayoutRect virtualRectForDirection(WebFocusType type,
                                    const LayoutRect& startingRect,
                                    LayoutUnit width) {
@@ -680,8 +670,9 @@ LayoutRect virtualRectForDirection(WebFocusType type,
 LayoutRect virtualRectForAreaElementAndDirection(HTMLAreaElement& area,
                                                  WebFocusType type) {
   ASSERT(area.imageElement());
-  // Area elements tend to overlap more than other focusable elements. We flatten the rect of the area elements
-  // to minimize the effect of overlapping areas.
+  // Area elements tend to overlap more than other focusable elements. We
+  // flatten the rect of the area elements to minimize the effect of overlapping
+  // areas.
   LayoutRect rect = virtualRectForDirection(
       type, rectToAbsoluteCoordinates(
                 area.document().frame(),

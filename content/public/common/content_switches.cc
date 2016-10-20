@@ -320,9 +320,6 @@ const char kDisableZeroCopyDxgiVideo[]      = "disable-zero-copy-dxgi-video";
 // based tests.
 const char kDomAutomationController[]       = "dom-automation";
 
-// Causes the process to run as a download subprocess.
-const char kDownloadProcess[]               = "download";
-
 // Disable antialiasing on 2d canvas clips
 const char kDisable2dCanvasClipAntialiasing[] = "disable-2d-canvas-clip-aa";
 
@@ -388,9 +385,6 @@ const char kEnableWebFontsInterventionV2SwitchValueEnabledWith3G[] =
 const char kEnableWebFontsInterventionV2SwitchValueEnabledWithSlow2G[] =
     "enabled-slow2g";
 const char kEnableWebFontsInterventionV2SwitchValueDisabled[] = "disabled";
-
-// Enables Generic Sensor API functionality.
-const char kEnableGenericSensors[] = "enable-generic-sensors";
 
 // Makes the GL worker context run asynchronously by using a separate stream.
 const char kEnableGpuAsyncWorkerContext[] = "enable-gpu-async-worker-context";
@@ -536,6 +530,12 @@ const char kEnableZeroCopy[]                = "enable-zero-copy";
 // numbers.
 const char kExplicitlyAllowedPorts[]        = "explicitly-allowed-ports";
 
+// Handle to the shared memory segment containing field trial state that is to
+// be shared between processes. The argument to this switch is the handle id
+// (pointer on Windows) as a string, followed by a comma, then the size of the
+// shared memory segment as a string.
+const char kFieldTrialHandle[] = "field-trial-handle";
+
 // Always use the Skia GPU backend for drawing layer tiles. Only valid with GPU
 // accelerated compositing + impl-side painting. Overrides the
 // kEnableGpuRasterization flag.
@@ -611,12 +611,6 @@ const char kDisableJavaScriptHarmonyShipping[] =
 // Enables experimental Harmony (ECMAScript 6) features.
 const char kJavaScriptHarmony[]             = "javascript-harmony";
 
-// Enables experimental Asm.js to WebAssembly.
-const char kEnableAsmWasm[]                 = "enable-asm-wasm";
-
-// Enables experimental WebAssembly.
-const char kEnableWasm[]                    = "enable-wasm";
-
 // Specifies the flags passed to JS engine
 const char kJavaScriptFlags[]               = "js-flags";
 
@@ -665,6 +659,12 @@ const char kNoReferrers[]                   = "no-referrers";
 
 // Disables the sandbox for all process types that are normally sandboxed.
 const char kNoSandbox[]                     = "no-sandbox";
+
+// Disables the use of a zygote process for forking child processes. Instead,
+// child processes will be forked and exec'd directly. Note that --no-sandbox
+// should also be used together with this flag because the sandbox needs the
+// zygote to work.
+const char kNoZygote[] = "no-zygote";
 
 // Enable or disable appcontainer/lowbox for renderer on Win8+ platforms.
 const char kEnableAppContainer[]           = "enable-appcontainer";
@@ -909,9 +909,9 @@ const char kDisableWebRtcEncryption[]      = "disable-webrtc-encryption";
 
 // Disables HW encode acceleration for WebRTC.
 const char kDisableWebRtcHWEncoding[]       = "disable-webrtc-hw-encoding";
-
-// Enables negotiation of DTLS 1.2 for WebRTC.
-const char kEnableWebRtcDtls12[]            = "enable-webrtc-dtls12";
+const char kDisableWebRtcHWEncodingVPx[] = "vpx";
+const char kDisableWebRtcHWEncodingH264[] = "h264";
+const char kDisableWebRtcHWEncodingNone[] = "none";
 
 // Enables H264 HW encode acceleration for WebRTC.
 const char kEnableWebRtcHWH264Encoding[]    = "enable-webrtc-hw-h264-encoding";
@@ -1029,15 +1029,8 @@ const char kDeviceScaleFactor[]     = "device-scale-factor";
 // Disable the Legacy Window which corresponds to the size of the WebContents.
 const char kDisableLegacyIntermediateWindow[] = "disable-legacy-window";
 
-// Disables the Win32K process mitigation policy for renderer processes.
-const char kDisableWin32kRendererLockDown[] =
-    "disable-win32k-renderer-lockdown";
-
-// Enables the Win32K process mitigation policy for certain PPAPI mime
-// types. Each mime type is separated by a comma. Specify * to enable
-// the policy for all mime types.
-const char kEnableWin32kLockDownMimeTypes[] =
-    "enable-win32k-lockdown-mimetypes";
+// Disables the Win32K process mitigation policy for child processes.
+const char kDisableWin32kLockDown[] = "disable-win32k-lockdown";
 
 // Enables experimental hardware acceleration for VP8/VP9 video decoding.
 // Bitmask - 0x1=Microsoft, 0x2=AMD, 0x03=Try all.

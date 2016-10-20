@@ -24,10 +24,10 @@
 #include "remoting/protocol/port_allocator_factory.h"
 #include "remoting/protocol/stream_message_pipe_adapter.h"
 #include "remoting/protocol/transport_context.h"
+#include "remoting/protocol/webrtc_audio_module.h"
 #include "remoting/protocol/webrtc_dummy_video_encoder.h"
 #include "third_party/webrtc/api/test/fakeconstraints.h"
 #include "third_party/webrtc/libjingle/xmllite/xmlelement.h"
-#include "third_party/webrtc/modules/audio_device/include/fake_audio_device.h"
 
 using buzz::QName;
 using buzz::XmlElement;
@@ -146,8 +146,10 @@ class WebrtcTransport::PeerConnectionWrapper
       std::unique_ptr<cricket::PortAllocator> port_allocator,
       base::WeakPtr<WebrtcTransport> transport)
       : transport_(transport) {
+    audio_module_ = new rtc::RefCountedObject<WebrtcAudioModule>();
+
     peer_connection_factory_ = webrtc::CreatePeerConnectionFactory(
-        worker_thread, rtc::Thread::Current(), &fake_audio_device_module_,
+        worker_thread, rtc::Thread::Current(), audio_module_.get(),
         encoder_factory.release(), nullptr);
 
     webrtc::FakeConstraints constraints;
@@ -158,6 +160,10 @@ class WebrtcTransport::PeerConnectionWrapper
         std::move(port_allocator), nullptr, this);
   }
   virtual ~PeerConnectionWrapper() { peer_connection_->Close(); }
+
+  WebrtcAudioModule* audio_module() {
+    return audio_module_.get();
+  }
 
   webrtc::PeerConnectionInterface* peer_connection() {
     return peer_connection_.get();
@@ -208,7 +214,7 @@ class WebrtcTransport::PeerConnectionWrapper
   }
 
  private:
-  webrtc::FakeAudioDeviceModule fake_audio_device_module_;
+  scoped_refptr<WebrtcAudioModule> audio_module_;
   scoped_refptr<webrtc::PeerConnectionFactoryInterface>
       peer_connection_factory_;
   scoped_refptr<webrtc::PeerConnectionInterface> peer_connection_;
@@ -222,12 +228,21 @@ WebrtcTransport::WebrtcTransport(
     rtc::Thread* worker_thread,
     scoped_refptr<TransportContext> transport_context,
     EventHandler* event_handler)
-    : worker_thread_(worker_thread),
-      transport_context_(transport_context),
+    : transport_context_(transport_context),
       event_handler_(event_handler),
       handshake_hmac_(crypto::HMAC::SHA256),
       weak_factory_(this) {
   transport_context_->set_relay_mode(TransportContext::RelayMode::TURN);
+
+  video_encoder_factory_ = new WebrtcDummyVideoEncoderFactory();
+  std::unique_ptr<cricket::PortAllocator> port_allocator =
+      transport_context_->port_allocator_factory()->CreatePortAllocator(
+          transport_context_);
+
+  // Takes ownership of video_encoder_factory_.
+  peer_connection_wrapper_.reset(new PeerConnectionWrapper(
+      worker_thread, base::WrapUnique(video_encoder_factory_),
+      std::move(port_allocator), weak_factory_.GetWeakPtr()));
 }
 
 WebrtcTransport::~WebrtcTransport() {
@@ -243,6 +258,12 @@ webrtc::PeerConnectionFactoryInterface*
 WebrtcTransport::peer_connection_factory() {
   return peer_connection_wrapper_
              ? peer_connection_wrapper_->peer_connection_factory()
+             : nullptr;
+}
+
+WebrtcAudioModule* WebrtcTransport::audio_module() {
+  return peer_connection_wrapper_
+             ? peer_connection_wrapper_->audio_module()
              : nullptr;
 }
 
@@ -270,16 +291,6 @@ void WebrtcTransport::Start(
   if (!handshake_hmac_.Init(authenticator->GetAuthKey())) {
     LOG(FATAL) << "HMAC::Init() failed.";
   }
-
-  video_encoder_factory_ = new WebrtcDummyVideoEncoderFactory();
-  std::unique_ptr<cricket::PortAllocator> port_allocator =
-      transport_context_->port_allocator_factory()->CreatePortAllocator(
-          transport_context_);
-
-  // Takes ownership of video_encoder_factory_.
-  peer_connection_wrapper_.reset(new PeerConnectionWrapper(
-      worker_thread_, base::WrapUnique(video_encoder_factory_),
-      std::move(port_allocator), weak_factory_.GetWeakPtr()));
 
   event_handler_->OnWebrtcTransportConnecting();
 
@@ -333,9 +344,9 @@ bool WebrtcTransport::ProcessTransportInfo(XmlElement* transport_info) {
       }
     }
 
-    // Set bitrate range to 1-20 Mbps.
+    // Set bitrate range to 1-100 Mbps.
     //  - Setting min bitrate here enables padding.
-    //  - The default max bitrate is 600 kbps. Setting it to 20 Mbps allows to
+    //  - The default max bitrate is 600 kbps. Setting it to 100 Mbps allows to
     //    use higher bandwidth when it's available.
     //
     // TODO(sergeyu): Padding needs to be enabled to workaround BW estimator not
@@ -348,7 +359,7 @@ bool WebrtcTransport::ProcessTransportInfo(XmlElement* transport_info) {
     std::string vp8line_with_bitrate =
         vp8line +
         "a=fmtp:100 x-google-min-bitrate=1000\n"
-        "a=fmtp:100 x-google-max-bitrate=20000\n";
+        "a=fmtp:100 x-google-max-bitrate=100000\n";
     base::ReplaceSubstringsAfterOffset(&sdp, 0, vp8line, vp8line_with_bitrate);
 
     webrtc::SdpParseError error;
@@ -430,6 +441,13 @@ void WebrtcTransport::OnLocalSessionDescriptionCreated(
     return;
   }
   description_sdp = NormalizeSessionDescription(description_sdp);
+
+  // Update SDP format to use stereo for opus codec.
+  std::string opus_line = "a=rtpmap:111 opus/48000/2\n";
+  std::string opus_line_with_bitrate =
+      opus_line + "a=fmtp:111 stereo=1; x-google-min-bitrate=160\n";
+  base::ReplaceSubstringsAfterOffset(&description_sdp, 0, opus_line,
+                                     opus_line_with_bitrate);
 
   // Format and send the session description to the peer.
   std::unique_ptr<XmlElement> transport_info(

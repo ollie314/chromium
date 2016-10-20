@@ -11,7 +11,6 @@ with layout test results.
 import logging
 import optparse
 
-from webkitpy.common.net.buildbot import Build
 from webkitpy.common.net.rietveld import Rietveld
 from webkitpy.common.net.web import Web
 from webkitpy.common.net.git_cl import GitCL
@@ -57,9 +56,11 @@ class RebaselineCL(AbstractParallelRebaselineCommand):
         if not issue_number:
             return
 
-        builds = self.rietveld.latest_try_jobs(issue_number, self._try_bots())
+        builds = self.rietveld.latest_try_job_results(issue_number, self._try_bots())
         if options.trigger_jobs:
-            self.trigger_jobs_for_missing_builds(builds)
+            if self.trigger_jobs_for_missing_builds(builds):
+                _log.info('Please re-run webkit-patch rebaseline-cl once all pending try jobs have finished.')
+                return
         if not builds:
             # TODO(qyearsley): Also check that there are *finished* builds.
             # The current behavior would still proceed if there are queued
@@ -76,14 +77,13 @@ class RebaselineCL(AbstractParallelRebaselineCommand):
 
         # TODO(qyearsley): Fix places where non-existing tests may be added:
         #  1. Make sure that the tests obtained when passing --only-changed-tests include only existing tests.
-        #  2. Make sure that update-w3c-test-expectations doesn't specify non-existing tests (http://crbug.com/649691).
         test_prefix_list = self._filter_existing(test_prefix_list)
 
         self._log_test_prefix_list(test_prefix_list)
 
         if options.dry_run:
             return
-        self._rebaseline(options, test_prefix_list, update_scm=False)
+        self.rebaseline(options, test_prefix_list)
 
     def _filter_existing(self, test_prefix_list):
         """Filters out entries in |test_prefix_list| for tests that don't exist."""
@@ -115,10 +115,11 @@ class RebaselineCL(AbstractParallelRebaselineCommand):
         return GitCL(self._tool)
 
     def trigger_jobs_for_missing_builds(self, builds):
+        """Returns True if jobs were triggered; False otherwise."""
         builders_with_builds = {b.builder_name for b in builds}
         builders_without_builds = set(self._try_bots()) - builders_with_builds
         if not builders_without_builds:
-            return
+            return False
 
         _log.info('Triggering try jobs for:')
         for builder in sorted(builders_without_builds):
@@ -130,6 +131,7 @@ class RebaselineCL(AbstractParallelRebaselineCommand):
         # even when there are builders under different master names.
         for builder in sorted(builders_without_builds):
             self.git_cl().run(['try', '-b', builder])
+        return True
 
     def _test_prefix_list(self, issue_number, only_changed_tests):
         """Returns a collection of test, builder and file extensions to get new baselines for.
@@ -161,29 +163,26 @@ class RebaselineCL(AbstractParallelRebaselineCommand):
     def _builds_to_tests(self, issue_number):
         """Fetches a list of try bots, and for each, fetches tests with new baselines."""
         _log.debug('Getting results for Rietveld issue %d.', issue_number)
-        try_jobs = self.rietveld.latest_try_jobs(issue_number, self._try_bots())
-        if not try_jobs:
+        builds = self.rietveld.latest_try_job_results(issue_number, self._try_bots())
+        if not builds:
             _log.debug('No try job results for builders in: %r.', self._try_bots())
-        builds_to_tests = {}
-        for job in try_jobs:
-            test_results = self._unexpected_mismatch_results(job)
-            build = Build(job.builder_name, job.build_number)
-            builds_to_tests[build] = sorted(r.test_name() for r in test_results)
-        return builds_to_tests
+        return {build: self._tests_to_rebaseline(build) for build in builds}
 
     def _try_bots(self):
         """Returns a collection of try bot builders to fetch results for."""
         return self._tool.builders.all_try_builder_names()
 
-    def _unexpected_mismatch_results(self, try_job):
+    def _tests_to_rebaseline(self, build):
         """Fetches a list of LayoutTestResult objects for unexpected results with new baselines."""
         buildbot = self._tool.buildbot
-        results_url = buildbot.results_url(try_job.builder_name, try_job.build_number)
+        results_url = buildbot.results_url(build.builder_name, build.build_number)
         layout_test_results = buildbot.fetch_layout_test_results(results_url)
         if layout_test_results is None:
             _log.warning('Failed to request layout test results from "%s".', results_url)
             return []
-        return layout_test_results.unexpected_mismatch_results()
+        failure_results = layout_test_results.unexpected_mismatch_results()
+        missing_results = layout_test_results.missing_results()
+        return sorted(r.test_name() for r in failure_results + missing_results)
 
     @staticmethod
     def _log_test_prefix_list(test_prefix_list):

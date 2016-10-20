@@ -193,11 +193,11 @@ void GLES2DecoderTestBase::InitDecoderWithCommandLine(
     feature_info = new FeatureInfo(*command_line, gpu_driver_bug_workaround);
   }
 
-  group_ = scoped_refptr<ContextGroup>(
-      new ContextGroup(gpu_preferences_, NULL, memory_tracker_,
-                       new ShaderTranslatorCache(gpu_preferences_),
-                       new FramebufferCompletenessCache, feature_info,
-                       normalized_init.bind_generates_resource, nullptr));
+  group_ = scoped_refptr<ContextGroup>(new ContextGroup(
+      gpu_preferences_, NULL, memory_tracker_,
+      new ShaderTranslatorCache(gpu_preferences_),
+      new FramebufferCompletenessCache, feature_info,
+      normalized_init.bind_generates_resource, nullptr, nullptr));
   bool use_default_textures = normalized_init.bind_generates_resource;
 
   InSequence sequence;
@@ -1384,20 +1384,26 @@ void GLES2DecoderTestBase::DoFramebufferRenderbuffer(
         renderbuffer_service_id))
         .Times(1)
         .RetiresOnSaturation();
+    EXPECT_CALL(*gl_, GetError())
+        .WillOnce(Return(error))
+        .RetiresOnSaturation();
     EXPECT_CALL(*gl_, FramebufferRenderbufferEXT(
         target, GL_STENCIL_ATTACHMENT, renderbuffer_target,
         renderbuffer_service_id))
         .Times(1)
+        .RetiresOnSaturation();
+    EXPECT_CALL(*gl_, GetError())
+        .WillOnce(Return(error))
         .RetiresOnSaturation();
   } else {
     EXPECT_CALL(*gl_, FramebufferRenderbufferEXT(
         target, attachment, renderbuffer_target, renderbuffer_service_id))
         .Times(1)
         .RetiresOnSaturation();
+    EXPECT_CALL(*gl_, GetError())
+        .WillOnce(Return(error))
+        .RetiresOnSaturation();
   }
-  EXPECT_CALL(*gl_, GetError())
-      .WillOnce(Return(error))
-      .RetiresOnSaturation();
   cmds::FramebufferRenderbuffer cmd;
   cmd.Init(target, attachment, renderbuffer_target, renderbuffer_client_id);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));

@@ -1101,17 +1101,6 @@ Runtime.Experiment.prototype = {
         var name = pair.shift();
         Runtime._queryParamsObject[name] = pair.join("=");
     }
-    var flags = Runtime._queryParamsObject["flags"];
-    delete Runtime._queryParamsObject["flags"];
-    if (flags) {
-        try {
-            var parsedFlags = JSON.parse(window.decodeURIComponent(flags));
-            for (var key in parsedFlags)
-                Runtime._queryParamsObject[key] = parsedFlags[key];
-        } catch(e) {
-            console.error("Invalid startup flag: " + e);
-        }
-    }
 })();}
 
 
@@ -1140,6 +1129,30 @@ Runtime.resolveSourceURL = function(path)
         sourceURL = sourceURL.replace(self.location.search, "");
     sourceURL = sourceURL.substring(0, sourceURL.lastIndexOf("/") + 1) + path;
     return "\n/*# sourceURL=" + sourceURL + " */";
+}
+
+/**
+ * @interface
+ */
+function ServicePort() { }
+
+ServicePort.prototype = {
+    /**
+     * @param {function(string)} messageHandler
+     * @param {function(string)} closeHandler
+     */
+    setHandlers: function(messageHandler, closeHandler) { },
+
+    /**
+     * @param {string} message
+     * @return {!Promise<boolean>}
+     */
+    send: function(message) { },
+
+    /**
+     * @return {!Promise<boolean>}
+     */
+    close: function() { }
 }
 
 /** @type {!Runtime} */

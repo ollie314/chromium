@@ -14,7 +14,6 @@
 #include "android_webview/grit/aw_strings.h"
 #include "android_webview/renderer/aw_content_settings_client.h"
 #include "android_webview/renderer/aw_key_systems.h"
-#include "android_webview/renderer/aw_message_port_client.h"
 #include "android_webview/renderer/aw_print_web_view_helper_delegate.h"
 #include "android_webview/renderer/aw_render_frame_ext.h"
 #include "android_webview/renderer/aw_render_view_ext.h"
@@ -39,8 +38,8 @@
 #include "content/public/renderer/render_view.h"
 #include "net/base/escape.h"
 #include "net/base/net_errors.h"
-#include "services/shell/public/cpp/interface_provider.h"
-#include "services/shell/public/cpp/interface_registry.h"
+#include "services/service_manager/public/cpp/interface_provider.h"
+#include "services/service_manager/public/cpp/interface_registry.h"
 #include "third_party/WebKit/public/platform/WebString.h"
 #include "third_party/WebKit/public/platform/WebURL.h"
 #include "third_party/WebKit/public/platform/WebURLError.h"
@@ -150,7 +149,6 @@ void AwContentRendererClient::RenderFrameCreated(
   new AwContentSettingsClient(render_frame);
   new PrintRenderFrameObserver(render_frame);
   new AwRenderFrameExt(render_frame);
-  new AwMessagePortClient(render_frame);
 
   // TODO(jam): when the frame tree moves into content and parent() works at
   // RenderFrame construction, simplify this by just checking parent().

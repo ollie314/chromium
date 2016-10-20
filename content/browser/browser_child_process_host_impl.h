@@ -12,6 +12,7 @@
 
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory/shared_memory.h"
 #include "base/memory/weak_ptr.h"
 #include "base/process/process.h"
 #include "base/single_thread_task_runner.h"
@@ -31,7 +32,7 @@ namespace base {
 class CommandLine;
 }
 
-namespace shell {
+namespace service_manager {
 class InterfaceProvider;
 }
 
@@ -40,7 +41,7 @@ namespace content {
 class BrowserChildProcessHostIterator;
 class BrowserChildProcessObserver;
 class BrowserMessageFilter;
-class MojoChildConnection;
+class ChildConnection;
 
 // Plugins/workers and other child processes that live on the IO thread use this
 // class. RenderProcessHostImpl is the main exception that doesn't use this
@@ -65,12 +66,14 @@ class CONTENT_EXPORT BrowserChildProcessHostImpl
   // Copies kEnableFeatures and kDisableFeatures to the command line. Generates
   // them from the FeatureList override state, to take into account overrides
   // from FieldTrials.
-  static void CopyFeatureAndFieldTrialFlags(base::CommandLine* cmd_line);
+  static std::unique_ptr<base::SharedMemory> CopyFeatureAndFieldTrialFlags(
+      base::CommandLine* cmd_line);
 
   // BrowserChildProcessHost implementation:
   bool Send(IPC::Message* message) override;
   void Launch(SandboxedProcessLauncherDelegate* delegate,
               base::CommandLine* cmd_line,
+              const base::SharedMemory* field_trial_state,
               bool terminate_on_shutdown) override;
   const ChildProcessData& GetData() const override;
   ChildProcessHost* GetHost() const override;
@@ -85,7 +88,7 @@ class CONTENT_EXPORT BrowserChildProcessHostImpl
   bool CanShutdown() override;
   void OnChildDisconnected() override;
   const base::Process& GetProcess() const override;
-  shell::InterfaceProvider* GetRemoteInterfaces() override;
+  service_manager::InterfaceProvider* GetRemoteInterfaces() override;
   bool OnMessageReceived(const IPC::Message& message) override;
   void OnChannelConnected(int32_t peer_pid) override;
   void OnChannelError() override;
@@ -108,7 +111,7 @@ class CONTENT_EXPORT BrowserChildProcessHostImpl
 
   BrowserChildProcessHostDelegate* delegate() const { return delegate_; }
 
-  MojoChildConnection* child_connection() const {
+  ChildConnection* child_connection() const {
     return child_connection_.get();
   }
 
@@ -153,7 +156,7 @@ class CONTENT_EXPORT BrowserChildProcessHostImpl
   std::unique_ptr<ChildProcessHost> child_process_host_;
 
   const std::string child_token_;
-  std::unique_ptr<MojoChildConnection> child_connection_;
+  std::unique_ptr<ChildConnection> child_connection_;
 
   std::unique_ptr<ChildProcessLauncher> child_process_;
 

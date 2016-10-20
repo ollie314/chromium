@@ -2,7 +2,8 @@
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 2000 Simon Hausmann <hausmann@kde.org>
  *           (C) 2000 Stefan Schimanski (1Stein@gmx.de)
- * Copyright (C) 2004, 2005, 2006, 2008, 2009, 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006, 2008, 2009, 2010 Apple Inc.
+ *               All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -32,6 +33,7 @@
 #include "core/layout/LayoutAnalyzer.h"
 #include "core/layout/LayoutView.h"
 #include "core/page/Page.h"
+#include "core/paint/EmbeddedObjectPaintInvalidator.h"
 #include "core/paint/EmbeddedObjectPainter.h"
 #include "core/plugins/PluginView.h"
 #include "platform/text/PlatformLocale.h"
@@ -48,11 +50,11 @@ LayoutEmbeddedObject::LayoutEmbeddedObject(Element* element)
 LayoutEmbeddedObject::~LayoutEmbeddedObject() {}
 
 PaintLayerType LayoutEmbeddedObject::layerTypeRequired() const {
-  // This can't just use LayoutPart::layerTypeRequired, because PaintLayerCompositor
-  // doesn't loop through LayoutEmbeddedObjects the way it does frames in order
-  // to update the self painting bit on their Layer.
-  // Also, unlike iframes, embeds don't used the usesCompositing bit on LayoutView
-  // in requiresAcceleratedCompositing.
+  // This can't just use LayoutPart::layerTypeRequired, because
+  // PaintLayerCompositor doesn't loop through LayoutEmbeddedObjects the way it
+  // does frames in order to update the self painting bit on their Layer.
+  // Also, unlike iframes, embeds don't used the usesCompositing bit on
+  // LayoutView in requiresAcceleratedCompositing.
   if (requiresAcceleratedCompositing())
     return NormalPaintLayer;
   return LayoutPart::layerTypeRequired();
@@ -115,6 +117,12 @@ void LayoutEmbeddedObject::paintReplaced(const PaintInfo& paintInfo,
   EmbeddedObjectPainter(*this).paintReplaced(paintInfo, paintOffset);
 }
 
+PaintInvalidationReason LayoutEmbeddedObject::invalidatePaintIfNeeded(
+    const PaintInvalidatorContext& context) const {
+  return EmbeddedObjectPaintInvalidator(*this, context)
+      .invalidatePaintIfNeeded();
+}
+
 void LayoutEmbeddedObject::layout() {
   ASSERT(needsLayout());
   LayoutAnalyzer::Scope analyzer(*this);
@@ -132,18 +140,6 @@ void LayoutEmbeddedObject::layout() {
     frameView()->addPartToUpdate(*this);
 
   clearNeedsLayout();
-}
-
-PaintInvalidationReason LayoutEmbeddedObject::invalidatePaintIfNeeded(
-    const PaintInvalidationState& paintInvalidationState) {
-  PaintInvalidationReason reason =
-      LayoutPart::invalidatePaintIfNeeded(paintInvalidationState);
-
-  Widget* widget = this->widget();
-  if (widget && widget->isPluginView())
-    toPluginView(widget)->invalidatePaintIfNeeded();
-
-  return reason;
 }
 
 ScrollResult LayoutEmbeddedObject::scroll(ScrollGranularity granularity,

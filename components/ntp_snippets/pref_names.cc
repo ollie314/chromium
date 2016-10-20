@@ -11,6 +11,8 @@ const char kEnableSnippets[] = "ntp_snippets.enable";
 
 const char kSnippetHosts[] = "ntp_snippets.hosts";
 
+const char kRemoteSuggestionCategories[] = "ntp_snippets.remote_categories";
+
 const char kSnippetBackgroundFetchingIntervalWifi[] =
     "ntp_snippets.fetching_interval_wifi";
 
@@ -37,6 +39,7 @@ const char kDismissedDownloadSuggestions[] =
     "ntp_suggestions.offline_pages.downloads.dismissed_ids";
 const char kDismissedForeignSessionsSuggestions[] =
     "ntp_suggestions.foreign_sessions.dismissed_ids";
+const char kDismissedCategories[] = "ntp_suggestions.dismissed_categories";
 
 const char kBookmarksFirstM54Start[] =
     "ntp_suggestions.bookmarks.first_M54_start";

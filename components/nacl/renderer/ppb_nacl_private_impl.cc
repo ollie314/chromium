@@ -130,14 +130,11 @@ class NaClPluginInstance {
   explicit NaClPluginInstance(PP_Instance instance)
       : nexe_load_manager(instance), pexe_size(0) {}
   ~NaClPluginInstance() {
-    // Make sure that we do not leak a file descriptor if the NaCl loader
+    // Make sure that we do not leak a mojo handle if the NaCl loader
     // process never called ppapi_start() to initialize PPAPI.
     if (instance_info) {
-#if defined(OS_WIN)
-      base::win::ScopedHandle closer(instance_info->channel_handle.pipe.handle);
-#else
-      base::ScopedFD closer(instance_info->channel_handle.socket.fd);
-#endif
+      DCHECK(instance_info->channel_handle.is_mojo_channel_handle());
+      instance_info->channel_handle.mojo_handle.Close();
     }
   }
 
@@ -194,17 +191,8 @@ int GetRoutingID(PP_Instance instance) {
 
 // Returns whether the channel_handle is valid or not.
 bool IsValidChannelHandle(const IPC::ChannelHandle& channel_handle) {
-  if (channel_handle.name.empty()) {
-    return false;
-  }
-
-#if defined(OS_POSIX)
-  if (channel_handle.socket.fd == -1) {
-    return false;
-  }
-#endif
-
-  return true;
+  DCHECK(channel_handle.is_mojo_channel_handle());
+  return channel_handle.is_mojo_channel_handle();
 }
 
 void PostPPCompletionCallback(PP_CompletionCallback callback,

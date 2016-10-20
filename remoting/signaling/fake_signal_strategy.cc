@@ -32,6 +32,7 @@ FakeSignalStrategy::FakeSignalStrategy(const std::string& jid)
       jid_(jid),
       last_id_(0),
       weak_factory_(this) {
+  DetachFromThread();
 }
 
 FakeSignalStrategy::~FakeSignalStrategy() {
@@ -64,14 +65,14 @@ void FakeSignalStrategy::SetLocalJid(const std::string& jid) {
 
 void FakeSignalStrategy::Connect() {
   DCHECK(CalledOnValidThread());
-  FOR_EACH_OBSERVER(Listener, listeners_,
-                    OnSignalStrategyStateChange(CONNECTED));
+  for (auto& observer : listeners_)
+    observer.OnSignalStrategyStateChange(CONNECTED);
 }
 
 void FakeSignalStrategy::Disconnect() {
   DCHECK(CalledOnValidThread());
-  FOR_EACH_OBSERVER(Listener, listeners_,
-                    OnSignalStrategyStateChange(DISCONNECTED));
+  for (auto& observer : listeners_)
+    observer.OnSignalStrategyStateChange(DISCONNECTED);
 }
 
 SignalStrategy::State FakeSignalStrategy::GetState() const {
@@ -145,10 +146,8 @@ void FakeSignalStrategy::OnIncomingMessage(
     return;
   }
 
-  base::ObserverListBase<Listener>::Iterator it(&listeners_);
-  Listener* listener;
-  while ((listener = it.GetNext()) != nullptr) {
-    if (listener->OnSignalStrategyIncomingStanza(stanza_ptr))
+  for (auto& listener : listeners_) {
+    if (listener.OnSignalStrategyIncomingStanza(stanza_ptr))
       break;
   }
 }

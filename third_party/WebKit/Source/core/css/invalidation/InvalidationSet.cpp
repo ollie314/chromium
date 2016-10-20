@@ -33,7 +33,7 @@
 #include "core/css/resolver/StyleResolver.h"
 #include "core/dom/Element.h"
 #include "core/inspector/InspectorTraceEvents.h"
-#include "platform/TracedValue.h"
+#include "platform/tracing/TracedValue.h"
 #include "wtf/Compiler.h"
 #include "wtf/PtrUtil.h"
 #include "wtf/text/StringBuilder.h"
@@ -130,7 +130,8 @@ void InvalidationSet::combine(const InvalidationSet& other) {
   if (other.invalidatesSelf())
     setInvalidatesSelf();
 
-  // No longer bother combining data structures, since the whole subtree is deemed invalid.
+  // No longer bother combining data structures, since the whole subtree is
+  // deemed invalid.
   if (wholeSubtreeInvalid())
     return;
 

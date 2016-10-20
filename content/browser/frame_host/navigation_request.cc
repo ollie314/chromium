@@ -29,6 +29,7 @@
 #include "content/public/common/content_client.h"
 #include "content/public/common/request_context_type.h"
 #include "content/public/common/resource_response.h"
+#include "content/public/common/url_constants.h"
 #include "net/base/load_flags.h"
 #include "net/base/url_util.h"
 #include "net/http/http_request_headers.h"
@@ -185,7 +186,6 @@ std::unique_ptr<NavigationRequest> NavigationRequest::CreateRendererInitiated(
       false,                   // can_load_local_resources
       base::Time::Now(),       // request_time
       PageState(),             // page_state
-      -1,                      // page_id
       0,                       // nav_entry_id
       false,                   // is_same_document_history_load
       false,                   // is_history_navigation_in_new_child
@@ -367,14 +367,16 @@ void NavigationRequest::OnResponseStarted(
   }
 
   // Update the service worker params of the request params.
-  request_params_.should_create_service_worker =
-      (frame_tree_node_->pending_sandbox_flags() &
-       blink::WebSandboxFlags::Origin) != blink::WebSandboxFlags::Origin;
-  if (navigation_handle_->service_worker_handle()) {
-    request_params_.service_worker_provider_id =
-        navigation_handle_->service_worker_handle()
-            ->service_worker_provider_host_id();
-  }
+  bool did_create_service_worker_host =
+      navigation_handle_->service_worker_handle() &&
+      navigation_handle_->service_worker_handle()
+              ->service_worker_provider_host_id() !=
+          kInvalidServiceWorkerProviderId;
+  request_params_.service_worker_provider_id =
+      did_create_service_worker_host
+          ? navigation_handle_->service_worker_handle()
+                ->service_worker_provider_host_id()
+          : kInvalidServiceWorkerProviderId;
 
   // Update the lofi state of the request.
   if (response->head.is_using_lofi)
@@ -469,6 +471,7 @@ void NavigationRequest::OnStartChecksComplete(
   bool can_create_service_worker =
       (frame_tree_node_->pending_sandbox_flags() &
        blink::WebSandboxFlags::Origin) != blink::WebSandboxFlags::Origin;
+  request_params_.should_create_service_worker = can_create_service_worker;
   if (can_create_service_worker) {
     ServiceWorkerContextWrapper* service_worker_context =
         static_cast<ServiceWorkerContextWrapper*>(
@@ -495,13 +498,17 @@ void NavigationRequest::OnStartChecksComplete(
   if (navigation_handle_->navigation_ui_data())
     navigation_ui_data = navigation_handle_->navigation_ui_data()->Clone();
 
+  bool is_for_guests_only =
+      navigation_handle_->GetStartingSiteInstance()->GetSiteURL().
+          SchemeIs(kGuestScheme);
+
   loader_ = NavigationURLLoader::Create(
       frame_tree_node_->navigator()->GetController()->GetBrowserContext(),
       base::MakeUnique<NavigationRequestInfo>(
           common_params_, begin_params_, first_party_for_cookies,
           frame_tree_node_->current_origin(), frame_tree_node_->IsMainFrame(),
           parent_is_main_frame, IsSecureFrame(frame_tree_node_->parent()),
-          frame_tree_node_->frame_tree_node_id()),
+          frame_tree_node_->frame_tree_node_id(), is_for_guests_only),
       std::move(navigation_ui_data),
       navigation_handle_->service_worker_handle(), this);
 }

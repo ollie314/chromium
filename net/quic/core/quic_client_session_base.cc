@@ -176,14 +176,10 @@ QuicClientPromisedInfo* QuicClientSessionBase::GetPromisedById(
 
 QuicSpdyStream* QuicClientSessionBase::GetPromisedStream(
     const QuicStreamId id) {
-  if (IsClosedStream(id)) {
-    return nullptr;
-  }
   DynamicStreamMap::iterator it = dynamic_streams().find(id);
   if (it != dynamic_streams().end()) {
-    return static_cast<QuicSpdyStream*>(it->second);
+    return static_cast<QuicSpdyStream*>(it->second.get());
   }
-  QUIC_BUG << "Open promised stream " << id << " is missing!";
   return nullptr;
 }
 
@@ -193,6 +189,8 @@ void QuicClientSessionBase::DeletePromised(QuicClientPromisedInfo* promised) {
   // promised.
   promised_by_id_.erase(promised->id());
 }
+
+void QuicClientSessionBase::OnPushStreamTimedOut(QuicStreamId stream_id) {}
 
 void QuicClientSessionBase::ResetPromised(QuicStreamId id,
                                           QuicRstStreamErrorCode error_code) {

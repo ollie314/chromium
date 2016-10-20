@@ -6,6 +6,7 @@
 
 #include <memory>
 #include <utility>
+#include <vector>
 
 #include "base/memory/ptr_util.h"
 #include "base/time/time.h"
@@ -131,7 +132,9 @@ BalsaHeaders* MungeHeaders(const BalsaHeaders* const_headers) {
   }
   BalsaHeaders* headers = new BalsaHeaders;
   headers->CopyFrom(*const_headers);
-  if (!uri.starts_with("https://") && !uri.starts_with("http://")) {
+  if (!base::StartsWith(uri, "https://",
+                        base::CompareCase::INSENSITIVE_ASCII) &&
+      !base::StartsWith(uri, "http://", base::CompareCase::INSENSITIVE_ASCII)) {
     // If we have a relative URL, set some defaults.
     string full_uri = "https://test.example.com";
     full_uri.append(uri.as_string());
@@ -186,9 +189,8 @@ void MockableQuicClient::ProcessPacket(const IPEndPoint& self_address,
                                        const IPEndPoint& peer_address,
                                        const QuicReceivedPacket& packet) {
   QuicClient::ProcessPacket(self_address, peer_address, packet);
-  if (track_last_incoming_packet_) {
-    last_incoming_packet_.reset(packet.Clone());
-  }
+  if (track_last_incoming_packet_)
+    last_incoming_packet_ = packet.Clone();
 }
 
 MockableQuicClient::~MockableQuicClient() {
@@ -348,7 +350,8 @@ ssize_t QuicTestClient::GetOrCreateStreamAndSendRequest(
       headers->GetAllOfHeaderAsString("transfer-encoding", &encoding);
       spdy_headers.insert(std::make_pair("transfer-encoding", encoding));
     }
-    if (static_cast<StringPiece>(spdy_headers[":authority"]).empty()) {
+    auto authority = spdy_headers.find(":authority");
+    if (authority == spdy_headers.end() || authority->second.empty()) {
       // HTTP/2 requests should include the :authority pseudo hader.
       spdy_headers[":authority"] = client_->server_id().host();
     }
@@ -568,7 +571,7 @@ bool QuicTestClient::HaveActiveStream() {
           !client_->session()->IsClosedStream(stream_->id()));
 }
 
-void QuicTestClient::WaitUntil(int timeout_ms, std::function<bool()> trigger) {
+bool QuicTestClient::WaitUntil(int timeout_ms, std::function<bool()> trigger) {
   int64_t timeout_us = timeout_ms * base::Time::kMicrosecondsPerMillisecond;
   int64_t old_timeout_us = epoll_server()->timeout_in_us();
   if (timeout_us > 0) {
@@ -588,7 +591,9 @@ void QuicTestClient::WaitUntil(int timeout_ms, std::function<bool()> trigger) {
   }
   if (trigger && !trigger()) {
     VLOG(1) << "Client WaitUntil returning with trigger returning false.";
+    return false;
   }
+  return true;
 }
 
 ssize_t QuicTestClient::Send(const void* buffer, size_t size) {

@@ -49,6 +49,7 @@
 #include "core/loader/FrameLoadRequest.h"
 #include "core/loader/FrameLoader.h"
 #include "core/loader/HistoryItem.h"
+#include "core/origin_trials/OriginTrials.h"
 #include "core/page/Page.h"
 #include "core/page/WindowFeatures.h"
 #include "modules/audio_output_devices/HTMLMediaElementAudioOutputDevice.h"
@@ -58,7 +59,6 @@
 #include "modules/device_orientation/DeviceOrientationController.h"
 #include "modules/encryptedmedia/HTMLMediaElementEncryptedMedia.h"
 #include "modules/gamepad/NavigatorGamepad.h"
-#include "modules/mediasession/MediaSession.h"
 #include "modules/serviceworkers/NavigatorServiceWorker.h"
 #include "modules/serviceworkers/ServiceWorkerLinkResource.h"
 #include "modules/storage/DOMWindowStorageController.h"
@@ -81,7 +81,6 @@
 #include "public/platform/WebURL.h"
 #include "public/platform/WebURLError.h"
 #include "public/platform/WebVector.h"
-#include "public/platform/modules/mediasession/WebMediaSession.h"
 #include "public/platform/modules/serviceworker/WebServiceWorkerProvider.h"
 #include "public/platform/modules/serviceworker/WebServiceWorkerProviderClient.h"
 #include "public/web/WebAutofillClient.h"
@@ -157,7 +156,8 @@ void FrameLoaderClientImpl::dispatchDidClearWindowObjectInMainWorld() {
       NavigatorGamepad::from(*document);
       NavigatorServiceWorker::from(*document);
       DOMWindowStorageController::from(*document);
-      if (RuntimeEnabledFeatures::webVREnabled())
+      if (RuntimeEnabledFeatures::webVREnabled() ||
+          OriginTrials::webVREnabled(document->getExecutionContext()))
         NavigatorVR::from(*document);
     }
   }
@@ -792,14 +792,6 @@ std::unique_ptr<WebMediaPlayer> FrameLoaderClientImpl::createWebMediaPlayer(
       sinkId));
 }
 
-std::unique_ptr<WebMediaSession>
-FrameLoaderClientImpl::createWebMediaSession() {
-  if (!m_webFrame->client())
-    return nullptr;
-
-  return wrapUnique(m_webFrame->client()->createMediaSession());
-}
-
 ObjectContentType FrameLoaderClientImpl::getObjectContentType(
     const KURL& url,
     const String& explicitMimeType,
@@ -902,7 +894,7 @@ void FrameLoaderClientImpl::didChangeFrameOwnerProperties(
       WebFrameOwnerProperties(
           frameElement->scrollingMode(), frameElement->marginWidth(),
           frameElement->marginHeight(), frameElement->allowFullscreen(),
-          frameElement->delegatedPermissions()));
+          frameElement->csp(), frameElement->delegatedPermissions()));
 }
 
 void FrameLoaderClientImpl::dispatchWillStartUsingPeerConnectionHandler(

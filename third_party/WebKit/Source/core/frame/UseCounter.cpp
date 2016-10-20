@@ -36,7 +36,7 @@
 #include "core/inspector/ConsoleMessage.h"
 #include "core/workers/WorkerGlobalScope.h"
 #include "platform/Histogram.h"
-#include "platform/TraceEvent.h"
+#include "platform/tracing/TraceEvent.h"
 
 namespace {
 
@@ -45,7 +45,7 @@ int totalPagesMeasuredCSSSampleId() {
 }
 
 // Make sure update_use_counter_css.py was run which updates histograms.xml.
-constexpr int kMaximumCSSSampleId = 545;
+constexpr int kMaximumCSSSampleId = 546;
 
 }  // namespace
 
@@ -1058,8 +1058,10 @@ int UseCounter::mapCSSPropertyIdToCSSSampleIdForHistogram(
       return 544;
     case CSSPropertyOffsetPosition:
       return 545;
-    // 1. Add new features above this line (don't change the assigned numbers of the existing
-    // items).
+    case CSSPropertyTextDecorationSkip:
+      return 546;
+    // 1. Add new features above this line (don't change the assigned numbers of
+    // the existing items).
     // 2. Update kMaximumCSSSampleId with the new maximum value.
     // 3. Run the update_use_counter_css.py script in
     // chromium/src/tools/metrics/histograms to update the UMA histogram names.
@@ -1097,7 +1099,8 @@ void UseCounter::recordMeasurement(Feature feature) {
   DCHECK(feature < NumberOfFeatures);
 
   if (!m_featuresRecorded.quickGet(feature)) {
-    // Note that HTTPArchive tooling looks specifically for this event - see https://github.com/HTTPArchive/httparchive/issues/59
+    // Note that HTTPArchive tooling looks specifically for this event - see
+    // https://github.com/HTTPArchive/httparchive/issues/59
     TRACE_EVENT1(TRACE_DISABLED_BY_DEFAULT("blink.feature_usage"),
                  "FeatureFirstUsed", "feature", feature);
     featuresHistogram().count(feature);
@@ -1213,14 +1216,14 @@ void UseCounter::countCrossOriginIframe(const Document& document,
 }
 
 void UseCounter::count(CSSParserMode cssParserMode, CSSPropertyID property) {
-  DCHECK(property >= firstCSSProperty);
-  DCHECK(property <= lastUnresolvedCSSProperty);
+  DCHECK(isCSSPropertyIDWithName(property));
 
   if (!isUseCounterEnabledForMode(cssParserMode) || m_muteCount)
     return;
 
   if (!m_CSSRecorded.quickGet(property)) {
-    // Note that HTTPArchive tooling looks specifically for this event - see https://github.com/HTTPArchive/httparchive/issues/59
+    // Note that HTTPArchive tooling looks specifically for this event - see
+    // https://github.com/HTTPArchive/httparchive/issues/59
     TRACE_EVENT1(TRACE_DISABLED_BY_DEFAULT("blink.feature_usage"),
                  "CSSFeatureFirstUsed", "feature", property);
     cssHistogram().count(mapCSSPropertyIdToCSSSampleIdForHistogram(property));
@@ -1256,8 +1259,9 @@ UseCounter* UseCounter::getFrom(const StyleSheetContents* sheetContents) {
 
 EnumerationHistogram& UseCounter::featuresHistogram() const {
   // TODO(rbyers): Fix the SVG case.  crbug.com/236262
-  // Eg. every SVGImage has it's own Page instance, they should probably all be delegating
-  // their UseCounter to the containing Page.  For now just use a separate histogram.
+  // Eg. every SVGImage has it's own Page instance, they should probably all be
+  // delegating their UseCounter to the containing Page.  For now just use a
+  // separate histogram.
   DEFINE_STATIC_LOCAL(blink::EnumerationHistogram, histogram,
                       ("WebCore.UseCounter_TEST.Features",
                        blink::UseCounter::NumberOfFeatures));
@@ -1281,7 +1285,8 @@ EnumerationHistogram& UseCounter::cssHistogram() const {
 
 /*
  *
- * LEGACY metrics support - WebCore.FeatureObserver is to be superceded by WebCore.UseCounter
+ * LEGACY metrics support - WebCore.FeatureObserver is to be superceded by
+ * WebCore.UseCounter
  *
  */
 
@@ -1297,8 +1302,8 @@ UseCounter::LegacyCounter::LegacyCounter()
       m_CSSBits(lastUnresolvedCSSProperty + 1) {}
 
 UseCounter::LegacyCounter::~LegacyCounter() {
-  // PageDestruction was intended to be used as a scale, but it's broken (due to fast shutdown).
-  // See https://crbug.com/597963.
+  // PageDestruction was intended to be used as a scale, but it's broken (due to
+  // fast shutdown).  See https://crbug.com/597963.
   featureObserverHistogram().count(OBSOLETE_PageDestruction);
   updateMeasurements();
 }
@@ -1321,9 +1326,9 @@ void UseCounter::LegacyCounter::updateMeasurements() {
   // Clearing count bits is timing sensitive.
   m_featureBits.clearAll();
 
-  // FIXME: Sometimes this function is called more than once per page. The following
-  //        bool guards against incrementing the page count when there are no CSS
-  //        bits set. https://crbug.com/236262.
+  // FIXME: Sometimes this function is called more than once per page. The
+  // following bool guards against incrementing the page count when there are no
+  // CSS bits set. https://crbug.com/236262.
   DEFINE_STATIC_LOCAL(
       EnumerationHistogram, cssPropertiesHistogram,
       ("WebCore.FeatureObserver.CSSProperties", kMaximumCSSSampleId));

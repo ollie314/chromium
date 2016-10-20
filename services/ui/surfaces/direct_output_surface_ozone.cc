@@ -8,9 +8,9 @@
 
 #include "base/bind.h"
 #include "base/memory/ptr_util.h"
-#include "cc/output/compositor_frame.h"
 #include "cc/output/context_provider.h"
 #include "cc/output/output_surface_client.h"
+#include "cc/output/output_surface_frame.h"
 #include "cc/scheduler/begin_frame_source.h"
 #include "components/display_compositor/buffer_queue.h"
 #include "gpu/command_buffer/client/context_support.h"
@@ -83,19 +83,38 @@ void DirectOutputSurfaceOzone::BindFramebuffer() {
   buffer_queue_->BindFramebuffer();
 }
 
-void DirectOutputSurfaceOzone::SwapBuffers(cc::CompositorFrame frame) {
-  DCHECK(buffer_queue_);
-  DCHECK(frame.gl_frame_data);
+// We call this on every frame that a value changes, but changing the size once
+// we've allocated backing NativePixmapOzone instances will cause a DCHECK
+// because Chrome never Reshape(s) after the first one from (0,0). NB: this
+// implies that screen size changes need to be plumbed differently. In
+// particular, we must create the native window in the size that the hardware
+// reports.
+void DirectOutputSurfaceOzone::Reshape(const gfx::Size& size,
+                                       float device_scale_factor,
+                                       const gfx::ColorSpace& color_space,
+                                       bool has_alpha) {
+  reshape_size_ = size;
+  context_provider()->ContextGL()->ResizeCHROMIUM(
+      size.width(), size.height(), device_scale_factor, has_alpha);
+  buffer_queue_->Reshape(size, device_scale_factor, color_space);
+}
 
-  buffer_queue_->SwapBuffers(frame.gl_frame_data->sub_buffer_rect);
+void DirectOutputSurfaceOzone::SwapBuffers(cc::OutputSurfaceFrame frame) {
+  DCHECK(buffer_queue_);
+
+  // TODO(rjkroege): What if swap happens again before OnGpuSwapBuffersCompleted
+  // then it would see the wrong size?
+  DCHECK(reshape_size_ == frame.size);
+  swap_size_ = reshape_size_;
+
+  buffer_queue_->SwapBuffers(frame.sub_buffer_rect);
 
   // Code combining GpuBrowserCompositorOutputSurface + DirectOutputSurface
-  if (frame.gl_frame_data->sub_buffer_rect ==
-      gfx::Rect(frame.gl_frame_data->size)) {
+  if (frame.sub_buffer_rect == gfx::Rect(frame.size)) {
     context_provider_->ContextSupport()->Swap();
   } else {
     context_provider_->ContextSupport()->PartialSwapBuffers(
-        frame.gl_frame_data->sub_buffer_rect);
+        frame.sub_buffer_rect);
   }
 
   gpu::gles2::GLES2Interface* gl = context_provider_->ContextGL();
@@ -110,20 +129,6 @@ uint32_t DirectOutputSurfaceOzone::GetFramebufferCopyTextureFormat() {
   return buffer_queue_->internal_format();
 }
 
-// We call this on every frame but changing the size once we've allocated
-// backing NativePixmapOzone instances will cause a DCHECK because
-// Chrome never Reshape(s) after the first one from (0,0). NB: this implies
-// that screen size changes need to be plumbed differently. In particular, we
-// must create the native window in the size that the hardware reports.
-void DirectOutputSurfaceOzone::Reshape(const gfx::Size& size,
-                                       float scale_factor,
-                                       const gfx::ColorSpace& color_space,
-                                       bool alpha) {
-  OutputSurface::Reshape(size, scale_factor, color_space, alpha);
-  DCHECK(buffer_queue_);
-  buffer_queue_->Reshape(SurfaceSize(), scale_factor, color_space);
-}
-
 cc::OverlayCandidateValidator*
 DirectOutputSurfaceOzone::GetOverlayCandidateValidator() const {
   return nullptr;
@@ -135,7 +140,6 @@ bool DirectOutputSurfaceOzone::IsDisplayedAsOverlayPlane() const {
 }
 
 unsigned DirectOutputSurfaceOzone::GetOverlayTextureId() const {
-  DCHECK(buffer_queue_);
   return buffer_queue_->current_texture_id();
 }
 
@@ -158,7 +162,6 @@ void DirectOutputSurfaceOzone::OnUpdateVSyncParametersFromGpu(
 
 void DirectOutputSurfaceOzone::OnGpuSwapBuffersCompleted(
     gfx::SwapResult result) {
-  DCHECK(buffer_queue_);
   bool force_swap = false;
   if (result == gfx::SwapResult::SWAP_NAK_RECREATE_BUFFERS) {
     // Even through the swap failed, this is a fixable error so we can pretend
@@ -169,10 +172,10 @@ void DirectOutputSurfaceOzone::OnGpuSwapBuffersCompleted(
   }
 
   buffer_queue_->PageFlipComplete();
-  client_->DidSwapBuffersComplete();
+  client_->DidReceiveSwapBuffersAck();
 
   if (force_swap)
-    client_->SetNeedsRedrawRect(gfx::Rect(SurfaceSize()));
+    client_->SetNeedsRedrawRect(gfx::Rect(swap_size_));
 }
 
 }  // namespace ui

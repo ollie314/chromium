@@ -18,7 +18,6 @@
 
 namespace content {
 
-class RenderViewHost;
 class WebContents;
 
 // Extends WebContentsObserver for providing a public Java API for some of the
@@ -73,9 +72,9 @@ class WebContentsObserverProxy : public WebContentsObserver {
   void DidStartNavigationToPendingEntry(
       const GURL& url,
       ReloadType reload_type) override;
-  void MediaSessionStateChanged(
-      bool is_controllable,
-      bool is_suspended,
+  void MediaSessionStateChanged(bool is_controllable,
+                                bool is_suspended) override;
+  void MediaSessionMetadataChanged(
       const base::Optional<MediaMetadata>& metadata) override;
   void SetToBaseURLForDataURLIfNeeded(std::string* url);
 

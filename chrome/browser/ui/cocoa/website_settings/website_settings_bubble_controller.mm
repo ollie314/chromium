@@ -185,6 +185,7 @@ NSPoint AnchorPointForWindow(NSWindow* parent) {
 
 bool IsInternalURL(const GURL& url) {
   return url.SchemeIs(content::kChromeUIScheme) ||
+         url.SchemeIs(content::kChromeDevToolsScheme) ||
          url.SchemeIs(extensions::kExtensionScheme) ||
          url.SchemeIs(content::kViewSourceScheme);
 }
@@ -236,6 +237,10 @@ bool IsInternalURL(const GURL& url) {
   return self;
 }
 
+- (Profile*)profile {
+  return Profile::FromBrowserContext(webContents_->GetBrowserContext());
+}
+
 - (void)windowWillClose:(NSNotification*)notification {
   if (presenter_.get())
     presenter_->OnUIClosing();
@@ -260,7 +265,8 @@ bool IsInternalURL(const GURL& url) {
     text = IDS_PAGE_INFO_VIEW_SOURCE_PAGE;
     // view-source scheme uses the same icon as chrome:// pages.
     icon = IDR_PRODUCT_LOGO_16;
-  } else if (!url.SchemeIs(content::kChromeUIScheme)) {
+  } else if (!url.SchemeIs(content::kChromeUIScheme) &&
+             !url.SchemeIs(content::kChromeDevToolsScheme)) {
     NOTREACHED();
   }
 
@@ -737,12 +743,14 @@ bool IsInternalURL(const GURL& url) {
   base::scoped_nsobject<PermissionSelectorButton> button(
       [[PermissionSelectorButton alloc] initWithPermissionInfo:permissionInfo
                                                         forURL:url
-                                                  withCallback:callback]);
+                                                  withCallback:callback
+                                                       profile:[self profile]]);
 
   // Determine the largest possible size for this button.
-  CGFloat maxTitleWidth = [button
-      maxTitleWidthForContentSettingsType:permissionInfo.type
-                       withDefaultSetting:permissionInfo.default_setting];
+  CGFloat maxTitleWidth =
+      [button maxTitleWidthForContentSettingsType:permissionInfo.type
+                               withDefaultSetting:permissionInfo.default_setting
+                                          profile:[self profile]];
 
   // Ensure the containing view is large enough to contain the button with its
   // widest possible title.
@@ -1068,7 +1076,7 @@ bool IsInternalURL(const GURL& url) {
 }
 
 - (void)setPermissionInfo:(const PermissionInfoList&)permissionInfoList
-         andChosenObjects:(const ChosenObjectInfoList&)chosenObjectInfoList {
+         andChosenObjects:(ChosenObjectInfoList)chosenObjectInfoList {
   [permissionsView_ setSubviews:[NSArray array]];
   NSPoint controlOrigin = NSMakePoint(kSectionHorizontalPadding, 0);
 
@@ -1086,9 +1094,9 @@ bool IsInternalURL(const GURL& url) {
       controlOrigin.y = rowBottomRight.y;
     }
 
-    for (auto* object : chosenObjectInfoList) {
+    for (auto& object : chosenObjectInfoList) {
       controlOrigin.y += kPermissionsVerticalSpacing;
-      NSPoint rowBottomRight = [self addChosenObject:base::WrapUnique(object)
+      NSPoint rowBottomRight = [self addChosenObject:std::move(object)
                                               toView:permissionsView_
                                              atPoint:controlOrigin];
       controlOrigin.y = rowBottomRight.y;
@@ -1190,9 +1198,9 @@ void WebsiteSettingsUIBridge::SetCookieInfo(
 
 void WebsiteSettingsUIBridge::SetPermissionInfo(
     const PermissionInfoList& permission_info_list,
-    const ChosenObjectInfoList& chosen_object_info_list) {
+    ChosenObjectInfoList chosen_object_info_list) {
   [bubble_controller_ setPermissionInfo:permission_info_list
-                       andChosenObjects:chosen_object_info_list];
+                       andChosenObjects:std::move(chosen_object_info_list)];
 }
 
 void WebsiteSettingsUIBridge::SetSelectedTab(TabId tab_id) {

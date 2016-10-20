@@ -21,9 +21,9 @@ TEST_F(MockDeviceVideoCaptureServiceTest,
       .WillOnce(InvokeWithoutArgs([&wait_loop]() { wait_loop.Quit(); }));
 
   device_proxy_->Start(requested_format_,
-                       mojom::ResolutionChangePolicy::FIXED_RESOLUTION,
-                       mojom::PowerLineFrequency::DEFAULT,
-                       std::move(mock_client_proxy_));
+                       media::RESOLUTION_POLICY_FIXED_RESOLUTION,
+                       media::PowerLineFrequency::FREQUENCY_DEFAULT,
+                       std::move(mock_receiver_proxy_));
   device_proxy_.reset();
 
   wait_loop.Run();
@@ -40,10 +40,10 @@ TEST_F(MockDeviceVideoCaptureServiceTest,
       .WillOnce(InvokeWithoutArgs([&wait_loop]() { wait_loop.Quit(); }));
 
   device_proxy_->Start(requested_format_,
-                       mojom::ResolutionChangePolicy::FIXED_RESOLUTION,
-                       mojom::PowerLineFrequency::DEFAULT,
-                       std::move(mock_client_proxy_));
-  mock_client_.reset();
+                       media::RESOLUTION_POLICY_FIXED_RESOLUTION,
+                       media::PowerLineFrequency::FREQUENCY_DEFAULT,
+                       std::move(mock_receiver_proxy_));
+  mock_receiver_.reset();
 
   wait_loop.Run();
 }

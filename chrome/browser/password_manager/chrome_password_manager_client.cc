@@ -28,7 +28,6 @@
 #include "chrome/common/url_constants.h"
 #include "components/autofill/content/browser/content_autofill_driver.h"
 #include "components/autofill/content/browser/content_autofill_driver_factory.h"
-#include "components/autofill/content/common/autofill_messages.h"
 #include "components/autofill/core/browser/password_generator.h"
 #include "components/autofill/core/common/password_form.h"
 #include "components/browser_sync/profile_sync_service.h"
@@ -142,6 +141,7 @@ ChromePasswordManagerClient::ChromePasswordManagerClient(
       password_manager_(this),
       driver_factory_(nullptr),
       credential_manager_impl_(web_contents, this),
+      password_manager_client_bindings_(web_contents, this),
       observer_(nullptr),
       credentials_filter_(this,
                           base::Bind(&GetSyncService, profile_),
@@ -249,8 +249,7 @@ bool ChromePasswordManagerClient::PromptUserToSaveOrUpdatePassword(
 }
 
 bool ChromePasswordManagerClient::PromptUserToChooseCredentials(
-    ScopedVector<autofill::PasswordForm> local_forms,
-    ScopedVector<autofill::PasswordForm> federated_forms,
+    std::vector<std::unique_ptr<autofill::PasswordForm>> local_forms,
     const GURL& origin,
     const CredentialsCallback& callback) {
   // Set up an intercept callback if the prompt is zero-clickable (e.g. just one
@@ -258,23 +257,21 @@ bool ChromePasswordManagerClient::PromptUserToChooseCredentials(
   CredentialsCallback intercept =
       base::Bind(&ChromePasswordManagerClient::OnCredentialsChosen,
                  base::Unretained(this), callback, local_forms.size() == 1);
-  std::vector<std::unique_ptr<autofill::PasswordForm>> locals =
-      password_manager_util::ConvertScopedVector(std::move(local_forms));
-  std::vector<std::unique_ptr<autofill::PasswordForm>> federations =
-      password_manager_util::ConvertScopedVector(std::move(federated_forms));
+  std::vector<std::unique_ptr<autofill::PasswordForm>> dummy_federations;
 #if defined(OS_ANDROID)
   // Deletes itself on the event from Java counterpart, when user interacts with
   // dialog.
   AccountChooserDialogAndroid* acccount_chooser_dialog =
-      new AccountChooserDialogAndroid(web_contents(), std::move(locals),
-                                      std::move(federations), origin,
+      new AccountChooserDialogAndroid(web_contents(), std::move(local_forms),
+                                      std::move(dummy_federations), origin,
                                       intercept);
   acccount_chooser_dialog->ShowDialog();
   return true;
 #else
   return PasswordsClientUIDelegateFromWebContents(web_contents())
-      ->OnChooseCredentials(std::move(locals), std::move(federations), origin,
-                            intercept);
+      ->OnChooseCredentials(std::move(local_forms),
+                            std::move(dummy_federations),
+                            origin, intercept);
 #endif
 }
 
@@ -304,19 +301,17 @@ void ChromePasswordManagerClient::GeneratePassword() {
 }
 
 void ChromePasswordManagerClient::NotifyUserAutoSignin(
-    ScopedVector<autofill::PasswordForm> local_forms,
+    std::vector<std::unique_ptr<autofill::PasswordForm>> local_forms,
     const GURL& origin) {
   DCHECK(!local_forms.empty());
   // If a site gets back a credential some navigations are likely to occur. They
   // shouldn't trigger the autofill password manager.
   password_manager_.DropFormManagers();
-  std::vector<std::unique_ptr<autofill::PasswordForm>> forms =
-      password_manager_util::ConvertScopedVector(std::move(local_forms));
 #if BUILDFLAG(ANDROID_JAVA_UI)
-  ShowAutoSigninPrompt(web_contents(), forms[0]->username_value);
+  ShowAutoSigninPrompt(web_contents(), local_forms[0]->username_value);
 #else
   PasswordsClientUIDelegateFromWebContents(web_contents())
-      ->OnAutoSignin(std::move(forms), origin);
+      ->OnAutoSignin(std::move(local_forms), origin);
 #endif
 }
 
@@ -460,31 +455,6 @@ void ChromePasswordManagerClient::SetTestObserver(
   observer_ = observer;
 }
 
-bool ChromePasswordManagerClient::OnMessageReceived(
-    const IPC::Message& message,
-    content::RenderFrameHost* render_frame_host) {
-  bool handled = true;
-  IPC_BEGIN_MESSAGE_MAP_WITH_PARAM(ChromePasswordManagerClient, message,
-                                   render_frame_host)
-    // Autofill messages:
-    IPC_MESSAGE_HANDLER(AutofillHostMsg_ShowPasswordGenerationPopup,
-                        ShowPasswordGenerationPopup)
-    IPC_MESSAGE_HANDLER(AutofillHostMsg_ShowPasswordEditingPopup,
-                        ShowPasswordEditingPopup)
-    IPC_END_MESSAGE_MAP()
-
-    IPC_BEGIN_MESSAGE_MAP(ChromePasswordManagerClient, message)
-    IPC_MESSAGE_HANDLER(AutofillHostMsg_HidePasswordGenerationPopup,
-                        HidePasswordGenerationPopup)
-    IPC_MESSAGE_HANDLER(AutofillHostMsg_GenerationAvailableForForm,
-                        GenerationAvailableForForm)
-    // Default:
-    IPC_MESSAGE_UNHANDLED(handled = false)
-  IPC_END_MESSAGE_MAP()
-
-  return handled;
-}
-
 void ChromePasswordManagerClient::DidStartNavigation(
     content::NavigationHandle* navigation_handle) {
   // Logging has no sense on WebUI sites.
@@ -498,7 +468,6 @@ gfx::RectF ChromePasswordManagerClient::GetBoundsInScreenSpace(
 }
 
 void ChromePasswordManagerClient::ShowPasswordGenerationPopup(
-    content::RenderFrameHost* render_frame_host,
     const gfx::RectF& bounds,
     int max_length,
     const base::string16& generation_element,
@@ -506,7 +475,8 @@ void ChromePasswordManagerClient::ShowPasswordGenerationPopup(
     const autofill::PasswordForm& form) {
   // TODO(gcasto): Validate data in PasswordForm.
 
-  auto* driver = driver_factory_->GetDriverForFrame(render_frame_host);
+  auto* driver = driver_factory_->GetDriverForFrame(
+      password_manager_client_bindings_.GetCurrentTargetFrame());
   password_manager_.SetGenerationElementAndReasonForForm(
       driver, form, generation_element, is_manually_triggered);
   gfx::RectF element_bounds_in_screen_space = GetBoundsInScreenSpace(bounds);
@@ -520,7 +490,6 @@ void ChromePasswordManagerClient::ShowPasswordGenerationPopup(
 }
 
 void ChromePasswordManagerClient::ShowPasswordEditingPopup(
-    content::RenderFrameHost* render_frame_host,
     const gfx::RectF& bounds,
     const autofill::PasswordForm& form) {
   gfx::RectF element_bounds_in_screen_space = GetBoundsInScreenSpace(bounds);
@@ -529,8 +498,9 @@ void ChromePasswordManagerClient::ShowPasswordEditingPopup(
           popup_controller_, element_bounds_in_screen_space, form,
           0,  // Unspecified max length.
           &password_manager_,
-          driver_factory_->GetDriverForFrame(render_frame_host), observer_,
-          web_contents(), web_contents()->GetNativeView());
+          driver_factory_->GetDriverForFrame(
+              password_manager_client_bindings_.GetCurrentTargetFrame()),
+          observer_, web_contents(), web_contents()->GetNativeView());
   popup_controller_->Show(false /* display_password */);
 }
 

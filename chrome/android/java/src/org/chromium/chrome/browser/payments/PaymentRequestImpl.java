@@ -9,6 +9,9 @@ import android.graphics.Bitmap;
 import android.os.Handler;
 import android.text.TextUtils;
 
+import org.json.JSONException;
+import org.json.JSONObject;
+
 import org.chromium.base.Callback;
 import org.chromium.base.Log;
 import org.chromium.base.VisibleForTesting;
@@ -17,6 +20,7 @@ import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.autofill.PersonalDataManager;
 import org.chromium.chrome.browser.autofill.PersonalDataManager.AutofillProfile;
+import org.chromium.chrome.browser.autofill.PersonalDataManager.NormalizedAddressRequestDelegate;
 import org.chromium.chrome.browser.favicon.FaviconHelper;
 import org.chromium.chrome.browser.payments.ui.Completable;
 import org.chromium.chrome.browser.payments.ui.LineItem;
@@ -47,8 +51,6 @@ import org.chromium.payments.mojom.PaymentRequest;
 import org.chromium.payments.mojom.PaymentRequestClient;
 import org.chromium.payments.mojom.PaymentResponse;
 import org.chromium.payments.mojom.PaymentShippingOption;
-import org.json.JSONException;
-import org.json.JSONObject;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -67,7 +69,8 @@ import java.util.Set;
  * third_party/WebKit/public/platform/modules/payments/payment_request.mojom.
  */
 public class PaymentRequestImpl implements PaymentRequest, PaymentRequestUI.Client,
-        PaymentApp.InstrumentsCallback, PaymentInstrument.DetailsCallback {
+        PaymentApp.InstrumentsCallback, PaymentInstrument.DetailsCallback,
+        NormalizedAddressRequestDelegate {
     /**
      * Observer to be notified when PaymentRequest UI has been dismissed.
      */
@@ -141,6 +144,7 @@ public class PaymentRequestImpl implements PaymentRequest, PaymentRequestUI.Clie
     private final List<PaymentApp> mApps;
     private final AddressEditor mAddressEditor;
     private final CardEditor mCardEditor;
+    private final PaymentRequestJourneyLogger mJourneyLogger = new PaymentRequestJourneyLogger();
 
     private Bitmap mFavicon;
     private PaymentRequestClient mClient;
@@ -188,6 +192,9 @@ public class PaymentRequestImpl implements PaymentRequest, PaymentRequestUI.Clie
 
     /** True if show() was called. */
     private boolean mIsShowing;
+
+    private boolean mIsWaitingForNormalization;
+    private PaymentResponse mPendingPaymentResponse;
 
     /**
      * Builds the PaymentRequest service implementation.
@@ -270,7 +277,7 @@ public class PaymentRequestImpl implements PaymentRequest, PaymentRequestUI.Clie
         List<AutofillProfile> profiles = null;
         if (requestShipping || requestPayerPhone || requestPayerEmail) {
             profiles = PersonalDataManager.getInstance().getProfilesToSuggest(
-                    false /* includeName */);
+                    false /* includeNameInLabel */);
         }
 
         if (requestShipping) {
@@ -289,6 +296,20 @@ public class PaymentRequestImpl implements PaymentRequest, PaymentRequestUI.Clie
 
             // Limit the number of suggestions.
             addresses = addresses.subList(0, Math.min(addresses.size(), SUGGESTIONS_LIMIT));
+
+            // Load the validation rules for each unique region code.
+            Set<String> uniqueCountryCodes = new HashSet<>();
+            for (int i = 0; i < addresses.size(); ++i) {
+                String countryCode = AutofillAddress.getCountryCode(addresses.get(i).getProfile());
+                if (!uniqueCountryCodes.contains(countryCode)) {
+                    uniqueCountryCodes.add(countryCode);
+                    PersonalDataManager.getInstance().loadRulesForRegion(countryCode);
+                }
+            }
+
+            // Log the number of suggested shipping addresses.
+            mJourneyLogger.setNumberOfSuggestionsShown(
+                    PaymentRequestJourneyLogger.SECTION_SHIPPING_ADDRESS, addresses.size());
 
             // Automatically select the first address if one is complete and if the merchant does
             // not require a shipping address to calculate shipping costs.
@@ -336,6 +357,10 @@ public class PaymentRequestImpl implements PaymentRequest, PaymentRequestUI.Clie
 
             // Limit the number of suggestions.
             contacts = contacts.subList(0, Math.min(contacts.size(), SUGGESTIONS_LIMIT));
+
+            // Log the number of suggested contact infos.
+            mJourneyLogger.setNumberOfSuggestionsShown(
+                    PaymentRequestJourneyLogger.SECTION_CONTACT_INFO, contacts.size());
 
             // Automatically select the first address if it is complete.
             int firstCompleteContactIndex = SectionInformation.NO_SELECTION;
@@ -697,6 +722,9 @@ public class PaymentRequestImpl implements PaymentRequest, PaymentRequestUI.Clie
             Callback<PaymentInformation> callback) {
         if (optionType == PaymentRequestUI.TYPE_SHIPPING_ADDRESSES) {
             assert option instanceof AutofillAddress;
+            // Log the change of shipping address.
+            mJourneyLogger.incrementSelectionChanges(
+                    PaymentRequestJourneyLogger.SECTION_SHIPPING_ADDRESS);
             AutofillAddress address = (AutofillAddress) option;
             if (address.isComplete()) {
                 mShippingAddressesSection.setSelectedItem(option);
@@ -715,6 +743,9 @@ public class PaymentRequestImpl implements PaymentRequest, PaymentRequestUI.Clie
             return PaymentRequestUI.SELECTION_RESULT_ASYNCHRONOUS_VALIDATION;
         } else if (optionType == PaymentRequestUI.TYPE_CONTACT_DETAILS) {
             assert option instanceof AutofillContact;
+            // Log the change of contact info.
+            mJourneyLogger.incrementSelectionChanges(
+                    PaymentRequestJourneyLogger.SECTION_CONTACT_INFO);
             AutofillContact contact = (AutofillContact) option;
 
             if (contact.isComplete()) {
@@ -726,6 +757,9 @@ public class PaymentRequestImpl implements PaymentRequest, PaymentRequestUI.Clie
         } else if (optionType == PaymentRequestUI.TYPE_PAYMENT_METHODS) {
             assert option instanceof PaymentInstrument;
             if (option instanceof AutofillPaymentInstrument) {
+                // Log the change of credit card.
+                mJourneyLogger.incrementSelectionChanges(
+                        PaymentRequestJourneyLogger.SECTION_CREDIT_CARDS);
                 AutofillPaymentInstrument card = (AutofillPaymentInstrument) option;
 
                 if (!card.isComplete()) {
@@ -746,12 +780,19 @@ public class PaymentRequestImpl implements PaymentRequest, PaymentRequestUI.Clie
         if (optionType == PaymentRequestUI.TYPE_SHIPPING_ADDRESSES) {
             editAddress(null);
             mPaymentInformationCallback = callback;
+            // Log the add of shipping address.
+            mJourneyLogger.incrementSelectionAdds(
+                    PaymentRequestJourneyLogger.SECTION_SHIPPING_ADDRESS);
             return PaymentRequestUI.SELECTION_RESULT_ASYNCHRONOUS_VALIDATION;
         } else if (optionType == PaymentRequestUI.TYPE_CONTACT_DETAILS) {
             editContact(null);
+            // Log the add of contact info.
+            mJourneyLogger.incrementSelectionAdds(PaymentRequestJourneyLogger.SECTION_CONTACT_INFO);
             return PaymentRequestUI.SELECTION_RESULT_EDITOR_LAUNCH;
         } else if (optionType == PaymentRequestUI.TYPE_PAYMENT_METHODS) {
             editCard(null);
+            // Log the add of credit card.
+            mJourneyLogger.incrementSelectionAdds(PaymentRequestJourneyLogger.SECTION_CREDIT_CARDS);
             return PaymentRequestUI.SELECTION_RESULT_EDITOR_LAUNCH;
         }
 
@@ -759,6 +800,11 @@ public class PaymentRequestImpl implements PaymentRequest, PaymentRequestUI.Clie
     }
 
     private void editAddress(final AutofillAddress toEdit) {
+        if (toEdit != null) {
+            // Log the edit of a shipping address.
+            mJourneyLogger.incrementSelectionEdits(
+                    PaymentRequestJourneyLogger.SECTION_SHIPPING_ADDRESS);
+        }
         mAddressEditor.edit(toEdit, new Callback<AutofillAddress>() {
             @Override
             public void onResult(AutofillAddress completeAddress) {
@@ -777,6 +823,11 @@ public class PaymentRequestImpl implements PaymentRequest, PaymentRequestUI.Clie
     }
 
     private void editContact(final AutofillContact toEdit) {
+        if (toEdit != null) {
+            // Log the edit of a contact info.
+            mJourneyLogger.incrementSelectionEdits(
+                    PaymentRequestJourneyLogger.SECTION_CONTACT_INFO);
+        }
         mContactEditor.edit(toEdit, new Callback<AutofillContact>() {
             @Override
             public void onResult(AutofillContact completeContact) {
@@ -794,6 +845,11 @@ public class PaymentRequestImpl implements PaymentRequest, PaymentRequestUI.Clie
     }
 
     private void editCard(final AutofillPaymentInstrument toEdit) {
+        if (toEdit != null) {
+            // Log the edit of a credit card.
+            mJourneyLogger.incrementSelectionEdits(
+                    PaymentRequestJourneyLogger.SECTION_CREDIT_CARDS);
+        }
         mCardEditor.edit(toEdit, new Callback<AutofillPaymentInstrument>() {
             @Override
             public void onResult(AutofillPaymentInstrument completeCard) {
@@ -921,6 +977,10 @@ public class PaymentRequestImpl implements PaymentRequest, PaymentRequestUI.Clie
         Collections.sort(mPendingAutofillInstruments, COMPLETENESS_COMPARATOR);
         mPendingInstruments.addAll(mPendingAutofillInstruments);
 
+        // Log the number of suggested credit cards.
+        mJourneyLogger.setNumberOfSuggestionsShown(PaymentRequestJourneyLogger.SECTION_CREDIT_CARDS,
+                mPendingAutofillInstruments.size());
+
         mPendingAutofillInstruments.clear();
         mPendingAutofillInstruments = null;
 
@@ -1015,22 +1075,6 @@ public class PaymentRequestImpl implements PaymentRequest, PaymentRequestUI.Clie
             }
         }
 
-        if (mShippingAddressesSection != null) {
-            PaymentOption selectedShippingAddress = mShippingAddressesSection.getSelectedItem();
-            if (selectedShippingAddress != null) {
-                // Shipping addresses are created in show(). These should all be instances of
-                // AutofillAddress.
-                assert selectedShippingAddress instanceof AutofillAddress;
-                AutofillAddress selectedAutofillAddress = (AutofillAddress) selectedShippingAddress;
-
-                // Record the use of the profile.
-                PersonalDataManager.getInstance().recordAndLogProfileUse(
-                        selectedAutofillAddress.getProfile().getGUID());
-
-                response.shippingAddress = selectedAutofillAddress.toPaymentAddress();
-            }
-        }
-
         if (mUiShippingOptions != null) {
             PaymentOption selectedShippingOption = mUiShippingOptions.getSelectedItem();
             if (selectedShippingOption != null && selectedShippingOption.getIdentifier() != null) {
@@ -1057,7 +1101,81 @@ public class PaymentRequestImpl implements PaymentRequest, PaymentRequestUI.Clie
         }
 
         mUI.showProcessingMessage();
+
+        if (mShippingAddressesSection != null) {
+            PaymentOption selectedShippingAddress = mShippingAddressesSection.getSelectedItem();
+            if (selectedShippingAddress != null) {
+                // Shipping addresses are created in show(). These should all be instances of
+                // AutofillAddress.
+                assert selectedShippingAddress instanceof AutofillAddress;
+                AutofillAddress selectedAutofillAddress = (AutofillAddress) selectedShippingAddress;
+
+                // Addresses to be sent to the merchant should always be complete.
+                assert selectedAutofillAddress.isComplete();
+
+                // Record the use of the profile.
+                PersonalDataManager.getInstance().recordAndLogProfileUse(
+                        selectedAutofillAddress.getProfile().getGUID());
+
+                response.shippingAddress = selectedAutofillAddress.toPaymentAddress();
+
+                // Create the normalization task.
+                mPendingPaymentResponse = response;
+                mIsWaitingForNormalization = true;
+                boolean willNormalizeAsync = PersonalDataManager.getInstance().normalizeAddress(
+                        selectedAutofillAddress.getProfile().getGUID(),
+                        AutofillAddress.getCountryCode(selectedAutofillAddress.getProfile()), this);
+
+                if (willNormalizeAsync) {
+                    // If the normalization was not done synchronously, start a timer to cancel the
+                    // asynchronous normalization if it takes too long.
+                    mHandler.postDelayed(new Runnable() {
+                        @Override
+                        public void run() {
+                            onAddressNormalized(null);
+                        }
+                    }, PersonalDataManager.getInstance().getNormalizationTimeoutMS());
+                }
+
+                // The payment response will be sent to the merchant in onAddressNormalized instead.
+                return;
+            }
+        }
+
         mClient.onPaymentResponse(response);
+        recordSuccessFunnelHistograms("ReceivedInstrumentDetails");
+    }
+
+    /**
+     * Callback method called either when the address has finished normalizing or when the timeout
+     * triggers. Replaces the address in the response with the normalized version if present and
+     * sends the response to the merchant.
+     *
+     * @param profile The profile with the address normalized or a null profile if the timeout
+     *                triggered first.
+     */
+    @Override
+    public void onAddressNormalized(AutofillProfile profile) {
+        // Check if the other task finished first.
+        if (!mIsWaitingForNormalization) return;
+        mIsWaitingForNormalization = false;
+
+        // Check if the response was already sent to the merchant.
+        if (mClient == null || mPendingPaymentResponse == null) return;
+
+        if (profile != null && !TextUtils.isEmpty(profile.getGUID())) {
+            // The normalization finished first: use the normalized address.
+            mPendingPaymentResponse.shippingAddress =
+                    new AutofillAddress(profile, true /* isComplete */).toPaymentAddress();
+        } else {
+            // The timeout triggered first: cancel the normalization task.
+            PersonalDataManager.getInstance().cancelPendingAddressNormalization();
+        }
+
+        // Send the payment response to the merchant.
+        mClient.onPaymentResponse(mPendingPaymentResponse);
+
+        mPendingPaymentResponse = null;
 
         recordSuccessFunnelHistograms("ReceivedInstrumentDetails");
     }
@@ -1067,6 +1185,7 @@ public class PaymentRequestImpl implements PaymentRequest, PaymentRequestUI.Clie
      */
     @Override
     public void onInstrumentDetailsError() {
+        if (mClient == null) return;
         mUI.onPayButtonProcessingCancelled();
         mPaymentAppRunning = false;
     }
@@ -1123,6 +1242,10 @@ public class PaymentRequestImpl implements PaymentRequest, PaymentRequestUI.Clie
      */
     private void recordSuccessFunnelHistograms(String funnelPart) {
         RecordHistogram.recordBooleanHistogram("PaymentRequest.CheckoutFunnel." + funnelPart, true);
+
+        if (funnelPart.equals("Completed")) {
+            mJourneyLogger.recordJourneyStatsHistograms("Completed");
+        }
     }
 
     /**
@@ -1138,5 +1261,11 @@ public class PaymentRequestImpl implements PaymentRequest, PaymentRequestUI.Clie
         RecordHistogram.recordEnumeratedHistogram(
                 "PaymentRequest.CheckoutFunnel.Aborted", abortReason,
                 PaymentRequestMetrics.ABORT_REASON_MAX);
+
+        if (abortReason == PaymentRequestMetrics.ABORT_REASON_ABORTED_BY_USER) {
+            mJourneyLogger.recordJourneyStatsHistograms("UserAborted");
+        } else {
+            mJourneyLogger.recordJourneyStatsHistograms("OtherAborted");
+        }
     }
 }

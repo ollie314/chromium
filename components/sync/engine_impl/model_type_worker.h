@@ -15,9 +15,9 @@
 #include "base/threading/thread_checker.h"
 #include "components/sync/base/cryptographer.h"
 #include "components/sync/base/model_type.h"
-#include "components/sync/core/non_blocking_sync_common.h"
-#include "components/sync/core/sync_encryption_handler.h"
 #include "components/sync/engine/commit_queue.h"
+#include "components/sync/engine/non_blocking_sync_common.h"
+#include "components/sync/engine/sync_encryption_handler.h"
 #include "components/sync/engine_impl/commit_contributor.h"
 #include "components/sync/engine_impl/nudge_handler.h"
 #include "components/sync/engine_impl/update_handler.h"
@@ -152,7 +152,7 @@ class ModelTypeWorker : public UpdateHandler,
 
   // A private copy of the most recent cryptographer known to sync.
   // Initialized at construction time and updated with UpdateCryptographer().
-  // NULL if encryption is not enabled for this type.
+  // null if encryption is not enabled for this type.
   std::unique_ptr<Cryptographer> cryptographer_;
 
   // Interface used to access and send nudges to the sync scheduler. Not owned.

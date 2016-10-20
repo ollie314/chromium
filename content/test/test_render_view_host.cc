@@ -40,12 +40,10 @@
 namespace content {
 
 void InitNavigateParams(FrameHostMsg_DidCommitProvisionalLoad_Params* params,
-                        int page_id,
                         int nav_entry_id,
                         bool did_create_new_entry,
                         const GURL& url,
                         ui::PageTransition transition) {
-  params->page_id = page_id;
   params->nav_entry_id = nav_entry_id;
   params->url = url;
   params->referrer = Referrer();
@@ -70,16 +68,12 @@ TestRenderWidgetHostView::TestRenderWidgetHostView(RenderWidgetHost* rwh)
   // Not all tests initialize or need a context provider factory.
   if (ContextProviderFactoryImpl::GetInstance()) {
     frame_sink_id_ = AllocateFrameSinkId();
-    surface_id_allocator_ =
-        base::MakeUnique<cc::SurfaceIdAllocator>(frame_sink_id_);
     GetSurfaceManager()->RegisterFrameSinkId(frame_sink_id_);
   }
 #else
   // Not all tests initialize or need an image transport factory.
   if (ImageTransportFactory::GetInstance()) {
     frame_sink_id_ = AllocateFrameSinkId();
-    surface_id_allocator_ =
-        base::MakeUnique<cc::SurfaceIdAllocator>(frame_sink_id_);
     GetSurfaceManager()->RegisterFrameSinkId(frame_sink_id_);
   }
 #endif
@@ -261,18 +255,16 @@ bool TestRenderViewHost::CreateTestRenderView(
     const base::string16& frame_name,
     int opener_frame_route_id,
     int proxy_route_id,
-    int32_t max_page_id,
     bool window_was_created_with_opener) {
   FrameReplicationState replicated_state;
   replicated_state.name = base::UTF16ToUTF8(frame_name);
-  return CreateRenderView(opener_frame_route_id, proxy_route_id, max_page_id,
+  return CreateRenderView(opener_frame_route_id, proxy_route_id,
                           replicated_state, window_was_created_with_opener);
 }
 
 bool TestRenderViewHost::CreateRenderView(
     int opener_frame_route_id,
     int proxy_route_id,
-    int32_t max_page_id,
     const FrameReplicationState& replicated_frame_state,
     bool window_was_created_with_opener) {
   DCHECK(!IsRenderViewLive());
@@ -311,14 +303,13 @@ void TestRenderViewHost::TestOnStartDragging(
 }
 
 void TestRenderViewHost::TestOnUpdateStateWithFile(
-    int page_id,
     const base::FilePath& file_path) {
   PageState state = PageState::CreateForTesting(GURL("http://www.google.com"),
                                                 false, "data", &file_path);
   if (SiteIsolationPolicy::UseSubframeNavigationEntries()) {
     static_cast<RenderFrameHostImpl*>(GetMainFrame())->OnUpdateState(state);
   } else {
-    OnUpdateState(page_id, state);
+    OnUpdateState(state);
   }
 }
 

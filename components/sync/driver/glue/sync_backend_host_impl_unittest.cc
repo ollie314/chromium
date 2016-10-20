@@ -10,6 +10,7 @@
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/location.h"
+#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/synchronization/waitable_event.h"
@@ -21,20 +22,20 @@
 #include "components/invalidation/public/invalidator_state.h"
 #include "components/invalidation/public/object_id_invalidation_map.h"
 #include "components/sync/base/experiments.h"
+#include "components/sync/base/sync_prefs.h"
 #include "components/sync/base/test_unrecoverable_error_handler.h"
-#include "components/sync/core/http_bridge_network_resources.h"
-#include "components/sync/core/network_resources.h"
-#include "components/sync/core/sync_manager_factory.h"
-#include "components/sync/core/test/fake_sync_manager.h"
 #include "components/sync/device_info/device_info.h"
 #include "components/sync/driver/fake_sync_client.h"
 #include "components/sync/driver/sync_frontend.h"
-#include "components/sync/driver/sync_prefs.h"
 #include "components/sync/engine/cycle/commit_counters.h"
 #include "components/sync/engine/cycle/status_counters.h"
 #include "components/sync/engine/cycle/update_counters.h"
+#include "components/sync/engine/fake_sync_manager.h"
 #include "components/sync/engine/model_safe_worker.h"
+#include "components/sync/engine/net/http_bridge_network_resources.h"
+#include "components/sync/engine/net/network_resources.h"
 #include "components/sync/engine/passive_model_worker.h"
+#include "components/sync/engine/sync_manager_factory.h"
 #include "components/sync/test/callback_counter.h"
 #include "components/syncable_prefs/pref_service_syncable.h"
 #include "components/syncable_prefs/testing_pref_service_syncable.h"
@@ -93,7 +94,7 @@ class MockSyncFrontend : public SyncFrontend {
                void(ModelType, const CommitCounters&));
   MOCK_METHOD2(OnDirectoryTypeUpdateCounterUpdated,
                void(ModelType, const UpdateCounters&));
-  MOCK_METHOD2(OnDirectoryTypeStatusCounterUpdated,
+  MOCK_METHOD2(OnDatatypeStatusCounterUpdated,
                void(ModelType, const StatusCounters&));
   MOCK_METHOD1(OnExperimentsChanged, void(const Experiments&));
   MOCK_METHOD1(OnActionableError, void(const SyncProtocolError& sync_error));
@@ -106,7 +107,7 @@ class FakeSyncManagerFactory : public SyncManagerFactory {
  public:
   explicit FakeSyncManagerFactory(FakeSyncManager** fake_manager)
       : fake_manager_(fake_manager) {
-    *fake_manager_ = NULL;
+    *fake_manager_ = nullptr;
   }
   ~FakeSyncManagerFactory() override {}
 
@@ -154,7 +155,7 @@ class BackendSyncClient : public FakeSyncClient {
 
 class SyncBackendHostTest : public testing::Test {
  protected:
-  SyncBackendHostTest() : fake_manager_(NULL) {}
+  SyncBackendHostTest() : fake_manager_(nullptr) {}
 
   ~SyncBackendHostTest() override {}
 
@@ -163,17 +164,18 @@ class SyncBackendHostTest : public testing::Test {
 
     SyncPrefs::RegisterProfilePrefs(pref_service_.registry());
 
-    sync_prefs_.reset(new SyncPrefs(&pref_service_));
-    backend_.reset(new SyncBackendHostImpl(
+    sync_prefs_ = base::MakeUnique<SyncPrefs>(&pref_service_);
+    backend_ = base::MakeUnique<SyncBackendHostImpl>(
         "dummyDebugName", &sync_client_, base::ThreadTaskRunnerHandle::Get(),
         nullptr, sync_prefs_->AsWeakPtr(),
-        temp_dir_.GetPath().Append(base::FilePath(kTestSyncDir))));
+        temp_dir_.GetPath().Append(base::FilePath(kTestSyncDir)));
     credentials_.account_id = "user@example.com";
     credentials_.email = "user@example.com";
     credentials_.sync_token = "sync_token";
     credentials_.scope_set.insert(GaiaConstants::kChromeSyncOAuth2Scope);
 
-    fake_manager_factory_.reset(new FakeSyncManagerFactory(&fake_manager_));
+    fake_manager_factory_ =
+        base::MakeUnique<FakeSyncManagerFactory>(&fake_manager_);
 
     // These types are always implicitly enabled.
     enabled_types_.PutAll(ControlTypes());
@@ -186,7 +188,7 @@ class SyncBackendHostTest : public testing::Test {
     enabled_types_.Put(SEARCH_ENGINES);
     enabled_types_.Put(AUTOFILL);
 
-    network_resources_.reset(new HttpBridgeNetworkResources());
+    network_resources_ = base::MakeUnique<HttpBridgeNetworkResources>();
   }
 
   void TearDown() override {

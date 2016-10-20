@@ -83,6 +83,7 @@ void ScrollManager::recomputeScrollChain(const Node& startNode,
 
   DCHECK(startNode.layoutObject());
   LayoutBox* curBox = startNode.layoutObject()->enclosingBox();
+  Element* documentElement = m_frame->document()->documentElement();
 
   // Scrolling propagates along the containing block chain and ends at the
   // RootScroller element. The RootScroller element will have a custom
@@ -98,13 +99,13 @@ void ScrollManager::recomputeScrollChain(const Node& startNode,
       // In normal circumastances, the documentElement will be the root
       // scroller but the documentElement itself isn't a containing block,
       // that'll be the document node rather than the element.
-      curElement = m_frame->document()->documentElement();
-      DCHECK(!curElement || isEffectiveRootScroller(*curElement));
+      curElement = documentElement;
     }
 
     if (curElement) {
       scrollChain.push_front(DOMNodeIds::idForNode(curElement));
-      if (isEffectiveRootScroller(*curElement))
+      if (isEffectiveRootScroller(*curElement) ||
+          curElement->isSameNode(documentElement))
         break;
     }
 
@@ -160,7 +161,8 @@ bool ScrollManager::bubblingScroll(ScrollDirection direction,
                                    Node* startingNode,
                                    Node* mousePressNode) {
   // The layout needs to be up to date to determine if we can scroll. We may be
-  // here because of an onLoad event, in which case the final layout hasn't been performed yet.
+  // here because of an onLoad event, in which case the final layout hasn't been
+  // performed yet.
   m_frame->document()->updateStyleAndLayoutIgnorePendingStylesheets();
   // FIXME: enable scroll customization in this case. See crbug.com/410974.
   if (logicalScroll(direction, granularity, startingNode, mousePressNode))
@@ -202,8 +204,9 @@ WebInputEventResult ScrollManager::handleGestureScrollBegin(
   if (document->layoutViewItem().isNull())
     return WebInputEventResult::NotHandled;
 
-  // If there's no layoutObject on the node, send the event to the nearest ancestor with a layoutObject.
-  // Needed for <option> and <optgroup> elements so we can touch scroll <select>s
+  // If there's no layoutObject on the node, send the event to the nearest
+  // ancestor with a layoutObject.  Needed for <option> and <optgroup> elements
+  // so we can touch scroll <select>s
   while (m_scrollGestureHandlingNode &&
          !m_scrollGestureHandlingNode->layoutObject())
     m_scrollGestureHandlingNode =
@@ -212,7 +215,8 @@ WebInputEventResult ScrollManager::handleGestureScrollBegin(
   if (!m_scrollGestureHandlingNode)
     m_scrollGestureHandlingNode = m_frame->document()->documentElement();
 
-  if (!m_scrollGestureHandlingNode)
+  if (!m_scrollGestureHandlingNode ||
+      !m_scrollGestureHandlingNode->layoutObject())
     return WebInputEventResult::NotHandled;
 
   passScrollGestureEventToWidget(gestureEvent,
@@ -238,6 +242,10 @@ WebInputEventResult ScrollManager::handleGestureScrollUpdate(
     const PlatformGestureEvent& gestureEvent) {
   DCHECK_EQ(gestureEvent.type(), PlatformEvent::GestureScrollUpdate);
 
+  Node* node = m_scrollGestureHandlingNode.get();
+  if (!node || !node->layoutObject())
+    return WebInputEventResult::NotHandled;
+
   // Negate the deltas since the gesture event stores finger movement and
   // scrolling occurs in the direction opposite the finger's movement
   // direction. e.g. Finger moving up has negative event delta but causes the
@@ -249,14 +257,7 @@ WebInputEventResult ScrollManager::handleGestureScrollUpdate(
   if (delta.isZero())
     return WebInputEventResult::NotHandled;
 
-  Node* node = m_scrollGestureHandlingNode.get();
-
-  if (!node)
-    return WebInputEventResult::NotHandled;
-
   LayoutObject* layoutObject = node->layoutObject();
-  if (!layoutObject)
-    return WebInputEventResult::NotHandled;
 
   // Try to send the event to the correct view.
   WebInputEventResult result =
@@ -322,7 +323,7 @@ WebInputEventResult ScrollManager::handleGestureScrollEnd(
     const PlatformGestureEvent& gestureEvent) {
   Node* node = m_scrollGestureHandlingNode;
 
-  if (node) {
+  if (node && node->layoutObject()) {
     passScrollGestureEventToWidget(gestureEvent, node->layoutObject());
     std::unique_ptr<ScrollStateData> scrollStateData =
         wrapUnique(new ScrollStateData());

@@ -31,22 +31,18 @@ ASH_EXPORT extern const char kAshDisableTouchExplorationMode[];
 ASH_EXPORT extern const char kAshEnableFullscreenAppList[];
 ASH_EXPORT extern const char kAshEnableMagnifierKeyScroller[];
 ASH_EXPORT extern const char kAshEnablePalette[];
-ASH_EXPORT extern const char kAshEnablePaletteExperimentalFeatures[];
 ASH_EXPORT extern const char kAshEnablePaletteOnAllDisplays[];
 ASH_EXPORT extern const char kAshEnableUnifiedDesktop[];
 #endif
 ASH_EXPORT extern const char kAshEnableTouchView[];
 ASH_EXPORT extern const char kAshEnableMirroredScreen[];
 ASH_EXPORT extern const char kAshDisableStableOverviewOrder[];
-ASH_EXPORT extern const char kAshEnableStableOverviewOrder[];
 ASH_EXPORT extern const char kAshEnableTouchViewTesting[];
 ASH_EXPORT extern const char kAshHideNotificationsForFactory[];
 ASH_EXPORT extern const char kAshMaterialDesign[];
 ASH_EXPORT extern const char kAshMaterialDesignDisabled[];
 ASH_EXPORT extern const char kAshMaterialDesignEnabled[];
 ASH_EXPORT extern const char kAshMaterialDesignExperimental[];
-ASH_EXPORT extern const char kAshMaxWindowsToUseMaskInOverview[];
-ASH_EXPORT extern const char kAshMaxWindowsToUseShapeInOverview[];
 ASH_EXPORT extern const char kAshTouchHud[];
 ASH_EXPORT extern const char kAuraLegacyPowerButton[];
 

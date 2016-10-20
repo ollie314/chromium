@@ -38,10 +38,6 @@
 #include "core/HTMLNames.h"
 #include "core/SVGNames.h"
 #include "core/animation/DocumentTimeline.h"
-#include "core/css/StyleSheetContents.h"
-#include "core/css/resolver/StyleResolver.h"
-#include "core/css/resolver/StyleResolverStats.h"
-#include "core/css/resolver/ViewportStyleResolver.h"
 #include "core/dom/ClientRect.h"
 #include "core/dom/ClientRectList.h"
 #include "core/dom/DOMArrayBuffer.h"
@@ -135,7 +131,6 @@
 #include "platform/Language.h"
 #include "platform/LayoutLocale.h"
 #include "platform/RuntimeEnabledFeatures.h"
-#include "platform/TraceEvent.h"
 #include "platform/geometry/IntRect.h"
 #include "platform/geometry/LayoutRect.h"
 #include "platform/graphics/GraphicsLayer.h"
@@ -143,6 +138,7 @@
 #include "platform/network/ResourceLoadPriority.h"
 #include "platform/scroll/ProgrammaticScrollAnimator.h"
 #include "platform/testing/URLTestHelpers.h"
+#include "platform/tracing/TraceEvent.h"
 #include "platform/weborigin/SchemeRegistry.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebConnectionType.h"
@@ -214,12 +210,6 @@ static ScrollableArea* scrollableAreaForNode(Node* node) {
   return toLayoutBox(layoutObject)->getScrollableArea();
 }
 
-const char* Internals::internalsId = "internals";
-
-Internals* Internals::create(ScriptState* scriptState) {
-  return new Internals(scriptState);
-}
-
 Internals::~Internals() {}
 
 static RuntimeEnabledFeatures::Backup* sFeaturesBackup = nullptr;
@@ -235,7 +225,7 @@ void Internals::resetToConsistentState(Page* page) {
   page->deprecatedLocalMainFrame()
       ->view()
       ->layoutViewportScrollableArea()
-      ->setScrollPosition(IntPoint(0, 0), ProgrammaticScroll);
+      ->setScrollOffset(ScrollOffset(), ProgrammaticScroll);
   overrideUserPreferredLanguages(Vector<AtomicString>());
   if (!page->deprecatedLocalMainFrame()
            ->spellChecker()
@@ -253,8 +243,8 @@ void Internals::resetToConsistentState(Page* page) {
   KeyboardEventManager::setCurrentCapsLockState(OverrideCapsLockState::Default);
 }
 
-Internals::Internals(ScriptState* scriptState)
-    : ContextLifecycleObserver(scriptState->getExecutionContext()),
+Internals::Internals(ExecutionContext* context)
+    : ContextLifecycleObserver(context),
       m_runtimeFlags(InternalRuntimeFlags::create()) {
   contextDocument()->fetcher()->enableIsPreloadedForTest();
 }
@@ -430,6 +420,18 @@ int Internals::getResourcePriority(const String& url, Document* document) {
     return ResourceLoadPriority::ResourceLoadPriorityUnresolved;
 
   return resource->resourceRequest().priority();
+}
+
+String Internals::getResourceHeader(const String& url,
+                                    const String& header,
+                                    Document* document) {
+  if (!document)
+    return String();
+  Resource* resource = document->fetcher()->allResources().get(
+      URLTestHelpers::toKURL(url.utf8().data()));
+  if (!resource)
+    return String();
+  return resource->resourceRequest().httpHeaderField(header.utf8().data());
 }
 
 bool Internals::isSharingStyle(Element* element1, Element* element2) const {
@@ -718,6 +720,8 @@ Node* Internals::previousInFlatTree(Node* node,
 String Internals::elementLayoutTreeAsText(Element* element,
                                           ExceptionState& exceptionState) {
   ASSERT(element);
+  element->document().view()->updateAllLifecyclePhases();
+
   String representation = externalRepresentation(element);
   if (representation.isEmpty()) {
     exceptionState.throwDOMException(
@@ -742,7 +746,8 @@ ShadowRoot* Internals::createUserAgentShadowRoot(Element* host) {
 }
 
 ShadowRoot* Internals::shadowRoot(Element* host) {
-  // FIXME: Internals::shadowRoot() in tests should be converted to youngestShadowRoot() or oldestShadowRoot().
+  // FIXME: Internals::shadowRoot() in tests should be converted to
+  // youngestShadowRoot() or oldestShadowRoot().
   // https://bugs.webkit.org/show_bug.cgi?id=78465
   return youngestShadowRoot(host);
 }
@@ -1051,7 +1056,7 @@ void Internals::setFrameViewPosition(Document* document,
   bool scrollbarsSuppressedOldValue = frameView->scrollbarsSuppressed();
 
   frameView->setScrollbarsSuppressed(false);
-  frameView->setScrollOffsetFromInternals(IntPoint(x, y));
+  frameView->updateScrollOffsetFromInternals(IntSize(x, y));
   frameView->setScrollbarsSuppressed(scrollbarsSuppressedOldValue);
 }
 
@@ -1199,7 +1204,8 @@ Range* Internals::rangeFromLocationAndLength(Element* scope,
 
 unsigned Internals::locationFromRange(Element* scope, const Range* range) {
   ASSERT(scope && range);
-  // PlainTextRange depends on Layout information, make sure layout it up to date.
+  // PlainTextRange depends on Layout information, make sure layout it up to
+  // date.
   scope->document().updateStyleAndLayoutIgnorePendingStylesheets();
 
   return PlainTextRange::create(*scope, *range).start();
@@ -1207,7 +1213,8 @@ unsigned Internals::locationFromRange(Element* scope, const Range* range) {
 
 unsigned Internals::lengthFromRange(Element* scope, const Range* range) {
   ASSERT(scope && range);
-  // PlainTextRange depends on Layout information, make sure layout it up to date.
+  // PlainTextRange depends on Layout information, make sure layout it up to
+  // date.
   scope->document().updateStyleAndLayoutIgnorePendingStylesheets();
 
   return PlainTextRange::create(*scope, *range).length();
@@ -1215,6 +1222,9 @@ unsigned Internals::lengthFromRange(Element* scope, const Range* range) {
 
 String Internals::rangeAsText(const Range* range) {
   ASSERT(range);
+  // Clean layout is required by plain text extraction.
+  range->ownerDocument().updateStyleAndLayoutIgnorePendingStylesheets();
+
   return range->text();
 }
 
@@ -1573,8 +1583,8 @@ static PaintLayer* findLayerForGraphicsLayer(PaintLayer* searchRoot,
     return searchRoot;
   }
 
-  // Search right to left to increase the chances that we'll choose the top-most layers in a
-  // grouped mapping for squashing.
+  // Search right to left to increase the chances that we'll choose the top-most
+  // layers in a grouped mapping for squashing.
   for (PaintLayer* child = searchRoot->lastChild(); child;
        child = child->previousSibling()) {
     PaintLayer* foundLayer =
@@ -1765,7 +1775,8 @@ StaticNodeList* Internals::nodesFromRect(Document* document,
 
   HitTestRequest request(hitType);
 
-  // When ignoreClipping is false, this method returns null for coordinates outside of the viewport.
+  // When ignoreClipping is false, this method returns null for coordinates
+  // outside of the viewport.
   if (!request.ignoreClipping() &&
       !frameView->visibleContentRect().intersects(HitTestLocation::rectForPoint(
           point, topPadding, rightPadding, bottomPadding, leftPadding)))
@@ -2583,7 +2594,13 @@ int Internals::selectPopupItemStyleFontHeight(Node* node, int itemIndex) {
     return false;
   const ComputedStyle* itemStyle =
       select.itemComputedStyle(*select.listItems()[itemIndex]);
-  return itemStyle ? itemStyle->font().getFontMetrics().height() : 0;
+
+  if (itemStyle) {
+    const SimpleFontData* fontData = itemStyle->font().primaryFont();
+    DCHECK(fontData);
+    return fontData ? fontData->getFontMetrics().height() : 0;
+  }
+  return 0;
 }
 
 void Internals::resetTypeAheadSession(HTMLSelectElement* select) {
@@ -2857,6 +2874,9 @@ String Internals::selectedHTMLForClipboard() {
   if (!frame())
     return String();
 
+  // Selection normalization and markup generation require clean layout.
+  frame()->document()->updateStyleAndLayoutIgnorePendingStylesheets();
+
   return frame()->selection().selectedHTMLForClipboard();
 }
 
@@ -2893,18 +2913,18 @@ int Internals::visualViewportWidth() {
       .width();
 }
 
-double Internals::visualViewportScrollX() {
+float Internals::visualViewportScrollX() {
   if (!frame())
     return 0;
 
-  return frame()->view()->getScrollableArea()->scrollPositionDouble().x();
+  return frame()->view()->getScrollableArea()->scrollOffset().width();
 }
 
-double Internals::visualViewportScrollY() {
+float Internals::visualViewportScrollY() {
   if (!frame())
     return 0;
 
-  return frame()->view()->getScrollableArea()->scrollPositionDouble().y();
+  return frame()->view()->getScrollableArea()->scrollOffset().height();
 }
 
 ValueIterable<int>::IterationSource* Internals::startIteration(

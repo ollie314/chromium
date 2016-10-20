@@ -190,7 +190,10 @@ Resource* DocumentLoader::startPreload(Resource::Type type,
       NOTREACHED();
   }
 
-  if (resource)
+  // CSP layout tests verify that preloads are subject to access checks by
+  // seeing if they are in the `preload started` list. Therefore do not add
+  // them to the list if the load is immediately denied.
+  if (resource && !resource->resourceError().isAccessCheck())
     fetcher()->preloadStarted(resource);
   return resource;
 }
@@ -299,15 +302,15 @@ void DocumentLoader::finishedLoading(double finishTime) {
     return;
 
   m_applicationCacheHost->finishedLoadingMainResource();
-  endWriting(m_writer.get());
+  endWriting();
   if (m_state < MainResourceDone)
     m_state = MainResourceDone;
   clearMainResourceHandle();
 }
 
-void DocumentLoader::redirectReceived(
+bool DocumentLoader::redirectReceived(
     Resource* resource,
-    ResourceRequest& request,
+    const ResourceRequest& request,
     const ResourceResponse& redirectResponse) {
   DCHECK_EQ(resource, m_mainResource);
   DCHECK(!redirectResponse.isNull());
@@ -321,20 +324,22 @@ void DocumentLoader::redirectReceived(
   if (!redirectingOrigin->canDisplay(requestURL)) {
     FrameLoader::reportLocalLoadFailed(m_frame, requestURL.getString());
     m_fetcher->stopFetching();
-    return;
+    return false;
   }
   if (!frameLoader()->shouldContinueForNavigationPolicy(
           m_request, SubstituteData(), this, CheckContentSecurityPolicy,
           m_navigationType, NavigationPolicyCurrentTab,
           replacesCurrentHistoryItem(), isClientRedirect(), nullptr)) {
     m_fetcher->stopFetching();
-    return;
+    return false;
   }
 
   DCHECK(timing().fetchStart());
   appendRedirect(requestURL);
   didRedirect(redirectResponse.url(), requestURL);
   frameLoader()->client()->dispatchDidReceiveServerRedirectForProvisionalLoad();
+
+  return true;
 }
 
 static bool canShowMIMEType(const String& mimeType, LocalFrame* frame) {
@@ -440,6 +445,29 @@ void DocumentLoader::responseReceived(
         cancelLoadAfterXFrameOptionsOrCSPDenied(response);
         return;
       }
+    }
+  }
+
+  if (RuntimeEnabledFeatures::embedderCSPEnforcementEnabled() &&
+      !frameLoader()->requiredCSP().isEmpty()) {
+    SecurityOrigin* parentSecurityOrigin =
+        frame()->tree().parent()->securityContext()->getSecurityOrigin();
+    if (ContentSecurityPolicy::shouldEnforceEmbeddersPolicy(
+            response, parentSecurityOrigin)) {
+      m_contentSecurityPolicy->addPolicyFromHeaderValue(
+          frameLoader()->requiredCSP(), ContentSecurityPolicyHeaderTypeEnforce,
+          ContentSecurityPolicyHeaderSourceHTTP);
+    } else {
+      String message = "Refused to display '" + response.url().elidedString() +
+                       "' because it has not opted-into the following policy "
+                       "required by its embedder: '" +
+                       frameLoader()->requiredCSP() + "'.";
+      ConsoleMessage* consoleMessage = ConsoleMessage::createForRequest(
+          SecurityMessageSource, ErrorMessageLevel, message, response.url(),
+          mainResourceIdentifier());
+      frame()->document()->addConsoleMessage(consoleMessage);
+      cancelLoadAfterXFrameOptionsOrCSPDenied(response);
+      return;
     }
   }
 
@@ -679,7 +707,13 @@ void DocumentLoader::startLoadingMainResource() {
                             mainResourceLoadOptions);
   m_mainResource =
       RawResource::fetchMainResource(fetchRequest, fetcher(), m_substituteData);
-  if (!m_mainResource) {
+
+  // PlzNavigate:
+  // The final access checks are still performed here, potentially rejecting
+  // the "provisional" load, but the browser side already expects the renderer
+  // to be able to unconditionally commit.
+  if (!m_mainResource || (m_frame->settings()->browserSideNavigationEnabled() &&
+                          m_mainResource->errorOccurred())) {
     m_request = ResourceRequest(blankURL());
     maybeLoadEmpty();
     return;
@@ -692,8 +726,7 @@ void DocumentLoader::startLoadingMainResource() {
   m_mainResource->addClient(this);
 }
 
-void DocumentLoader::endWriting(DocumentWriter* writer) {
-  DCHECK_EQ(m_writer, writer);
+void DocumentLoader::endWriting() {
   m_writer->end();
   m_writer.clear();
 }
@@ -715,6 +748,9 @@ DocumentWriter* DocumentLoader::createWriterFor(
 
   Document* document =
       frame->localDOMWindow()->installNewDocument(mimeType, init);
+
+  if (!init.shouldReuseDefaultView())
+    frame->page()->chromeClient().installSupplements(*frame);
 
   // This should be set before receivedFirstData().
   if (!overridingURL.isEmpty())
@@ -748,7 +784,7 @@ void DocumentLoader::replaceDocumentWhileExecutingJavaScriptURL(
                              ForceSynchronousParsing);
   if (!source.isNull())
     m_writer->appendReplacingData(source);
-  endWriting(m_writer.get());
+  endWriting();
 }
 
 DEFINE_WEAK_IDENTIFIER_MAP(DocumentLoader);

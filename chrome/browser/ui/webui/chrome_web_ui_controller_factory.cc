@@ -62,6 +62,7 @@
 #include "chrome/browser/ui/webui/version_ui.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/features.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "components/dom_distiller/core/dom_distiller_constants.h"
@@ -109,7 +110,7 @@
 #include "chrome/browser/ui/webui/offline/offline_internals_ui.h"
 #include "chrome/browser/ui/webui/popular_sites_internals_ui.h"
 #include "chrome/browser/ui/webui/snippets_internals_ui.h"
-#if defined(ENABLE_VR_SHELL)
+#if defined(ENABLE_VR_SHELL) || defined(ENABLE_WEBVR)
 #include "chrome/browser/ui/webui/vr_shell/vr_shell_ui_ui.h"
 #endif
 #else
@@ -176,11 +177,11 @@
 #include "chrome/browser/ui/webui/certificate_viewer_ui.h"
 #endif
 
-#if defined(ENABLE_SERVICE_DISCOVERY)
+#if BUILDFLAG(ENABLE_SERVICE_DISCOVERY)
 #include "chrome/browser/ui/webui/local_discovery/local_discovery_ui.h"
 #endif
 
-#if defined(ENABLE_APP_LIST)
+#if BUILDFLAG(ENABLE_APP_LIST)
 #include "chrome/browser/ui/webui/app_list/start_page_ui.h"
 #endif
 
@@ -531,10 +532,10 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
   if (url.host() == chrome::kChromeUISnippetsInternalsHost &&
       !profile->IsOffTheRecord())
     return &NewWebUI<SnippetsInternalsUI>;
-#if defined(ENABLE_VR_SHELL)
+#if defined(ENABLE_VR_SHELL) || defined(ENABLE_WEBVR)
   if (url.host() == chrome::kChromeUIVrShellUIHost)
     return &NewWebUI<VrShellUIUI>;
-#endif  // defined(ENABLE_VR_SHELL)
+#endif
 #else
   if (url.SchemeIs(content::kChromeDevToolsScheme))
     return &NewWebUI<DevToolsUI>;
@@ -590,7 +591,7 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
     return &NewWebUI<PolicyMaterialDesignUI>;
   }
 
-#if defined(ENABLE_APP_LIST)
+#if BUILDFLAG(ENABLE_APP_LIST)
   if (url.host() == chrome::kChromeUIAppListStartPageHost)
     return &NewWebUI<app_list::StartPageUI>;
 #endif
@@ -610,7 +611,7 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
     return &NewWebUI<PrintPreviewUI>;
   }
 #endif
-#if defined(ENABLE_SERVICE_DISCOVERY)
+#if BUILDFLAG(ENABLE_SERVICE_DISCOVERY)
   if (url.host() == chrome::kChromeUIDevicesHost) {
     return &NewWebUI<LocalDiscoveryUI>;
   }

@@ -87,6 +87,7 @@
 #include "extensions/renderer/script_injection.h"
 #include "extensions/renderer/script_injection_manager.h"
 #include "extensions/renderer/send_request_natives.h"
+#include "extensions/renderer/service_worker_request_sender.h"
 #include "extensions/renderer/set_icon_natives.h"
 #include "extensions/renderer/static_v8_external_one_byte_string_resource.h"
 #include "extensions/renderer/test_features_native_handler.h"
@@ -180,7 +181,7 @@ void CallModuleMethod(const std::string& module_name,
     arguments.push_back(converter->ToV8Value(arg.get(), context->v8_context()));
   }
 
-  context->module_system()->CallModuleMethod(
+  context->module_system()->CallModuleMethodSafe(
       module_name, method_name, &arguments);
 }
 
@@ -397,7 +398,7 @@ void Dispatcher::DidCreateScriptContext(
 
 void Dispatcher::DidInitializeServiceWorkerContextOnWorkerThread(
     v8::Local<v8::Context> v8_context,
-    int embedded_worker_id,
+    int64_t service_worker_version_id,
     const GURL& url) {
   const base::TimeTicks start_time = base::TimeTicks::Now();
 
@@ -443,7 +444,7 @@ void Dispatcher::DidInitializeServiceWorkerContextOnWorkerThread(
   context->set_url(url);
 
   if (ExtensionsClient::Get()->ExtensionAPIEnabledInExtensionServiceWorkers()) {
-    WorkerThreadDispatcher::Get()->AddWorkerData(embedded_worker_id);
+    WorkerThreadDispatcher::Get()->AddWorkerData(service_worker_version_id);
     {
       // TODO(lazyboy): Make sure accessing |source_map_| in worker thread is
       // safe.
@@ -537,7 +538,7 @@ void Dispatcher::WillReleaseScriptContext(
 // static
 void Dispatcher::WillDestroyServiceWorkerContextOnWorkerThread(
     v8::Local<v8::Context> v8_context,
-    int embedded_worker_id,
+    int64_t service_worker_version_id,
     const GURL& url) {
   if (url.SchemeIs(kExtensionScheme) ||
       url.SchemeIs(kExtensionResourceScheme)) {
@@ -545,7 +546,7 @@ void Dispatcher::WillDestroyServiceWorkerContextOnWorkerThread(
     g_worker_script_context_set.Get().Remove(v8_context, url);
   }
   if (ExtensionsClient::Get()->ExtensionAPIEnabledInExtensionServiceWorkers())
-    WorkerThreadDispatcher::Get()->RemoveWorkerData(embedded_worker_id);
+    WorkerThreadDispatcher::Get()->RemoveWorkerData(service_worker_version_id);
 }
 
 void Dispatcher::DidCreateDocumentElement(blink::WebLocalFrame* frame) {
@@ -769,19 +770,9 @@ std::vector<std::pair<std::string, int> > Dispatcher::GetJsResources() {
   resources.push_back(
       std::make_pair(mojo::kValidatorModuleName, IDR_MOJO_VALIDATOR_JS));
   resources.push_back(std::make_pair("async_waiter", IDR_ASYNC_WAITER_JS));
-  resources.push_back(std::make_pair("data_receiver", IDR_DATA_RECEIVER_JS));
-  resources.push_back(std::make_pair("data_sender", IDR_DATA_SENDER_JS));
   resources.push_back(std::make_pair("keep_alive", IDR_KEEP_ALIVE_JS));
   resources.push_back(std::make_pair("extensions/common/mojo/keep_alive.mojom",
                                      IDR_KEEP_ALIVE_MOJOM_JS));
-  resources.push_back(std::make_pair("device/serial/data_stream.mojom",
-                                     IDR_DATA_STREAM_MOJOM_JS));
-  resources.push_back(
-      std::make_pair("device/serial/data_stream_serialization.mojom",
-                     IDR_DATA_STREAM_SERIALIZATION_MOJOM_JS));
-  resources.push_back(std::make_pair("stash_client", IDR_STASH_CLIENT_JS));
-  resources.push_back(
-      std::make_pair("extensions/common/mojo/stash.mojom", IDR_STASH_MOJOM_JS));
 
   // Custom bindings.
   resources.push_back(
@@ -818,17 +809,6 @@ std::vector<std::pair<std::string, int> > Dispatcher::GetJsResources() {
       std::make_pair("webViewRequest",
                      IDR_WEB_VIEW_REQUEST_CUSTOM_BINDINGS_JS));
   resources.push_back(std::make_pair("binding", IDR_BINDING_JS));
-
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableMojoSerialService)) {
-    resources.push_back(
-        std::make_pair("serial", IDR_SERIAL_CUSTOM_BINDINGS_JS));
-  }
-  resources.push_back(std::make_pair("serial_service", IDR_SERIAL_SERVICE_JS));
-  resources.push_back(
-      std::make_pair("device/serial/serial.mojom", IDR_SERIAL_MOJOM_JS));
-  resources.push_back(std::make_pair("device/serial/serial_serialization.mojom",
-                                     IDR_SERIAL_SERIALIZATION_MOJOM_JS));
 
   // Custom types sources.
   resources.push_back(std::make_pair("StorageArea", IDR_STORAGE_AREA_JS));

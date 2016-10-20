@@ -30,7 +30,7 @@ class FilePath;
 class Time;
 }
 
-namespace shell {
+namespace service_manager {
 class Connector;
 }
 
@@ -54,10 +54,10 @@ class BrowserPluginGuestManager;
 class DownloadManager;
 class DownloadManagerDelegate;
 class IndexedDBContext;
-class MojoShellConnection;
 class PermissionManager;
 class PushMessagingService;
 class ResourceContext;
+class ServiceManagerConnection;
 class SiteInstance;
 class StoragePartition;
 class SSLHostStateDelegate;
@@ -147,27 +147,28 @@ class CONTENT_EXPORT BrowserContext : public base::SupportsUserData {
   static void SetDownloadManagerForTesting(BrowserContext* browser_context,
                                            DownloadManager* download_manager);
 
-  // Makes mojo aware of this BrowserContext, and assigns a user ID number to
-  // it. Should be called for each BrowserContext created.
+  // Makes the Service Manager aware of this BrowserContext, and assigns a user
+  // ID number to it. Should be called for each BrowserContext created.
   static void Initialize(BrowserContext* browser_context,
                          const base::FilePath& path);
 
-  // Returns a Shell User ID associated with this BrowserContext. This ID is not
-  // persistent across runs. See
-  // services/shell/public/interfaces/connector.mojom. By default, this user id
-  // is randomly generated when Initialize() is called.
-  static const std::string& GetShellUserIdFor(BrowserContext* browser_context);
+  // Returns a Service User ID associated with this BrowserContext. This ID is
+  // not persistent across runs. See
+  // services/service_manager/public/interfaces/connector.mojom. By default,
+  // this user id is randomly generated when Initialize() is called.
+  static const std::string& GetServiceUserIdFor(
+      BrowserContext* browser_context);
 
   // Returns the BrowserContext associated with |user_id|, or nullptr if no
   // BrowserContext exists for that |user_id|.
-  static BrowserContext* GetBrowserContextForShellUserId(
+  static BrowserContext* GetBrowserContextForServiceUserId(
       const std::string& user_id);
 
   // Returns a Connector associated with this BrowserContext, which can be used
   // to connect to service instances bound as this user.
-  static shell::Connector* GetShellConnectorFor(
+  static service_manager::Connector* GetConnectorFor(
       BrowserContext* browser_context);
-  static MojoShellConnection* GetMojoShellConnectionFor(
+  static ServiceManagerConnection* GetServiceManagerConnectionFor(
       BrowserContext* browser_context);
 
   ~BrowserContext() override;

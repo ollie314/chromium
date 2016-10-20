@@ -110,7 +110,8 @@ void LayoutRubyBase::moveBlockChildren(LayoutRubyBase* toBase,
   if (toBase->childrenInline())
     toBase->makeChildrenNonInline();
 
-  // If an anonymous block would be put next to another such block, then merge those.
+  // If an anonymous block would be put next to another such block, then merge
+  // those.
   LayoutObject* firstChildHere = firstChild();
   LayoutObject* lastChildThere = toBase->lastChild();
   if (firstChildHere->isAnonymousBlock() && firstChildHere->childrenInline() &&
@@ -123,8 +124,12 @@ void LayoutRubyBase::moveBlockChildren(LayoutRubyBase* toBase,
     anonBlockHere->deleteLineBoxTree();
     anonBlockHere->destroy();
   }
-  // Move all remaining children normally.
-  moveChildrenTo(toBase, firstChild(), beforeChild);
+  // Move all remaining children normally. If moving all children, include our
+  // float list.
+  if (!beforeChild)
+    moveAllChildrenIncludingFloatsTo(toBase, toBase->hasLayer() || hasLayer());
+  else
+    moveChildrenTo(toBase, firstChild(), beforeChild, toBase->children());
 }
 
 ETextAlign LayoutRubyBase::textAlignmentForLine(

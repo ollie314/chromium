@@ -64,7 +64,6 @@
 #include "ui/gfx/ipc/color/gfx_param_traits.h"
 #include "ui/gfx/ipc/gfx_param_traits.h"
 #include "ui/gfx/ipc/skia/gfx_skia_param_traits.h"
-#include "ui/gfx/range/range.h"
 
 #if defined(OS_MACOSX)
 #include "third_party/WebKit/public/platform/WebScrollbarButtonsPlacement.h"
@@ -184,7 +183,6 @@ IPC_STRUCT_TRAITS_BEGIN(content::ResizeParams)
   IPC_STRUCT_TRAITS_MEMBER(top_controls_height)
   IPC_STRUCT_TRAITS_MEMBER(bottom_controls_height)
   IPC_STRUCT_TRAITS_MEMBER(visible_viewport_size)
-  IPC_STRUCT_TRAITS_MEMBER(resizer_rect)
   IPC_STRUCT_TRAITS_MEMBER(is_fullscreen_granted)
   IPC_STRUCT_TRAITS_MEMBER(display_mode)
   IPC_STRUCT_TRAITS_MEMBER(needs_resize_ack)
@@ -363,17 +361,6 @@ IPC_STRUCT_BEGIN(ViewHostMsg_UpdateRect_Params)
   IPC_STRUCT_MEMBER(int, flags)
 IPC_STRUCT_END()
 
-#if defined(OS_MACOSX)
-IPC_STRUCT_BEGIN(ViewMsg_UpdateScrollbarTheme_Params)
-  IPC_STRUCT_MEMBER(float, initial_button_delay)
-  IPC_STRUCT_MEMBER(float, autoscroll_button_delay)
-  IPC_STRUCT_MEMBER(bool, jump_on_track_click)
-  IPC_STRUCT_MEMBER(blink::ScrollerStyle, preferred_scroller_style)
-  IPC_STRUCT_MEMBER(bool, redraw)
-  IPC_STRUCT_MEMBER(blink::WebScrollbarButtonsPlacement, button_placement)
-IPC_STRUCT_END()
-#endif
-
 // Messages sent from the browser to the renderer.
 
 #if defined(OS_ANDROID)
@@ -419,10 +406,6 @@ IPC_MESSAGE_ROUTED1(ViewMsg_EnableDeviceEmulation,
 
 // Disables device emulation, enabled previously by EnableDeviceEmulation.
 IPC_MESSAGE_ROUTED0(ViewMsg_DisableDeviceEmulation)
-
-// Tells the render view that the resize rect has changed.
-IPC_MESSAGE_ROUTED1(ViewMsg_ChangeResizeRect,
-                    gfx::Rect /* resizer_rect */)
 
 // Sent to inform the view that it was hidden.  This allows it to reduce its
 // resource utilization.
@@ -570,12 +553,6 @@ IPC_MESSAGE_ROUTED0(ViewMsg_WorkerScriptLoadFailed)
 // This message is sent only if the worker successfully loaded the script.
 IPC_MESSAGE_ROUTED0(ViewMsg_WorkerConnected)
 
-// Tells the renderer that the network type has changed so that navigator.onLine
-// and navigator.connection can be updated.
-IPC_MESSAGE_CONTROL2(ViewMsg_NetworkConnectionChanged,
-                     net::NetworkChangeNotifier::ConnectionType /* type */,
-                     double /* max bandwidth mbps */)
-
 // Sent by the browser to synchronize with the next compositor frame. Used only
 // for tests.
 IPC_MESSAGE_ROUTED1(ViewMsg_WaitForNextFrameForTests, int /* routing_id */)
@@ -592,11 +569,6 @@ IPC_MESSAGE_ROUTED2(ViewMsg_PpapiBrokerChannelCreated,
 // or not.
 IPC_MESSAGE_ROUTED1(ViewMsg_PpapiBrokerPermissionResult,
                     bool /* result */)
-
-// Tells the renderer to empty its plugin list cache, optional reloading
-// pages containing plugins.
-IPC_MESSAGE_CONTROL1(ViewMsg_PurgePluginListCache,
-                     bool /* reload_pages */)
 #endif
 
 // An acknowledge to ViewHostMsg_MultipleTargetsTouched to notify the renderer
@@ -607,23 +579,7 @@ IPC_MESSAGE_ROUTED1(ViewMsg_ReleaseDisambiguationPopupBitmap,
 // Fetches complete rendered content of a web page as plain text.
 IPC_MESSAGE_ROUTED0(ViewMsg_GetRenderedText)
 
-#if defined(OS_MACOSX)
-// Notification of a change in scrollbar appearance and/or behavior.
-IPC_MESSAGE_CONTROL1(ViewMsg_UpdateScrollbarTheme,
-                     ViewMsg_UpdateScrollbarTheme_Params /* params */)
-
-// Notification that the OS X Aqua color preferences changed.
-IPC_MESSAGE_CONTROL3(ViewMsg_SystemColorsChanged,
-                     int /* AppleAquaColorVariant */,
-                     std::string /* AppleHighlightedTextColor */,
-                     std::string /* AppleHighlightColor */)
-#endif
-
 #if defined(OS_ANDROID)
-// Tells the renderer to suspend/resume the webkit timers.
-IPC_MESSAGE_CONTROL1(ViewMsg_SetWebKitSharedTimersSuspended,
-                     bool /* suspend */)
-
 // Notifies the renderer whether hiding/showing the top controls is enabled
 // and whether or not to animate to the proper state.
 IPC_MESSAGE_ROUTED3(ViewMsg_UpdateTopControlsState,
@@ -741,9 +697,7 @@ IPC_MESSAGE_CONTROL1(ViewHostMsg_Close_ACK,
 IPC_MESSAGE_ROUTED0(ViewHostMsg_ClosePage_ACK)
 
 // Notifies the browser that we have session history information.
-// page_id: unique ID that allows us to distinguish between history entries.
-IPC_MESSAGE_ROUTED2(ViewHostMsg_UpdateState,
-                    int32_t /* page_id */,
+IPC_MESSAGE_ROUTED1(ViewHostMsg_UpdateState,
                     content::PageState /* state */)
 
 // Notifies the browser that we want to show a destination url for a potential
@@ -845,15 +799,6 @@ IPC_MESSAGE_ROUTED3(ViewHostMsg_RequestPpapiBrokerPermission,
 IPC_MESSAGE_ROUTED2(ViewHostMsg_SetTooltipText,
                     base::string16 /* tooltip text string */,
                     blink::WebTextDirection /* text direction hint */)
-
-// Notification that the text selection has changed.
-// Note: The secound parameter is the character based offset of the
-// base::string16
-// text in the document.
-IPC_MESSAGE_ROUTED3(ViewHostMsg_SelectionChanged,
-                    base::string16 /* text covers the selection range */,
-                    uint32_t /* the offset of the text in the document */,
-                    gfx::Range /* selection range in the document */)
 
 // Notification that the selection bounds have changed.
 IPC_MESSAGE_ROUTED1(ViewHostMsg_SelectionBoundsChanged,

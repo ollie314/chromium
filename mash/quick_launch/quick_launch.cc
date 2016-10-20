@@ -11,10 +11,10 @@
 #include "base/strings/utf_string_conversions.h"
 #include "mash/public/interfaces/launchable.mojom.h"
 #include "services/catalog/public/interfaces/catalog.mojom.h"
-#include "services/shell/public/c/main.h"
-#include "services/shell/public/cpp/connector.h"
-#include "services/shell/public/cpp/service.h"
-#include "services/shell/public/cpp/service_runner.h"
+#include "services/service_manager/public/c/main.h"
+#include "services/service_manager/public/cpp/connector.h"
+#include "services/service_manager/public/cpp/service.h"
+#include "services/service_manager/public/cpp/service_runner.h"
 #include "services/tracing/public/cpp/provider.h"
 #include "ui/views/background.h"
 #include "ui/views/controls/textfield/textfield.h"
@@ -35,10 +35,10 @@ class QuickLaunchUI : public views::WidgetDelegateView,
                       public views::TextfieldController {
  public:
   QuickLaunchUI(QuickLaunch* quick_launch,
-                shell::Connector* connector,
+                service_manager::Connector* connector,
                 catalog::mojom::CatalogPtr catalog)
       : quick_launch_(quick_launch),
-    connector_(connector),
+        connector_(connector),
         prompt_(new views::Textfield),
         catalog_(std::move(catalog)) {
     set_background(views::Background::CreateStandardPanelBackground());
@@ -53,7 +53,6 @@ class QuickLaunchUI : public views::WidgetDelegateView,
 
  private:
   // Overridden from views::WidgetDelegate:
-  views::View* GetContentsView() override { return this; }
   base::string16 GetWindowTitle() const override {
     // TODO(beng): use resources.
     return base::ASCIIToUTF16("QuickLaunch");
@@ -114,8 +113,8 @@ class QuickLaunchUI : public views::WidgetDelegateView,
     base::string16 working;
     base::TrimWhitespace(input, base::TRIM_ALL, &working);
     GURL url(working);
-    if (url.scheme() != "mojo" && url.scheme() != "exe")
-      working = base::ASCIIToUTF16("mojo:") + working;
+    if (url.scheme() != "service" && url.scheme() != "exe")
+      working = base::ASCIIToUTF16("service:") + working;
     return base::UTF16ToUTF8(working);
   }
 
@@ -132,7 +131,8 @@ class QuickLaunchUI : public views::WidgetDelegateView,
   }
 
   void Launch(const std::string& name, bool new_window) {
-    std::unique_ptr<shell::Connection> connection = connector_->Connect(name);
+    std::unique_ptr<service_manager::Connection> connection =
+        connector_->Connect(name);
     mojom::LaunchablePtr launchable;
     connection->GetInterface(&launchable);
     connections_.push_back(std::move(connection));
@@ -142,9 +142,9 @@ class QuickLaunchUI : public views::WidgetDelegateView,
   }
 
   QuickLaunch* quick_launch_;
-  shell::Connector* connector_;
+  service_manager::Connector* connector_;
   views::Textfield* prompt_;
-  std::vector<std::unique_ptr<shell::Connection>> connections_;
+  std::vector<std::unique_ptr<service_manager::Connection>> connections_;
   catalog::mojom::CatalogPtr catalog_;
   std::set<base::string16> app_names_;
   bool suggestion_rejected_ = false;
@@ -163,7 +163,7 @@ void QuickLaunch::RemoveWindow(views::Widget* window) {
     base::MessageLoop::current()->QuitWhenIdle();
 }
 
-void QuickLaunch::OnStart(const shell::Identity& identity) {
+void QuickLaunch::OnStart(const service_manager::Identity& identity) {
   tracing_.Initialize(connector(), identity.name());
 
   aura_init_.reset(
@@ -174,8 +174,8 @@ void QuickLaunch::OnStart(const shell::Identity& identity) {
   Launch(mojom::kWindow, mojom::LaunchMode::MAKE_NEW);
 }
 
-bool QuickLaunch::OnConnect(const shell::Identity& remote_identity,
-                            shell::InterfaceRegistry* registry) {
+bool QuickLaunch::OnConnect(const service_manager::Identity& remote_identity,
+                            service_manager::InterfaceRegistry* registry) {
   registry->AddInterface<mojom::Launchable>(this);
   return true;
 }
@@ -188,7 +188,7 @@ void QuickLaunch::Launch(uint32_t what, mojom::LaunchMode how) {
     return;
   }
   catalog::mojom::CatalogPtr catalog;
-  connector()->ConnectToInterface("mojo:catalog", &catalog);
+  connector()->ConnectToInterface("service:catalog", &catalog);
 
   views::Widget* window = views::Widget::CreateWindowWithContextAndBounds(
       new QuickLaunchUI(this, connector(), std::move(catalog)),
@@ -197,7 +197,7 @@ void QuickLaunch::Launch(uint32_t what, mojom::LaunchMode how) {
   windows_.push_back(window);
 }
 
-void QuickLaunch::Create(const shell::Identity& remote_identity,
+void QuickLaunch::Create(const service_manager::Identity& remote_identity,
                          mojom::LaunchableRequest request) {
   bindings_.AddBinding(this, std::move(request));
 }

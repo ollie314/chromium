@@ -408,6 +408,14 @@ Number.toFixedIfFloating = function(value)
 }
 
 /**
+ * @return {boolean}
+ */
+Date.prototype.isValid = function()
+{
+    return !isNaN(this.getTime())
+}
+
+/**
  * @return {string}
  */
 Date.prototype.toISO8601Compact = function()
@@ -488,13 +496,14 @@ Object.defineProperty(Array.prototype, "remove", {
 
 Object.defineProperty(Array.prototype, "pushAll", {
     /**
-     * @param {!Array.<!T>} array
-     * @this {Array.<!T>}
+     * @param {!Array<!T>} array
+     * @this {Array<!T>}
      * @template T
      */
     value: function(array)
     {
-        Array.prototype.push.apply(this, array);
+        for (var i = 0; i < array.length; ++i)
+            this.push(array[i]);
     }
 });
 

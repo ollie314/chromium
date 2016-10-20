@@ -1268,7 +1268,7 @@ void LayerTreeHostImpl::DidModifyTilePriorities() {
 std::unique_ptr<RasterTilePriorityQueue> LayerTreeHostImpl::BuildRasterQueue(
     TreePriority tree_priority,
     RasterTilePriorityQueue::Type type) {
-  TRACE_EVENT0("disabled-by-default-cc.debug",
+  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("cc.debug"),
                "LayerTreeHostImpl::BuildRasterQueue");
 
   return RasterTilePriorityQueue::Create(active_tree_->picture_layers(),
@@ -1280,7 +1280,7 @@ std::unique_ptr<RasterTilePriorityQueue> LayerTreeHostImpl::BuildRasterQueue(
 
 std::unique_ptr<EvictionTilePriorityQueue>
 LayerTreeHostImpl::BuildEvictionQueue(TreePriority tree_priority) {
-  TRACE_EVENT0("disabled-by-default-cc.debug",
+  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("cc.debug"),
                "LayerTreeHostImpl::BuildEvictionQueue");
 
   std::unique_ptr<EvictionTilePriorityQueue> queue(
@@ -1449,8 +1449,8 @@ void LayerTreeHostImpl::SetExternalTilePriorityConstraints(
   }
 }
 
-void LayerTreeHostImpl::DidSwapBuffersComplete() {
-  client_->DidSwapBuffersCompleteOnImplThread();
+void LayerTreeHostImpl::DidReceiveCompositorFrameAck() {
+  client_->DidReceiveCompositorFrameAckOnImplThread();
 }
 
 void LayerTreeHostImpl::ReclaimResources(
@@ -1674,7 +1674,7 @@ bool LayerTreeHostImpl::DrawLayers(FrameData* frame) {
   CompositorFrame compositor_frame;
   compositor_frame.metadata = std::move(metadata);
   compositor_frame.delegated_frame_data = std::move(data);
-  compositor_frame_sink_->SwapBuffers(std::move(compositor_frame));
+  compositor_frame_sink_->SubmitCompositorFrame(std::move(compositor_frame));
 
   // The next frame should start by assuming nothing has changed, and changes
   // are noted as they occur.
@@ -2174,8 +2174,6 @@ void LayerTreeHostImpl::CreateResourceAndRasterBufferProvider(
     return;
   }
 
-  DCHECK(compositor_context_provider->ContextCapabilities().image);
-
   bool use_zero_copy = settings_.use_zero_copy;
   // TODO(reveman): Remove this when mojo supports worker contexts.
   // crbug.com/522440
@@ -2221,6 +2219,10 @@ void LayerTreeHostImpl::SetLayerTreeMutator(
                "LayerTreeHostImpl::SetLayerTreeMutator");
   mutator_ = std::move(mutator);
   mutator_->SetClient(this);
+}
+
+LayerImpl* LayerTreeHostImpl::ViewportMainScrollLayer() {
+  return viewport()->MainScrollLayer();
 }
 
 void LayerTreeHostImpl::CleanUpTileManagerAndUIResources() {
@@ -2312,7 +2314,8 @@ bool LayerTreeHostImpl::InitializeRenderer(
       settings_.renderer_settings.highp_threshold_min,
       settings_.renderer_settings.texture_id_allocation_chunk_size,
       compositor_frame_sink_->capabilities().delegated_sync_points_required,
-      settings_.renderer_settings.use_gpu_memory_buffer_resources, false,
+      settings_.renderer_settings.use_gpu_memory_buffer_resources,
+      settings_.enable_color_correct_rendering,
       settings_.renderer_settings.buffer_to_texture_target_map);
 
   // Make sure the main context visibility is restored. Worker context
@@ -2831,19 +2834,18 @@ InputHandler::ScrollStatus LayerTreeHostImpl::ScrollAnimated(
     if (scroll_node) {
       for (; scroll_tree.parent(scroll_node);
            scroll_node = scroll_tree.parent(scroll_node)) {
-        if (!scroll_node->scrollable ||
-            scroll_node->is_outer_viewport_scroll_layer)
+        if (!scroll_node->scrollable)
           continue;
 
-        if (scroll_node->is_inner_viewport_scroll_layer) {
+        if (viewport()->MainScrollLayer() &&
+            scroll_node->owner_id == viewport()->MainScrollLayer()->id()) {
           gfx::Vector2dF scrolled =
               viewport()->ScrollAnimated(pending_delta, delayed_by);
           // Viewport::ScrollAnimated returns pending_delta as long as it
           // starts an animation.
           if (scrolled == pending_delta)
             return scroll_status;
-          pending_delta -= scrolled;
-          continue;
+          break;
         }
 
         gfx::Vector2dF scroll_delta =
@@ -3043,18 +3045,19 @@ void LayerTreeHostImpl::DistributeScrollDelta(ScrollState* scroll_state) {
   std::list<const ScrollNode*> current_scroll_chain;
   ScrollTree& scroll_tree = active_tree_->property_trees()->scroll_tree;
   ScrollNode* scroll_node = scroll_tree.CurrentlyScrollingNode();
+  ScrollNode* viewport_scroll_node =
+      viewport()->MainScrollLayer()
+          ? scroll_tree.Node(viewport()->MainScrollLayer()->scroll_tree_index())
+          : nullptr;
   if (scroll_node) {
+    // TODO(bokan): The loop checks for a null parent but don't we still want to
+    // distribute to the root scroll node?
     for (; scroll_tree.parent(scroll_node);
          scroll_node = scroll_tree.parent(scroll_node)) {
-      if (scroll_node->is_outer_viewport_scroll_layer) {
-        // TODO(bokan): This should use Viewport::MainScrollLayer once that
-        // returns the outer viewport scroll layer.
+      if (scroll_node == viewport_scroll_node) {
         // Don't chain scrolls past the outer viewport scroll layer. Once we
         // reach that, we should scroll the viewport which is represented by the
         // main viewport scroll layer.
-        DCHECK(viewport()->MainScrollLayer());
-        ScrollNode* viewport_scroll_node = scroll_tree.Node(
-            viewport()->MainScrollLayer()->scroll_tree_index());
         DCHECK(viewport_scroll_node);
         current_scroll_chain.push_front(viewport_scroll_node);
         break;
@@ -3252,9 +3255,11 @@ void LayerTreeHostImpl::MouseMoveAt(const gfx::Point& viewport_point) {
   LayerImpl* scroll_layer_impl = FindScrollLayerForDeviceViewportPoint(
       device_viewport_point, InputHandler::TOUCHSCREEN, layer_impl,
       &scroll_on_main_thread, &main_thread_scrolling_reasons);
+
   // Scrollbars for the viewport are registered with the outer viewport layer.
   if (scroll_layer_impl == InnerViewportScrollLayer())
     scroll_layer_impl = OuterViewportScrollLayer();
+
   if (scroll_on_main_thread || !scroll_layer_impl)
     return;
 
@@ -3272,6 +3277,13 @@ void LayerTreeHostImpl::MouseMoveAt(const gfx::Point& viewport_point) {
 
   animation_controller->DidMouseMoveNear(distance_to_scrollbar /
                                          active_tree_->device_scale_factor());
+}
+
+void LayerTreeHostImpl::MouseLeave() {
+  for (auto& pair : scrollbar_animation_controllers_)
+    pair.second->DidMouseMoveOffScrollbar();
+
+  scroll_layer_id_when_mouse_over_scrollbar_ = Layer::INVALID_ID;
 }
 
 void LayerTreeHostImpl::HandleMouseOverScrollbar(LayerImpl* layer_impl) {

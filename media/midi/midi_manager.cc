@@ -12,12 +12,12 @@
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
 
-namespace media {
 namespace midi {
 
 namespace {
 
 using Sample = base::HistogramBase::Sample;
+using midi::mojom::Result;
 
 // If many users have more devices, this number will be increased.
 // But the number is expected to be big enough for now.
@@ -274,4 +274,3 @@ void MidiManager::ShutdownOnSessionThread() {
 }
 
 }  // namespace midi
-}  // namespace media

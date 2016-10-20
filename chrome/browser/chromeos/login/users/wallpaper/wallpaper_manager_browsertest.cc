@@ -87,7 +87,9 @@ class WallpaperManagerBrowserTest : public InProcessBrowserTest {
   // Update the display configuration as given in |display_specs|.  See
   // ash::test::DisplayManagerTestApi::UpdateDisplay for more details.
   void UpdateDisplay(const std::string& display_specs) {
-    ash::test::DisplayManagerTestApi().UpdateDisplay(display_specs);
+    ash::test::DisplayManagerTestApi(
+        ash::Shell::GetInstance()->display_manager())
+        .UpdateDisplay(display_specs);
   }
 
   void WaitAsyncWallpaperLoadStarted() {
@@ -116,7 +118,7 @@ class WallpaperManagerBrowserTest : public InProcessBrowserTest {
                                                    false);
     // Adding a secondary display creates a shelf on that display, which
     // assumes a shelf on the primary display if the user was logged in.
-    ash::Shell::GetInstance()->CreateShelf();
+    ash::WmShell::Get()->CreateShelf();
     WaitAsyncWallpaperLoadStarted();
   }
 

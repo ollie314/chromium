@@ -14,6 +14,7 @@
 #include "cc/surfaces/surface_factory_client.h"
 #include "cc/surfaces/surface_id.h"
 #include "cc/surfaces/surface_id_allocator.h"
+#include "cc/surfaces/surface_sequence_generator.h"
 #include "mojo/public/cpp/bindings/binding.h"
 #include "services/ui/public/interfaces/surface.mojom.h"
 #include "services/ui/public/interfaces/window_tree.mojom.h"
@@ -33,6 +34,7 @@ class ServerWindowSurface : public mojom::Surface,
                             public cc::SurfaceFactoryClient {
  public:
   ServerWindowSurface(ServerWindowSurfaceManager* manager,
+                      const cc::FrameSinkId& frame_sink_id,
                       mojo::InterfaceRequest<mojom::Surface> request,
                       mojom::SurfaceClientPtr client);
 
@@ -49,33 +51,47 @@ class ServerWindowSurface : public mojom::Surface,
       cc::CompositorFrame frame,
       const SubmitCompositorFrameCallback& callback) override;
 
-  const cc::SurfaceId& id() const { return surface_id_; }
+  // There is a 1-1 correspondence between FrameSinks and frame sources.
+  // The FrameSinkId uniquely identifies the FrameSink, and since there is
+  // one FrameSink per ServerWindowSurface, it allows the window server
+  // to uniquely identify the window, and the thus the client that generated the
+  // frame.
+  const cc::FrameSinkId& frame_sink_id() const { return frame_sink_id_; }
 
-  // Destroys old surfaces that have been outdated by a new surface.
-  void DestroySurfacesScheduledForDestruction();
+  // The LocalFrameId can be thought of as an identifier to a bucket of
+  // sequentially submitted CompositorFrames in the same FrameSink all sharing
+  // the same size and device scale factor.
+  const cc::LocalFrameId& local_frame_id() const { return local_frame_id_; }
+
+  bool has_frame() const { return !local_frame_id_.is_null(); }
+
+  cc::SurfaceId GetSurfaceId() const;
+
+  // Creates a surface dependency token that expires when this
+  // ServerWindowSurface goes away.
+  cc::SurfaceSequence CreateSurfaceSequence();
+
+  ServerWindow* window();
 
  private:
-  ServerWindow* window();
 
   // SurfaceFactoryClient implementation.
   void ReturnResources(const cc::ReturnedResourceArray& resources) override;
   void SetBeginFrameSource(cc::BeginFrameSource* begin_frame_source) override;
 
   const cc::FrameSinkId frame_sink_id_;
+  cc::SurfaceSequenceGenerator surface_sequence_generator_;
 
   ServerWindowSurfaceManager* manager_;  // Owns this.
 
   gfx::Size last_submitted_frame_size_;
 
-  cc::SurfaceId surface_id_;
+  cc::LocalFrameId local_frame_id_;
   cc::SurfaceIdAllocator surface_id_allocator_;
   cc::SurfaceFactory surface_factory_;
 
   mojom::SurfaceClientPtr client_;
   mojo::Binding<Surface> binding_;
-
-  // Set of surface ids that need to be destroyed.
-  std::set<cc::SurfaceId> surfaces_scheduled_for_destruction_;
 
   bool may_contain_video_ = false;
 

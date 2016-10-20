@@ -115,6 +115,15 @@ class PLATFORM_EXPORT FontCache {
   SkFontMgr* fontManager() { return m_fontManager.get(); }
   static void setFontManager(const sk_sp<SkFontMgr>&);
 
+#if !OS(MACOSX)
+  static const AtomicString& systemFontFamily();
+#else
+  static const AtomicString& legacySystemFontFamily();
+#endif
+#if OS(LINUX)
+  static void setSystemFontFamily(const char*);
+#endif
+
 #if OS(WIN)
   static bool antialiasedTextEnabled() { return s_antialiasedTextEnabled; }
   static bool lcdTextEnabled() { return s_lcdTextEnabled; }
@@ -175,7 +184,8 @@ class PLATFORM_EXPORT FontCache {
 #endif
   PassRefPtr<SimpleFontData> fontDataFromFontPlatformData(
       const FontPlatformData*,
-      ShouldRetain = Retain);
+      ShouldRetain = Retain,
+      bool = false);
 
   void invalidateShapeCache();
 

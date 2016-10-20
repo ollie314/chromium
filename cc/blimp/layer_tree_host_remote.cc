@@ -5,9 +5,12 @@
 #include "cc/blimp/layer_tree_host_remote.h"
 
 #include "base/atomic_sequence_num.h"
+#include "base/auto_reset.h"
 #include "base/memory/ptr_util.h"
 #include "cc/animation/animation_host.h"
 #include "cc/blimp/compositor_proto_state.h"
+#include "cc/blimp/engine_picture_cache.h"
+#include "cc/blimp/picture_data_conversions.h"
 #include "cc/blimp/remote_compositor_bridge.h"
 #include "cc/output/begin_frame_args.h"
 #include "cc/output/compositor_frame_sink.h"
@@ -17,6 +20,7 @@
 #include "cc/trees/layer_tree_host_client.h"
 #include "cc/trees/layer_tree_host_common.h"
 #include "cc/trees/task_runner_provider.h"
+#include "ui/gfx/geometry/scroll_offset.h"
 
 namespace cc {
 namespace {
@@ -46,6 +50,7 @@ LayerTreeHostRemote::LayerTreeHostRemote(InitParams* params,
           TaskRunnerProvider::Create(std::move(params->main_task_runner),
                                      nullptr)),
       remote_compositor_bridge_(std::move(params->remote_compositor_bridge)),
+      engine_picture_cache_(std::move(params->engine_picture_cache)),
       settings_(*params->settings),
       layer_tree_(std::move(layer_tree)),
       weak_factory_(this) {
@@ -53,6 +58,7 @@ LayerTreeHostRemote::LayerTreeHostRemote(InitParams* params,
   DCHECK(remote_compositor_bridge_);
   DCHECK(client_);
   remote_compositor_bridge_->BindToClient(this);
+  layer_tree_->set_engine_picture_cache(engine_picture_cache_.get());
 }
 
 LayerTreeHostRemote::~LayerTreeHostRemote() = default;
@@ -157,7 +163,11 @@ bool LayerTreeHostRemote::BeginMainFrameRequested() const {
 }
 
 bool LayerTreeHostRemote::CommitRequested() const {
-  return requested_pipeline_stage_for_next_frame_ == FramePipelineStage::COMMIT;
+  // We report that a commit is in progress when synchronizing scroll and scale
+  // updates because in threaded mode, scroll/scale synchronization from the
+  // impl thread happens only during the main frame.
+  return synchronizing_client_updates_ ||
+         requested_pipeline_stage_for_next_frame_ == FramePipelineStage::COMMIT;
 }
 
 void LayerTreeHostRemote::SetDeferCommits(bool defer_commits) {
@@ -173,12 +183,6 @@ void LayerTreeHostRemote::LayoutAndUpdateLayers() {
 void LayerTreeHostRemote::Composite(base::TimeTicks frame_begin_time) {
   NOTREACHED() << "Only supported in single-threaded mode and this class"
                << " does not support single-thread since it is out of process";
-}
-
-void LayerTreeHostRemote::SetNeedsRedraw() {
-  // The engine shouldn't need to care about draws. CompositorFrames are never
-  // used here.
-  NOTREACHED();
 }
 
 void LayerTreeHostRemote::SetNeedsRedrawRect(const gfx::Rect& damage_rect) {
@@ -404,8 +408,51 @@ void LayerTreeHostRemote::BeginMainFrame() {
   // being used for. Consider migrating clients to understand/cope with the fact
   // that there is no actual compositing happening here.
   task_runner_provider_->MainThreadTaskRunner()->PostTask(
-      FROM_HERE, base::Bind(&LayerTreeHostRemote::DispatchDrawAndSwapCallbacks,
-                            weak_factory_.GetWeakPtr()));
+      FROM_HERE,
+      base::Bind(&LayerTreeHostRemote::DispatchDrawAndSubmitCallbacks,
+                 weak_factory_.GetWeakPtr()));
+}
+
+bool LayerTreeHostRemote::ApplyScrollAndScaleUpdateFromClient(
+    const ScrollOffsetMap& client_scroll_map,
+    float client_page_scale) {
+  DCHECK(!synchronizing_client_updates_);
+
+  base::AutoReset<bool> synchronizing_updates(&synchronizing_client_updates_,
+                                              true);
+  bool layer_sync_successful = true;
+
+  gfx::Vector2dF inner_viewport_scroll_delta;
+  Layer* inner_viewport_scroll_layer =
+      layer_tree_->inner_viewport_scroll_layer();
+  for (const auto& client_scroll : client_scroll_map) {
+    Layer* layer = layer_tree_->LayerById(client_scroll.first);
+    const gfx::ScrollOffset& scroll_offset = client_scroll.second;
+
+    // Note the inner viewport scroll delta to report separately.
+    if (layer == inner_viewport_scroll_layer) {
+      inner_viewport_scroll_delta =
+          scroll_offset.DeltaFrom(layer->scroll_offset());
+    }
+
+    if (layer)
+      layer->SetScrollOffsetFromImplSide(scroll_offset);
+    else
+      layer_sync_successful = false;
+  }
+
+  float page_scale_delta = 1.0f;
+  if (client_page_scale != layer_tree_->page_scale_factor()) {
+    page_scale_delta = client_page_scale / layer_tree_->page_scale_factor();
+    layer_tree_->SetPageScaleFromImplSide(client_page_scale);
+  }
+
+  if (!inner_viewport_scroll_delta.IsZero() || page_scale_delta != 1.0f) {
+    client_->ApplyViewportDeltas(inner_viewport_scroll_delta, gfx::Vector2dF(),
+                                 gfx::Vector2dF(), page_scale_delta, 1.0f);
+  }
+
+  return layer_sync_successful;
 }
 
 void LayerTreeHostRemote::MainFrameComplete() {
@@ -419,9 +466,14 @@ void LayerTreeHostRemote::MainFrameComplete() {
   client_->DidBeginMainFrame();
 }
 
-void LayerTreeHostRemote::DispatchDrawAndSwapCallbacks() {
+void LayerTreeHostRemote::DispatchDrawAndSubmitCallbacks() {
   client_->DidCommitAndDrawFrame();
-  client_->DidCompleteSwapBuffers();
+  client_->DidReceiveCompositorFrameAck();
+}
+
+void LayerTreeHostRemote::SetTaskRunnerProviderForTesting(
+    std::unique_ptr<TaskRunnerProvider> task_runner_provider) {
+  task_runner_provider_ = std::move(task_runner_provider);
 }
 
 void LayerTreeHostRemote::SerializeCurrentState(
@@ -439,7 +491,10 @@ void LayerTreeHostRemote::SerializeCurrentState(
         layer_tree_host_proto->mutable_layer_updates(), inputs_only);
   layer_tree_->LayersThatShouldPushProperties().clear();
 
-  // TODO(khushalsagar): Deal with picture caching.
+  std::vector<PictureData> pictures =
+      engine_picture_cache_->CalculateCacheUpdateAndFlush();
+  proto::PictureDataVectorToSkPicturesProto(
+      pictures, layer_tree_host_proto->mutable_pictures());
 }
 
 }  // namespace cc

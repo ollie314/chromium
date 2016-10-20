@@ -278,7 +278,7 @@ const char kChromeUIPopularSitesInternalsHost[] = "popular-sites-internals";
 const char kChromeUISnippetsInternalsHost[] = "snippets-internals";
 #endif
 
-#if defined(ENABLE_VR_SHELL)
+#if defined(ENABLE_VR_SHELL) || defined(ENABLE_WEBVR)
 const char kChromeUIVrShellUIHost[] = "vr-shell-ui";
 #endif
 
@@ -532,7 +532,7 @@ const char kChromiumProjectURL[] = "https://www.chromium.org/";
 const char kLearnMoreReportingURL[] =
     "https://support.google.com/chrome/?p=ui_usagestat";
 
-#if defined(ENABLE_PLUGIN_INSTALLATION)
+#if BUILDFLAG(ENABLE_PLUGIN_INSTALLATION)
 const char kOutdatedPluginLearnMoreURL[] =
     "https://support.google.com/chrome/?p=ib_outdated_plugin";
 #endif
@@ -621,6 +621,7 @@ const char* const kChromeHostURLs[] = {
   kChromeUIHistoryHost,
   kChromeUIInvalidationsHost,
   kChromeUILocalStateHost,
+  kChromeUINetExportHost,
   kChromeUINetInternalsHost,
   kChromeUINewTabHost,
   kChromeUIOmniboxHost,
@@ -707,7 +708,7 @@ const char* const kChromeHostURLs[] = {
 #if defined(ENABLE_PRINT_PREVIEW)
   kChromeUIPrintHost,
 #endif
-#if defined(ENABLE_SERVICE_DISCOVERY)
+#if BUILDFLAG(ENABLE_SERVICE_DISCOVERY)
   kChromeUIDevicesHost,
 #endif
 #if defined(ENABLE_WEBRTC)

@@ -18,18 +18,21 @@
 #include "base/optional.h"
 #include "base/time/time.h"
 #include "content/common/service_worker/embedded_worker.mojom.h"
+#include "content/common/service_worker/fetch_event_dispatcher.mojom.h"
 #include "content/common/service_worker/service_worker_status_code.h"
 #include "ipc/ipc_listener.h"
 #include "ipc/ipc_test_sink.h"
 #include "mojo/public/cpp/bindings/binding.h"
-#include "services/shell/public/interfaces/interface_provider.mojom.h"
+#include "services/service_manager/public/cpp/interface_provider.h"
+#include "services/service_manager/public/cpp/interface_registry.h"
+#include "services/service_manager/public/interfaces/interface_provider.mojom.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
 
 class GURL;
 struct ServiceWorkerMsg_ExtendableMessageEvent_Params;
 
-namespace shell {
+namespace service_manager {
 class InterfaceProvider;
 class InterfaceRegistry;
 }
@@ -79,15 +82,24 @@ class EmbeddedWorkerTestHelper : public IPC::Sender,
     static void Bind(const base::WeakPtr<EmbeddedWorkerTestHelper>& helper,
                      mojom::EmbeddedWorkerInstanceClientRequest request);
 
-   private:
+   protected:
     // Implementation of mojo interfaces.
-    void StartWorker(const EmbeddedWorkerStartParams& params) override;
+    void StartWorker(
+        const EmbeddedWorkerStartParams& params,
+        service_manager::mojom::InterfaceProviderPtr browser_interfaces,
+        service_manager::mojom::InterfaceProviderRequest renderer_request)
+        override;
+    void StopWorker(const StopWorkerCallback& callback) override;
 
     base::WeakPtr<EmbeddedWorkerTestHelper> helper_;
     mojo::Binding<mojom::EmbeddedWorkerInstanceClient> binding_;
 
+    service_manager::InterfaceRegistry local_interfaces_;
+    service_manager::InterfaceProvider remote_interfaces_;
+
     base::Optional<int> embedded_worker_id_;
 
+   private:
     DISALLOW_COPY_AND_ASSIGN(MockEmbeddedWorkerInstanceClient);
   };
 
@@ -105,6 +117,14 @@ class EmbeddedWorkerTestHelper : public IPC::Sender,
 
   // IPC::Listener implementation.
   bool OnMessageReceived(const IPC::Message& msg) override;
+
+  // Register a mojo endpoint object derived from
+  // MockEmbeddedWorkerInstanceClient.
+  void RegisterMockInstanceClient(
+      std::unique_ptr<MockEmbeddedWorkerInstanceClient> client);
+
+  template <typename MockType, typename... Args>
+  MockType* CreateAndRegisterMockInstanceClient(Args&&... args);
 
   // IPC sink for EmbeddedWorker messages.
   IPC::TestSink* ipc_sink() { return &sink_; }
@@ -136,6 +156,10 @@ class EmbeddedWorkerTestHelper : public IPC::Sender,
 
   TestBrowserContext* browser_context() { return browser_context_.get(); }
 
+  base::WeakPtr<EmbeddedWorkerTestHelper> AsWeakPtr() {
+    return weak_factory_.GetWeakPtr();
+  }
+
  protected:
   // Called when StartWorker, StopWorker and SendMessageToWorker message
   // is sent to the embedded worker. Override if necessary. By default
@@ -156,8 +180,9 @@ class EmbeddedWorkerTestHelper : public IPC::Sender,
 
   // Called to setup mojo for a new embedded worker. Override to register
   // interfaces the worker should expose to the browser.
-  virtual void OnSetupMojo(int thread_id,
-                           shell::InterfaceRegistry* interface_registry);
+  virtual void OnSetupMojo(
+      int thread_id,
+      service_manager::InterfaceRegistry* interface_registry);
 
   // On*Event handlers. Called by the default implementation of
   // OnMessageToWorker when events are sent to the embedded
@@ -167,8 +192,9 @@ class EmbeddedWorkerTestHelper : public IPC::Sender,
   virtual void OnExtendableMessageEvent(int embedded_worker_id, int request_id);
   virtual void OnInstallEvent(int embedded_worker_id, int request_id);
   virtual void OnFetchEvent(int embedded_worker_id,
-                            int response_id,
+                            int fetch_event_id,
                             const ServiceWorkerFetchRequest& request,
+                            mojom::FetchEventPreloadHandlePtr preload_handle,
                             const FetchCallback& callback);
   virtual void OnPushEvent(int embedded_worker_id,
                            int request_id,
@@ -189,8 +215,8 @@ class EmbeddedWorkerTestHelper : public IPC::Sender,
 
  private:
   using InterfaceRegistryAndProvider =
-      std::pair<std::unique_ptr<shell::InterfaceRegistry>,
-                std::unique_ptr<shell::InterfaceProvider>>;
+      std::pair<std::unique_ptr<service_manager::InterfaceRegistry>,
+                std::unique_ptr<service_manager::InterfaceProvider>>;
 
   class MockEmbeddedWorkerSetup;
   class MockFetchEventDispatcher;
@@ -207,17 +233,19 @@ class EmbeddedWorkerTestHelper : public IPC::Sender,
       const ServiceWorkerMsg_ExtendableMessageEvent_Params& params);
   void OnInstallEventStub(int request_id);
   void OnFetchEventStub(int thread_id,
-                        int response_id,
+                        int fetch_event_id,
                         const ServiceWorkerFetchRequest& request,
+                        mojom::FetchEventPreloadHandlePtr preload_handle,
                         const FetchCallback& callback);
   void OnPushEventStub(int request_id, const PushEventPayload& payload);
-  void OnSetupMojoStub(int thread_id,
-                       shell::mojom::InterfaceProviderRequest services,
-                       shell::mojom::InterfaceProviderPtr exposed_services);
+  void OnSetupMojoStub(
+      int thread_id,
+      service_manager::mojom::InterfaceProviderRequest services,
+      service_manager::mojom::InterfaceProviderPtr exposed_services);
 
   MessagePortMessageFilter* NewMessagePortMessageFilter();
 
-  std::unique_ptr<shell::InterfaceRegistry> CreateInterfaceRegistry(
+  std::unique_ptr<service_manager::InterfaceRegistry> CreateInterfaceRegistry(
       MockRenderProcessHost* rph);
 
   std::unique_ptr<TestBrowserContext> browser_context_;
@@ -237,8 +265,9 @@ class EmbeddedWorkerTestHelper : public IPC::Sender,
   int mock_render_process_id_;
   int new_mock_render_process_id_;
 
-  std::unique_ptr<shell::InterfaceRegistry> render_process_interface_registry_;
-  std::unique_ptr<shell::InterfaceRegistry>
+  std::unique_ptr<service_manager::InterfaceRegistry>
+      render_process_interface_registry_;
+  std::unique_ptr<service_manager::InterfaceRegistry>
       new_render_process_interface_registry_;
 
   std::map<int, int64_t> embedded_worker_id_service_worker_version_id_map_;
@@ -260,6 +289,16 @@ class EmbeddedWorkerTestHelper : public IPC::Sender,
 
   DISALLOW_COPY_AND_ASSIGN(EmbeddedWorkerTestHelper);
 };
+
+template <typename MockType, typename... Args>
+MockType* EmbeddedWorkerTestHelper::CreateAndRegisterMockInstanceClient(
+    Args&&... args) {
+  std::unique_ptr<MockType> mock =
+      base::MakeUnique<MockType>(std::forward<Args>(args)...);
+  MockType* mock_rawptr = mock.get();
+  RegisterMockInstanceClient(std::move(mock));
+  return mock_rawptr;
+}
 
 }  // namespace content
 

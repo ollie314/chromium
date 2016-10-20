@@ -12,6 +12,7 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "content/browser/loader/intercepting_resource_handler.h"
@@ -27,6 +28,7 @@
 #include "net/url_request/url_request_context.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
+#include "url/origin.h"
 
 namespace content {
 
@@ -210,7 +212,7 @@ class TestFakePluginService : public FakePluginService {
                      int render_frame_id,
                      ResourceContext* context,
                      const GURL& url,
-                     const GURL& page_url,
+                     const url::Origin& main_frame_origin,
                      const std::string& mime_type,
                      bool allow_wildcard,
                      bool* is_stale,
@@ -380,7 +382,12 @@ bool MimeSniffingResourceHandlerTest::TestStreamIsIntercepted(
 
   TestFakePluginService plugin_service(plugin_available_, plugin_stale_);
   std::unique_ptr<InterceptingResourceHandler> intercepting_handler(
-      new InterceptingResourceHandler(std::unique_ptr<ResourceHandler>(),
+      new InterceptingResourceHandler(base::MakeUnique<TestResourceHandler>(
+                                          true,    // response_started_succeeds
+                                          false,   // defer_response_started
+                                          true,    // will_read_succeeds,
+                                          true,    // read_completed_succeeds,
+                                          false),  // defer_read_completed
                                       nullptr));
   std::unique_ptr<ResourceHandler> mime_handler(new MimeSniffingResourceHandler(
       std::unique_ptr<ResourceHandler>(
@@ -432,7 +439,12 @@ void MimeSniffingResourceHandlerTest::TestHandlerSniffing(
 
   TestFakePluginService plugin_service(plugin_available_, plugin_stale_);
   std::unique_ptr<InterceptingResourceHandler> intercepting_handler(
-      new InterceptingResourceHandler(std::unique_ptr<ResourceHandler>(),
+      new InterceptingResourceHandler(base::MakeUnique<TestResourceHandler>(
+                                          true,    // response_started_succeeds
+                                          false,   // defer_on_response_started
+                                          true,    // will_read_succeeds
+                                          true,    // read_completed_succeeds
+                                          false),  // defer_on_read_completed
                                       nullptr));
   std::unique_ptr<TestResourceHandler> scoped_test_handler =
       std::unique_ptr<TestResourceHandler>(new TestResourceHandler(
@@ -593,7 +605,12 @@ void MimeSniffingResourceHandlerTest::TestHandlerNoSniffing(
 
   TestFakePluginService plugin_service(plugin_available_, plugin_stale_);
   std::unique_ptr<InterceptingResourceHandler> intercepting_handler(
-      new InterceptingResourceHandler(std::unique_ptr<ResourceHandler>(),
+      new InterceptingResourceHandler(base::MakeUnique<TestResourceHandler>(
+                                          true,    // response_started_succeeds
+                                          false,   // defer_response_started
+                                          true,    // will_read_succeeds,
+                                          true,    // read_completed_succeeds,
+                                          false),  // defer_read_completed
                                       nullptr));
 
   std::unique_ptr<TestResourceHandler> scoped_test_handler =
@@ -987,7 +1004,12 @@ TEST_F(MimeSniffingResourceHandlerTest, 304Handling) {
 
   TestFakePluginService plugin_service(false, false);
   std::unique_ptr<ResourceHandler> intercepting_handler(
-      new InterceptingResourceHandler(std::unique_ptr<ResourceHandler>(),
+      new InterceptingResourceHandler(base::MakeUnique<TestResourceHandler>(
+                                          true,    // response_started_succeeds
+                                          false,   // defer_response_started
+                                          true,    // will_read_succeeds,
+                                          true,    // read_completed_succeeds,
+                                          false),  // defer_read_completed
                                       nullptr));
   std::unique_ptr<ResourceHandler> mime_handler(new MimeSniffingResourceHandler(
       std::unique_ptr<ResourceHandler>(
@@ -1035,7 +1057,13 @@ TEST_F(MimeSniffingResourceHandlerTest, FetchShouldDisableMimeSniffing) {
 
   TestFakePluginService plugin_service(false, false);
   std::unique_ptr<InterceptingResourceHandler> intercepting_handler(
-      new InterceptingResourceHandler(nullptr, nullptr));
+      new InterceptingResourceHandler(base::MakeUnique<TestResourceHandler>(
+                                          true,    // response_started_succeeds
+                                          false,   // defer_response_started
+                                          true,    // will_read_succeeds,
+                                          true,    // read_completed_succeeds,
+                                          false),  // defer_read_completed
+                                      nullptr));
 
   std::unique_ptr<TestResourceHandler> scoped_test_handler(
       new TestResourceHandler(false,    // response_started

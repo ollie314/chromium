@@ -7,6 +7,7 @@
 #include "base/android/jni_android.h"
 #include "base/android/jni_array.h"
 #include "base/android/jni_string.h"
+#include "base/memory/ptr_util.h"
 #include "cc/layers/solid_color_layer.h"
 #include "chrome/browser/android/compositor/layer/contextual_search_layer.h"
 #include "chrome/browser/profiles/profile.h"
@@ -22,7 +23,6 @@
 
 using base::android::JavaParamRef;
 
-namespace chrome {
 namespace android {
 
 ContextualSearchSceneLayer::ContextualSearchSceneLayer(JNIEnv* env,
@@ -92,7 +92,9 @@ void ContextualSearchSceneLayer::UpdateContextualSearchLayer(
     jfloat search_bar_margin_side,
     jfloat search_bar_height,
     jfloat search_context_opacity,
+    jfloat search_text_layer_min_height,
     jfloat search_term_opacity,
+    jfloat search_term_caption_spacing,
     jfloat search_caption_animation_percentage,
     jboolean search_caption_visible,
     jboolean search_bar_border_visible,
@@ -117,7 +119,7 @@ void ContextualSearchSceneLayer::UpdateContextualSearchLayer(
   // Load the thumbnail if necessary.
   std::string thumbnail_url =
       base::android::ConvertJavaStringToUTF8(env, j_thumbnail_url);
-  if (thumbnail_url.compare(thumbnail_url_) != 0) {
+  if (thumbnail_url != thumbnail_url_) {
     thumbnail_url_ = thumbnail_url;
     FetchThumbnail(j_profile);
   }
@@ -178,7 +180,9 @@ void ContextualSearchSceneLayer::UpdateContextualSearchLayer(
       search_bar_margin_side,
       search_bar_height,
       search_context_opacity,
+      search_text_layer_min_height,
       search_term_opacity,
+      search_term_caption_spacing,
       search_caption_animation_percentage,
       search_caption_visible,
       search_bar_border_visible,
@@ -203,11 +207,12 @@ void ContextualSearchSceneLayer::UpdateContextualSearchLayer(
 }
 
 void ContextualSearchSceneLayer::FetchThumbnail(jobject j_profile) {
-  if (thumbnail_url_.compare("") == 0) return;
+  if (thumbnail_url_.empty())
+    return;
 
-  GURL* gurl = new GURL(thumbnail_url_);
+  GURL gurl(thumbnail_url_);
   Profile* profile = ProfileAndroid::FromProfileAndroid(j_profile);
-  fetcher_.reset(new chrome::BitmapFetcher(*gurl, this));
+  fetcher_ = base::MakeUnique<chrome::BitmapFetcher>(gurl, this);
   fetcher_->Init(
       profile->GetRequestContext(),
       std::string(),
@@ -218,14 +223,14 @@ void ContextualSearchSceneLayer::FetchThumbnail(jobject j_profile) {
 
 void ContextualSearchSceneLayer::OnFetchComplete(const GURL& url,
                                                  const SkBitmap* bitmap) {
-  bool success = bitmap != NULL && !bitmap->drawsNothing();
+  bool success = bitmap && !bitmap->drawsNothing();
   Java_ContextualSearchSceneLayer_onThumbnailFetched(env_,
                                                      object_.obj(),
                                                      success);
+  if (success)
+    contextual_search_layer_->SetThumbnail(bitmap);
 
-  if (success) contextual_search_layer_->SetThumbnail(bitmap);
-
-  fetcher_.reset(nullptr);
+  fetcher_.reset();
 }
 
 void ContextualSearchSceneLayer::SetContentTree(
@@ -267,4 +272,3 @@ bool RegisterContextualSearchSceneLayer(JNIEnv* env) {
 }
 
 }  // namespace android
-}  // namespace chrome

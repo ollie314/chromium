@@ -19,7 +19,6 @@
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
-#include "crypto/scoped_openssl_types.h"
 #include "grit/components_strings.h"
 #include "jni/AwContentsClientBridge_jni.h"
 #include "net/cert/x509_certificate.h"
@@ -243,7 +242,7 @@ void AwContentsClientBridge::ProvideClientCertificateResponse(
 
   // Create an SSLPrivateKey wrapper for the private key JNI reference.
   scoped_refptr<net::SSLPrivateKey> private_key =
-      net::WrapJavaPrivateKey(private_key_ref);
+      net::WrapJavaPrivateKey(client_cert.get(), private_key_ref);
   if (!private_key) {
     LOG(ERROR) << "Could not create OpenSSL wrapper for private key";
     return;
@@ -357,7 +356,7 @@ bool AwContentsClientBridge::ShouldOverrideUrlLoading(const base::string16& url,
     // Tell the chromium message loop to not perform any tasks after the current
     // one - we want to make sure we return to Java cleanly without first making
     // any new JNI calls.
-    static_cast<base::MessageLoopForUI*>(base::MessageLoop::current())->Abort();
+    base::MessageLoopForUI::current()->Abort();
     // If we crashed we don't want to continue the navigation.
     return true;
   }

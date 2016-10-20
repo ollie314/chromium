@@ -69,20 +69,23 @@ CSSPaintAPI status=experimental, depends_on=CSSTypedOM, depends_on=Worklet
 CSSSnapSize status=experimental
 CSSStickyPosition status=experimental
 CSSTouchActionPanDirections status=stable
-CSSTouchActionPinchZoom status=experimental
+CSSTouchActionPinchZoom status=stable
 CSSTypedOM status=experimental
 CSSVariables2 status=experimental
 CSSViewport status=experimental
 CSSScrollSnapPoints status=test
+CustomElementsBuiltin status=test
 CustomElementsV1 status=stable
 CustomSchemeHandler depends_on=NavigatorContentUtils, status=experimental
 Database status=stable
 DecodeToYUV status=experimental
+DesktopCaptureDisableLocalEchoControl status=experimental
 DeviceLight status=experimental
 DisplayList2dCanvas status=stable
 DocumentWriteEvaluator
 DOMConvenienceAPI status=stable
-DurableStorage status=experimental, origin_trial_feature_name=DurableStorage
+DurableStorage status=stable
+ExpensiveBackgroundTimerThrottling status=experimental
 FontCacheScaling status=test
 ForceDisplayList2dCanvas
 // See crbug.com/585250.
@@ -98,14 +101,13 @@ FeaturePolicy status=experimental
 FileAPIBlobClose status=experimental
 FileSystem status=stable
 ForeignFetch status=experimental, origin_trial_feature_name=ForeignFetch
-FramebustingNeedsSameOriginOrUserGesture status=stable
+FramebustingNeedsSameOriginOrUserGesture status=test, settable_from_internals=True
 FullscreenUnprefixed status=test
 FrameTimingSupport status=experimental
-GamepadExtensions
+GamepadExtensions origin_trial_feature_name=WebVR
 GeometryInterfaces status=experimental, implied_by=CompositorWorker
 GetUserMedia status=stable
 GlobalCacheStorage status=stable
-GpuCompositing
 IDBObserver status=experimental
 ImageCapture status=experimental
 ImageOrientation status=test
@@ -128,7 +130,7 @@ MediaCaptureFromVideo status=experimental
 MediaConstraints status=stable
 MediaDocumentDownloadButton
 MediaGetSettings status=test
-MediaSession
+MediaSession status=test
 MediaSourceExperimental status=experimental
 MediaSourceNewAbortAndDuration status=experimental
 MediaStreamSpeech status=experimental
@@ -174,6 +176,7 @@ PointerEvent status=stable
 // For temporary compat testing of Edge-like model - crbug.com/640700
 PointerEventV1SpecCapturing
 PreciseMemoryInfo
+PreferredImageRasterScale settable_from_internals=True
 // This feature is deprecated and we are evangelizing affected sites.
 // See https://crbug.com/346236 for current status.
 PrefixedVideoFullscreen status=stable
@@ -182,11 +185,10 @@ PresentationReceiver status=test
 PushMessaging status=stable
 QuotaPromise status=experimental
 ReducedReferrerGranularity
-ReferrerPolicyHeader status=experimental
 ReloadwithoutSubResourceCacheRevalidation
 RemotePlayback status=experimental
 RenderingPipelineThrottling status=stable
-RenderUnicodeControlCharacters status=experimental
+RenderUnicodeControlCharacters status=stable
 ResizeObserver status=experimental
 // Handles frame scrolling via the root PaintLayer instead of the FrameView.
 // crbug.com/417782 tracks enabling this by default.
@@ -199,9 +201,7 @@ ScrollAnchoring status=experimental, settable_from_internals=True
 // as per the spec, matching other Web engines.
 ScrollTopLeftInterop status=experimental
 Sensor status=experimental
-ServiceWorkerClientAttributes status=stable
-ServiceWorkerClientsGetID status=stable
-ServiceWorkerWindowClientNavigate status=stable
+ServiceWorkerNavigationPreload status=experimental
 SetRootScroller status=experimental
 ShadowDOMV1 status=stable
 ShapeDetection status=experimental
@@ -234,7 +234,6 @@ Touch status=stable
 TraceWrappables
 TrustedEventsDefaultAction status=stable
 UnsafeES3APIs
-UnsandboxedAuxiliary status=stable
 UserSelectAll status=stable
 WebAnimationsAPI status=experimental
 WebAnimationsSVG status=experimental
@@ -243,7 +242,7 @@ WebBluetooth origin_trial_feature_name=WebBluetooth
 WebGLDraftExtensions status=experimental
 WebGLImageChromium
 WebUSB status=experimental, origin_trial_feature_name=WebUSB
-WebVR
+WebVR origin_trial_feature_name=WebVR
 WebVTTRegions status=experimental
 V8BasedStructuredClone
 V8IdleTasks

@@ -32,6 +32,7 @@
 #include "base/path_service.h"
 #include "base/process/launch.h"
 #include "base/process/memory.h"
+#include "base/process/process.h"
 #include "base/process/process_handle.h"
 #include "base/profiler/scoped_tracker.h"
 #include "base/strings/string_number_conversions.h"
@@ -65,7 +66,6 @@
 #include "content/renderer/in_process_renderer_thread.h"
 #include "content/utility/in_process_utility_thread.h"
 #include "ipc/ipc_descriptors.h"
-#include "ipc/ipc_switches.h"
 #include "media/base/media.h"
 #include "ui/base/ui_base_paths.h"
 #include "ui/base/ui_base_switches.h"
@@ -121,9 +121,6 @@ extern int PpapiBrokerMain(const MainFunctionParams&);
 #endif
 extern int RendererMain(const content::MainFunctionParams&);
 extern int UtilityMain(const MainFunctionParams&);
-#if defined(OS_ANDROID)
-extern int DownloadMain(const MainFunctionParams&);
-#endif
 }  // namespace content
 
 namespace content {
@@ -146,12 +143,8 @@ void InitializeFieldTrialAndFeatureList(
 
   // Ensure any field trials in browser are reflected into the child
   // process.
-  if (command_line.HasSwitch(switches::kForceFieldTrials)) {
-    bool result = base::FieldTrialList::CreateTrialsFromString(
-        command_line.GetSwitchValueASCII(switches::kForceFieldTrials),
-        std::set<std::string>());
-    DCHECK(result);
-  }
+  base::FieldTrialList::CreateTrialsFromCommandLine(
+      command_line, switches::kFieldTrialHandle);
 
   std::unique_ptr<base::FeatureList> feature_list(new base::FeatureList);
   feature_list->InitializeFromCommandLine(
@@ -391,9 +384,6 @@ int RunNamedProcessTypeMain(
     { switches::kUtilityProcess,     UtilityMain },
     { switches::kRendererProcess,    RendererMain },
     { switches::kGpuProcess,         GpuMain },
-#if defined(OS_ANDROID)
-    { switches::kDownloadProcess,    DownloadMain},
-#endif
 #endif  // !CHROME_MULTIPLE_DLL_BROWSER
   };
 

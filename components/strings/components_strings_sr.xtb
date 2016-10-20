@@ -157,7 +157,7 @@
 <translation id="2677748264148917807">Напусти</translation>
 <translation id="269990154133806163">Сервер је послао сертификат који није јавно откривен помоћу смерница за транспарентност сертификата. То је обавезно за неке сертификате да бисмо се уверили да су поуздани и да штите од нападача. <ph name="BEGIN_LEARN_MORE_LINK" />Сазнајте више<ph name="END_LEARN_MORE_LINK" />.</translation>
 <translation id="2704283930420550640">Вредност се не подудара са форматом.</translation>
-<translation id="2704951214193499422">Chromium није успео да потврди картицу. Покушајте поново касније.</translation>
+<translation id="2704951214193499422">Chromium није успео да потврди картицу. Пробајте поново касније.</translation>
 <translation id="2705137772291741111">Сачувана (кеширана) копија овог сајта није могла да се чита.</translation>
 <translation id="2709516037105925701">Аутоматско попуњавање</translation>
 <translation id="2712118517637785082">Покушали сте да посетите <ph name="DOMAIN" />, али је издавач опозвао сертификат који је сервер послао. То значи да никако не треба да имате поверења у безбедносне акредитиве које је сервер послао. Могуће је да комуницирате са нападачем. <ph name="BEGIN_LEARN_MORE_LINK" />Сазнајте више<ph name="END_LEARN_MORE_LINK" />.</translation>
@@ -172,7 +172,6 @@
 <translation id="2824775600643448204">Трака за адресу и претрагу</translation>
 <translation id="2826760142808435982">Веза је шифрована и њена аутентичност је потврђена помоћу <ph name="CIPHER" /> и користи <ph name="KX" /> као механизам за размену шифара.</translation>
 <translation id="2835170189407361413">Обриши образац</translation>
-<translation id="2837049386027881519">Успостављање везе је морало да буде поновљено помоћу старије верзије TLS или SSL протокола. Ово обично значи да сервер користи веома стар софтвер и може да има других безбедносних проблема.</translation>
 <translation id="284702764277384724">Изгледа да је сертификат сервера на хосту <ph name="HOST_NAME" /> фалсификат.</translation>
 <translation id="2889159643044928134">Не учитавај поново</translation>
 <translation id="2900469785430194048">Google Chrome-у је понестало меморије док је покушавао да прикаже ову веб-страницу.</translation>
@@ -193,7 +192,7 @@
 <translation id="3037605927509011580">О, не!</translation>
 <translation id="3040955737384246924">{COUNT,plural, =0{најмање 1 ставка на синхронизованим уређајима}=1{1 ставка (и још ставки на синхронизованим уређајима)}one{# ставка (и још ставки на синхронизованим уређајима)}few{# ставке (и још ставки на синхронизованим уређајима)}other{# ставки (и још ставки на синхронизованим уређајима)}}</translation>
 <translation id="3041612393474885105">Информације о сертификату</translation>
-<translation id="3063697135517575841">Chrome није успео да потврди картицу. Покушајте поново касније.</translation>
+<translation id="3063697135517575841">Chrome није успео да потврди картицу. Пробајте поново касније.</translation>
 <translation id="3093245981617870298">Офлајн сте.</translation>
 <translation id="3105172416063519923">ИД елемента:</translation>
 <translation id="3109728660330352905">Немате овлашћење да прегледате ову страницу.</translation>
@@ -216,11 +215,12 @@
 <translation id="3254409185687681395">Обележите ову страницу</translation>
 <translation id="3270847123878663523">&amp;Опозови промену редоследа</translation>
 <translation id="3286538390144397061">Поново покрени одмах</translation>
+<translation id="3303855915957856445">Нису пронађени резултати претраге</translation>
 <translation id="3305707030755673451">Подаци су шифровани помоћу приступне фразе за синхронизацију <ph name="TIME" />. Унесите је да бисте започели синхронизацију.</translation>
 <translation id="333371639341676808">Спречите ову страницу да прави додатне дијалоге.</translation>
 <translation id="3338095232262050444">Безбедан</translation>
 <translation id="3340978935015468852">подешавања</translation>
-<translation id="3345135638360864351">Слање захтева за приступ овом сајту кориснику <ph name="NAME" /> није успело. Покушајте поново.</translation>
+<translation id="3345135638360864351">Слање захтева за приступ овом сајту кориснику <ph name="NAME" /> није успело. Пробајте поново.</translation>
 <translation id="3355823806454867987">Промени подешавања проксија...</translation>
 <translation id="3369192424181595722">Грешка на сату</translation>
 <translation id="337363190475750230">Онемогућен је</translation>
@@ -238,7 +238,7 @@
 <translation id="3479539252931486093">Да ли је ово било неочекивано? <ph name="BEGIN_LINK" />Обавестите нас<ph name="END_LINK" /></translation>
 <translation id="3479552764303398839">Не сада</translation>
 <translation id="348000606199325318">ИД отказивања <ph name="CRASH_LOCAL_ID" /> (ИД сервера: <ph name="CRASH_ID" />)</translation>
-<translation id="3498215018399854026">Тренутно не можемо да контактирамо родитеља. Покушај поново.</translation>
+<translation id="3498215018399854026">Тренутно не можемо да контактирамо родитеља. Пробај поново.</translation>
 <translation id="3527085408025491307">Директоријум</translation>
 <translation id="3528171143076753409">Сертификат сервера није поуздан.</translation>
 <translation id="3539171420378717834">Задржи копију ове картице на овом уређају</translation>
@@ -327,6 +327,7 @@
 <translation id="4394049700291259645">Онемогући</translation>
 <translation id="4395129973926795186"><ph name="START_DATE" /> – <ph name="END_DATE" /></translation>
 <translation id="4406896451731180161">резултати претраге</translation>
+<translation id="4432688616882109544"><ph name="HOST_NAME" /> није прихватио сертификат за пријављивање или сертификат за пријављивање није приложен.</translation>
 <translation id="443673843213245140">Коришћење проксија је онемогућено, али је наведена експлицитна конфигурација проксија.</translation>
 <translation id="4458874409874303848">Безбедни сајтови</translation>
 <translation id="4461847750548395463">Ову поруку видите јер су Google безбедни сајтови омогућени.</translation>
@@ -369,8 +370,8 @@
 <translation id="495170559598752135">Радње</translation>
 <translation id="4958444002117714549">Прошири листу</translation>
 <translation id="4962322354953122629">Овај сервер не може да докаже да је <ph name="DOMAIN" />; Chrome нема поверења у његов безбедносни сертификат. Узрок томе је можда погрешна конфигурација или нападач који је прекинуо везу. <ph name="BEGIN_LEARN_MORE_LINK" />Сазнајте више<ph name="END_LEARN_MORE_LINK" />.</translation>
-<translation id="4986920000862467124">Све је прочитано</translation>
 <translation id="498957508165411911">Желите ли да преведете са језика <ph name="ORIGINAL_LANGUAGE" /> на <ph name="TARGET_LANGUAGE" />?</translation>
+<translation id="4989809363548539747">Ова додатна компонента није подржана</translation>
 <translation id="5002932099480077015">Ако је ова опција омогућена, Chrome ће складиштити копију картице на овом уређају ради бржег попуњавања образаца.</translation>
 <translation id="5019198164206649151">Складиште тока података је у лошем стању</translation>
 <translation id="5023310440958281426">Проверите смернице администратора</translation>
@@ -392,6 +393,7 @@
 <translation id="5190835502935405962">Трака са обележивачима</translation>
 <translation id="5199729219167945352">Експерименти</translation>
 <translation id="5251803541071282808">Клауд</translation>
+<translation id="5277279256032773186">Да ли користите Chrome на послу? Предузеће може да управља подешавањима Chrome-а за запослене. Сазнајте више</translation>
 <translation id="5299298092464848405">Грешка при рашчлањивању смерница</translation>
 <translation id="5300589172476337783">Прикажи</translation>
 <translation id="5308689395849655368">Извештавање о отказивању је онемогућено.</translation>
@@ -523,8 +525,10 @@
 <translation id="6970216967273061347">Дистрикт</translation>
 <translation id="6973656660372572881">Наведени су и фиксни прокси сервери и URL адреса .pac скрипте.</translation>
 <translation id="6989763994942163495">Прикажи напредна подешавања...</translation>
+<translation id="7000990526846637657">Није пронађен ниједан унос у историји</translation>
 <translation id="7009986207543992532">Покушали сте да посетите <ph name="DOMAIN" />, али је сервер послао сертификат са периодом важења који је предугачак да би био поуздан. <ph name="BEGIN_LEARN_MORE_LINK" />Сазнајте више<ph name="END_LEARN_MORE_LINK" />.</translation>
 <translation id="7012363358306927923">China UnionPay</translation>
+<translation id="7012372675181957985">Google налог има друге облике историје прегледања на <ph name="BEGIN_LINK" />history.google.com<ph name="END_LINK" /></translation>
 <translation id="7029809446516969842">Лозинке</translation>
 <translation id="7087282848513945231">Округ</translation>
 <translation id="7088615885725309056">Старије</translation>
@@ -607,6 +611,7 @@
 <translation id="780301667611848630">Не, хвала</translation>
 <translation id="7805768142964895445">Статус</translation>
 <translation id="7813600968533626083">Желите ли да уклоните предлог из Chrome-а?</translation>
+<translation id="7815407501681723534">Пронашли смо <ph name="NUMBER_OF_RESULTS" /> <ph name="SEARCH_RESULTS" /> за „<ph name="SEARCH_STRING" />“</translation>
 <translation id="785549533363645510">Али, нисте невидљиви. Преласком у режим без архивирања нећете сакрити прегледање од послодавца, интернет провајдера или веб-сајтова које посећујете.</translation>
 <translation id="7887683347370398519">Проверите CVC и покушајте поново</translation>
 <translation id="7894616681410591072">Упс! Потребна вам је дозвола корисника <ph name="NAME" /> да бисте приступили овој страници.</translation>
@@ -620,7 +625,7 @@
 <translation id="7962083544045318153">ИД отказивања <ph name="CRASH_LOCAL_ID" /></translation>
 <translation id="7983301409776629893">Увек преводи са језика: <ph name="ORIGINAL_LANGUAGE" /> на <ph name="TARGET_LANGUAGE" /></translation>
 <translation id="7995512525968007366">Није наведено</translation>
-<translation id="8012647001091218357">Тренутно не можемо да контактирамо родитеље. Покушај поново.</translation>
+<translation id="8012647001091218357">Тренутно не можемо да контактирамо родитеље. Пробај поново.</translation>
 <translation id="8034522405403831421">Језик ове странице је <ph name="SOURCE_LANGUAGE" />. Желите ли да је преведете на <ph name="TARGET_LANGUAGE" />?</translation>
 <translation id="8088680233425245692">Прегледање чланка није успело.</translation>
 <translation id="8089520772729574115">мање од 1 MB</translation>
@@ -669,7 +674,7 @@
 <translation id="8647750283161643317">Врати све на подразумевано</translation>
 <translation id="8680787084697685621">Детаљи за пријављивање на налог су застарели.</translation>
 <translation id="8703575177326907206">Ваша веза са доменом <ph name="DOMAIN" /> није шифрована.</translation>
-<translation id="8725066075913043281">Покушајте поново</translation>
+<translation id="8725066075913043281">Пробајте поново</translation>
 <translation id="8728672262656704056">Прешли сте у режим Без архивирања</translation>
 <translation id="8730621377337864115">Готово</translation>
 <translation id="8738058698779197622">Да бисте успоставили безбедну везу, сат на уређају мора да буде тачан. То је зато што сертификати које веб-сајтови користе за идентификацију важе само одређени временски период. Пошто сат на вашем уређају није тачан, Chromium не може да верификује ове сертификате.</translation>

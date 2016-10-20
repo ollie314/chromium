@@ -113,7 +113,7 @@ class LocationBarView : public LocationBar,
   };
 
   // Width (and height) of icons in location bar.
-  static constexpr int kLocationBarIconWidth = 16;
+  static constexpr int kIconWidth = 16;
 
   // The location bar view's class name.
   static const char kViewClassName[];
@@ -322,11 +322,13 @@ class LocationBarView : public LocationBar,
   base::string16 GetSecurityText() const;
 
   bool ShouldShowKeywordBubble() const;
-  bool ShouldShowEVBubble() const;
 
   // Returns true when the current page is explicitly secure or insecure.
   // In these cases, we should show the state of the security chip.
   bool ShouldShowSecurityChip() const;
+
+  // Returns true if the chip should be animated
+  bool ShouldAnimateSecurityChip() const;
 
   // Used to "reverse" the URL showing/hiding animations, since we use separate
   // animations whose curves are not true inverses of each other.  Based on the
@@ -479,7 +481,9 @@ class LocationBarView : public LocationBar,
 
   // These allow toggling the verbose security state behavior via flags.
   bool should_show_secure_state_;
+  bool should_show_nonsecure_state_;
   bool should_animate_secure_state_;
+  bool should_animate_nonsecure_state_;
 
   DISALLOW_COPY_AND_ASSIGN(LocationBarView);
 };

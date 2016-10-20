@@ -673,8 +673,6 @@ RenderViewImpl::RenderViewImpl(CompositorDependencies* compositor_deps,
       send_preferred_size_changes_(false),
       navigation_gesture_(NavigationGestureUnknown),
       opened_by_user_gesture_(true),
-      page_id_(-1),
-      next_page_id_(params.next_page_id),
       history_list_offset_(-1),
       history_list_length_(0),
       frames_in_progress_(0),
@@ -711,9 +709,6 @@ void RenderViewImpl::Initialize(const mojom::CreateViewParams& params,
     opener_id_ = opener_view_routing_id;
 
   display_mode_ = params.initial_size.display_mode;
-
-  // Ensure we start with a valid next_page_id_ from the browser.
-  DCHECK_GE(next_page_id_, 0);
 
   webview_ =
       WebView::create(this, is_hidden() ? blink::WebPageVisibilityStateHidden
@@ -886,8 +881,10 @@ RenderViewImpl::~RenderViewImpl() {
     DCHECK_NE(this, it->second) << "Failed to call Close?";
 #endif
 
-  FOR_EACH_OBSERVER(RenderViewObserver, observers_, RenderViewGone());
-  FOR_EACH_OBSERVER(RenderViewObserver, observers_, OnDestruct());
+  for (auto& observer : observers_)
+    observer.RenderViewGone();
+  for (auto& observer : observers_)
+    observer.OnDestruct();
 }
 
 /*static*/
@@ -974,7 +971,6 @@ void RenderView::ApplyWebPreferences(const WebPreferences& prefs,
   WebRuntimeFeatures::enableDatabase(prefs.databases_enabled);
   settings->setOfflineWebApplicationCacheEnabled(
       prefs.application_cache_enabled);
-  settings->setCaretBrowsingEnabled(prefs.caret_browsing_enabled);
   settings->setHistoryEntryRequiresUserGesture(
       prefs.history_entry_requires_user_gesture);
   settings->setHyperlinkAuditingEnabled(prefs.hyperlink_auditing_enabled);
@@ -1153,6 +1149,7 @@ void RenderView::ApplyWebPreferences(const WebPreferences& prefs,
   settings->setForcePreloadNoneForMediaElements(is_low_end_device);
   WebRuntimeFeatures::enableAutoplayMutedVideos(
       prefs.autoplay_muted_videos_enabled && !is_low_end_device);
+  settings->setSpellCheckEnabledByDefault(prefs.spellcheck_enabled_by_default);
 #endif
 
   settings->setAutoplayExperimentMode(
@@ -1169,8 +1166,6 @@ void RenderView::ApplyWebPreferences(const WebPreferences& prefs,
   settings->setMainFrameResizesAreOrientationChanges(
       prefs.main_frame_resizes_are_orientation_changes);
 
-  settings->setPinchOverlayScrollbarThickness(
-      prefs.pinch_overlay_scrollbar_thickness);
   settings->setUseSolidColorScrollbars(prefs.use_solid_color_scrollbars);
 
   settings->setShowContextMenuOnMouseUp(prefs.context_menu_on_mouse_up);
@@ -1261,7 +1256,8 @@ void RenderViewImpl::TransferActiveWheelFlingAnimation(
 // RenderWidgetInputHandlerDelegate -----------------------------------------
 
 void RenderViewImpl::RenderWidgetFocusChangeComplete() {
-  FOR_EACH_OBSERVER(RenderViewObserver, observers_, FocusChangeComplete());
+  for (auto& observer : observers_)
+    observer.FocusChangeComplete();
 }
 
 bool RenderViewImpl::DoesRenderWidgetHaveTouchEventHandlersAt(
@@ -1304,11 +1300,10 @@ bool RenderViewImpl::OnMessageReceived(const IPC::Message& message) {
   if (is_swapped_out_ && IPC_MESSAGE_ID_CLASS(message.type()) == InputMsgStart)
     return false;
 
-  base::ObserverListBase<RenderViewObserver>::Iterator it(&observers_);
-  RenderViewObserver* observer;
-  while ((observer = it.GetNext()) != NULL)
-    if (observer->OnMessageReceived(message))
+  for (auto& observer : observers_) {
+    if (observer.OnMessageReceived(message))
       return true;
+  }
 
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(RenderViewImpl, message)
@@ -1463,7 +1458,7 @@ void RenderViewImpl::SendUpdateState() {
   if (!entry)
     return;
 
-  Send(new ViewHostMsg_UpdateState(GetRoutingID(), page_id_,
+  Send(new ViewHostMsg_UpdateState(GetRoutingID(),
                                    HistoryEntryToPageState(entry)));
 }
 
@@ -1593,7 +1588,6 @@ WebView* RenderViewImpl::createView(WebLocalFrame* creator,
   view_params.replicated_frame_state = FrameReplicationState();
   view_params.hidden = is_background_tab;
   view_params.never_visible = never_visible;
-  view_params.next_page_id = 1;
   view_params.initial_size = initial_size;
   view_params.enable_auto_resize = false;
   view_params.min_size = gfx::Size();
@@ -1625,8 +1619,18 @@ WebStorageNamespace* RenderViewImpl::createSessionStorageNamespace() {
 }
 
 void RenderViewImpl::printPage(WebLocalFrame* frame) {
-  FOR_EACH_OBSERVER(RenderViewObserver, observers_,
-                    PrintPage(frame, input_handler().handling_input_event()));
+  UMA_HISTOGRAM_BOOLEAN("PrintPreview.InitiatedByScript",
+                        frame->top() == frame);
+
+  // Logging whether the top frame is remote is sufficient in this case. If
+  // the top frame is local, the printing code will function correctly and
+  // the frame itself will be printed, so the cases this histogram tracks is
+  // where printing of a subframe will fail as of now.
+  UMA_HISTOGRAM_BOOLEAN("PrintPreview.OutOfProcessSubframe",
+                        frame->top()->isWebRemoteFrame());
+
+  for (auto& observer : observers_)
+    observer.PrintPage(frame, input_handler().handling_input_event());
 }
 
 bool RenderViewImpl::enumerateChosenDirectory(
@@ -1640,8 +1644,10 @@ bool RenderViewImpl::enumerateChosenDirectory(
 
 void RenderViewImpl::FrameDidStartLoading(WebFrame* frame) {
   DCHECK_GE(frames_in_progress_, 0);
-  if (frames_in_progress_ == 0)
-    FOR_EACH_OBSERVER(RenderViewObserver, observers_, DidStartLoading());
+  if (frames_in_progress_ == 0) {
+    for (auto& observer : observers_)
+      observer.DidStartLoading();
+  }
   frames_in_progress_++;
 }
 
@@ -1653,7 +1659,8 @@ void RenderViewImpl::FrameDidStopLoading(WebFrame* frame) {
   frames_in_progress_--;
   if (frames_in_progress_ == 0) {
     DidStopLoadingIcons();
-    FOR_EACH_OBSERVER(RenderViewObserver, observers_, DidStopLoading());
+    for (auto& observer : observers_)
+      observer.DidStopLoading();
   }
 }
 
@@ -1669,7 +1676,8 @@ void RenderViewImpl::SetZoomLevel(double zoom_level) {
   page_zoom_level_ = zoom_level;
 
   webview()->setZoomLevel(zoom_level);
-  FOR_EACH_OBSERVER(RenderViewObserver, observers_, OnZoomLevelChanged());
+  for (auto& observer : observers_)
+    observer.OnZoomLevelChanged();
 }
 
 void RenderViewImpl::didCancelCompositionOnSelectionChange() {
@@ -1849,7 +1857,8 @@ void RenderViewImpl::focusedNodeChanged(const WebNode& fromNode,
                                           node_bounds));
 
   // TODO(estade): remove.
-  FOR_EACH_OBSERVER(RenderViewObserver, observers_, FocusedNodeChanged(toNode));
+  for (auto& observer : observers_)
+    observer.FocusedNodeChanged(toNode);
 
   RenderFrameImpl* previous_frame = nullptr;
   if (!fromNode.isNull())
@@ -1869,7 +1878,8 @@ void RenderViewImpl::focusedNodeChanged(const WebNode& fromNode,
 }
 
 void RenderViewImpl::didUpdateLayout() {
-  FOR_EACH_OBSERVER(RenderViewObserver, observers_, DidUpdateLayout());
+  for (auto& observer : observers_)
+    observer.DidUpdateLayout();
 
   // We don't always want to set up a timer, only if we've been put in that
   // mode by getting a |ViewMsg_EnablePreferredSizeChangedMode|
@@ -1937,8 +1947,8 @@ void RenderViewImpl::show(WebNavigationPolicy policy) {
 }
 
 void RenderViewImpl::onMouseDown(const WebNode& mouse_down_node) {
-  FOR_EACH_OBSERVER(
-      RenderViewObserver, observers_, OnMouseDown(mouse_down_node));
+  for (auto& observer : observers_)
+    observer.OnMouseDown(mouse_down_node);
 }
 
 void RenderViewImpl::didHandleGestureEvent(
@@ -1947,8 +1957,8 @@ void RenderViewImpl::didHandleGestureEvent(
   RenderWidget::didHandleGestureEvent(event, event_cancelled);
 
   if (!event_cancelled) {
-    FOR_EACH_OBSERVER(
-        RenderViewObserver, observers_, DidHandleGestureEvent(event));
+    for (auto& observer : observers_)
+      observer.DidHandleGestureEvent(event);
   }
 
   // TODO(ananta): Piggyback off existing IPCs to communicate this information,
@@ -2385,7 +2395,6 @@ void RenderViewImpl::OnDisableAutoResize(const gfx::Size& new_size) {
         top_controls_shrink_blink_size_;
     resize_params.top_controls_height = top_controls_height_;
     resize_params.visible_viewport_size = visible_viewport_size_;
-    resize_params.resizer_rect = resizer_rect_;
     resize_params.is_fullscreen_granted = is_fullscreen_granted();
     resize_params.display_mode = display_mode_;
     resize_params.needs_resize_ack = false;
@@ -2457,7 +2466,8 @@ void RenderViewImpl::OnPluginActionAt(const gfx::Point& location,
 }
 
 void RenderViewImpl::OnClosePage() {
-  FOR_EACH_OBSERVER(RenderViewObserver, observers_, ClosePage());
+  for (auto& observer : observers_)
+    observer.ClosePage();
   // TODO(creis): We'd rather use webview()->Close() here, but that currently
   // sets the WebView's delegate_ to NULL, preventing any JavaScript dialogs
   // in the onunload handler from appearing.  For now, we're bypassing that and
@@ -2738,10 +2748,8 @@ double RenderViewImpl::zoomFactorToZoomLevel(double factor) const {
 }
 
 void RenderViewImpl::draggableRegionsChanged() {
-  FOR_EACH_OBSERVER(
-      RenderViewObserver,
-      observers_,
-      DraggableRegionsChanged(webview()->mainFrame()));
+  for (auto& observer : observers_)
+    observer.DraggableRegionsChanged(webview()->mainFrame());
 }
 
 void RenderViewImpl::pageImportanceSignalsChanged() {
@@ -2943,7 +2951,6 @@ void RenderViewImpl::SetDeviceScaleFactorForTesting(float factor) {
   params.physical_backing_size = gfx::ScaleToCeiledSize(size(), factor);
   params.top_controls_shrink_blink_size = false;
   params.top_controls_height = 0.f;
-  params.resizer_rect = WebRect();
   params.is_fullscreen_granted = is_fullscreen_granted();
   params.display_mode = display_mode_;
   OnResize(params);
@@ -2980,7 +2987,8 @@ void RenderViewImpl::OnReleaseDisambiguationPopupBitmap(
 
 void RenderViewImpl::DidCommitCompositorFrame() {
   RenderWidget::DidCommitCompositorFrame();
-  FOR_EACH_OBSERVER(RenderViewObserver, observers_, DidCommitCompositorFrame());
+  for (auto& observer : observers_)
+    observer.DidCommitCompositorFrame();
 }
 
 void RenderViewImpl::SendUpdateFaviconURL(const std::vector<FaviconURL>& urls) {

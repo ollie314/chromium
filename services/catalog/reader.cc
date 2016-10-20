@@ -16,41 +16,47 @@
 #include "services/catalog/constants.h"
 #include "services/catalog/entry.h"
 #include "services/catalog/manifest_provider.h"
-#include "services/shell/public/cpp/names.h"
+#include "services/service_manager/public/cpp/names.h"
 
 namespace catalog {
 namespace {
 
 base::FilePath GetManifestPath(const base::FilePath& package_dir,
-                               const std::string& name) {
+                               const std::string& name,
+                               const std::string& package_name_override) {
   // TODO(beng): think more about how this should be done for exe targets.
-  std::string type = shell::GetNameType(name);
-  std::string path = shell::GetNamePath(name);
-  if (type == shell::kNameType_Mojo) {
+  std::string type = service_manager::GetNameType(name);
+  std::string path = service_manager::GetNamePath(name);
+  if (type == service_manager::kNameType_Service) {
+    std::string package_name;
+    if (package_name_override.empty())
+      package_name = path;
+    else
+      package_name = package_name_override;
     return package_dir.AppendASCII(kPackagesDirName).AppendASCII(
-        path + "/manifest.json");
+        package_name + "/manifest.json");
   }
-  if (type == shell::kNameType_Exe)
+  if (type == service_manager::kNameType_Exe)
     return package_dir.AppendASCII(path + "_manifest.json");
   return base::FilePath();
 }
 
-
 base::FilePath GetExecutablePath(const base::FilePath& package_dir,
                                  const std::string& name) {
-  std::string type = shell::GetNameType(name);
-  if (type == shell::kNameType_Mojo) {
+  std::string type = service_manager::GetNameType(name);
+  if (type == service_manager::kNameType_Service) {
     // It's still a mojo: URL, use the default mapping scheme.
-    const std::string host = shell::GetNamePath(name);
+    const std::string host = service_manager::GetNamePath(name);
     return package_dir.AppendASCII(host + "/" + host + ".library");
   }
-  if (type == shell::kNameType_Exe) {
+  if (type == service_manager::kNameType_Exe) {
 #if defined OS_WIN
     std::string extension = ".exe";
 #else
     std::string extension;
 #endif
-    return package_dir.AppendASCII(shell::GetNamePath(name) + extension);
+    return package_dir.AppendASCII(service_manager::GetNamePath(name) +
+                                   extension);
   }
   return base::FilePath();
 }
@@ -107,8 +113,8 @@ void ScanDir(
     // build (e.g. for applications that are packaged into others) and are not
     // valid standalone packages.
     base::FilePath package_path = GetExecutablePath(package_dir, entry->name());
-    if (entry->name() != "mojo:shell" && entry->name() != "mojo:catalog" &&
-        !base::PathExists(package_path)) {
+    if (entry->name() != "service:service_manager" &&
+        entry->name() != "service:catalog" && !base::PathExists(package_path)) {
       continue;
     }
 
@@ -120,10 +126,21 @@ void ScanDir(
   original_thread_task_runner->PostTask(FROM_HERE, read_complete_closure);
 }
 
-std::unique_ptr<Entry> ReadManifest(const base::FilePath& package_dir,
-                                    const std::string& mojo_name) {
-  std::unique_ptr<Entry> entry = CreateEntryForManifestAt(
-      GetManifestPath(package_dir, mojo_name), package_dir);
+std::unique_ptr<Entry> ReadManifest(
+    const base::FilePath& package_dir,
+    const std::string& mojo_name,
+    const std::string& package_name_override,
+    const base::FilePath& manifest_path_override) {
+  base::FilePath manifest_path;
+  if (manifest_path_override.empty()) {
+    manifest_path =
+        GetManifestPath(package_dir, mojo_name, package_name_override);
+  } else {
+    manifest_path = manifest_path_override;
+  }
+
+  std::unique_ptr<Entry> entry = CreateEntryForManifestAt(manifest_path,
+                                                          package_dir);
   if (!entry) {
     entry.reset(new Entry(mojo_name));
     entry->set_path(GetExecutablePath(
@@ -139,7 +156,7 @@ void AddEntryToCache(EntryCache* cache, std::unique_ptr<Entry> entry) {
   (*cache)[entry->name()] = std::move(entry);
 }
 
-void DoNothing(shell::mojom::ResolveResultPtr) {}
+void DoNothing(service_manager::mojom::ResolveResultPtr) {}
 
 }  // namespace
 
@@ -191,11 +208,36 @@ void Reader::CreateEntryForName(
       return;
     }
   }
+
+  base::FilePath manifest_path_override;
+  {
+    auto override_iter = manifest_path_overrides_.find(mojo_name);
+    if (override_iter != manifest_path_overrides_.end())
+      manifest_path_override = override_iter->second;
+  }
+
+  std::string package_name_override;
+  {
+    auto override_iter = package_name_overrides_.find(mojo_name);
+    if (override_iter != package_name_overrides_.end())
+      package_name_override = override_iter->second;
+  }
   base::PostTaskAndReplyWithResult(
       file_task_runner_.get(), FROM_HERE,
-      base::Bind(&ReadManifest, system_package_dir_, mojo_name),
+      base::Bind(&ReadManifest, system_package_dir_, mojo_name,
+                 package_name_override, manifest_path_override),
       base::Bind(&Reader::OnReadManifest, weak_factory_.GetWeakPtr(), cache,
                   entry_created_callback));
+}
+
+void Reader::OverridePackageName(const std::string& service_name,
+                                 const std::string& package_name) {
+  package_name_overrides_.insert(std::make_pair(service_name, package_name));
+}
+
+void Reader::OverrideManifestPath(const std::string& service_name,
+                                  const base::FilePath& path) {
+  manifest_path_overrides_.insert(std::make_pair(service_name, path));
 }
 
 Reader::Reader(ManifestProvider* manifest_provider)
@@ -209,8 +251,8 @@ void Reader::OnReadManifest(
     std::unique_ptr<Entry> entry) {
   if (!entry)
     return;
-  shell::mojom::ResolveResultPtr result =
-      shell::mojom::ResolveResult::From(*entry);
+  service_manager::mojom::ResolveResultPtr result =
+      service_manager::mojom::ResolveResult::From(*entry);
   AddEntryToCache(cache, std::move(entry));
   entry_created_callback.Run(std::move(result));
 }

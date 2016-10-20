@@ -3,8 +3,6 @@
   "name": "exe:mus_clipboard_unittests",
   "display_name": "Clipboard Service Unittests",
   "capabilities": {
-    "required": {
-      "mojo:ui": { "interfaces":  [ "ui::mojom::Clipboard" ] }
-    }
+    "required": { "service:ui": [ "app" ] }
   }
 }

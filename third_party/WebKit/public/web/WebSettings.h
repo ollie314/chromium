@@ -148,7 +148,6 @@ class WebSettings {
   virtual void setAutoplayExperimentMode(const WebString&) = 0;
   virtual void setAutoZoomFocusedNodeToLegibleScale(bool) = 0;
   virtual void setBrowserSideNavigationEnabled(bool) = 0;
-  virtual void setCaretBrowsingEnabled(bool) = 0;
   virtual void setClobberUserAgentInitialScaleQuirk(bool) = 0;
   virtual void setCookieEnabled(bool) = 0;
   virtual void setNavigateOnDragDrop(bool) = 0;
@@ -215,7 +214,6 @@ class WebSettings {
   virtual void setPerTilePaintingEnabled(bool) = 0;
   virtual void setPictographFontFamily(const WebString&,
                                        UScriptCode = USCRIPT_COMMON) = 0;
-  virtual void setPinchOverlayScrollbarThickness(int) = 0;
   virtual void setPluginsEnabled(bool) = 0;
   virtual void setAvailablePointerTypes(int) = 0;
   virtual void setPrimaryPointerType(PointerType) = 0;

@@ -16,13 +16,13 @@
 #include "ash/common/shelf/shelf_view.h"
 #include "ash/common/shelf/shelf_widget.h"
 #include "ash/common/shelf/wm_shelf.h"
-#include "ash/common/shell_window_ids.h"
 #include "ash/common/system/status_area_widget.h"
 #include "ash/common/system/tray/system_tray.h"
 #include "ash/common/system/tray/system_tray_item.h"
 #include "ash/common/wm/window_state.h"
 #include "ash/common/wm_shell.h"
 #include "ash/display/display_manager.h"
+#include "ash/public/cpp/shell_window_ids.h"
 #include "ash/root_window_controller.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
@@ -783,7 +783,8 @@ TEST_F(ShelfLayoutManagerTest, AutoHideShelfOnScreenBoundary) {
 
   UpdateDisplay("800x600,800x600");
   Shell::GetInstance()->display_manager()->SetLayoutForCurrentDisplays(
-      test::CreateDisplayLayout(display::DisplayPlacement::RIGHT, 0));
+      test::CreateDisplayLayout(display_manager(),
+                                display::DisplayPlacement::RIGHT, 0));
   // Put the primary monitor's shelf on the display boundary.
   WmShelf* shelf = GetPrimaryShelf();
   shelf->SetAlignment(SHELF_ALIGNMENT_RIGHT);

@@ -58,11 +58,9 @@ void RequireCallback(cc::SurfaceManager* manager,
 }  // namespace
 
 BlimpCompositor::BlimpCompositor(
-    int render_widget_id,
     BlimpCompositorDependencies* compositor_dependencies,
     BlimpCompositorClient* client)
-    : render_widget_id_(render_widget_id),
-      client_(client),
+    : client_(client),
       compositor_dependencies_(compositor_dependencies),
       frame_sink_id_(compositor_dependencies_->GetEmbedderDependencies()
                          ->AllocateFrameSinkId()),
@@ -74,8 +72,7 @@ BlimpCompositor::BlimpCompositor(
       weak_ptr_factory_(this) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
-  surface_id_allocator_ =
-      base::MakeUnique<cc::SurfaceIdAllocator>(frame_sink_id_);
+  surface_id_allocator_ = base::MakeUnique<cc::SurfaceIdAllocator>();
   GetEmbedderDeps()->GetSurfaceManager()->RegisterFrameSinkId(frame_sink_id_);
   CreateLayerTreeHost();
 }
@@ -94,12 +91,6 @@ void BlimpCompositor::SetVisible(bool visible) {
 
   if (!visible)
     CheckPendingCommitCounts(true /* flush */);
-}
-
-bool BlimpCompositor::OnTouchEvent(const ui::MotionEvent& motion_event) {
-  if (input_manager_)
-    return input_manager_->OnTouchEvent(motion_event);
-  return false;
 }
 
 void BlimpCompositor::NotifyWhenDonePendingCommits(base::Closure callback) {
@@ -141,7 +132,7 @@ void BlimpCompositor::SetProtoReceiver(ProtoReceiver* receiver) {
 
 void BlimpCompositor::SendCompositorProto(
     const cc::proto::CompositorMessage& proto) {
-  client_->SendCompositorMessage(render_widget_id_, proto);
+  client_->SendCompositorMessage(proto);
 }
 
 void BlimpCompositor::OnCompositorMessageReceived(
@@ -169,6 +160,11 @@ void BlimpCompositor::OnCompositorMessageReceived(
       DCHECK(remote_proto_channel_receiver_);
       remote_proto_channel_receiver_->OnProtoReceived(std::move(message));
   }
+}
+
+// Returns a reference to the InputHandler owned by layer tree host.
+const base::WeakPtr<cc::InputHandler>& BlimpCompositor::GetInputHandler() {
+  return host_->GetInputHandler();
 }
 
 void BlimpCompositor::OnContextProvidersCreated(
@@ -199,11 +195,6 @@ void BlimpCompositor::OnContextProvidersCreated(
   host_->SetCompositorFrameSink(std::move(compositor_frame_sink));
 }
 
-void BlimpCompositor::SendWebGestureEvent(
-    const blink::WebGestureEvent& gesture_event) {
-  client_->SendWebGestureEvent(render_widget_id_, gesture_event);
-}
-
 void BlimpCompositor::BindToProxyClient(
     base::WeakPtr<BlimpCompositorFrameSinkProxyClient> proxy_client) {
   DCHECK(thread_checker_.CalledOnValidThread());
@@ -214,7 +205,7 @@ void BlimpCompositor::BindToProxyClient(
       frame_sink_id_, GetEmbedderDeps()->GetSurfaceManager(), this);
 }
 
-void BlimpCompositor::SwapCompositorFrame(cc::CompositorFrame frame) {
+void BlimpCompositor::SubmitCompositorFrame(cc::CompositorFrame frame) {
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(surface_factory_);
 
@@ -222,12 +213,12 @@ void BlimpCompositor::SwapCompositorFrame(cc::CompositorFrame frame) {
       frame.delegated_frame_data->render_pass_list.back().get();
   gfx::Size surface_size = root_pass->output_rect.size();
 
-  if (surface_id_.is_null() || current_surface_size_ != surface_size) {
+  if (local_frame_id_.is_null() || current_surface_size_ != surface_size) {
     DestroyDelegatedContent();
     DCHECK(layer_->children().empty());
 
-    surface_id_ = surface_id_allocator_->GenerateId();
-    surface_factory_->Create(surface_id_);
+    local_frame_id_ = surface_id_allocator_->GenerateId();
+    surface_factory_->Create(local_frame_id_);
     current_surface_size_ = surface_size;
 
     // manager must outlive compositors using it.
@@ -236,7 +227,9 @@ void BlimpCompositor::SwapCompositorFrame(cc::CompositorFrame frame) {
     scoped_refptr<cc::SurfaceLayer> content_layer = cc::SurfaceLayer::Create(
         base::Bind(&SatisfyCallback, base::Unretained(surface_manager)),
         base::Bind(&RequireCallback, base::Unretained(surface_manager)));
-    content_layer->SetSurfaceId(surface_id_, 1.f, surface_size);
+    content_layer->SetSurfaceId(
+        cc::SurfaceId(surface_factory_->frame_sink_id(), local_frame_id_), 1.f,
+        surface_size);
     content_layer->SetBounds(current_surface_size_);
     content_layer->SetIsDrawable(true);
     content_layer->SetContentsOpaque(true);
@@ -244,8 +237,18 @@ void BlimpCompositor::SwapCompositorFrame(cc::CompositorFrame frame) {
     layer_->AddChild(content_layer);
   }
 
-  surface_factory_->SubmitCompositorFrame(surface_id_, std::move(frame),
-                                          base::Closure());
+  surface_factory_->SubmitCompositorFrame(
+      local_frame_id_, std::move(frame),
+      base::Bind(&BlimpCompositor::SubmitCompositorFrameAck,
+                 weak_ptr_factory_.GetWeakPtr()));
+}
+
+void BlimpCompositor::SubmitCompositorFrameAck() {
+  DCHECK(surface_factory_);
+  compositor_dependencies_->GetCompositorTaskRunner()->PostTask(
+      FROM_HERE,
+      base::Bind(&BlimpCompositorFrameSinkProxyClient::SubmitCompositorFrameAck,
+                 proxy_client_));
 }
 
 void BlimpCompositor::UnbindProxyClient() {
@@ -272,18 +275,19 @@ CompositorDependencies* BlimpCompositor::GetEmbedderDeps() {
 }
 
 void BlimpCompositor::DestroyDelegatedContent() {
-  if (surface_id_.is_null())
+  if (local_frame_id_.is_null())
     return;
 
-  // Remove any references for the surface layer that uses this |surface_id_|.
+  // Remove any references for the surface layer that uses this
+  // |local_frame_id_|.
   layer_->RemoveAllChildren();
-  surface_factory_->Destroy(surface_id_);
-  surface_id_ = cc::SurfaceId();
+  surface_factory_->Destroy(local_frame_id_);
+  local_frame_id_ = cc::LocalFrameId();
 }
 
 void BlimpCompositor::CreateLayerTreeHost() {
   DCHECK(!host_);
-  VLOG(1) << "Creating LayerTreeHost for render widget: " << render_widget_id_;
+  VLOG(1) << "Creating LayerTreeHost.";
 
   // Create the LayerTreeHost
   cc::LayerTreeHostInProcess::InitParams params;
@@ -309,17 +313,12 @@ void BlimpCompositor::CreateLayerTreeHost() {
 
   host_ = cc::LayerTreeHostInProcess::CreateRemoteClient(
       this /* remote_proto_channel */, compositor_task_runner, &params);
-
-  DCHECK(!input_manager_);
-  input_manager_ = BlimpInputManager::Create(
-      this, base::ThreadTaskRunnerHandle::Get(), compositor_task_runner,
-      host_->GetInputHandler());
 }
 
 void BlimpCompositor::DestroyLayerTreeHost() {
   DCHECK(host_);
-  VLOG(1) << "Destroying LayerTreeHost for render widget: "
-          << render_widget_id_;
+  VLOG(1) << "Destroying LayerTreeHost.";
+
   // Tear down the output surface connection with the old LayerTreeHost
   // instance.
   DestroyDelegatedContent();
@@ -327,12 +326,6 @@ void BlimpCompositor::DestroyLayerTreeHost() {
 
   // Destroy the old LayerTreeHost state.
   host_.reset();
-
-  // Destroy the old input manager state.
-  // It is important to destroy the LayerTreeHost before destroying the input
-  // manager as it has a reference to the cc::InputHandlerClient owned by the
-  // BlimpInputManager.
-  input_manager_.reset();
 
   // Cancel any outstanding CompositorFrameSink requests.  That way if we get an
   // async callback related to the old request we know to drop it.

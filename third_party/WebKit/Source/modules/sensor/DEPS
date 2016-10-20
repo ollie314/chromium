@@ -1,8 +1,8 @@
 include_rules = [
     "+bindings",
+    "+device/generic_sensor/public/cpp",
     "+device/generic_sensor/public/interfaces",
     "+core",
-    "+heap",
     "-modules",
     "+modules/EventModules.h",
     "+modules/EventTargetModules.h",

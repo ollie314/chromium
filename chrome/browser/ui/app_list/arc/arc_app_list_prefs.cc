@@ -359,9 +359,8 @@ void ArcAppListPrefs::SetNotificationsEnabled(const std::string& app_id,
   // In case app is not ready, defer this request.
   if (!ready_apps_.count(app_id)) {
     SetNotificationsEnabledDeferred(prefs_).Put(app_id, enabled);
-    FOR_EACH_OBSERVER(
-        Observer, observer_list_,
-        OnNotificationsEnabledChanged(app_info->package_name, enabled));
+    for (auto& observer : observer_list_)
+      observer.OnNotificationsEnabledChanged(app_info->package_name, enabled);
     return;
   }
 
@@ -547,8 +546,8 @@ void ArcAppListPrefs::DisableAllApps() {
   std::unordered_set<std::string> old_ready_apps;
   old_ready_apps.swap(ready_apps_);
   for (auto& app_id : old_ready_apps) {
-    FOR_EACH_OBSERVER(Observer, observer_list_,
-                      OnAppReadyChanged(app_id, false));
+    for (auto& observer : observer_list_)
+      observer.OnAppReadyChanged(app_id, false);
   }
 }
 
@@ -567,8 +566,8 @@ void ArcAppListPrefs::NotifyRegisteredApps() {
     // Default apps are reported earlier.
     if (default_apps_.HasApp(app_id))
       continue;
-    FOR_EACH_OBSERVER(Observer, observer_list_,
-                      OnAppRegistered(app_id, *app_info));
+    for (auto& observer : observer_list_)
+      observer.OnAppRegistered(app_id, *app_info);
   }
 
   apps_restored_ = true;
@@ -582,8 +581,8 @@ void ArcAppListPrefs::RemoveAllApps() {
     } else {
       if (ready_apps_.count(app_id)) {
         ready_apps_.erase(app_id);
-        FOR_EACH_OBSERVER(Observer, observer_list_,
-                          OnAppReadyChanged(app_id, false));
+        for (auto& observer : observer_list_)
+          observer.OnAppReadyChanged(app_id, false);
       }
     }
   }
@@ -591,19 +590,41 @@ void ArcAppListPrefs::RemoveAllApps() {
 }
 
 void ArcAppListPrefs::OnOptInEnabled(bool enabled) {
+  UpdateDefaultAppsHiddenState();
+
   if (enabled)
     NotifyRegisteredApps();
   else
     RemoveAllApps();
 }
 
+void ArcAppListPrefs::UpdateDefaultAppsHiddenState() {
+  const arc::ArcAuthService* auth_service = arc::ArcAuthService::Get();
+  const bool was_hidden = default_apps_.is_hidden();
+  default_apps_.set_hidden(!auth_service->IsArcEnabled() &&
+                           auth_service->IsArcManaged());
+  if (was_hidden && !default_apps_.is_hidden())
+    RegisterDefaultApps();
+}
+
 void ArcAppListPrefs::OnDefaultAppsReady() {
   // Apply uninstalled packages now.
+
   const std::vector<std::string> uninstalled_package_names =
       GetPackagesFromPrefs(false);
   for (const auto& uninstalled_package_name : uninstalled_package_names)
     default_apps_.MaybeMarkPackageUninstalled(uninstalled_package_name, true);
 
+  UpdateDefaultAppsHiddenState();
+
+  default_apps_ready_ = true;
+  if (!default_apps_ready_callback_.is_null())
+    default_apps_ready_callback_.Run();
+
+  StartPrefs();
+}
+
+void ArcAppListPrefs::RegisterDefaultApps() {
   // Report default apps first, note, app_map includes uninstalled apps as well.
   for (const auto& default_app : default_apps_.app_map()) {
     const std::string& app_id = default_app.first;
@@ -622,12 +643,6 @@ void ArcAppListPrefs::OnDefaultAppsReady() {
                       true /* launchable */,
                       arc::mojom::OrientationLock::NONE);
   }
-
-  default_apps_ready_ = true;
-  if (!default_apps_ready_callback_.is_null())
-    default_apps_ready_callback_.Run();
-
-  StartPrefs();
 }
 
 void ArcAppListPrefs::SetDefaltAppsReadyCallback(base::Closure callback) {
@@ -666,6 +681,7 @@ void ArcAppListPrefs::OnInstanceClosed() {
   }
 
   is_initialized_ = false;
+  package_list_initial_refreshed_ = false;
 }
 
 void ArcAppListPrefs::MaybeAddNonLaunchableApp(const std::string& name,
@@ -712,8 +728,8 @@ void ArcAppListPrefs::AddAppAndShortcut(
     DCHECK(app_old_info);
     DCHECK(launchable);
     if (updated_name != app_old_info->name) {
-      FOR_EACH_OBSERVER(Observer, observer_list_,
-                        OnAppNameUpdated(app_id, updated_name));
+      for (auto& observer : observer_list_)
+        observer.OnAppNameUpdated(app_id, updated_name);
     }
   }
 
@@ -745,8 +761,8 @@ void ArcAppListPrefs::AddAppAndShortcut(
 
   if (was_registered) {
     if (was_disabled && app_ready) {
-      FOR_EACH_OBSERVER(Observer, observer_list_,
-                        OnAppReadyChanged(app_id, true));
+      for (auto& observer : observer_list_)
+        observer.OnAppReadyChanged(app_id, true);
     }
   } else {
     AppInfo app_info(updated_name, package_name, activity, intent_uri,
@@ -754,9 +770,8 @@ void ArcAppListPrefs::AddAppAndShortcut(
                      sticky, notifications_enabled, true,
                      launchable && arc::ShouldShowInLauncher(app_id), shortcut,
                      launchable, orientation_lock);
-    FOR_EACH_OBSERVER(Observer,
-                      observer_list_,
-                      OnAppRegistered(app_id, app_info));
+    for (auto& observer : observer_list_)
+      observer.OnAppRegistered(app_id, app_info);
   }
 
   if (app_ready) {
@@ -799,7 +814,8 @@ void ArcAppListPrefs::RemoveApp(const std::string& app_id) {
   const bool removed = apps->Remove(app_id, nullptr);
   DCHECK(removed);
 
-  FOR_EACH_OBSERVER(Observer, observer_list_, OnAppRemoved(app_id));
+  for (auto& observer : observer_list_)
+    observer.OnAppRemoved(app_id);
 
   // Remove local data on file system.
   content::BrowserThread::GetBlockingPool()->PostTask(
@@ -891,8 +907,8 @@ void ArcAppListPrefs::OnAppListRefreshed(
 void ArcAppListPrefs::OnTaskOrientationLockRequested(
     int32_t task_id,
     const arc::mojom::OrientationLock orientation_lock) {
-  FOR_EACH_OBSERVER(Observer, observer_list_,
-                    OnTaskOrientationLockRequested(task_id, orientation_lock));
+  for (auto& observer : observer_list_)
+    observer.OnTaskOrientationLockRequested(task_id, orientation_lock);
 }
 
 void ArcAppListPrefs::AddApp(const arc::mojom::AppInfo& app_info) {
@@ -992,7 +1008,8 @@ void ArcAppListPrefs::OnPackageRemoved(const mojo::String& package_name) {
     RemoveApp(app_id);
 
   RemovePackageFromPrefs(prefs_, package_name);
-  FOR_EACH_OBSERVER(Observer, observer_list_, OnPackageRemoved(package_name));
+  for (auto& observer : observer_list_)
+    observer.OnPackageRemoved(package_name);
 }
 
 void ArcAppListPrefs::OnAppIcon(const mojo::String& package_name,
@@ -1032,16 +1049,18 @@ void ArcAppListPrefs::OnTaskCreated(int32_t task_id,
                                     const mojo::String& activity,
                                     const mojo::String& name) {
   MaybeAddNonLaunchableApp(name, package_name, activity);
-  FOR_EACH_OBSERVER(Observer, observer_list_,
-                    OnTaskCreated(task_id, package_name, activity));
+  for (auto& observer : observer_list_)
+    observer.OnTaskCreated(task_id, package_name, activity);
 }
 
 void ArcAppListPrefs::OnTaskDestroyed(int32_t task_id) {
-  FOR_EACH_OBSERVER(Observer, observer_list_, OnTaskDestroyed(task_id));
+  for (auto& observer : observer_list_)
+    observer.OnTaskDestroyed(task_id);
 }
 
 void ArcAppListPrefs::OnTaskSetActive(int32_t task_id) {
-  FOR_EACH_OBSERVER(Observer, observer_list_, OnTaskSetActive(task_id));
+  for (auto& observer : observer_list_)
+    observer.OnTaskSetActive(task_id);
 }
 
 void ArcAppListPrefs::OnNotificationsEnabledChanged(
@@ -1064,8 +1083,8 @@ void ArcAppListPrefs::OnNotificationsEnabledChanged(
     base::DictionaryValue* updateing_app_dict = update.Get();
     updateing_app_dict->SetBoolean(kNotificationsEnabled, enabled);
   }
-  FOR_EACH_OBSERVER(Observer, observer_list_,
-                    OnNotificationsEnabledChanged(package_name, enabled));
+  for (auto& observer : observer_list_)
+    observer.OnNotificationsEnabledChanged(package_name, enabled);
 }
 
 void ArcAppListPrefs::MaybeShowPackageInAppLauncher(
@@ -1102,8 +1121,8 @@ void ArcAppListPrefs::OnPackageAdded(
       !sync_service_->IsPackageSyncing(package_info->package_name);
 
   AddOrUpdatePackagePrefs(prefs_, *package_info);
-  FOR_EACH_OBSERVER(Observer, observer_list_,
-                    OnPackageInstalled(*package_info));
+  for (auto& observer : observer_list_)
+    observer.OnPackageInstalled(*package_info);
   if (new_package_in_system)
     MaybeShowPackageInAppLauncher(*package_info);
 }
@@ -1112,7 +1131,8 @@ void ArcAppListPrefs::OnPackageModified(
     arc::mojom::ArcPackageInfoPtr package_info) {
   DCHECK(IsArcEnabled());
   AddOrUpdatePackagePrefs(prefs_, *package_info);
-  FOR_EACH_OBSERVER(Observer, observer_list_, OnPackageModified(*package_info));
+  for (auto& observer : observer_list_)
+    observer.OnPackageModified(*package_info);
 }
 
 void ArcAppListPrefs::OnPackageListRefreshed(
@@ -1132,12 +1152,14 @@ void ArcAppListPrefs::OnPackageListRefreshed(
       RemovePackageFromPrefs(prefs_, package_name);
   }
 
-  // Start ArcPackageSyncService ASAP. This is the call_back of
-  // app_instance->RefreshAppList() in OnInstanceReady(). SyncStarted() should
-  // only be called after packagelist refresh is completed. SyncStarted() is
-  // no-op after first time setup or if sync is disabled.
-  DCHECK(sync_service_);
-  sync_service_->SyncStarted();
+  // TODO(lgcheng@) File http://b/31944261. Remove the flag after Android side
+  // cleanup.
+  if (package_list_initial_refreshed_)
+    return;
+
+  package_list_initial_refreshed_ = true;
+  for (auto& observer : observer_list_)
+    observer.OnPackageListInitialRefreshed();
 }
 
 std::vector<std::string> ArcAppListPrefs::GetPackagesFromPrefs() const {
@@ -1200,8 +1222,8 @@ void ArcAppListPrefs::OnIconInstalled(const std::string& app_id,
   if (!install_succeed)
     return;
 
-  FOR_EACH_OBSERVER(Observer, observer_list_,
-                    OnAppIconUpdated(app_id, scale_factor));
+  for (auto& observer : observer_list_)
+    observer.OnAppIconUpdated(app_id, scale_factor);
 }
 
 ArcAppListPrefs::AppInfo::AppInfo(const std::string& name,

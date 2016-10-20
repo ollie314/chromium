@@ -48,13 +48,11 @@ std::string OfflineInternalsUIMessageHandler::GetStringFromDeletePageResult(
 }
 
 std::string OfflineInternalsUIMessageHandler::GetStringFromDeleteRequestResults(
-    const offline_pages::RequestQueue::UpdateMultipleRequestResults& results) {
+    const offline_pages::MultipleItemStatuses& results) {
   // If any requests failed, return "failure", else "success".
   for (const auto& result : results) {
-    if (result.second ==
-        offline_pages::RequestQueue::UpdateRequestResult::STORE_FAILURE) {
+    if (result.second == offline_pages::ItemActionStatus::STORE_ERROR)
       return "Store failure, could not delete one or more requests";
-    }
   }
 
   return "Success";
@@ -124,7 +122,7 @@ void OfflineInternalsUIMessageHandler::HandleDeletedPagesCallback(
 
 void OfflineInternalsUIMessageHandler::HandleDeletedRequestsCallback(
     std::string callback_id,
-    const offline_pages::RequestQueue::UpdateMultipleRequestResults& results) {
+    const offline_pages::MultipleItemStatuses& results) {
   ResolveJavascriptCallback(
       base::StringValue(callback_id),
       base::StringValue(GetStringFromDeleteRequestResults(results)));
@@ -142,7 +140,7 @@ void OfflineInternalsUIMessageHandler::HandleStoredPagesCallback(
     offline_page->SetString("namespace", page.client_id.name_space);
     offline_page->SetDouble("size", page.file_size);
     offline_page->SetString("id", std::to_string(page.offline_id));
-    offline_page->SetString("filePath", page.GetOfflineURL().spec());
+    offline_page->SetString("filePath", page.file_path.MaybeAsASCII());
     offline_page->SetDouble("creationTime", page.creation_time.ToJsTime());
     offline_page->SetDouble("lastAccessTime", page.last_access_time.ToJsTime());
     offline_page->SetInteger("accessCount", page.access_count);
@@ -287,9 +285,10 @@ void OfflineInternalsUIMessageHandler::HandleAddToRequestQueue(
     ResolveJavascriptCallback(
         *callback_id,
         base::FundamentalValue(request_coordinator_->SavePageLater(
-            GURL(url), offline_pages::ClientId(offline_pages::kAsyncNamespace,
-                                               id_stream.str()),
-            true)));
+                GURL(url), offline_pages::ClientId(
+                               offline_pages::kAsyncNamespace, id_stream.str()),
+                true, offline_pages::RequestCoordinator::RequestAvailability::
+                          ENABLED_FOR_OFFLINER) > 0));
   } else {
     ResolveJavascriptCallback(*callback_id, base::FundamentalValue(false));
   }

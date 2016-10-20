@@ -16,8 +16,24 @@ test(function() {
   f2.submit();
 }, 'Submitting a form that has never been attached to the document.');
 
+document.body.appendChild(f2);
+var f3 = f2.cloneNode(true);
+f2.action = "javascript: submit_success()";
+f3.action = "javascript: redirect()";
+test(function() {
+  f2.submit();
+}, 'Submitting a form that is attached to the document.');
+
+test(function() {
+  f3.submit();
+}, 'Submitting a form cloned from a form that is attached to the document.');
+
 function redirect() {
   assert_unreached('A form should never be submitted if it is not attached to the document.');
+}
+
+function submit_success() {
+  assert_true(true, 'A form that is attached to the document should be submitted.');
 }
 
 </script>

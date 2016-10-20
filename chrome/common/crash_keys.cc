@@ -16,7 +16,6 @@
 #include "chrome/common/chrome_switches.h"
 #include "components/flags_ui/flags_ui_switches.h"
 #include "content/public/common/content_switches.h"
-#include "ipc/ipc_switches.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/common/chrome_switches.h"
@@ -51,6 +50,11 @@ const char kGPURenderer[] = "gpu-gl-renderer";
 
 #if defined(OS_WIN)
 const char kHungAudioThreadDetails[] = "hung-audio-thread-details";
+
+const char kHungRendererOutstandingAckCount[] = "hung-outstanding-acks";
+const char kHungRendererOutstandingEventType[] = "hung-outstanding-event-type";
+const char kHungRendererLastEventType[] = "hung-last-event-type";
+const char kHungRendererReason[] = "hung-reason";
 #endif
 
 const char kPrinterInfo[] = "prn-info-%" PRIuS;
@@ -127,6 +131,12 @@ size_t RegisterChromeCrashKeys() {
     { "ppapi_path", kMediumSize },
     { "subresource_url", kLargeSize },
     { "total-discardable-memory-allocated", kSmallSize },
+#if defined(OS_WIN)
+    { kHungRendererOutstandingAckCount, kSmallSize },
+    { kHungRendererOutstandingEventType, kSmallSize },
+    { kHungRendererLastEventType, kSmallSize },
+    { kHungRendererReason, kSmallSize },
+#endif
 #if defined(OS_CHROMEOS)
     { kNumberOfUsers, kSmallSize },
 #endif
@@ -275,14 +285,6 @@ static bool IsBoringSwitch(const std::string& flag) {
     switches::kFlagSwitchesBegin,
     switches::kFlagSwitchesEnd,
     switches::kLoggingLevel,
-#if defined(OS_WIN)
-    // This file is linked into both chrome.dll and chrome.exe. However //ipc
-    // is only in the .dll, so this needs to be a literal rather than the
-    // constant.
-    "channel",  // switches::kProcessChannelID
-#else
-    switches::kProcessChannelID,
-#endif
     switches::kProcessType,
     switches::kV,
     switches::kVModule,

@@ -9,10 +9,11 @@
 #include <utility>
 
 #include "base/logging.h"
+#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
-#include "components/sync/core/user_share.h"
 #include "components/sync/driver/change_processor.h"
 #include "components/sync/driver/sync_client.h"
+#include "components/sync/syncable/user_share.h"
 
 namespace syncer {
 
@@ -33,7 +34,7 @@ SyncBackendRegistrar::SyncBackendRegistrar(
 
   sync_thread_ = std::move(sync_thread);
   if (!sync_thread_) {
-    sync_thread_.reset(new base::Thread("Chrome_SyncThread"));
+    sync_thread_ = base::MakeUnique<base::Thread>("Chrome_SyncThread");
     base::Thread::Options options;
     options.timer_slack = base::TIMER_SLACK_MAXIMUM;
     CHECK(sync_thread_->StartWithOptions(options));
@@ -206,7 +207,7 @@ void SyncBackendRegistrar::DeactivateDataType(ModelType type) {
 }
 
 bool SyncBackendRegistrar::IsTypeActivatedForTest(ModelType type) const {
-  return GetProcessor(type) != NULL;
+  return GetProcessor(type) != nullptr;
 }
 
 void SyncBackendRegistrar::OnChangesApplied(
@@ -252,7 +253,7 @@ ChangeProcessor* SyncBackendRegistrar::GetProcessor(ModelType type) const {
   base::AutoLock lock(lock_);
   ChangeProcessor* processor = GetProcessorUnsafe(type);
   if (!processor)
-    return NULL;
+    return nullptr;
 
   // We can only check if |processor| exists, as otherwise the type is
   // mapped to GROUP_PASSIVE.
@@ -273,7 +274,7 @@ ChangeProcessor* SyncBackendRegistrar::GetProcessorUnsafe(
   // association takes place then the change processor is added to the
   // |processors_| list.
   if (it == processors_.end())
-    return NULL;
+    return nullptr;
 
   return it->second;
 }

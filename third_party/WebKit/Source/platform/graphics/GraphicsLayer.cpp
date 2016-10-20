@@ -30,7 +30,6 @@
 #include "base/trace_event/trace_event_argument.h"
 #include "cc/layers/layer.h"
 #include "platform/DragImage.h"
-#include "platform/TraceEvent.h"
 #include "platform/geometry/FloatRect.h"
 #include "platform/geometry/LayoutRect.h"
 #include "platform/geometry/Region.h"
@@ -46,6 +45,7 @@
 #include "platform/json/JSONValues.h"
 #include "platform/scroll/ScrollableArea.h"
 #include "platform/text/TextStream.h"
+#include "platform/tracing/TraceEvent.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebCompositorSupport.h"
 #include "public/platform/WebFloatPoint.h"
@@ -109,16 +109,17 @@ GraphicsLayer::GraphicsLayer(GraphicsLayerClient* client)
       m_contentsLayer(0),
       m_contentsLayerId(0),
       m_scrollableArea(nullptr),
-      m_renderingContext3d(0) {
+      m_renderingContext3d(0),
+      m_preferredRasterScale(1.0f),
+      m_hasPreferredRasterScale(false) {
 #if ENABLE(ASSERT)
   if (m_client)
     m_client->verifyNotPainting();
 #endif
 
   m_contentLayerDelegate = wrapUnique(new ContentLayerDelegate(this));
-  m_layer =
-      wrapUnique(Platform::current()->compositorSupport()->createContentLayer(
-          m_contentLayerDelegate.get()));
+  m_layer = Platform::current()->compositorSupport()->createContentLayer(
+      m_contentLayerDelegate.get());
   m_layer->layer()->setDrawsContent(m_drawsContent && m_contentsVisible);
   m_layer->layer()->setLayerClient(this);
 }
@@ -148,6 +149,18 @@ LayoutRect GraphicsLayer::visualRect() const {
 
 void GraphicsLayer::setHasWillChangeTransformHint(bool hasWillChangeTransform) {
   m_layer->layer()->setHasWillChangeTransformHint(hasWillChangeTransform);
+}
+
+void GraphicsLayer::setPreferredRasterScale(float preferredRasterScale) {
+  m_preferredRasterScale = preferredRasterScale;
+  m_hasPreferredRasterScale = true;
+  m_layer->layer()->setPreferredRasterScale(preferredRasterScale);
+}
+
+void GraphicsLayer::clearPreferredRasterScale() {
+  m_preferredRasterScale = 1.0f;
+  m_hasPreferredRasterScale = false;
+  m_layer->layer()->clearPreferredRasterScale();
 }
 
 void GraphicsLayer::setParent(GraphicsLayer* layer) {
@@ -347,9 +360,10 @@ void GraphicsLayer::updateChildList() {
   clearContentsLayerIfUnregistered();
 
   if (m_contentsLayer) {
-    // FIXME: add the contents layer in the correct order with negative z-order children.
-    // This does not cause visible rendering issues because currently contents layers are only used
-    // for replaced elements that don't have children.
+    // FIXME: Add the contents layer in the correct order with negative z-order
+    // children. This does not currently cause visible rendering issues because
+    // contents layers are only used for replaced elements that don't have
+    // children.
     childHost->addChild(m_contentsLayer);
   }
 
@@ -361,10 +375,11 @@ void GraphicsLayer::updateChildList() {
 }
 
 void GraphicsLayer::updateLayerIsDrawable() {
-  // For the rest of the accelerated compositor code, there is no reason to make a
-  // distinction between drawsContent and contentsVisible. So, for m_layer->layer(), these two
-  // flags are combined here. m_contentsLayer shouldn't receive the drawsContent flag
-  // so it is only given contentsVisible.
+  // For the rest of the accelerated compositor code, there is no reason to make
+  // a distinction between drawsContent and contentsVisible. So, for
+  // m_layer->layer(), these two flags are combined here. |m_contentsLayer|
+  // shouldn't receive the drawsContent flag, so it is only given
+  // contentsVisible.
 
   m_layer->layer()->setDrawsContent(m_drawsContent && m_contentsVisible);
   if (WebLayer* contentsLayer = contentsLayerIfRegistered())
@@ -450,12 +465,13 @@ void GraphicsLayer::setupContentsLayer(WebLayer* contentsLayer) {
   m_contentsLayer->setTransformOrigin(FloatPoint3D());
   m_contentsLayer->setUseParentBackfaceVisibility(true);
 
-  // It is necessary to call setDrawsContent as soon as we receive the new contentsLayer, for
-  // the correctness of early exit conditions in setDrawsContent() and setContentsVisible().
+  // It is necessary to call setDrawsContent as soon as we receive the new
+  // contentsLayer, for the correctness of early exit conditions in
+  // setDrawsContent() and setContentsVisible().
   m_contentsLayer->setDrawsContent(m_contentsVisible);
 
-  // Insert the content layer first. Video elements require this, because they have
-  // shadow content that must display in front of the video.
+  // Insert the content layer first. Video elements require this, because they
+  // have shadow content that must display in front of the video.
   m_layer->layer()->insertChild(m_contentsLayer, 0);
   WebLayer* borderWebLayer = m_contentsClippingMaskLayer
                                  ? m_contentsClippingMaskLayer->platformLayer()
@@ -527,7 +543,8 @@ void GraphicsLayer::trackRasterInvalidation(const DisplayItemClient& client,
   }
 
   if (RuntimeEnabledFeatures::paintUnderInvalidationCheckingEnabled()) {
-    // TODO(crbug.com/496260): Some antialiasing effects overflows the paint invalidation rect.
+    // TODO(crbug.com/496260): Some antialiasing effects overflow the paint
+    // invalidation rect.
     IntRect r = rect;
     r.inflate(1);
     tracking.rasterInvalidationRegionSinceLastPaint.unite(r);
@@ -601,15 +618,14 @@ static String pointerAsString(const void* ptr) {
 std::unique_ptr<JSONObject> GraphicsLayer::layerTreeAsJSON(
     LayerTreeFlags flags) const {
   RenderingContextMap renderingContextMap;
-  if (flags & OutputChildrenAsLayerList) {
-    std::unique_ptr<JSONObject> json = JSONObject::create();
-    std::unique_ptr<JSONArray> layersArray = JSONArray::create();
-    for (auto& child : m_children)
-      child->layersAsJSONArray(flags, renderingContextMap, layersArray.get());
-    json->setArray("layers", std::move(layersArray));
-    return json;
-  }
-  return layerTreeAsJSONInternal(flags, renderingContextMap);
+  if (flags & OutputAsLayerTree)
+    return layerTreeAsJSONInternal(flags, renderingContextMap);
+  std::unique_ptr<JSONObject> json = JSONObject::create();
+  std::unique_ptr<JSONArray> layersArray = JSONArray::create();
+  for (auto& child : m_children)
+    child->layersAsJSONArray(flags, renderingContextMap, layersArray.get());
+  json->setArray("layers", std::move(layersArray));
+  return json;
 }
 
 std::unique_ptr<JSONObject> GraphicsLayer::layerAsJSONInternal(
@@ -670,6 +686,9 @@ std::unique_ptr<JSONObject> GraphicsLayer::layerAsJSONInternal(
   if (!m_backfaceVisibility)
     json->setString("backfaceVisibility",
                     m_backfaceVisibility ? "visible" : "hidden");
+
+  if (m_hasPreferredRasterScale)
+    json->setDouble("preferredRasterScale", m_preferredRasterScale);
 
   if (flags & LayerTreeIncludesDebugInfo)
     json->setString("client", pointerAsString(m_client));
@@ -817,9 +836,10 @@ void GraphicsLayer::setPosition(const FloatPoint& point) {
 }
 
 void GraphicsLayer::setSize(const FloatSize& size) {
-  // We are receiving negative sizes here that cause assertions to fail in the compositor. Clamp them to 0 to
-  // avoid those assertions.
-  // FIXME: This should be an ASSERT instead, as negative sizes should not exist in WebCore.
+  // We are receiving negative sizes here that cause assertions to fail in the
+  // compositor. Clamp them to 0 to avoid those assertions.
+  // FIXME: This should be an ASSERT instead, as negative sizes should not exist
+  // in WebCore.
   FloatSize clampedSize = size;
   if (clampedSize.width() < 0 || clampedSize.height() < 0)
     clampedSize = FloatSize();
@@ -874,8 +894,9 @@ void GraphicsLayer::setMasksToBounds(bool masksToBounds) {
 }
 
 void GraphicsLayer::setDrawsContent(bool drawsContent) {
-  // Note carefully this early-exit is only correct because we also properly call
-  // WebLayer::setDrawsContent whenever m_contentsLayer is set to a new layer in setupContentsLayer().
+  // NOTE: This early-exit is only correct because we also properly call
+  // WebLayer::setDrawsContent() whenever |m_contentsLayer| is set to a new
+  // layer in setupContentsLayer().
   if (drawsContent == m_drawsContent)
     return;
 
@@ -887,8 +908,9 @@ void GraphicsLayer::setDrawsContent(bool drawsContent) {
 }
 
 void GraphicsLayer::setContentsVisible(bool contentsVisible) {
-  // Note carefully this early-exit is only correct because we also properly call
-  // WebLayer::setDrawsContent whenever m_contentsLayer is set to a new layer in setupContentsLayer().
+  // NOTE: This early-exit is only correct because we also properly call
+  // WebLayer::setDrawsContent() whenever |m_contentsLayer| is set to a new
+  // layer in setupContentsLayer().
   if (contentsVisible == m_contentsVisible)
     return;
 
@@ -983,7 +1005,8 @@ void GraphicsLayer::setNeedsDisplay() {
   if (!drawsContent())
     return;
 
-  // TODO(chrishtr): stop invalidating the rects once FrameView::paintRecursively does so.
+  // TODO(chrishtr): Stop invalidating the rects once
+  // FrameView::paintRecursively() does so.
   m_layer->layer()->invalidate();
   for (size_t i = 0; i < m_linkHighlights.size(); ++i)
     m_linkHighlights[i]->invalidate();
@@ -1033,8 +1056,8 @@ void GraphicsLayer::setContentsToImage(
 
   if (image && skImage) {
     if (!m_imageLayer) {
-      m_imageLayer = wrapUnique(
-          Platform::current()->compositorSupport()->createImageLayer());
+      m_imageLayer =
+          Platform::current()->compositorSupport()->createImageLayer();
       registerContentsLayer(m_imageLayer->layer());
     }
     m_imageLayer->setImage(skImage.get());
@@ -1109,14 +1132,16 @@ void GraphicsLayer::setScrollableArea(ScrollableArea* scrollableArea,
 
 void GraphicsLayer::didScroll() {
   if (m_scrollableArea) {
-    DoublePoint newPosition =
-        -m_scrollableArea->scrollOrigin() +
-        toDoubleSize(m_layer->layer()->scrollPositionDouble());
+    ScrollOffset newOffset =
+        toFloatSize(m_layer->layer()->scrollPositionDouble() -
+                    m_scrollableArea->scrollOrigin());
 
-    // FrameView::setScrollPosition doesn't work for compositor commits (interacts poorly with programmatic scroll animations)
-    // so we need to use the ScrollableArea version. The FrameView method should go away soon anyway.
-    m_scrollableArea->ScrollableArea::setScrollPosition(newPosition,
-                                                        CompositorScroll);
+    // FrameView::setScrollOffset() doesn't work for compositor commits
+    // (interacts poorly with programmatic scroll animations) so we need to use
+    // the ScrollableArea version. The FrameView method should go away soon
+    // anyway.
+    m_scrollableArea->ScrollableArea::setScrollOffset(newOffset,
+                                                      CompositorScroll);
   }
 }
 
@@ -1248,8 +1273,9 @@ void GraphicsLayer::checkPaintUnderInvalidations(const SkPicture& newPicture) {
   oldBitmap.unlockPixels();
   newBitmap.unlockPixels();
 
-  // Visualize under-invalidations by overlaying the new bitmap (containing red pixels indicating under-invalidations,
-  // and transparent pixels otherwise) onto the painting.
+  // Visualize under-invalidations by overlaying the new bitmap (containing red
+  // pixels indicating under-invalidations, and transparent pixels otherwise)
+  // onto the painting.
   SkPictureRecorder recorder;
   recorder.beginRecording(rect);
   recorder.getRecordingCanvas()->drawBitmap(newBitmap, rect.x(), rect.y());

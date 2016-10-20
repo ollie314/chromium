@@ -4,18 +4,19 @@
 
 #include "chrome/browser/ui/webui/vr_shell/vr_shell_ui_message_handler.h"
 
-#include <memory>
+#include <string>
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/values.h"
+#include "chrome/browser/android/vr_shell/ui_scene.h"
 #include "chrome/browser/android/vr_shell/vr_shell.h"
 #include "content/public/browser/web_ui.h"
 
-VrShellUIMessageHandler::VrShellUIMessageHandler() {}
+VrShellUIMessageHandler::VrShellUIMessageHandler() = default;
 
-VrShellUIMessageHandler::~VrShellUIMessageHandler() {}
+VrShellUIMessageHandler::~VrShellUIMessageHandler() = default;
 
 void VrShellUIMessageHandler::RegisterMessages() {
   vr_shell_ = vr_shell::VrShell::GetWeakPtr(web_ui()->GetWebContents());
@@ -36,13 +37,6 @@ void VrShellUIMessageHandler::HandleDomLoaded(const base::ListValue* args) {
     return;
 
   vr_shell_->OnDomContentsLoaded();
-
-  // TODO(bshe): Get size from native side directly.
-  CHECK_EQ(2u, args->GetSize());
-  int width, height;
-  CHECK(args->GetInteger(0, &width));
-  CHECK(args->GetInteger(1, &height));
-  vr_shell_->SetUiTextureSize(width, height);
 }
 
 void VrShellUIMessageHandler::HandleUpdateScene(const base::ListValue* args) {
@@ -58,5 +52,9 @@ void VrShellUIMessageHandler::HandleUpdateScene(const base::ListValue* args) {
 }
 
 void VrShellUIMessageHandler::HandleDoAction(const base::ListValue* args) {
-  NOTIMPLEMENTED();
+  int action;
+  CHECK(args->GetInteger(0, &action));
+  if (vr_shell_) {
+    vr_shell_->DoUiAction((vr_shell::UiAction) action);
+  }
 }

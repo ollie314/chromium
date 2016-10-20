@@ -89,8 +89,8 @@ void DateTimeFieldElement::defaultKeyboardEventHandler(
   if (key == "ArrowLeft") {
     if (!m_fieldOwner)
       return;
-    // FIXME: We'd like to use FocusController::advanceFocus(FocusDirectionLeft, ...)
-    // but it doesn't work for shadow nodes. webkit.org/b/104650
+    // FIXME: We'd like to use FocusController::advanceFocus(FocusDirectionLeft,
+    // ...) but it doesn't work for shadow nodes. webkit.org/b/104650
     if (!localeForOwner().isRTL() && m_fieldOwner->focusOnPreviousField(*this))
       keyboardEvent->setDefaultHandled();
     return;
@@ -99,7 +99,8 @@ void DateTimeFieldElement::defaultKeyboardEventHandler(
   if (key == "ArrowRight") {
     if (!m_fieldOwner)
       return;
-    // FIXME: We'd like to use FocusController::advanceFocus(FocusDirectionRight, ...)
+    // FIXME: We'd like to use
+    // FocusController::advanceFocus(FocusDirectionRight, ...)
     // but it doesn't work for shadow nodes. webkit.org/b/104650
     if (!localeForOwner().isRTL() && m_fieldOwner->focusOnNextField(*this))
       keyboardEvent->setDefaultHandled();
@@ -130,10 +131,10 @@ void DateTimeFieldElement::defaultKeyboardEventHandler(
   }
 }
 
-void DateTimeFieldElement::setFocus(bool value) {
+void DateTimeFieldElement::setFocused(bool value) {
   if (m_fieldOwner)
     value ? m_fieldOwner->didFocusOnField() : m_fieldOwner->didBlurFromField();
-  ContainerNode::setFocus(value);
+  ContainerNode::setFocused(value);
 }
 
 void DateTimeFieldElement::focusOnNextField() {

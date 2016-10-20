@@ -18,7 +18,6 @@
 #include "base/json/json_writer.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "chrome/browser/android/preferences/important_sites_util.h"
 #include "chrome/browser/browsing_data/browsing_data_flash_lso_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_local_storage_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_quota_helper.h"
@@ -28,6 +27,7 @@
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/content_settings/web_site_settings_uma_util.h"
+#include "chrome/browser/engagement/important_sites_util.h"
 #include "chrome/browser/notifications/desktop_notification_profile_util.h"
 #include "chrome/browser/permissions/permission_uma_util.h"
 #include "chrome/browser/permissions/permission_util.h"
@@ -531,7 +531,7 @@ class SiteDataDeleteHelper :
         new BrowsingDataCookieHelper(profile_->GetRequestContext()),
         new BrowsingDataDatabaseHelper(profile_),
         new BrowsingDataLocalStorageHelper(profile_),
-        NULL,
+        nullptr,
         new BrowsingDataAppCacheHelper(profile_),
         new BrowsingDataIndexedDBHelper(indexed_db_context),
         BrowsingDataFileSystemHelper::Create(file_system_context),
@@ -539,7 +539,8 @@ class SiteDataDeleteHelper :
         BrowsingDataChannelIDHelper::Create(profile_->GetRequestContext()),
         new BrowsingDataServiceWorkerHelper(service_worker_context),
         new BrowsingDataCacheStorageHelper(cache_storage_context),
-        NULL);
+        nullptr,
+        nullptr);
 
     cookies_tree_model_.reset(new CookiesTreeModel(
         container, profile_->GetExtensionSpecialStoragePolicy()));

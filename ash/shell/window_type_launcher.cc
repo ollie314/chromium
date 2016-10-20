@@ -7,11 +7,11 @@
 #include <utility>
 
 #include "ash/common/session/session_state_delegate.h"
-#include "ash/common/shell_window_ids.h"
 #include "ash/common/system/status_area_widget.h"
 #include "ash/common/system/web_notification/web_notification_tray.h"
 #include "ash/common/wm_shell.h"
 #include "ash/content/shell_content_state.h"
+#include "ash/public/cpp/shell_window_ids.h"
 #include "ash/root_window_controller.h"
 #include "ash/shell.h"
 #include "ash/shell/example_factory.h"
@@ -77,7 +77,6 @@ class ModalWindow : public views::WidgetDelegateView,
   }
 
   // Overridden from views::WidgetDelegate:
-  views::View* GetContentsView() override { return this; }
   bool CanResize() const override { return true; }
   base::string16 GetWindowTitle() const override {
     return base::ASCIIToUTF16("Modal Window");
@@ -131,7 +130,6 @@ class NonModalTransient : public views::WidgetDelegateView {
   gfx::Size GetPreferredSize() const override { return gfx::Size(250, 250); }
 
   // Overridden from views::WidgetDelegate:
-  views::View* GetContentsView() override { return this; }
   bool CanResize() const override { return true; }
   base::string16 GetWindowTitle() const override {
     return base::ASCIIToUTF16("Non-Modal Transient");
@@ -238,10 +236,6 @@ void WindowTypeLauncher::OnPaint(gfx::Canvas* canvas) {
 bool WindowTypeLauncher::OnMousePressed(const ui::MouseEvent& event) {
   // Overridden so we get OnMouseReleased and can show the context menu.
   return true;
-}
-
-views::View* WindowTypeLauncher::GetContentsView() {
-  return this;
 }
 
 bool WindowTypeLauncher::CanResize() const {

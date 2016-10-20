@@ -51,16 +51,16 @@ typedef unsigned GraphicsLayerPaintingPhase;
 
 enum {
   LayerTreeNormal = 0,
-  LayerTreeIncludesDebugInfo =
-      1 << 0,  // Dump extra debugging info like layer addresses.
+  // Dump extra debugging info like layer addresses.
+  LayerTreeIncludesDebugInfo = 1 << 0,
   LayerTreeIncludesPaintInvalidations = 1 << 1,
   LayerTreeIncludesPaintingPhases = 1 << 2,
   LayerTreeIncludesRootLayer = 1 << 3,
   LayerTreeIncludesClipAndScrollParents = 1 << 4,
   LayerTreeIncludesCompositingReasons = 1 << 5,
-  OutputChildrenAsLayerList =
-      1
-      << 6,  // Outputs all children of the given layer as a layer list, in paint order.
+  // Outputs all layers as a layer tree. The default is output children
+  // (excluding the root) as a layer list, in paint (preorder) order.
+  OutputAsLayerTree = 1 << 6,
 };
 typedef unsigned LayerTreeFlags;
 
@@ -77,7 +77,8 @@ class PLATFORM_EXPORT GraphicsLayerClient {
       const GraphicsLayer*,
       const IntRect& previousInterestRect) const = 0;
   virtual LayoutSize subpixelAccumulation() const { return LayoutSize(); }
-  // Returns whether the client needs to be repainted with respect to the given graphics layer.
+  // Returns whether the client needs to be repainted with respect to the given
+  // graphics layer.
   virtual bool needsRepaint(const GraphicsLayer&) const = 0;
   virtual void paintContents(const GraphicsLayer*,
                              GraphicsContext&,

@@ -7,9 +7,12 @@
 #import <UIKit/UIKit.h>
 
 #include "base/logging.h"
+#include "base/mac/scoped_nsobject.h"
 #include "base/memory/ptr_util.h"
 #include "ios/public/provider/chrome/browser/signin/fake_chrome_identity_service.h"
 #import "ios/public/provider/chrome/browser/test_updatable_resource_provider.h"
+#import "ios/public/provider/chrome/browser/voice/test_voice_search_provider.h"
+#import "ios/public/provider/chrome/browser/voice/voice_search_language.h"
 
 @interface TestStyledTextField : UITextField<TextFieldStyling>
 @end
@@ -25,7 +28,9 @@
 namespace ios {
 
 TestChromeBrowserProvider::TestChromeBrowserProvider()
-    : test_updatable_resource_provider_(new TestUpdatableResourceProvider) {}
+    : updatable_resource_provider_(
+          base::MakeUnique<TestUpdatableResourceProvider>()),
+      voice_search_provider_(base::MakeUnique<TestVoiceSearchProvider>()) {}
 
 TestChromeBrowserProvider::~TestChromeBrowserProvider() {}
 
@@ -50,12 +55,20 @@ ChromeIdentityService* TestChromeBrowserProvider::GetChromeIdentityService() {
 
 UpdatableResourceProvider*
 TestChromeBrowserProvider::GetUpdatableResourceProvider() {
-  return test_updatable_resource_provider_.get();
+  return updatable_resource_provider_.get();
 }
 
 UITextField<TextFieldStyling>* TestChromeBrowserProvider::CreateStyledTextField(
     CGRect frame) const {
   return [[TestStyledTextField alloc] initWithFrame:frame];
+}
+
+NSArray* TestChromeBrowserProvider::GetAvailableVoiceSearchLanguages() const {
+  return voice_search_provider_->GetAvailableLanguages();
+}
+
+VoiceSearchProvider* TestChromeBrowserProvider::GetVoiceSearchProvider() const {
+  return voice_search_provider_.get();
 }
 
 }  // namespace ios

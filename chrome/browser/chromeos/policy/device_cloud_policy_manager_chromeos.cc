@@ -316,13 +316,13 @@ void DeviceCloudPolicyManagerChromeOS::InitializeRequisition() {
 }
 
 void DeviceCloudPolicyManagerChromeOS::NotifyConnected() {
-  FOR_EACH_OBSERVER(
-      Observer, observers_, OnDeviceCloudPolicyManagerConnected());
+  for (auto& observer : observers_)
+    observer.OnDeviceCloudPolicyManagerConnected();
 }
 
 void DeviceCloudPolicyManagerChromeOS::NotifyDisconnected() {
-  FOR_EACH_OBSERVER(
-      Observer, observers_, OnDeviceCloudPolicyManagerDisconnected());
+  for (auto& observer : observers_)
+    observer.OnDeviceCloudPolicyManagerDisconnected();
 }
 
 void DeviceCloudPolicyManagerChromeOS::CreateStatusUploader() {
@@ -332,7 +332,8 @@ void DeviceCloudPolicyManagerChromeOS::CreateStatusUploader() {
           local_state_, chromeos::system::StatisticsProvider::GetInstance(),
           DeviceStatusCollector::VolumeInfoFetcher(),
           DeviceStatusCollector::CPUStatisticsFetcher(),
-          DeviceStatusCollector::CPUTempFetcher()),
+          DeviceStatusCollector::CPUTempFetcher(),
+          DeviceStatusCollector::AndroidStatusFetcher()),
       task_runner_));
 }
 

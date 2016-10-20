@@ -61,9 +61,9 @@
 #include "net/cert/ct_policy_enforcer.h"
 #include "net/cert/ct_policy_status.h"
 #include "net/cert/ct_verifier.h"
-#include "net/cert/ct_verify_result.h"
 #include "net/cert/ev_root_ca_metadata.h"
 #include "net/cert/mock_cert_verifier.h"
+#include "net/cert/signed_certificate_timestamp_and_status.h"
 #include "net/cert/test_root_certs.h"
 #include "net/cert_net/nss_ocsp.h"
 #include "net/cookies/cookie_monster.h"
@@ -83,6 +83,7 @@
 #include "net/log/test_net_log_entry.h"
 #include "net/log/test_net_log_util.h"
 #include "net/nqe/external_estimate_provider.h"
+#include "net/proxy/proxy_server.h"
 #include "net/proxy/proxy_service.h"
 #include "net/socket/ssl_client_socket.h"
 #include "net/ssl/channel_id_service.h"
@@ -2160,7 +2161,7 @@ TEST_F(URLRequestTest, MAYBE_NetworkDelegateProxyError) {
 
   // Check we see a failed request.
   // The proxy server is not set before failure.
-  EXPECT_TRUE(req->proxy_server().IsEmpty());
+  EXPECT_FALSE(req->proxy_server().is_valid());
   EXPECT_EQ(ERR_PROXY_CONNECTION_FAILED, d.request_status());
 
   EXPECT_EQ(1, network_delegate.error_count());
@@ -3604,7 +3605,7 @@ TEST_F(URLRequestTestHTTP, ProxyTunnelRedirectTest) {
     base::RunLoop().Run();
 
     // The proxy server is not set before failure.
-    EXPECT_TRUE(r->proxy_server().IsEmpty());
+    EXPECT_FALSE(r->proxy_server().is_valid());
     EXPECT_EQ(ERR_TUNNEL_CONNECTION_FAILED, d.request_status());
     EXPECT_EQ(1, d.response_started_count());
     // We should not have followed the redirect.
@@ -3631,7 +3632,7 @@ TEST_F(URLRequestTestHTTP, NetworkDelegateTunnelConnectionFailed) {
     base::RunLoop().Run();
 
     // The proxy server is not set before failure.
-    EXPECT_TRUE(r->proxy_server().IsEmpty());
+    EXPECT_FALSE(r->proxy_server().is_valid());
     EXPECT_EQ(1, d.response_started_count());
     EXPECT_EQ(ERR_TUNNEL_CONNECTION_FAILED, d.request_status());
     // We should not have followed the redirect.
@@ -3707,7 +3708,7 @@ TEST_F(URLRequestTestHTTP, NetworkDelegateCancelRequest) {
     base::RunLoop().Run();
 
     // The proxy server is not set before cancellation.
-    EXPECT_TRUE(r->proxy_server().IsEmpty());
+    EXPECT_FALSE(r->proxy_server().is_valid());
     EXPECT_EQ(ERR_EMPTY_RESPONSE, d.request_status());
     EXPECT_EQ(1, network_delegate.created_requests());
     EXPECT_EQ(0, network_delegate.destroyed_requests());
@@ -3739,7 +3740,14 @@ void NetworkDelegateCancelRequest(BlockingNetworkDelegate::BlockMode block_mode,
     base::RunLoop().Run();
 
     // The proxy server is not set before cancellation.
-    EXPECT_TRUE(r->proxy_server().IsEmpty());
+    if (stage == BlockingNetworkDelegate::ON_BEFORE_URL_REQUEST ||
+        stage == BlockingNetworkDelegate::ON_BEFORE_SEND_HEADERS) {
+      EXPECT_FALSE(r->proxy_server().is_valid());
+    } else if (stage == BlockingNetworkDelegate::ON_HEADERS_RECEIVED) {
+      EXPECT_TRUE(r->proxy_server().is_direct());
+    } else {
+      NOTREACHED();
+    }
     EXPECT_EQ(ERR_BLOCKED_BY_CLIENT, d.request_status());
     EXPECT_EQ(1, network_delegate.created_requests());
     EXPECT_EQ(0, network_delegate.destroyed_requests());
@@ -3830,7 +3838,9 @@ TEST_F(URLRequestTestHTTP, NetworkDelegateRedirectRequest) {
     r->FollowDeferredRedirect();
     base::RunLoop().Run();
     EXPECT_EQ(OK, d.request_status());
-    EXPECT_TRUE(r->proxy_server().Equals(http_test_server()->host_port_pair()));
+    EXPECT_EQ(ProxyServer(ProxyServer::SCHEME_HTTP,
+                          http_test_server()->host_port_pair()),
+              r->proxy_server());
     // before_send_headers_with_proxy_count only increments for headers sent
     // through an untunneled proxy.
     EXPECT_EQ(1, network_delegate.before_send_headers_with_proxy_count());
@@ -3884,7 +3894,9 @@ TEST_F(URLRequestTestHTTP, NetworkDelegateRedirectRequestSynchronously) {
     base::RunLoop().Run();
 
     EXPECT_EQ(OK, d.request_status());
-    EXPECT_TRUE(r->proxy_server().Equals(http_test_server()->host_port_pair()));
+    EXPECT_EQ(ProxyServer(ProxyServer::SCHEME_HTTP,
+                          http_test_server()->host_port_pair()),
+              r->proxy_server());
     // before_send_headers_with_proxy_count only increments for headers sent
     // through an untunneled proxy.
     EXPECT_EQ(1, network_delegate.before_send_headers_with_proxy_count());
@@ -3981,7 +3993,9 @@ TEST_F(URLRequestTestHTTP, NetworkDelegateRedirectRequestOnHeadersReceived) {
     base::RunLoop().Run();
 
     EXPECT_EQ(OK, d.request_status());
-    EXPECT_TRUE(r->proxy_server().Equals(http_test_server()->host_port_pair()));
+    EXPECT_EQ(ProxyServer(ProxyServer::SCHEME_HTTP,
+                          http_test_server()->host_port_pair()),
+              r->proxy_server());
     // before_send_headers_with_proxy_count only increments for headers sent
     // through an untunneled proxy.
     EXPECT_EQ(2, network_delegate.before_send_headers_with_proxy_count());
@@ -4462,7 +4476,7 @@ TEST_F(URLRequestTestHTTP, UnexpectedServerAuthTest) {
     base::RunLoop().Run();
 
     // The proxy server is not set before failure.
-    EXPECT_TRUE(r->proxy_server().IsEmpty());
+    EXPECT_FALSE(r->proxy_server().is_valid());
     EXPECT_EQ(ERR_TUNNEL_CONNECTION_FAILED, d.request_status());
   }
 }
@@ -6364,7 +6378,7 @@ class MockCTVerifier : public CTVerifier {
   int Verify(X509Certificate* cert,
              const std::string& stapled_ocsp_response,
              const std::string& sct_list_from_tls_extension,
-             ct::CTVerifyResult* result,
+             SignedCertificateTimestampAndStatusList* output_scts,
              const NetLogWithSource& net_log) override {
     return net::OK;
   }
@@ -8767,15 +8781,6 @@ class HTTPSFallbackTest : public testing::Test {
     base::RunLoop().Run();
   }
 
-  void ExpectConnection(int version) {
-    EXPECT_EQ(1, delegate_.response_started_count());
-    EXPECT_NE(0, delegate_.bytes_received());
-    EXPECT_EQ(version, SSLConnectionStatusToVersion(
-        request_->ssl_info().connection_status));
-    EXPECT_TRUE(request_->ssl_info().connection_status &
-                SSL_CONNECTION_VERSION_FALLBACK);
-  }
-
   void ExpectFailure(int error) {
     EXPECT_EQ(1, delegate_.response_started_count());
     EXPECT_EQ(error, delegate_.request_status());
@@ -9853,8 +9858,7 @@ TEST_F(HTTPSCRLSetTest, CRLSetRevoked) {
 class URLRequestTestFTP : public URLRequestTest {
  public:
   URLRequestTestFTP()
-      : ftp_transaction_factory_(&host_resolver_),
-        ftp_test_server_(SpawnedTestServer::TYPE_FTP,
+      : ftp_test_server_(SpawnedTestServer::TYPE_FTP,
                          SpawnedTestServer::kLocalhost,
                          base::FilePath(kTestFilePath)) {
     // Can't use |default_context_|'s HostResolver to set up the
@@ -9866,7 +9870,7 @@ class URLRequestTestFTP : public URLRequestTest {
   void SetUpFactory() override {
     // Add FTP support to the default URLRequestContext.
     job_factory_impl_->SetProtocolHandler(
-        "ftp", base::MakeUnique<FtpProtocolHandler>(&ftp_transaction_factory_));
+        "ftp", FtpProtocolHandler::Create(&host_resolver_));
   }
 
   std::string GetTestFileContents() {
@@ -9880,8 +9884,10 @@ class URLRequestTestFTP : public URLRequestTest {
   }
 
  protected:
+  // Note that this is destroyed before the FtpProtocolHandler that references
+  // it, which is owned by the parent class. Since no requests are made during
+  // teardown, this works, though it's not great.
   MockHostResolver host_resolver_;
-  FtpNetworkLayer ftp_transaction_factory_;
 
   SpawnedTestServer ftp_test_server_;
 };

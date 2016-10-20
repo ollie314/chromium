@@ -2,11 +2,13 @@
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2001 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2004, 2005, 2006, 2007, 2008, 2009, 2010, 2011 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006, 2007, 2008, 2009, 2010, 2011 Apple Inc. All
+ * rights reserved.
  *           (C) 2006 Alexey Proskuryakov (ap@nypop.com)
  * Copyright (C) 2007 Samuel Weinig (sam@webkit.org)
  * Copyright (C) 2010 Google Inc. All rights reserved.
- * Copyright (C) 2008 Torch Mobile Inc. All rights reserved. (http://www.torchmobile.com/)
+ * Copyright (C) 2008 Torch Mobile Inc. All rights reserved.
+ * (http://www.torchmobile.com/)
  * Copyright (C) 2012 Samsung Electronics. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
@@ -76,6 +78,7 @@
 
 namespace blink {
 
+using ValueMode = InputType::ValueMode;
 using namespace HTMLNames;
 
 class ListAttributeTargetObserver : public IdTargetObserver {
@@ -118,12 +121,11 @@ HTMLInputElement::HTMLInputElement(Document& document,
       m_canReceiveDroppedFiles(false),
       m_shouldRevealPassword(false),
       m_needsToUpdateViewValue(true),
-      m_isPlaceholderVisible(false)
+      m_isPlaceholderVisible(false),
       // |m_inputType| is lazily created when constructed by the parser to avoid
-      // constructing unnecessarily a text inputType and its shadow subtree, just
-      // to destroy them when the |type| attribute gets set by the parser to
-      // something else than 'text'.
-      ,
+      // constructing unnecessarily a text inputType and its shadow subtree,
+      // just to destroy them when the |type| attribute gets set by the parser
+      // to something else than 'text'.
       m_inputType(createdByParser ? nullptr : InputType::createText(*this)),
       m_inputTypeView(m_inputType ? m_inputType->createView() : nullptr) {
   setHasCustomStyleCallbacks();
@@ -319,13 +321,8 @@ void HTMLInputElement::updateFocusAppearance(
     // case of RangeSelection. crbug.com/443061.
     if (layoutObject())
       layoutObject()->scrollRectToVisible(boundingBox());
-    if (document().frame()) {
-      // TODO(xiaochengh): The use of updateStyleAndLayoutIgnorePendingStylesheets
-      // needs to be audited.  See http://crbug.com/590369 for more details.
-      document().updateStyleAndLayoutIgnorePendingStylesheets();
-
+    if (document().frame())
       document().frame()->selection().revealSelection();
-    }
   } else {
     HTMLTextFormControlElement::updateFocusAppearance(selectionBehavior);
   }
@@ -413,7 +410,7 @@ void HTMLInputElement::updateType() {
   InputType* newType = InputType::create(*this, newTypeName);
   removeFromRadioButtonGroup();
 
-  bool didStoreValue = m_inputType->storesValueSeparateFromAttribute();
+  ValueMode oldValueMode = m_inputType->valueMode();
   bool didRespectHeightAndWidth =
       m_inputType->shouldRespectHeightAndWidthAttributes();
   bool couldBeSuccessfulSubmitButton = canBeSuccessfulSubmitButton();
@@ -427,18 +424,45 @@ void HTMLInputElement::updateType() {
 
   setNeedsWillValidateCheck();
 
-  bool willStoreValue = m_inputType->storesValueSeparateFromAttribute();
+  ValueMode newValueMode = m_inputType->valueMode();
 
-  if (didStoreValue && !willStoreValue && hasDirtyValue()) {
+  // https://html.spec.whatwg.org/multipage/forms.html#input-type-change
+  //
+  // 1. If the previous state of the element's type attribute put the value IDL
+  // attribute in the value mode, and the element's value is not the empty
+  // string, and the new state of the element's type attribute puts the value
+  // IDL attribute in either the default mode or the default/on mode, then set
+  // the element's value content attribute to the element's value.
+  if (oldValueMode == ValueMode::kValue &&
+      (newValueMode == ValueMode::kDefault ||
+       newValueMode == ValueMode::kDefaultOn) &&
+      hasDirtyValue()) {
     setAttribute(valueAttr, AtomicString(m_valueIfDirty));
     m_valueIfDirty = String();
     m_hasDirtyValue = false;
   }
-  if (!didStoreValue && willStoreValue) {
+  // 2. Otherwise, if the previous state of the element's type attribute put the
+  // value IDL attribute in any mode other than the value mode, and the new
+  // state of the element's type attribute puts the value IDL attribute in the
+  // value mode, then set the value of the element to the value of the value
+  // content attribute, if there is one, or the empty string otherwise, and then
+  // set the control's dirty value flag to false.
+  else if (oldValueMode != ValueMode::kValue &&
+           newValueMode == ValueMode::kValue) {
     AtomicString valueString = fastGetAttribute(valueAttr);
     m_inputType->warnIfValueIsInvalid(valueString);
-    m_valueIfDirty = sanitizeValue(valueString);
-    m_hasDirtyValue = !m_valueIfDirty.isNull();
+    m_valueIfDirty = String();
+    m_hasDirtyValue = false;
+  }
+  // 3. Otherwise, if the previous state of the element's type attribute put the
+  // value IDL attribute in any mode other than the filename mode, and the new
+  // state of the element's type attribute puts the value IDL attribute in the
+  // filename mode, then set the value of the element to the empty string.
+  else if (oldValueMode != ValueMode::kFilename &&
+           newValueMode == ValueMode::kFilename) {
+    m_valueIfDirty = String();
+    m_hasDirtyValue = false;
+
   } else {
     if (!hasDirtyValue())
       m_inputType->warnIfValueIsInvalid(
@@ -481,7 +505,8 @@ void HTMLInputElement::updateType() {
 
 void HTMLInputElement::subtreeHasChanged() {
   m_inputTypeView->subtreeHasChanged();
-  // When typing in an input field, childrenChanged is not called, so we need to force the directionality check.
+  // When typing in an input field, childrenChanged is not called, so we need to
+  // force the directionality check.
   calculateAndAdjustDirectionality();
 }
 
@@ -683,7 +708,8 @@ void HTMLInputElement::parseAttribute(const QualifiedName& name,
   } else if (name == typeAttr) {
     updateType();
   } else if (name == valueAttr) {
-    // We only need to setChanged if the form is looking at the default value right now.
+    // We only need to setChanged if the form is looking at the default value
+    // right now.
     if (!hasDirtyValue()) {
       updatePlaceholderVisibility();
       setNeedsStyleRecalc(
@@ -728,7 +754,8 @@ void HTMLInputElement::parseAttribute(const QualifiedName& name,
   } else if (name == usemapAttr || name == accesskeyAttr) {
     // FIXME: ignore for the moment
   } else if (name == onsearchAttr) {
-    // Search field and slider attributes all just cause updateFromElement to be called through style recalcing.
+    // Search field and slider attributes all just cause updateFromElement to be
+    // called through style recalcing.
     setAttributeEventListener(
         EventTypeNames::search,
         createAttributeEventListener(this, name, value, eventParameterName()));
@@ -856,7 +883,8 @@ String HTMLInputElement::resultForDialogSubmit() {
 }
 
 void HTMLInputElement::resetImpl() {
-  if (m_inputType->storesValueSeparateFromAttribute()) {
+  if (m_inputType->valueMode() == ValueMode::kValue ||
+      m_inputType->valueMode() == ValueMode::kFilename) {
     setValue(String());
     setNeedsValidityCheck();
   }
@@ -951,6 +979,7 @@ void HTMLInputElement::copyNonAttributePropertiesFromElement(
   setChecked(sourceElement.m_isChecked);
   m_dirtyCheckedness = sourceElement.m_dirtyCheckedness;
   m_isIndeterminate = sourceElement.m_isIndeterminate;
+  m_inputType->copyNonAttributeProperties(sourceElement);
 
   HTMLTextFormControlElement::copyNonAttributePropertiesFromElement(source);
 
@@ -1043,8 +1072,8 @@ void HTMLInputElement::setValue(const String& value,
 
   setLastChangeWasNotUserEdit();
   m_needsToUpdateViewValue = true;
-  m_suggestedValue =
-      String();  // Prevent TextFieldInputType::setValue from using the suggested value.
+  // Prevent TextFieldInputType::setValue from using the suggested value.
+  m_suggestedValue = String();
 
   m_inputType->setValue(sanitizedValue, valueChanged, eventBehavior);
   m_inputTypeView->didSetValue(sanitizedValue, valueChanged);
@@ -1127,7 +1156,8 @@ void HTMLInputElement::setValueFromRenderer(const String& value) {
   m_hasDirtyValue = true;
   m_needsToUpdateViewValue = false;
 
-  // Input event is fired by the Node::defaultEventHandler for editable controls.
+  // Input event is fired by the Node::defaultEventHandler for editable
+  // controls.
   if (!isTextField())
     dispatchInputEvent();
   notifyFormStateChanged();
@@ -1178,8 +1208,9 @@ void HTMLInputElement::defaultEventHandler(Event* evt) {
       return;
   }
 
-  // Call the base event handler before any of our own event handling for almost all events in text fields.
-  // Makes editing keyboard handling take precedence over the keydown and keypress handling in this function.
+  // Call the base event handler before any of our own event handling for almost
+  // all events in text fields.  Makes editing keyboard handling take precedence
+  // over the keydown and keypress handling in this function.
   bool callBaseClassEarly =
       isTextField() && (evt->type() == EventTypeNames::keydown ||
                         evt->type() == EventTypeNames::keypress);
@@ -1189,10 +1220,12 @@ void HTMLInputElement::defaultEventHandler(Event* evt) {
       return;
   }
 
-  // DOMActivate events cause the input to be "activated" - in the case of image and submit inputs, this means
-  // actually submitting the form. For reset inputs, the form is reset. These events are sent when the user clicks
-  // on the element, or presses enter while it is the active element. JavaScript code wishing to activate the element
-  // must dispatch a DOMActivate event - a click event will not do the job.
+  // DOMActivate events cause the input to be "activated" - in the case of image
+  // and submit inputs, this means actually submitting the form. For reset
+  // inputs, the form is reset. These events are sent when the user clicks on
+  // the element, or presses enter while it is the active element. JavaScript
+  // code wishing to activate the element must dispatch a DOMActivate event - a
+  // click event will not do the job.
   if (evt->type() == EventTypeNames::DOMActivate) {
     m_inputTypeView->handleDOMActivateEvent(evt);
     if (evt->defaultHandled())
@@ -1225,7 +1258,8 @@ void HTMLInputElement::defaultEventHandler(Event* evt) {
       dispatchFormControlChangeEvent();
 
     HTMLFormElement* formForSubmission = m_inputTypeView->formForSubmission();
-    // Form may never have been present, or may have been destroyed by code responding to the change event.
+    // Form may never have been present, or may have been destroyed by code
+    // responding to the change event.
     if (formForSubmission)
       formForSubmission->submitImplicitly(evt, canTriggerImplicitSubmission());
 
@@ -1250,7 +1284,8 @@ void HTMLInputElement::defaultEventHandler(Event* evt) {
 }
 
 bool HTMLInputElement::willRespondToMouseClickEvents() {
-  // FIXME: Consider implementing willRespondToMouseClickEvents() in InputType if more accurate results are necessary.
+  // FIXME: Consider implementing willRespondToMouseClickEvents() in InputType
+  // if more accurate results are necessary.
   if (!isDisabledFormControl())
     return true;
 
@@ -1390,7 +1425,7 @@ KURL HTMLInputElement::src() const {
   return document().completeURL(fastGetAttribute(srcAttr));
 }
 
-FileList* HTMLInputElement::files() {
+FileList* HTMLInputElement::files() const {
   return m_inputType->files();
 }
 

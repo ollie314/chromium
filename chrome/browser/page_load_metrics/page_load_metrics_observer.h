@@ -32,17 +32,22 @@ enum UserAbortType {
   // meta refresh tag.
   ABORT_CLIENT_REDIRECT,
 
-  // If the navigation is replaced by a new navigation. This includes link
+  // If the page load is replaced by a new navigation. This includes link
   // clicks, typing in the omnibox (not a reload), and form submissions.
   ABORT_NEW_NAVIGATION,
 
   // If the user presses the stop X button.
   ABORT_STOP,
 
-  // If the navigation is aborted by closing the tab or browser.
+  // If the page load is aborted by closing the tab or browser.
   ABORT_CLOSE,
 
-  // We don't know why the navigation aborted. This is the value we assign to an
+  // The page load was backgrounded, e.g. the browser was minimized or the user
+  // switched tabs. Note that the same page may be foregrounded in the future,
+  // so this is not a 'terminal' abort type.
+  ABORT_BACKGROUND,
+
+  // We don't know why the page load aborted. This is the value we assign to an
   // aborted load if the only signal we get is a provisional load finishing
   // without committing, either without error or with net::ERR_ABORTED.
   ABORT_OTHER,
@@ -68,7 +73,6 @@ struct PageLoadExtraInfo {
       bool user_gesture,
       const GURL& committed_url,
       const GURL& start_url,
-      const base::Optional<base::TimeDelta>& time_to_commit,
       UserAbortType abort_type,
       bool abort_user_initiated,
       const base::Optional<base::TimeDelta>& time_to_abort,
@@ -99,9 +103,6 @@ struct PageLoadExtraInfo {
 
   // The URL that started the navigation, before redirects.
   const GURL start_url;
-
-  // Time from navigation start until commit.
-  const base::Optional<base::TimeDelta> time_to_commit;
 
   // The abort time and time to abort for this page load. If the page was not
   // aborted, |abort_type| will be |ABORT_NONE|.
@@ -163,7 +164,7 @@ class PageLoadMetricsObserver {
   // first data for the request. The navigation handle holds relevant data for
   // the navigation, but will be destroyed soon after this call. Don't hold a
   // reference to it.
-  // Note that this does not get called for same page navigations.
+  // Note that this does not get called for same-page navigations.
   // Observers that return STOP_OBSERVING will not receive any additional
   // callbacks, and will be deleted after invocation of this method returns.
   virtual ObservePolicy OnCommit(content::NavigationHandle* navigation_handle);
@@ -229,10 +230,10 @@ class PageLoadMetricsObserver {
   // the application may be killed at any time after this method is invoked
   // without further notification. Note that this may be called both for
   // provisional loads as well as committed loads. Implementations that only
-  // want to track committed loads should check extra_info.time_to_commit to
-  // determine if the load had committed. If the implementation returns
-  // CONTINUE_OBSERVING, this method may be called multiple times per observer,
-  // once for each time that the application enters the backround.
+  // want to track committed loads should check whether extra_info.committed_url
+  // is empty to determine if the load had committed. If the implementation
+  // returns CONTINUE_OBSERVING, this method may be called multiple times per
+  // observer, once for each time that the application enters the backround.
   //
   // The default implementation does nothing, and returns CONTINUE_OBSERVING.
   virtual ObservePolicy FlushMetricsOnAppEnterBackground(
@@ -249,14 +250,14 @@ class PageLoadMetricsObserver {
   // instead.
 
   // OnComplete is invoked for tracked page loads that committed, immediately
-  // before the observer is deleted.
+  // before the observer is deleted. Observers that implement OnComplete may
+  // also want to implement FlushMetricsOnAppEnterBackground, to avoid loss of
+  // data if the application is killed while in the background.
   virtual void OnComplete(const PageLoadTiming& timing,
                           const PageLoadExtraInfo& extra_info) {}
 
   // OnFailedProvisionalLoad is invoked for tracked page loads that did not
-  // commit, immediately before the observer is deleted. Note that provisional
-  // loads that result in downloads or 204s are aborted by the system, and are
-  // also included as failed provisional loads.
+  // commit, immediately before the observer is deleted.
   virtual void OnFailedProvisionalLoad(
       const FailedProvisionalLoadInfo& failed_provisional_load_info,
       const PageLoadExtraInfo& extra_info) {}

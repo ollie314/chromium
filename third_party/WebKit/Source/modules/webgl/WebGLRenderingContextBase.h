@@ -91,7 +91,7 @@ class WebGLActiveInfo;
 class WebGLBuffer;
 class WebGLCompressedTextureASTC;
 class WebGLCompressedTextureATC;
-class WebGLCompressedTextureES30;
+class WebGLCompressedTextureETC;
 class WebGLCompressedTextureETC1;
 class WebGLCompressedTexturePVRTC;
 class WebGLCompressedTextureS3TC;
@@ -539,6 +539,18 @@ class MODULES_EXPORT WebGLRenderingContextBase : public CanvasRenderingContext {
   void forceRestoreContext();
   void loseContextImpl(LostContextMode, AutoRecoveryMethod);
 
+  // Utilities to restore GL state to match the rendering context's
+  // saved state. Use these after contextGL()-based state changes that
+  // bypass the rendering context.
+  void restoreScissorEnabled();
+  void restoreScissorBox();
+  void restoreClearColor();
+  void restoreClearDepthf();
+  void restoreClearStencil();
+  void restoreStencilMaskSeparate();
+  void restoreColorMask();
+  void restoreDepthMask();
+
   gpu::gles2::GLES2Interface* contextGL() const {
     DrawingBuffer* d = drawingBuffer();
     if (!d)
@@ -564,6 +576,8 @@ class MODULES_EXPORT WebGLRenderingContextBase : public CanvasRenderingContext {
   EAGERLY_FINALIZE();
   DECLARE_EAGER_FINALIZATION_OPERATOR_NEW();
   DECLARE_VIRTUAL_TRACE();
+
+  DECLARE_VIRTUAL_TRACE_WRAPPERS();
 
   // Returns approximate gpu memory allocated per pixel.
   int externallyAllocatedBytesPerPixel() override;
@@ -598,7 +612,7 @@ class MODULES_EXPORT WebGLRenderingContextBase : public CanvasRenderingContext {
   friend class WebGLDebugShaders;
   friend class WebGLCompressedTextureASTC;
   friend class WebGLCompressedTextureATC;
-  friend class WebGLCompressedTextureES30;
+  friend class WebGLCompressedTextureETC;
   friend class WebGLCompressedTextureETC1;
   friend class WebGLCompressedTexturePVRTC;
   friend class WebGLCompressedTextureS3TC;
@@ -635,7 +649,7 @@ class MODULES_EXPORT WebGLRenderingContextBase : public CanvasRenderingContext {
   void addContextObject(WebGLContextObject*);
   void detachAndRemoveAllObjects();
 
-  void destroyContext();
+  virtual void destroyContext();
   void markContextChanged(ContentChangeType);
 
   void onErrorMessage(const char*, int32_t id);
@@ -762,6 +776,7 @@ class MODULES_EXPORT WebGLRenderingContextBase : public CanvasRenderingContext {
 
   GLfloat m_clearColor[4];
   bool m_scissorEnabled;
+  GLint m_scissorBox[4];
   GLfloat m_clearDepth;
   GLint m_clearStencil;
   GLboolean m_colorMask[4];

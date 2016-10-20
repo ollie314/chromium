@@ -105,6 +105,7 @@ Zur Verwendung von Physical Web müssen Bluetooth und der Standortdienst aktivie
 <translation id="213279576345780926"><ph name="TAB_TITLE" /> geschlossen</translation>
 <translation id="2138201775715568214">Nach Physical Web-Seiten zu Objekten in der Nähe wird gesucht.</translation>
 <translation id="2139186145475833000">Zum Startbildschirm hinzu</translation>
+<translation id="2146738493024040262">Instant-App öffnen</translation>
 <translation id="2148716181193084225">Heute</translation>
 <translation id="2154710561487035718">URL kopieren</translation>
 <translation id="219985413780390209">Mich und mein Gerät vor schädlichen Websites schützen</translation>
@@ -184,8 +185,8 @@ Zur Verwendung von Physical Web müssen Bluetooth und der Standortdienst aktivie
 <translation id="3036750288708366620"><ph name="BEGIN_LINK" />Hilfe aufrufen<ph name="END_LINK" /></translation>
 <translation id="3089395242580810162">In Inkognito-Tab öffnen</translation>
 <translation id="3090193911106258841">Zugriff auf Audio- und Video-Eingang</translation>
-<translation id="3117051980354074377">Melden Sie sich in Chrome an, um Lesezeichen von Ihren anderen Geräten abzurufen.</translation>
 <translation id="3137521801621304719">Inkognitomodus deaktivieren</translation>
+<translation id="3148434565183091099">Melden Sie sich in Chrome an, um Ihre Lesezeichen auf allen Ihren Geräten zu haben.</translation>
 <translation id="3149891296864842641">Versandoption</translation>
 <translation id="3177909033752230686">Sprache der Seite:</translation>
 <translation id="3190152372525844641">Berechtigungen für Chrome in den <ph name="BEGIN_LINK" />Android-Einstellungen<ph name="END_LINK" /> aktivieren</translation>
@@ -220,6 +221,7 @@ Zur Verwendung von Physical Web müssen Bluetooth und der Standortdienst aktivie
 <translation id="3518985090088779359">Akzeptieren &amp; weiter</translation>
 <translation id="3522247891732774234">Update verfügbar. Weitere Optionen</translation>
 <translation id="3527085408025491307">Ordner</translation>
+<translation id="3542235761944717775"><ph name="KILOBYTES" /> KB verfügbar</translation>
 <translation id="3549644494707163724">Alle synchronisierten Daten mit Ihrer eigenen Synchronisierungspassphrase verschlüsseln</translation>
 <translation id="3590487821116122040">Websitespeicher, den Chrome nicht für wichtig hält, wie etwa Websites ohne gespeicherte Einstellungen oder solche, die nicht oft besucht werden</translation>
 <translation id="360480449234699036">Erfahren Sie mehr über Themen auf einer Website, ohne die Seite verlassen zu müssen. Mit der Option "Zum Suchen tippen" werden ein Wort sowie dessen Kontext an die Google-Suche gesendet. Daraufhin erhalten Sie Definitionen, Bilder, Suchergebnisse und andere Details.
@@ -284,6 +286,7 @@ Zur Anpassung des Suchbegriffs drücken Sie einige Sekunden lang auf den entspre
 <translation id="4351244548802238354">Dialogfeld schließen</translation>
 <translation id="4376501731284077108">Nicht kontrolliert</translation>
 <translation id="4378154925671717803">Telefon</translation>
+<translation id="4384468725000734951">Suche erfolgt mit Sogou</translation>
 <translation id="4412992751769744546">Cookies Dritter zulassen</translation>
 <translation id="4440256989292146959">Mehr surfen, weniger verbrauchen</translation>
 <translation id="4452548195519783679">Als Lesezeichen in "<ph name="FOLDER_NAME" />" gespeichert</translation>
@@ -297,7 +300,6 @@ Zur Anpassung des Suchbegriffs drücken Sie einige Sekunden lang auf den entspre
 <translation id="4532845899244822526">Ordner auswählen</translation>
 <translation id="4543661749405994812">E-Mail-Adresse kopieren</translation>
 <translation id="4572422548854449519">In verwaltetem Konto anmelden</translation>
-<translation id="4576023202210315647">Tab in Chrome speichern</translation>
 <translation id="4581964774250883625">Sie befinden sich jetzt im Inkognitomodus.</translation>
 <translation id="4583164079174244168">{MINUTES,plural, =1{Vor # Minute}other{Vor # Minuten}}</translation>
 <translation id="4605958867780575332">Element entfernt: <ph name="ITEM_TITLE" /></translation>
@@ -410,7 +412,7 @@ Sie sind jedoch nicht unsichtbar. Der Inkognitomodus verhindert nicht, dass Info
 <translation id="5777170031995031090">Sie können festlegen, wie Google Ihren Browserverlauf nutzt, um die Suche, Werbung und andere Google-Dienste zu personalisieren.</translation>
 <translation id="5804241973901381774">Berechtigungen</translation>
 <translation id="5809361687334836369">{HOURS,plural, =1{Vor # Stunde}other{Vor # Stunden}}</translation>
-<translation id="5817918615728894473">Pairing durchführen</translation>
+<translation id="5817918615728894473">Koppeln</translation>
 <translation id="583281660410589416">Unbekannt</translation>
 <translation id="5832934273103296195">Maximiert – zum Minimieren klicken</translation>
 <translation id="583891442612896534">Chrome kann die Google-Server für die Datenkomprimierung nicht erreichen. Ihre Einsparungen bei der Datennutzung können begrenzt sein.</translation>
@@ -423,6 +425,8 @@ Sie sind jedoch nicht unsichtbar. Der Inkognitomodus verhindert nicht, dass Info
 <translation id="5916664084637901428">An</translation>
 <translation id="5919204609460789179">Zur Synchronisierung müssen Sie <ph name="PRODUCT_NAME" /> aktualisieren</translation>
 <translation id="5939518447894949180">Zurücksetzen</translation>
+<translation id="5942872142862698679">Suche erfolgt mit Google</translation>
+<translation id="6000066717592683814">Google beibehalten</translation>
 <translation id="6010869025736512584">Zugriff auf Video-Eingang</translation>
 <translation id="6012342843556706400">Chrome benötigt Zugriff auf den Standort, um ihn für diese Website freizugeben.</translation>
 <translation id="6031101910111098835">Minimiert – zum Maximieren klicken</translation>
@@ -440,6 +444,7 @@ Sie sind jedoch nicht unsichtbar. Der Inkognitomodus verhindert nicht, dass Info
 <translation id="6159335304067198720"><ph name="PERCENT" /> Einsparungen bei der Datennutzung</translation>
 <translation id="6165508094623778733">Weitere Informationen</translation>
 <translation id="6177390657002841081">Datensparmodus aktivieren</translation>
+<translation id="617991007797131187">Chrome kann in China Sogou für die Suche verwenden. Sie können dies unter <ph name="BEGIN_LINK" />Einstellungen<ph name="END_LINK" /> ändern.</translation>
 <translation id="6181444274883918285">Ausnahme für Website hinzufügen</translation>
 <translation id="6192792657125177640">Ausnahmen</translation>
 <translation id="6232535412751077445">Wenn Sie das Kästchen "Do Not Track" anklicken, wird mit Ihren Browserzugriffen eine Anforderung gesendet. Wie sich diese Anforderung auswirkt, hängt davon ab, ob eine Website darauf reagiert und wie die Anforderung interpretiert wird.
@@ -471,6 +476,7 @@ Einige Websites schalten möglicherweise Werbeanzeigen, deren Auswahl nicht dara
 <translation id="654446541061731451">Tab zum Beamen auswählen</translation>
 <translation id="6545017243486555795">Alle Daten löschen</translation>
 <translation id="6550675742724504774">Optionen</translation>
+<translation id="6560414384669816528">Suche mit Sogou</translation>
 <translation id="656628257199996201"><ph name="SOURCE_LANGUAGE" /> immer übersetzen</translation>
 <translation id="6571070086367343653">Kreditkarte bearbeiten</translation>
 <translation id="6573431926118603307">Hier werden Tabs angezeigt, die Sie auf Ihren anderen Geräten in Chrome geöffnet haben.</translation>
@@ -522,7 +528,7 @@ Einige Websites schalten möglicherweise Werbeanzeigen, deren Auswahl nicht dara
 <translation id="7062545763355031412">Akzeptieren und Konto wechseln</translation>
 <translation id="7063006564040364415">Verbindung zum Synchronisierungsserver konnte nicht hergestellt werden.</translation>
 <translation id="7064851114919012435">Kontaktdaten</translation>
-<translation id="7074853159844403180"><ph name="SITE" /> möchte ein Pairing durchführen mit:</translation>
+<translation id="7074853159844403180"><ph name="SITE" /> möchte sich koppeln mit:</translation>
 <translation id="7081639897063626814">Bestehende Daten getrennt halten</translation>
 <translation id="7094922512924405309">Keine Physical Web-Seiten zu Objekten in der Nähe gefunden</translation>
 <translation id="7115197232530297436">Nicht unterstützte Versandadresse. Wählen Sie eine andere Adresse aus.</translation>
@@ -532,7 +538,6 @@ Einige Websites schalten möglicherweise Werbeanzeigen, deren Auswahl nicht dara
 <translation id="7208788139759694678">Datensparmodus deaktiviert</translation>
 <translation id="7243308994586599757">Optionen unten auf dem Bildschirm verfügbar</translation>
 <translation id="7244362611678346589"><ph name="SEARCH_ENGINE_URL" /> zeigt Ihnen lokale Suchergebnisse basierend auf Ihrem Standort.</translation>
-<translation id="7327835590071894791">Ihr Tab ist jetzt im Hintergrund.</translation>
 <translation id="7347770551817603360">Offline-Inhalt</translation>
 <translation id="7353894246028566792">{NUM_SELECTED,plural, =1{1 ausgewähltes Element teilen}other{# ausgewählte Elemente teilen}}</translation>
 <translation id="7366340029385295517">Übertragung an <ph name="SCREEN_NAME" /></translation>
@@ -551,7 +556,6 @@ Einige Websites schalten möglicherweise Werbeanzeigen, deren Auswahl nicht dara
 Eventuell finden Sie unter <ph name="BEGIN_LINK" />history.google.com<ph name="END_LINK" /> weitere Arten von Browserverlaufsdaten wie Suchanfragen oder Aktivitäten anderer Google-Dienste für Ihr Google-Konto.</translation>
 <translation id="7493994139787901920"><ph name="VERSION" /> (aktualisiert <ph name="TIME_SINCE_UPDATE" />)</translation>
 <translation id="7498271377022651285">Bitte warten...</translation>
-<translation id="7501135638693251872">Alle Lesezeichen</translation>
 <translation id="7521387064766892559">JavaScript</translation>
 <translation id="7562080006725997899">Browserdaten werden gelöscht</translation>
 <translation id="756809126120519699">Gelöschte Chrome-Daten</translation>
@@ -639,12 +643,14 @@ Eventuell finden Sie unter <ph name="BEGIN_LINK" />history.google.com<ph name="E
 <translation id="8518901949365209398">Diese Website verwendet eine schwache Sicherheitskonfiguration (SHA-1-Signaturen). Daher ist Ihre Verbindung möglicherweise nicht geschützt.</translation>
 <translation id="8523928698583292556">Gespeichertes Passwort löschen</translation>
 <translation id="8525306231823319788">Vollbildmodus</translation>
+<translation id="85415543246899402"><ph name="MEGABYTES" /> MB belegt</translation>
 <translation id="854522910157234410">Diese Seite öffnen</translation>
 <translation id="8562452229998620586">Gespeicherte Passwörter erscheinen hier.</translation>
 <translation id="856481929701340285">Desktop-Version anfordern</translation>
 <translation id="857943718398505171">Zugelassen (empfohlen)</translation>
 <translation id="8583805026567836021">Kontodaten werden gelöscht</translation>
 <translation id="8617240290563765734">Soll die im heruntergeladenen Inhalt angegebene URL geöffnet werden?</translation>
+<translation id="8618653050765576793"><ph name="KILOBYTES" /> KB belegt</translation>
 <translation id="862875433388403934">In anderen Anwendungen heruntergeladene Inhalte wie Filme und Musik können möglicherweise erst wieder abgespielt werden, nachdem Lizenzen basierend auf neuen Anmeldedaten für die betreffenden Anwendungen erworben wurden.
 
 Um neue Lizenzen zu erwerben, stellen Sie eine Internetverbindung her und spielen Sie die heruntergeladenen Inhalte ab.</translation>
@@ -696,7 +702,7 @@ Um neue Lizenzen zu erwerben, stellen Sie eine Internetverbindung her und spiele
 <translation id="917685106653909562">Physical Web-Seiten zu Objekten in der Nähe</translation>
 <translation id="9187199695613236444">Für Mobilgeräte optimierte Ansicht</translation>
 <translation id="9188680907066685419">Von verwaltetem Konto abmelden</translation>
-<translation id="9192643434065497760">Aktivieren Sie Bluetooth in den <ph name="BEGIN_LINK" />Geräteeinstellungen<ph name="END_LINK" />, um ein Pairing zuzulassen.</translation>
+<translation id="9192643434065497760">Aktivieren Sie Bluetooth in den <ph name="BEGIN_LINK" />Geräteeinstellungen<ph name="END_LINK" />, um eine Kopplung zu ermöglichen.</translation>
 <translation id="9198708126133947749">Die Daten dieses Geräts werden durch die Daten von <ph name="TO_ACCOUNT" /> ersetzt. Wenn Sie Ihre vorhandenen Daten abrufen möchten, wechseln Sie zurück zu <ph name="FROM_ACCOUNT" />.</translation>
 <translation id="9206873250291191720">A</translation>
 <translation id="9219103736887031265">Bilder</translation>

@@ -113,9 +113,30 @@ class VRDisplay final : public GarbageCollectedFinalized<VRDisplay>,
   double m_depthFar;
 
   Timer<VRDisplay> m_fullscreenCheckTimer;
+  gpu::gles2::GLES2Interface* m_contextGL;
+  Member<WebGLRenderingContextBase> m_renderingContext;
 };
 
 using VRDisplayVector = HeapVector<Member<VRDisplay>>;
+
+enum class PresentationResult {
+  Requested = 0,
+  Success = 1,
+  SuccessAlreadyPresenting = 2,
+  VRDisplayCannotPresent = 3,
+  PresentationNotSupportedByDisplay = 4,
+  VRDisplayNotFound = 5,
+  NotInitiatedByUserGesture = 6,
+  InvalidNumberOfLayers = 7,
+  InvalidLayerSource = 8,
+  LayerSourceMissingWebGLContext = 9,
+  InvalidLayerBounds = 10,
+  ServiceInactive = 11,
+  RequestDenied = 12,
+  PresentationResultMax,  // Must be last member of enum.
+};
+
+void ReportPresentationResult(PresentationResult);
 
 }  // namespace blink
 
