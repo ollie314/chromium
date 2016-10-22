@@ -30,6 +30,7 @@
 #include "bindings/core/v8/ScriptState.h"
 #include "bindings/core/v8/ScriptValue.h"
 #include "bindings/core/v8/ScriptWrappable.h"
+#include "bindings/core/v8/ScriptWrappableVisitor.h"
 #include "core/CoreExport.h"
 #include "core/dom/DOMTypedArray.h"
 #include "core/dom/TypedFlexibleArrayBufferView.h"
@@ -132,7 +133,8 @@ class ScopedRGBEmulationColorMask {
   const bool m_requiresEmulation;
 };
 
-class MODULES_EXPORT WebGLRenderingContextBase : public CanvasRenderingContext {
+class MODULES_EXPORT WebGLRenderingContextBase : public CanvasRenderingContext,
+                                                 public DrawingBuffer::Client {
   WTF_MAKE_NONCOPYABLE(WebGLRenderingContextBase);
 
  public:
@@ -545,11 +547,7 @@ class MODULES_EXPORT WebGLRenderingContextBase : public CanvasRenderingContext {
   void restoreScissorEnabled();
   void restoreScissorBox();
   void restoreClearColor();
-  void restoreClearDepthf();
-  void restoreClearStencil();
-  void restoreStencilMaskSeparate();
   void restoreColorMask();
-  void restoreDepthMask();
 
   gpu::gles2::GLES2Interface* contextGL() const {
     DrawingBuffer* d = drawingBuffer();
@@ -586,12 +584,14 @@ class MODULES_EXPORT WebGLRenderingContextBase : public CanvasRenderingContext {
     DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
 
    public:
-    Member<WebGLTexture> m_texture2DBinding;
-    Member<WebGLTexture> m_textureCubeMapBinding;
-    Member<WebGLTexture> m_texture3DBinding;
-    Member<WebGLTexture> m_texture2DArrayBinding;
+    TraceWrapperMember<WebGLTexture> m_texture2DBinding;
+    TraceWrapperMember<WebGLTexture> m_textureCubeMapBinding;
+    TraceWrapperMember<WebGLTexture> m_texture3DBinding;
+    TraceWrapperMember<WebGLTexture> m_texture2DArrayBinding;
 
     DECLARE_TRACE();
+    // Wrappers are traced by parent since TextureUnitState is not a heap
+    // object.
   };
 
   PassRefPtr<Image> getImage(AccelerationHint, SnapshotReason) const override;
@@ -619,6 +619,7 @@ class MODULES_EXPORT WebGLRenderingContextBase : public CanvasRenderingContext {
   friend class WebGLCompressedTextureS3TCsRGB;
   friend class WebGLRenderingContextErrorMessageCallback;
   friend class WebGLVertexArrayObjectBase;
+  friend class ScopedDrawingBufferBinder;
   friend class ScopedTexture2DRestorer;
   friend class ScopedFramebufferRestorer;
   // To allow V8WebGL[2]RenderingContext to call visitChildDOMWrappers.
@@ -644,6 +645,16 @@ class MODULES_EXPORT WebGLRenderingContextBase : public CanvasRenderingContext {
   bool paintRenderingResultsToCanvas(SourceDrawingBuffer) override;
   WebLayer* platformLayer() const override;
   void stop() override;
+
+  // DrawingBuffer::Client implementation.
+  bool DrawingBufferClientIsBoundForDraw() override;
+  void DrawingBufferClientRestoreScissorTest() override;
+  void DrawingBufferClientRestoreMaskAndClearValues() override;
+  void DrawingBufferClientRestorePixelPackAlignment() override;
+  void DrawingBufferClientRestoreTexture2DBinding() override;
+  void DrawingBufferClientRestoreRenderbufferBinding() override;
+  void DrawingBufferClientRestoreFramebufferBinding() override;
+  void DrawingBufferClientRestorePixelUnpackBufferBinding() override;
 
   void addSharedObject(WebGLSharedObject*);
   void addContextObject(WebGLContextObject*);
@@ -711,10 +722,10 @@ class MODULES_EXPORT WebGLRenderingContextBase : public CanvasRenderingContext {
 
   // List of bound VBO's. Used to maintain info about sizes for ARRAY_BUFFER and
   // stored values for ELEMENT_ARRAY_BUFFER
-  Member<WebGLBuffer> m_boundArrayBuffer;
+  TraceWrapperMember<WebGLBuffer> m_boundArrayBuffer;
 
   Member<WebGLVertexArrayObjectBase> m_defaultVertexArrayObject;
-  Member<WebGLVertexArrayObjectBase> m_boundVertexArrayObject;
+  TraceWrapperMember<WebGLVertexArrayObjectBase> m_boundVertexArrayObject;
   void setBoundVertexArrayObject(WebGLVertexArrayObjectBase*);
 
   enum VertexAttribValueType {
@@ -727,9 +738,9 @@ class MODULES_EXPORT WebGLRenderingContextBase : public CanvasRenderingContext {
   unsigned m_maxVertexAttribs;
   void setVertexAttribType(GLuint index, VertexAttribValueType);
 
-  Member<WebGLProgram> m_currentProgram;
-  Member<WebGLFramebuffer> m_framebufferBinding;
-  Member<WebGLRenderbuffer> m_renderbufferBinding;
+  TraceWrapperMember<WebGLProgram> m_currentProgram;
+  TraceWrapperMember<WebGLFramebuffer> m_framebufferBinding;
+  TraceWrapperMember<WebGLRenderbuffer> m_renderbufferBinding;
 
   HeapVector<TextureUnitState> m_textureUnits;
   unsigned long m_activeTextureUnit;
@@ -884,14 +895,14 @@ class MODULES_EXPORT WebGLRenderingContextBase : public CanvasRenderingContext {
   };
 
   bool m_extensionEnabled[WebGLExtensionNameCount];
-  HeapVector<Member<ExtensionTracker>> m_extensions;
+  HeapVector<TraceWrapperMember<ExtensionTracker>> m_extensions;
 
   template <typename T>
   void registerExtension(Member<T>& extensionPtr,
                          ExtensionFlags flags = ApprovedExtension,
                          const char* const* prefixes = nullptr) {
-    m_extensions.append(
-        TypedExtensionTracker<T>::create(extensionPtr, flags, prefixes));
+    m_extensions.append(TraceWrapperMember<ExtensionTracker>(
+        this, TypedExtensionTracker<T>::create(extensionPtr, flags, prefixes)));
   }
 
   bool extensionSupportedAndAllowed(const ExtensionTracker*);
@@ -915,7 +926,7 @@ class MODULES_EXPORT WebGLRenderingContextBase : public CanvasRenderingContext {
           m_readFramebufferBinding(framebufferBinding) {
       // Commit DrawingBuffer if needed (e.g., for multisampling)
       if (!m_readFramebufferBinding && m_drawingBuffer)
-        m_drawingBuffer->commit();
+        m_drawingBuffer->resolveAndBindForReadAndDraw();
     }
 
     ~ScopedDrawingBufferBinder() {
@@ -974,9 +985,6 @@ class MODULES_EXPORT WebGLRenderingContextBase : public CanvasRenderingContext {
     CombinedClear
   };
   HowToClear clearIfComposited(GLbitfield clearMask = 0);
-
-  // Helper to restore state that clearing the framebuffer may destroy.
-  void restoreStateAfterClear();
 
   // Convert texture internal format.
   GLenum convertTexInternalFormat(GLenum internalformat, GLenum type);

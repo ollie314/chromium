@@ -181,12 +181,11 @@ void WebMediaPlayerMS::play() {
     audio_renderer_->Play();
 
   if (delegate_) {
-    // TODO(perkj, magjed): We send a duration of 1 second here to avoid
-    // creating an interactive media session on Android. We'd like to use zero
-    // here, but that is treated as an unknown duration and assumed to be
-    // interactive. See http://crbug.com/595297 for more details.
+    // TODO(perkj, magjed): We use Uncontrollable type here to avoid creating an
+    // interactive media session on Android. See http://crbug.com/596516 for
+    // more details.
     delegate_->DidPlay(delegate_id_, hasVideo(), hasAudio(), false,
-                       media::MediaContentType::Uncontrollable);
+                       media::MediaContentType::Persistent);
   }
 
   paused_ = false;
@@ -446,12 +445,11 @@ void WebMediaPlayerMS::OnPlay() {
 }
 
 void WebMediaPlayerMS::OnPause() {
-  // TODO(perkj, magjed): See TODO in Onplay().
+  // TODO(perkj, magjed): See TODO in OnPlay().
 }
 
 void WebMediaPlayerMS::OnVolumeMultiplierUpdate(double multiplier) {
-  volume_multiplier_ = multiplier;
-  setVolume(volume_);
+  // TODO(perkj, magjed): See TODO in OnPlay().
 }
 
 bool WebMediaPlayerMS::copyVideoTextureToPlatformTexture(

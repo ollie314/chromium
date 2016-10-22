@@ -413,7 +413,7 @@ class EndToEndTest : public ::testing::TestWithParam<TestParams> {
   GetSentPacketManagerFromFirstServerSession() const {
     QuicDispatcher* dispatcher =
         QuicServerPeer::GetDispatcher(server_thread_->server());
-    QuicSession* session = dispatcher->session_map().begin()->second;
+    QuicSession* session = dispatcher->session_map().begin()->second.get();
     return &session->connection()->sent_packet_manager();
   }
 
@@ -574,7 +574,7 @@ class EndToEndTest : public ::testing::TestWithParam<TestParams> {
     QuicDispatcher* dispatcher =
         QuicServerPeer::GetDispatcher(server_thread_->server());
     ASSERT_EQ(1u, dispatcher->session_map().size());
-    QuicSession* session = dispatcher->session_map().begin()->second;
+    QuicSession* session = dispatcher->session_map().begin()->second.get();
     QuicConnectionStats server_stats = session->connection()->GetStats();
     if (!had_packet_loss) {
       EXPECT_EQ(0u, server_stats.packets_lost);
@@ -643,7 +643,7 @@ TEST_P(EndToEndTest, HandshakeSuccessful) {
   server_thread_->Pause();
   QuicDispatcher* dispatcher =
       QuicServerPeer::GetDispatcher(server_thread_->server());
-  QuicSession* server_session = dispatcher->session_map().begin()->second;
+  QuicSession* server_session = dispatcher->session_map().begin()->second.get();
   crypto_stream = QuicSessionPeer::GetCryptoStream(server_session);
   sequencer = ReliableQuicStreamPeer::sequencer(crypto_stream);
   EXPECT_NE(FLAGS_quic_release_crypto_stream_buffer &&
@@ -1181,6 +1181,32 @@ TEST_P(EndToEndTest, InvalidStream) {
   EXPECT_EQ(QUIC_INVALID_STREAM_ID, client_->connection_error());
 }
 
+// Test that if the the server will close the connection if the client attempts
+// to send a request with overly large headers.
+TEST_P(EndToEndTest, LargeHeaders) {
+  ASSERT_TRUE(Initialize());
+  client_->client()->WaitForCryptoHandshakeConfirmed();
+
+  string body;
+  test::GenerateBody(&body, kMaxPacketSize);
+
+  HTTPMessage request(HttpConstants::HTTP_1_1, HttpConstants::POST, "/foo");
+  request.AddHeader("key1", string(15 * 1024, 'a'));
+  request.AddHeader("key2", string(15 * 1024, 'a'));
+  request.AddHeader("key3", string(15 * 1024, 'a'));
+  request.AddBody(body, true);
+
+  client_->SendCustomSynchronousRequest(request);
+  if (FLAGS_quic_limit_uncompressed_headers) {
+    EXPECT_EQ(QUIC_HEADERS_TOO_LARGE, client_->stream_error());
+  } else {
+    EXPECT_EQ(QUIC_STREAM_NO_ERROR, client_->stream_error());
+    EXPECT_EQ(kFooResponseBody, client_->response_body());
+    EXPECT_EQ(200u, client_->response_headers()->parsed_response_code());
+  }
+  EXPECT_EQ(QUIC_NO_ERROR, client_->connection_error());
+}
+
 TEST_P(EndToEndTest, EarlyResponseWithQuicStreamNoError) {
   ASSERT_TRUE(Initialize());
   client_->client()->WaitForCryptoHandshakeConfirmed();
@@ -1331,7 +1357,7 @@ TEST_P(EndToEndTest, SetIndependentMaxIncomingDynamicStreamsLimits) {
   server_thread_->Pause();
   QuicDispatcher* dispatcher =
       QuicServerPeer::GetDispatcher(server_thread_->server());
-  QuicSession* server_session = dispatcher->session_map().begin()->second;
+  QuicSession* server_session = dispatcher->session_map().begin()->second.get();
   EXPECT_EQ(kClientMaxIncomingDynamicStreams,
             server_session->max_open_outgoing_streams());
   server_thread_->Resume();
@@ -1426,7 +1452,7 @@ TEST_P(EndToEndTest, MaxInitialRTT) {
   QuicDispatcher* dispatcher =
       QuicServerPeer::GetDispatcher(server_thread_->server());
   ASSERT_EQ(1u, dispatcher->session_map().size());
-  QuicSession* session = dispatcher->session_map().begin()->second;
+  QuicSession* session = dispatcher->session_map().begin()->second.get();
   const QuicSentPacketManagerInterface& client_sent_packet_manager =
       client_->client()->session()->connection()->sent_packet_manager();
 
@@ -1456,7 +1482,7 @@ TEST_P(EndToEndTest, MinInitialRTT) {
   QuicDispatcher* dispatcher =
       QuicServerPeer::GetDispatcher(server_thread_->server());
   ASSERT_EQ(1u, dispatcher->session_map().size());
-  QuicSession* session = dispatcher->session_map().begin()->second;
+  QuicSession* session = dispatcher->session_map().begin()->second.get();
   const QuicSentPacketManagerInterface& client_sent_packet_manager =
       client_->client()->session()->connection()->sent_packet_manager();
   const QuicSentPacketManagerInterface& server_sent_packet_manager =
@@ -1716,7 +1742,7 @@ TEST_P(EndToEndTest, DifferentFlowControlWindows) {
   server_thread_->Pause();
   QuicDispatcher* dispatcher =
       QuicServerPeer::GetDispatcher(server_thread_->server());
-  QuicSession* session = dispatcher->session_map().begin()->second;
+  QuicSession* session = dispatcher->session_map().begin()->second.get();
   EXPECT_EQ(kClientStreamIFCW,
             session->config()->ReceivedInitialStreamFlowControlWindowBytes());
   EXPECT_EQ(kClientSessionIFCW,
@@ -1771,7 +1797,7 @@ TEST_P(EndToEndTest, HeadersAndCryptoStreamsNoConnectionFlowControl) {
   server_thread_->Pause();
   QuicDispatcher* dispatcher =
       QuicServerPeer::GetDispatcher(server_thread_->server());
-  QuicSession* session = dispatcher->session_map().begin()->second;
+  QuicSession* session = dispatcher->session_map().begin()->second.get();
   QuicFlowController* server_connection_flow_controller =
       session->flow_controller();
   EXPECT_EQ(kSessionIFCW, QuicFlowControllerPeer::ReceiveWindowSize(
@@ -1791,7 +1817,8 @@ TEST_P(EndToEndTest, FlowControlsSynced) {
   QuicSpdySession* const client_session = client_->client()->session();
   QuicDispatcher* dispatcher =
       QuicServerPeer::GetDispatcher(server_thread_->server());
-  QuicSpdySession* server_session = dispatcher->session_map().begin()->second;
+  QuicSpdySession* server_session =
+      dispatcher->session_map().begin()->second.get();
 
   ExpectFlowControlsSynced(client_session->flow_controller(),
                            server_session->flow_controller());
@@ -1828,7 +1855,7 @@ TEST_P(EndToEndTest, RequestWithNoBodyWillNeverSendStreamFrameWithFIN) {
   server_thread_->Pause();
   QuicDispatcher* dispatcher =
       QuicServerPeer::GetDispatcher(server_thread_->server());
-  QuicSession* session = dispatcher->session_map().begin()->second;
+  QuicSession* session = dispatcher->session_map().begin()->second.get();
   EXPECT_EQ(
       0u,
       QuicSessionPeer::GetLocallyClosedStreamsHighestOffset(session).size());
@@ -2432,7 +2459,7 @@ TEST_P(EndToEndTest, EarlyResponseFinRecording) {
       QuicDispatcherPeer::session_map(dispatcher);
   QuicDispatcher::SessionMap::const_iterator it = map.begin();
   EXPECT_TRUE(it != map.end());
-  QuicServerSessionBase* server_session = it->second;
+  QuicServerSessionBase* server_session = it->second.get();
 
   // The stream is not waiting for the arrival of the peer's final offset.
   EXPECT_EQ(
@@ -2741,7 +2768,7 @@ TEST_P(EndToEndTestServerPush, ServerPushOverLimitWithBlocking) {
   QuicDispatcher* dispatcher =
       QuicServerPeer::GetDispatcher(server_thread_->server());
   ASSERT_EQ(1u, dispatcher->session_map().size());
-  QuicSession* session = dispatcher->session_map().begin()->second;
+  QuicSession* session = dispatcher->session_map().begin()->second.get();
   EXPECT_EQ(kNumMaxStreams, session->GetNumOpenOutgoingStreams());
   server_thread_->Resume();
 

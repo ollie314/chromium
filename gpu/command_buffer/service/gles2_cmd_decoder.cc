@@ -3293,34 +3293,6 @@ bool GLES2DecoderImpl::Initialize(
                                         ? GL_RGBA
                                         : GL_RGB;
 
-    // Create the target frame buffer. This is the one that the client renders
-    // directly to.
-    offscreen_target_frame_buffer_.reset(new BackFramebuffer(this));
-    offscreen_target_frame_buffer_->Create();
-    // Due to GLES2 format limitations, either the color texture (for
-    // non-multisampling) or the color render buffer (for multisampling) will be
-    // attached to the offscreen frame buffer.  The render buffer has more
-    // limited formats available to it, but the texture can't do multisampling.
-    if (IsOffscreenBufferMultisampled()) {
-      offscreen_target_color_render_buffer_.reset(new BackRenderbuffer(this));
-      offscreen_target_color_render_buffer_->Create();
-    } else {
-      offscreen_target_color_texture_.reset(new BackTexture(this));
-      offscreen_target_color_texture_->Create();
-    }
-    offscreen_target_depth_render_buffer_.reset(new BackRenderbuffer(this));
-    offscreen_target_depth_render_buffer_->Create();
-    offscreen_target_stencil_render_buffer_.reset(new BackRenderbuffer(this));
-    offscreen_target_stencil_render_buffer_->Create();
-
-    // Create the saved offscreen texture. The target frame buffer is copied
-    // here when SwapBuffers is called.
-    offscreen_saved_frame_buffer_.reset(new BackFramebuffer(this));
-    offscreen_saved_frame_buffer_->Create();
-    //
-    offscreen_saved_color_texture_.reset(new BackTexture(this));
-    offscreen_saved_color_texture_->Create();
-
     gfx::Size initial_size = attrib_helper.offscreen_framebuffer_size;
     if (initial_size.IsEmpty()) {
       // If we're an offscreen surface with zero width and/or height, set to a
@@ -3331,34 +3303,8 @@ bool GLES2DecoderImpl::Initialize(
       initial_size = gfx::Size(1, 1);
     }
 
-    // Allocate the render buffers at their initial size and check the status
-    // of the frame buffers is okay.
-    if (!ResizeOffscreenFramebuffer(initial_size)) {
-      LOG(ERROR) << "Could not allocate offscreen buffer storage.";
-      Destroy(true);
-      return false;
-    }
-
     state_.viewport_width = initial_size.width();
     state_.viewport_height = initial_size.height();
-
-    // Allocate the offscreen saved color texture.
-    DCHECK(offscreen_saved_color_format_);
-    offscreen_saved_color_texture_->AllocateStorage(
-        gfx::Size(1, 1), offscreen_saved_color_format_, true);
-
-    offscreen_saved_frame_buffer_->AttachRenderTexture(
-        offscreen_saved_color_texture_.get());
-    if (offscreen_saved_frame_buffer_->CheckStatus() !=
-        GL_FRAMEBUFFER_COMPLETE) {
-      LOG(ERROR) << "Offscreen saved FBO was incomplete.";
-      Destroy(true);
-      return false;
-    }
-
-    // Bind to the new default frame buffer (the offscreen target frame buffer).
-    // This should now be associated with ID zero.
-    DoBindFramebuffer(GL_FRAMEBUFFER, 0);
   } else {
     glBindFramebufferEXT(GL_FRAMEBUFFER, GetBackbufferServiceId());
     // These are NOT if the back buffer has these proprorties. They are
@@ -3454,6 +3400,60 @@ bool GLES2DecoderImpl::Initialize(
   // Set all the default state because some GL drivers get it wrong.
   state_.InitCapabilities(NULL);
   state_.InitState(NULL);
+
+  // Default state must be set before offscreen resources can be created.
+  if (offscreen) {
+    // Create the target frame buffer. This is the one that the client renders
+    // directly to.
+    offscreen_target_frame_buffer_.reset(new BackFramebuffer(this));
+    offscreen_target_frame_buffer_->Create();
+    // Due to GLES2 format limitations, either the color texture (for
+    // non-multisampling) or the color render buffer (for multisampling) will be
+    // attached to the offscreen frame buffer.  The render buffer has more
+    // limited formats available to it, but the texture can't do multisampling.
+    if (IsOffscreenBufferMultisampled()) {
+      offscreen_target_color_render_buffer_.reset(new BackRenderbuffer(this));
+      offscreen_target_color_render_buffer_->Create();
+    } else {
+      offscreen_target_color_texture_.reset(new BackTexture(this));
+      offscreen_target_color_texture_->Create();
+    }
+    offscreen_target_depth_render_buffer_.reset(new BackRenderbuffer(this));
+    offscreen_target_depth_render_buffer_->Create();
+    offscreen_target_stencil_render_buffer_.reset(new BackRenderbuffer(this));
+    offscreen_target_stencil_render_buffer_->Create();
+
+    // Create the saved offscreen texture. The target frame buffer is copied
+    // here when SwapBuffers is called.
+    offscreen_saved_frame_buffer_.reset(new BackFramebuffer(this));
+    offscreen_saved_frame_buffer_->Create();
+    //
+    offscreen_saved_color_texture_.reset(new BackTexture(this));
+    offscreen_saved_color_texture_->Create();
+
+    // Allocate the render buffers at their initial size and check the status
+    // of the frame buffers is okay.
+    if (!ResizeOffscreenFramebuffer(
+            gfx::Size(state_.viewport_width, state_.viewport_height))) {
+      LOG(ERROR) << "Could not allocate offscreen buffer storage.";
+      Destroy(true);
+      return false;
+    }
+    // Allocate the offscreen saved color texture.
+    DCHECK(offscreen_saved_color_format_);
+    offscreen_saved_color_texture_->AllocateStorage(
+        gfx::Size(1, 1), offscreen_saved_color_format_, true);
+
+    offscreen_saved_frame_buffer_->AttachRenderTexture(
+        offscreen_saved_color_texture_.get());
+    if (offscreen_saved_frame_buffer_->CheckStatus() !=
+        GL_FRAMEBUFFER_COMPLETE) {
+      LOG(ERROR) << "Offscreen saved FBO was incomplete.";
+      Destroy(true);
+      return false;
+    }
+  }
+
   glActiveTexture(GL_TEXTURE0 + state_.active_texture_unit);
 
   DoBindBuffer(GL_ARRAY_BUFFER, 0);
@@ -12653,11 +12653,9 @@ std::unique_ptr<uint8_t[]> DecompressTextureData(
   return decompressed_data;
 }
 
-bool IsValidDXTSize(GLint level, GLsizei size) {
-  // TODO(zmo): Linux NVIDIA driver does allow size of 1 and 2 on level 0.
-  // However, the WebGL conformance test and blink side code forbid it.
-  // For now, let's be on the cautious side. If all drivers behaves the same
-  // as Linux NVIDIA, then we can remove this limitation.
+bool IsValidS3TCSizeForWebGL(GLint level, GLsizei size) {
+  // WebGL only allows multiple-of-4 sizes, except for levels > 0 where it also
+  // allows 1 or 2. See WEBGL_compressed_texture_s3tc.
   return (level && size == 1) ||
          (level && size == 2) ||
          !(size % kS3TCBlockWidth);
@@ -12852,7 +12850,9 @@ bool GLES2DecoderImpl::ValidateCompressedTexDimensions(
     case GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT3_EXT:
     case GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT:
       DCHECK_EQ(1, depth);  // 2D formats.
-      if (!IsValidDXTSize(level, width) || !IsValidDXTSize(level, height)) {
+      if (feature_info_->IsWebGLContext() &&
+          (!IsValidS3TCSizeForWebGL(level, width) ||
+           !IsValidS3TCSizeForWebGL(level, height))) {
         LOCAL_SET_GL_ERROR(
             GL_INVALID_OPERATION, function_name,
             "width or height invalid for level");
@@ -12980,8 +12980,14 @@ bool GLES2DecoderImpl::ValidateCompressedTexSubDimensions(
             GL_INVALID_OPERATION, function_name, "dimensions out of range");
         return false;
       }
-      return ValidateCompressedTexDimensions(
-          function_name, target, level, width, height, 1, format);
+      if ((((width % kBlockWidth) != 0) && (width + xoffset != tex_width)) ||
+          (((height % kBlockHeight) != 0) &&
+           (height + yoffset != tex_height))) {
+        LOCAL_SET_GL_ERROR(GL_INVALID_OPERATION, function_name,
+                           "dimensions do not align to a block boundary");
+        return false;
+      }
+      return true;
     }
     case GL_ATC_RGB_AMD:
     case GL_ATC_RGBA_EXPLICIT_ALPHA_AMD:

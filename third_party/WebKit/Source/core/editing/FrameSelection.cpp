@@ -154,12 +154,20 @@ const VisibleSelectionInFlatTree& FrameSelection::selectionInFlatTree() const {
   return visibleSelection<EditingInFlatTreeStrategy>();
 }
 
-void FrameSelection::moveTo(const VisiblePosition& pos,
-                            EUserTriggered userTriggered,
-                            CursorAlignOnScroll align) {
-  SetSelectionOptions options = CloseTyping | ClearTypingStyle | userTriggered;
-  setSelection(createVisibleSelection(pos, pos, selection().isDirectional()),
-               options, align);
+void FrameSelection::moveCaretSelection(const IntPoint& point) {
+  DCHECK(!document().needsLayoutTreeUpdate());
+
+  Element* const editable = rootEditableElement();
+  if (!editable)
+    return;
+
+  const VisiblePosition position =
+      visiblePositionForContentsPoint(point, frame());
+  SelectionInDOMTree::Builder builder;
+  builder.setIsDirectional(selection().isDirectional());
+  if (position.isNotNull())
+    builder.collapse(position.toPositionWithAffinity());
+  setSelection(builder.build(), CloseTyping | ClearTypingStyle | UserTriggered);
 }
 
 // TODO(xiaochengh): We should not use reference to return value.
@@ -306,7 +314,7 @@ void FrameSelection::setSelectionAlgorithm(
 
   const VisibleSelectionTemplate<Strategy> oldSelection =
       visibleSelection<Strategy>();
-  const VisibleSelection oldSelectionInDOMTree = selection();
+  const Position& oldSelectionStart = selection().start();
 
   m_selectionEditor->setVisibleSelection(s, options);
   m_frameCaret->setCaretRectNeedsUpdate();
@@ -352,7 +360,7 @@ void FrameSelection::setSelectionAlgorithm(
     m_frame->inputMethodController().cancelCompositionIfSelectionIsInvalid();
     return;
   }
-  m_frame->editor().respondToChangedSelection(oldSelectionInDOMTree, options);
+  m_frame->editor().respondToChangedSelection(oldSelectionStart, options);
   if (userTriggered == UserTriggered) {
     ScrollAlignment alignment;
 
@@ -996,13 +1004,7 @@ void FrameSelection::selectAll() {
       return;
   }
 
-  // TODO(xiaochengh): The use of updateStyleAndLayoutIgnorePendingStylesheets
-  // needs to be audited.  See http://crbug.com/590369 for more details.
-  document().updateStyleAndLayoutIgnorePendingStylesheets();
-
-  VisibleSelection newSelection(
-      VisibleSelection::selectionFromContentsOfNode(root));
-  setSelection(newSelection);
+  setSelection(SelectionInDOMTree::Builder().selectAllChildren(*root).build());
   selectFrameElementInParentIfFullySelected();
   notifyLayoutObjectOfSelectionChange(UserTriggered);
 }
@@ -1385,7 +1387,9 @@ bool FrameSelection::selectWordAroundPosition(const VisiblePosition& position) {
     String text =
         plainText(EphemeralRange(start.deepEquivalent(), end.deepEquivalent()));
     if (!text.isEmpty() && !isSeparator(text.characterStartingAt(0))) {
-      setSelection(createVisibleSelection(start, end), WordGranularity);
+      setSelection(createVisibleSelection(start, end),
+                   CloseTyping | ClearTypingStyle,
+                   CursorAlignOnScroll::IfNeeded, WordGranularity);
       return true;
     }
   }
@@ -1434,7 +1438,8 @@ void FrameSelection::moveRangeSelection(const VisiblePosition& basePosition,
   if (newSelection.isNone())
     return;
 
-  setSelection(newSelection, granularity);
+  setSelection(newSelection, CloseTyping | ClearTypingStyle,
+               CursorAlignOnScroll::IfNeeded, granularity);
 }
 
 void FrameSelection::updateIfNeeded() {

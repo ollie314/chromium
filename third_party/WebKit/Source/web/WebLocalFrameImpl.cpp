@@ -120,6 +120,7 @@
 #include "core/frame/FrameHost.h"
 #include "core/frame/FrameView.h"
 #include "core/frame/LocalDOMWindow.h"
+#include "core/frame/PageScaleConstraintsSet.h"
 #include "core/frame/RemoteFrame.h"
 #include "core/frame/Settings.h"
 #include "core/frame/UseCounter.h"
@@ -1262,13 +1263,9 @@ void WebLocalFrameImpl::moveCaretSelection(const WebPoint& pointInViewport) {
   // TODO(editing-dev): The use of updateStyleAndLayoutIgnorePendingStylesheets
   // needs to be audited.  see http://crbug.com/590369 for more details.
   frame()->document()->updateStyleAndLayoutIgnorePendingStylesheets();
-
-  Element* editable = frame()->selection().rootEditableElement();
-  if (!editable)
-    return;
-
-  VisiblePosition position = visiblePositionForViewportPoint(pointInViewport);
-  frame()->selection().moveTo(position, UserTriggered);
+  const IntPoint pointInContents =
+      frame()->view()->viewportToContents(pointInViewport);
+  frame()->selection().moveCaretSelection(pointInContents);
 }
 
 bool WebLocalFrameImpl::setEditableSelectionOffsets(int start, int end) {
@@ -1711,6 +1708,10 @@ void WebLocalFrameImpl::createFrameView() {
 
   frame()->createView(initialSize, webView->baseBackgroundColor(),
                       isTransparent);
+  if (isMainFrame) {
+    frame()->view()->setInitialViewportSize(
+        webView->pageScaleConstraintsSet().initialViewportSize());
+  }
   if (webView->shouldAutoResize() && frame()->isLocalRoot())
     frame()->view()->enableAutoSizeMode(webView->minAutoSize(),
                                         webView->maxAutoSize());
@@ -1788,7 +1789,9 @@ void WebLocalFrameImpl::setFindEndstateFocusAndSelection() {
           // Found a focusable parent node. Set the active match as the
           // selection and focus to the focusable node.
           frame()->selection().setSelection(
-              createVisibleSelection(activeMatchRange));
+              SelectionInDOMTree::Builder()
+                  .setBaseAndExtent(activeMatchRange)
+                  .build());
           frame()->document()->setFocusedElement(
               &element, FocusParams(SelectionBehaviorOnFocus::None,
                                     WebFocusTypeNone, nullptr));
@@ -1817,7 +1820,9 @@ void WebLocalFrameImpl::setFindEndstateFocusAndSelection() {
     // you'll have the last thing you found highlighted) and make sure that
     // we have nothing focused (otherwise you might have text selected but
     // a link focused, which is weird).
-    frame()->selection().setSelection(createVisibleSelection(activeMatchRange));
+    frame()->selection().setSelection(SelectionInDOMTree::Builder()
+                                          .setBaseAndExtent(activeMatchRange)
+                                          .build());
     frame()->document()->clearFocusedElement();
 
     // Finally clear the active match, for two reasons:

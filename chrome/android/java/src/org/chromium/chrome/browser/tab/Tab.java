@@ -80,7 +80,6 @@ import org.chromium.chrome.browser.snackbar.SnackbarManager;
 import org.chromium.chrome.browser.ssl.SecurityStateModel;
 import org.chromium.chrome.browser.tab.TabUma.TabCreationState;
 import org.chromium.chrome.browser.tabmodel.AsyncTabParamsManager;
-import org.chromium.chrome.browser.tabmodel.SingleTabModelSelector;
 import org.chromium.chrome.browser.tabmodel.TabModel;
 import org.chromium.chrome.browser.tabmodel.TabModel.TabLaunchType;
 import org.chromium.chrome.browser.tabmodel.TabModel.TabSelectionType;
@@ -206,6 +205,7 @@ public class Tab implements ViewGroup.OnHierarchyChangeListener,
     // Content layer Observers and Delegates
     private ContentViewClient mContentViewClient;
     private TabWebContentsObserver mWebContentsObserver;
+    private TabBlimpContentsObserver mBlimpContentsObserver;
     private TabWebContentsDelegateAndroid mWebContentsDelegate;
     private BlimpContents mBlimpContents;
 
@@ -1027,9 +1027,15 @@ public class Tab implements ViewGroup.OnHierarchyChangeListener,
      * @return a value between 0 and 100 reflecting what percentage of the page load is complete.
      */
     public int getProgress() {
-        TabWebContentsDelegateAndroid delegate = getTabWebContentsDelegateAndroid();
-        if (delegate == null) return 0;
-        return isLoading() ? delegate.getMostRecentProgress() : 100;
+        if (!isLoading()) return 100;
+
+        if (mBlimp) {
+            return mBlimpContentsObserver != null ? mBlimpContentsObserver.getMostRecentProgress()
+                                                  : 0;
+        } else {
+            TabWebContentsDelegateAndroid delegate = getTabWebContentsDelegateAndroid();
+            return delegate != null ? delegate.getMostRecentProgress() : 0;
+        }
     }
 
     /**
@@ -1472,7 +1478,8 @@ public class Tab implements ViewGroup.OnHierarchyChangeListener,
                 mBlimpContents = nativeInitBlimpContents(
                         mNativeTabAndroid, profile, mWindowAndroid.getNativePointer());
                 if (mBlimpContents != null) {
-                    getBlimpContents().addObserver(new TabBlimpContentsObserver(this));
+                    mBlimpContentsObserver = new TabBlimpContentsObserver(this);
+                    mBlimpContents.addObserver(mBlimpContentsObserver);
                 } else {
                     mBlimp = false;
                 }
@@ -1770,9 +1777,6 @@ public class Tab implements ViewGroup.OnHierarchyChangeListener,
         cvc.initialize(ViewAndroidDelegate.createBasicDelegate(cv), cv, webContents,
                 getWindowAndroid());
         setContentViewCore(cvc);
-        if (getTabModelSelector() instanceof SingleTabModelSelector) {
-            getContentViewCore().setFullscreenRequiredForOrientationLock(false);
-        }
     }
 
     /**
@@ -1885,6 +1889,18 @@ public class Tab implements ViewGroup.OnHierarchyChangeListener,
             return true;
         }
         return false;
+    }
+
+    /**
+     * Notify observers when provisional load starts.
+     * @param isMainFrame    Whether the load is happening for the main frame.
+     * @param validatedUrl   The validated URL that is being navigated to.
+     */
+    void handleDidStartProvisionalLoadForFrame(boolean isMainFrame, String validatedUrl) {
+        RewindableIterator<TabObserver> observers = getTabObservers();
+        while (observers.hasNext()) {
+            observers.next().onDidStartProvisionalLoadForFrame(this, isMainFrame, validatedUrl);
+        }
     }
 
     /**

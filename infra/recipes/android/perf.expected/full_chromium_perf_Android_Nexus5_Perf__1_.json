@@ -164,7 +164,7 @@
     "cmd": [
       "python",
       "-u",
-      "\nimport sys\nsys.path.append(sys.argv[1])\nfrom devil import devil_env\ndevil_env.config.Initialize()\n",
+      "\nimport sys\nsys.path.append(sys.argv[1])\nfrom devil import devil_env\ndevil_env.config.Initialize()\ndevil_env.config.PrefetchPaths(dependencies=['adb'])\n",
       "[SLAVE_BUILD]/src/third_party/catapult/devil"
     ],
     "name": "initialize devil",
@@ -174,6 +174,7 @@
       "@@@STEP_LOG_LINE@python.inline@sys.path.append(sys.argv[1])@@@",
       "@@@STEP_LOG_LINE@python.inline@from devil import devil_env@@@",
       "@@@STEP_LOG_LINE@python.inline@devil_env.config.Initialize()@@@",
+      "@@@STEP_LOG_LINE@python.inline@devil_env.config.PrefetchPaths(dependencies=['adb'])@@@",
       "@@@STEP_LOG_END@python.inline@@@"
     ]
   },
@@ -579,7 +580,9 @@
       "350",
       "--known-devices-file",
       "[HOME]/.android/known_devices.json",
-      "--enable-platform-mode"
+      "--enable-platform-mode",
+      "--adb-path",
+      "[SLAVE_BUILD]/src/third_party/catapult/devil/bin/deps/linux2/x86_64/bin/adb"
     ],
     "cwd": "[SLAVE_BUILD]/src",
     "env": {

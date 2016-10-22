@@ -520,9 +520,9 @@ void VideoCaptureManager::HandleQueuedStartRequest() {
 void VideoCaptureManager::OnDeviceStarted(
     int serial_id,
     std::unique_ptr<VideoCaptureDevice> device) {
+  DVLOG(3) << __func__;
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   DCHECK_EQ(serial_id, device_start_queue_.begin()->serial_id());
-  DVLOG(3) << __func__;
   if (device_start_queue_.front().abort_start()) {
     // |device| can be null if creation failed in
     // DoStartDeviceCaptureOnDeviceThread.
@@ -549,14 +549,14 @@ void VideoCaptureManager::OnDeviceStarted(
       MaybePostDesktopCaptureWindowId(session_id);
     }
 
-    auto request = photo_request_queue_.begin();
-    while(request != photo_request_queue_.end()) {
+    auto it = photo_request_queue_.begin();
+    while (it != photo_request_queue_.end()) {
+      auto request = it++;
       DeviceEntry* maybe_entry = GetDeviceEntryBySessionId(request->first);
       if (maybe_entry && maybe_entry->video_capture_device()) {
         request->second.Run(maybe_entry->video_capture_device());
         photo_request_queue_.erase(request);
       }
-      ++request;
     }
   }
 
@@ -654,7 +654,6 @@ VideoCaptureManager::DoStartDesktopCaptureOnDeviceThread(
 void VideoCaptureManager::StartCaptureForClient(
     media::VideoCaptureSessionId session_id,
     const media::VideoCaptureParams& params,
-    base::ProcessHandle client_render_process,
     VideoCaptureControllerID client_id,
     VideoCaptureControllerEventHandler* client_handler,
     const DoneCB& done_cb) {
@@ -682,7 +681,7 @@ void VideoCaptureManager::StartCaptureForClient(
   // Run the callback first, as AddClient() may trigger OnFrameInfo().
   done_cb.Run(entry->video_capture_controller()->GetWeakPtrForIOThread());
   entry->video_capture_controller()->AddClient(
-      client_id, client_handler, client_render_process, session_id, params);
+      client_id, client_handler, session_id, params);
 }
 
 void VideoCaptureManager::StopCaptureForClient(

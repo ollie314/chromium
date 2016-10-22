@@ -352,8 +352,8 @@ void WindowTreeClient::RequestClose(Window* window) {
 void WindowTreeClient::AttachSurface(
     Id window_id,
     mojom::SurfaceType type,
-    mojo::InterfaceRequest<mojom::Surface> surface,
-    mojom::SurfaceClientPtr client) {
+    mojo::InterfaceRequest<cc::mojom::MojoCompositorFrameSink> surface,
+    cc::mojom::MojoCompositorFrameSinkClientPtr client) {
   DCHECK(tree_);
   tree_->AttachSurface(window_id, type, std::move(surface), std::move(client));
 }
@@ -1271,6 +1271,11 @@ void WindowTreeClient::WmDisplayRemoved(int64_t display_id) {
       return;
     }
   }
+}
+
+void WindowTreeClient::WmDisplayModified(const display::Display& display) {
+  DCHECK(window_manager_delegate_);
+  window_manager_delegate_->OnWmDisplayModified(display);
 }
 
 void WindowTreeClient::WmSetBounds(uint32_t change_id,

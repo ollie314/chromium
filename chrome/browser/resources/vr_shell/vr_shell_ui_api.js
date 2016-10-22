@@ -70,7 +70,18 @@ var api = (function() {
     'HISTORY_FORWARD': 1,
     'RELOAD': 2,
     'ZOOM_OUT': 3,
-    'ZOOM_IN': 4,
+    'ZOOM_IN': 4
+  });
+
+  /**
+   * Enumeration of modes that can be specified by the native side.
+   * @enum {number}
+   * @const
+   */
+  var Mode = Object.freeze({
+    'UNKNOWN': -1,
+    'STANDARD': 0,
+    'WEB_VR': 1
   });
 
   /**
@@ -151,6 +162,21 @@ var api = (function() {
      */
     setVisible(visible) {
       this.visible = !!visible;
+    }
+
+    /**
+     * Hit-testable implies that the reticle will hit the element, if visible.
+     */
+    setHitTestable(testable) {
+      this.hitTestable = !!testable;
+    }
+
+    /**
+     * Causes an element to be rendered relative to the field of view, rather
+     * than the scene.  Elements locked in this way should not have a parent.
+     */
+    setLockToFieldOfView(locked) {
+      this.lockToFov = !!locked;
     }
   };
 
@@ -268,6 +294,7 @@ var api = (function() {
     Easing: Easing,
     Command: Command,
     Action: Action,
+    Mode: Mode,
     getContentElementId: getContentElementId,
     UiElement: UiElement,
     UiElementUpdate: UiElementUpdate,

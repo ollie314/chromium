@@ -402,6 +402,9 @@ class WebContents : public PageNavigator,
   virtual base::TimeTicks GetLastActiveTime() const = 0;
   virtual void SetLastActiveTime(base::TimeTicks last_active_time) = 0;
 
+  // Get the last time that the WebContents was made hidden.
+  virtual base::TimeTicks GetLastHiddenTime() const = 0;
+
   // Invoked when the WebContents becomes shown/hidden.
   virtual void WasShown() = 0;
   virtual void WasHidden() = 0;
@@ -718,6 +721,9 @@ class WebContents : public PageNavigator,
   // SSLStatus to record the sensitive input field, so that embedders
   // can adjust the UI if desired.
   virtual void OnCreditCardInputShownOnHttp() = 0;
+
+  // Sets whether the WebContents is for overlaying content on a page.
+  virtual void SetIsOverlayContent(bool is_overlay_content) = 0;
 
 #if defined(OS_ANDROID)
   CONTENT_EXPORT static WebContents* FromJavaWebContents(

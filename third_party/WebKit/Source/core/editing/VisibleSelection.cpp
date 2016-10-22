@@ -98,17 +98,6 @@ VisibleSelection createVisibleSelection(const Position& base,
   return createVisibleSelection(builder.build());
 }
 
-VisibleSelection createVisibleSelection(const PositionWithAffinity& pos,
-                                        bool isDirectional) {
-  return createVisibleSelection(pos.position(), pos.affinity(), isDirectional);
-}
-
-VisibleSelection createVisibleSelection(const VisiblePosition& pos,
-                                        bool isDirectional) {
-  return createVisibleSelection(pos.deepEquivalent(), pos.affinity(),
-                                isDirectional);
-}
-
 VisibleSelection createVisibleSelection(const VisiblePosition& base,
                                         const VisiblePosition& extent,
                                         bool isDirectional) {
@@ -118,48 +107,9 @@ VisibleSelection createVisibleSelection(const VisiblePosition& base,
                                 base.affinity(), isDirectional);
 }
 
-VisibleSelection createVisibleSelection(const EphemeralRange& range,
-                                        TextAffinity affinity,
-                                        bool isDirectional) {
-  DCHECK(!needsLayoutTreeUpdate(range.startPosition()));
-  DCHECK(!needsLayoutTreeUpdate(range.endPosition()));
-  SelectionInDOMTree::Builder builder;
-  builder.setBaseAndExtent(range).setAffinity(affinity).setIsDirectional(
-      isDirectional);
-  return createVisibleSelection(builder.build());
-}
-
 VisibleSelectionInFlatTree createVisibleSelection(
     const SelectionInFlatTree& selection) {
   return VisibleSelectionInFlatTree::create(selection);
-}
-
-VisibleSelectionInFlatTree createVisibleSelection(
-    const PositionInFlatTree& base,
-    const PositionInFlatTree& extent,
-    TextAffinity affinity,
-    bool isDirectional) {
-  DCHECK(!needsLayoutTreeUpdate(base));
-  DCHECK(!needsLayoutTreeUpdate(extent));
-  // TODO(yosin): We should use |Builder::setBaseAndExtent()| once we get rid
-  // of callers passing |base.istNull()| but |extent.isNotNull()|.
-  SelectionInFlatTree::Builder builder;
-  builder.setBaseAndExtentDeprecated(base, extent)
-      .setAffinity(affinity)
-      .setIsDirectional(isDirectional);
-  return createVisibleSelection(builder.build());
-}
-
-VisibleSelectionInFlatTree createVisibleSelection(
-    const VisiblePositionInFlatTree& base,
-    const VisiblePositionInFlatTree& extent,
-    bool isDirectional) {
-  DCHECK(base.isValid());
-  DCHECK(extent.isValid());
-  // TODO(xiaochengh): We should check |base.isNotNull() || extent.isNull()|
-  // after all call sites have ensured that.
-  return createVisibleSelection(base.deepEquivalent(), extent.deepEquivalent(),
-                                base.affinity(), isDirectional);
 }
 
 template <typename Strategy>
@@ -210,19 +160,6 @@ operator=(const VisibleSelectionTemplate<Strategy>& other) {
   m_granularity = other.m_granularity;
   m_hasTrailingWhitespace = other.m_hasTrailingWhitespace;
   return *this;
-}
-
-template <typename Strategy>
-VisibleSelectionTemplate<Strategy>
-VisibleSelectionTemplate<Strategy>::selectionFromContentsOfNode(Node* node) {
-  DCHECK(node);
-  DCHECK(!Strategy::editingIgnoresContent(node));
-  DCHECK(!needsLayoutTreeUpdate(*node));
-
-  typename SelectionTemplate<Strategy>::Builder builder;
-  builder.collapse(PositionTemplate<Strategy>::firstPositionInNode(node))
-      .extend(PositionTemplate<Strategy>::lastPositionInNode(node));
-  return VisibleSelectionTemplate::create(builder.build());
 }
 
 template <typename Strategy>
@@ -838,7 +775,6 @@ void VisibleSelectionTemplate<Strategy>::updateIfNeeded() {
     return;
   appendTrailingWhitespace();
 }
-
 
 template <typename Strategy>
 static bool equalSelectionsAlgorithm(

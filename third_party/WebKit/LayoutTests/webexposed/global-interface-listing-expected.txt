@@ -2488,6 +2488,7 @@ interface HTMLIFrameElement : HTMLElement
     attribute @@toStringTag
     getter align
     getter allowFullscreen
+    getter allowPaymentRequest
     getter contentDocument
     getter contentWindow
     getter csp
@@ -2508,6 +2509,7 @@ interface HTMLIFrameElement : HTMLElement
     method getSVGDocument
     setter align
     setter allowFullscreen
+    setter allowPaymentRequest
     setter csp
     setter frameBorder
     setter height
@@ -4092,13 +4094,6 @@ interface NamedNodeMap
     method removeNamedItemNS
     method setNamedItem
     method setNamedItemNS
-interface NavigationPreloadManager
-    attribute @@toStringTag
-    method constructor
-    method disable
-    method enable
-    method getState
-    method setHeaderValue
 interface Navigator
     attribute @@toStringTag
     getter appCodeName
@@ -4508,10 +4503,6 @@ interface Performance : EventTarget
     setter onframetimingbufferfull
     setter onresourcetimingbufferfull
     setter onwebkitresourcetimingbufferfull
-interface PerformanceCompositeTiming : PerformanceEntry
-    attribute @@toStringTag
-    getter sourceFrame
-    method constructor
 interface PerformanceEntry
     attribute @@toStringTag
     getter duration
@@ -4547,10 +4538,6 @@ interface PerformanceObserverEntryList
     method getEntries
     method getEntriesByName
     method getEntriesByType
-interface PerformanceRenderTiming : PerformanceEntry
-    attribute @@toStringTag
-    getter sourceFrame
-    method constructor
 interface PerformanceResourceTiming : PerformanceEntry
     attribute @@toStringTag
     getter connectEnd
@@ -6142,7 +6129,6 @@ interface ServiceWorkerRegistration : EventTarget
     attribute @@toStringTag
     getter active
     getter installing
-    getter navigationPreload
     getter onupdatefound
     getter pushManager
     getter scope

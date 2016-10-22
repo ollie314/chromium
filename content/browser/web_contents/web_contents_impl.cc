@@ -451,6 +451,7 @@ WebContentsImpl::WebContentsImpl(BrowserContext* browser_context)
       virtual_keyboard_requested_(false),
       page_scale_factor_is_one_(true),
       mouse_lock_widget_(nullptr),
+      is_overlay_content_(false),
       loading_weak_factory_(this),
       weak_factory_(this) {
   frame_tree_.SetFrameRemoveListener(
@@ -1324,6 +1325,10 @@ void WebContentsImpl::SetLastActiveTime(base::TimeTicks last_active_time) {
   last_active_time_ = last_active_time;
 }
 
+base::TimeTicks WebContentsImpl::GetLastHiddenTime() const {
+  return last_hidden_time_;
+}
+
 void WebContentsImpl::WasShown() {
   controller_.SetActive(true);
 
@@ -1363,6 +1368,8 @@ void WebContentsImpl::WasHidden() {
 
     SendPageMessage(new PageMsg_WasHidden(MSG_ROUTING_NONE));
   }
+
+  last_hidden_time_ = base::TimeTicks::Now();
 
   for (auto& observer : observers_)
     observer.WasHidden();
@@ -1719,7 +1726,8 @@ void WebContentsImpl::RenderWidgetDeleted(
       view_->RestoreFocus();
   }
 
-  CHECK(mouse_lock_widget_ != render_widget_host);
+  if (mouse_lock_widget_)
+    LostMouseLock(mouse_lock_widget_);
 }
 
 void WebContentsImpl::RenderWidgetGotFocus(
@@ -3813,6 +3821,10 @@ void WebContentsImpl::OnCreditCardInputShownOnHttp() {
   controller_.ssl_manager()->DidShowCreditCardInputOnHttp();
 }
 
+void WebContentsImpl::SetIsOverlayContent(bool is_overlay_content) {
+  is_overlay_content_ = is_overlay_content;
+}
+
 void WebContentsImpl::OnFirstVisuallyNonEmptyPaint() {
   for (auto& observer : observers_)
     observer.DidFirstVisuallyNonEmptyPaint();
@@ -4143,6 +4155,10 @@ double WebContentsImpl::GetPendingPageZoomLevel() {
   GURL url = pending_entry->GetURL();
   return HostZoomMap::GetForWebContents(this)->GetZoomLevelForHostAndScheme(
       url.scheme(), net::GetHostOrSpecFromURL(url));
+}
+
+bool WebContentsImpl::HideDownloadUI() const {
+  return is_overlay_content_;
 }
 
 bool WebContentsImpl::IsNeverVisible() {

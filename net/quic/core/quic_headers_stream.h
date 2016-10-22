@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef NET_QUIC_QUIC_HEADERS_STREAM_H_
-#define NET_QUIC_QUIC_HEADERS_STREAM_H_
+#ifndef NET_QUIC_CORE_QUIC_HEADERS_STREAM_H_
+#define NET_QUIC_CORE_QUIC_HEADERS_STREAM_H_
 
 #include <stddef.h>
 
@@ -101,6 +101,9 @@ class NET_EXPORT_PRIVATE QuicHeadersStream : public ReliableQuicStream {
     spdy_framer_.set_max_decode_buffer_size_bytes(max_decode_buffer_size_bytes);
   }
 
+  void set_max_uncompressed_header_bytes(
+      size_t set_max_uncompressed_header_bytes);
+
  private:
   friend class test::QuicHeadersStreamPeer;
 
@@ -119,16 +122,6 @@ class NET_EXPORT_PRIVATE QuicHeadersStream : public ReliableQuicStream {
                      SpdyStreamId promised_stream_id,
                      bool end);
 
-  // Called when a chunk of header data is available. This is called
-  // after OnHeaders.
-  // |stream_id| The stream receiving the header data.
-  // |header_data| A buffer containing the header data chunk received.
-  // |len| The length of the header data buffer. A length of zero indicates
-  //       that the header data block has been completely sent.
-  void OnControlFrameHeaderData(SpdyStreamId stream_id,
-                                const char* header_data,
-                                size_t len);
-
   // Called when the complete list of headers is available.
   void OnHeaderList(const QuicHeaderList& header_list);
 
@@ -136,15 +129,10 @@ class NET_EXPORT_PRIVATE QuicHeadersStream : public ReliableQuicStream {
   void OnCompressedFrameSize(size_t frame_len);
 
   // For force HOL blocking, where stream frames from all streams are
-  // plumbed through headers stream as HTTP/2 data frames.
-  // The following two return false if force_hol_blocking_ is false.
+  // plumbed through headers stream as HTTP/2 data frames.  Return false
+  // if force_hol_blocking_ is false;
   bool OnDataFrameHeader(QuicStreamId stream_id, size_t length, bool fin);
   bool OnStreamFrameData(QuicStreamId stream_id, const char* data, size_t len);
-  // Helper for |WritevStreamData()|.
-  void WriteDataFrame(QuicStreamId stream_id,
-                      base::StringPiece data,
-                      bool fin,
-                      QuicAckListenerInterface* ack_notifier_delegate);
 
   // Returns true if the session is still connected.
   bool IsConnected();
@@ -177,4 +165,4 @@ class NET_EXPORT_PRIVATE QuicHeadersStream : public ReliableQuicStream {
 
 }  // namespace net
 
-#endif  // NET_QUIC_QUIC_HEADERS_STREAM_H_
+#endif  // NET_QUIC_CORE_QUIC_HEADERS_STREAM_H_

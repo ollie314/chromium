@@ -49,10 +49,6 @@
   const PULL_AGAIN = 0b1000;
   const EXTERNALLY_CONTROLLED = 0b10000;
 
-  const readableStreamControllerCancel =
-      v8.createPrivateSymbol('[[InternalCancel]]');
-  const readableStreamControllerPull = v8.createPrivateSymbol('[[InternalPull]]');
-
   const undefined = global.undefined;
   const Infinity = global.Infinity;
 
@@ -172,11 +168,13 @@
       }
 
       if (mode === 'byob') {
-        if (IsReadableByteStreamDefaultController(this[readableStreamController]) === false) {
-          throw new TypeError(errGetReaderNotByteStream);
-        }
-
-        return AcquireReadableStreamBYOBReader(this);
+        // TODO(ricea): When BYOB readers are supported:
+        //
+        // a. If
+        // ! IsReadableByteStreamController(this.[[readableStreamController]])
+        // is false, throw a TypeError exception.
+        // b. Return ? AcquireReadableStreamBYOBReader(this).
+        throw new TypeError(errGetReaderNotByteStream);
       }
 
       if (mode === undefined) {

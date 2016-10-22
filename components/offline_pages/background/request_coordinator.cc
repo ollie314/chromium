@@ -136,6 +136,7 @@ RequestCoordinator::RequestCoordinator(
       network_quality_estimator_(network_quality_estimator),
       active_request_(nullptr),
       last_offlining_status_(Offliner::RequestStatus::UNKNOWN),
+      scheduler_callback_(base::Bind(&EmptySchedulerCallback)),
       immediate_schedule_callback_(base::Bind(&EmptySchedulerCallback)),
       weak_ptr_factory_(this) {
   DCHECK(policy_ != nullptr);
@@ -239,6 +240,7 @@ bool RequestCoordinator::CancelActiveRequestIfItMatches(
     if (request_ids.end() != std::find(request_ids.begin(), request_ids.end(),
                                        active_request_->request_id())) {
       StopPrerendering(Offliner::RequestStatus::REQUEST_COORDINATOR_CANCELED);
+      active_request_.reset(nullptr);
       return true;
     }
   }
@@ -247,7 +249,6 @@ bool RequestCoordinator::CancelActiveRequestIfItMatches(
 }
 
 void RequestCoordinator::AbortRequestAttempt(SavePageRequest* request) {
-  request->MarkAttemptAborted();
   if (request->started_attempt_count() >= policy_->GetMaxStartedTries()) {
     const BackgroundSavePageResult result(
         BackgroundSavePageResult::START_COUNT_EXCEEDED);
@@ -255,10 +256,11 @@ void RequestCoordinator::AbortRequestAttempt(SavePageRequest* request) {
                                                result, request->request_id());
     RemoveAttemptedRequest(*request, result);
   } else {
-    queue_->UpdateRequest(
-        *request,
-        base::Bind(&RequestCoordinator::UpdateRequestCallback,
-                   weak_ptr_factory_.GetWeakPtr(), request->client_id()));
+    queue_->MarkAttemptAborted(
+        request->request_id(),
+        base::Bind(&RequestCoordinator::MarkAttemptAbortedDone,
+                   weak_ptr_factory_.GetWeakPtr(), request->request_id(),
+                   request->client_id()));
   }
 }
 
@@ -271,6 +273,25 @@ void RequestCoordinator::RemoveAttemptedRequest(
                          base::Bind(&RequestCoordinator::HandleRemovedRequests,
                                     weak_ptr_factory_.GetWeakPtr(), result));
   RecordAttemptCount(request, result);
+}
+
+void RequestCoordinator::MarkAttemptAbortedDone(
+    int64_t request_id,
+    const ClientId& client_id,
+    std::unique_ptr<UpdateRequestsResult> result) {
+  // If the request succeeded, nothing to do.  If it failed, we can't really do
+  // much, so just log it.
+  if (result->store_state != StoreState::LOADED ||
+      result->item_statuses.size() != 1 ||
+      result->item_statuses.at(0).first != request_id ||
+      result->item_statuses.at(0).second != ItemActionStatus::SUCCESS) {
+    DVLOG(1) << "Failed to mark request aborted: " << request_id;
+    event_logger_.RecordUpdateRequestFailed(
+        client_id.name_space,
+        result->store_state != StoreState::LOADED
+            ? RequestQueue::UpdateRequestResult::STORE_FAILURE
+            : RequestQueue::UpdateRequestResult::REQUEST_DOES_NOT_EXIST);
+  }
 }
 
 void RequestCoordinator::RemoveRequests(
@@ -447,8 +468,11 @@ RequestCoordinator::TryImmediateStart() {
     return OfflinerImmediateStartStatus::BUSY;
 
   // Make sure we are not on svelte device to start immediately.
-  if (base::SysInfo::IsLowEndDevice())
+  // Let the scheduler know we are done processing and failed due to svelte.
+  if (base::SysInfo::IsLowEndDevice()) {
+    immediate_schedule_callback_.Run(false);
     return OfflinerImmediateStartStatus::NOT_STARTED_ON_SVELTE;
+  }
 
   // Make sure we have reasonable network quality (or at least a connection).
   if (network_quality_estimator_) {
@@ -485,6 +509,7 @@ void RequestCoordinator::TryNextRequest() {
     is_starting_ = false;
 
     // Let the scheduler know we are done processing.
+    // TODO: Make sure the scheduler callback is valid before running it.
     scheduler_callback_.Run(true);
 
     return;

@@ -8,12 +8,14 @@ import android.app.Activity;
 import android.content.SharedPreferences;
 import android.os.AsyncTask;
 import android.test.suitebuilder.annotation.SmallTest;
+import android.util.Pair;
 import android.util.SparseArray;
 
 import org.chromium.base.ActivityState;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.AdvancedMockContext;
+import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.MinAndroidSdkLevel;
 import org.chromium.base.test.util.RetryOnFailure;
@@ -21,7 +23,6 @@ import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.TabState;
 import org.chromium.chrome.browser.compositor.overlays.strip.StripLayoutHelper;
 import org.chromium.chrome.browser.fullscreen.ChromeFullscreenManager;
-import org.chromium.chrome.browser.fullscreen.FullscreenManager;
 import org.chromium.chrome.browser.snackbar.undo.UndoBarController;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.TabCreatorManager.TabCreator;
@@ -32,7 +33,6 @@ import org.chromium.chrome.browser.tabmodel.TestTabModelDirectory.TabModelMetaDa
 import org.chromium.chrome.browser.widget.OverviewListLayout;
 import org.chromium.chrome.test.util.browser.tabmodel.MockTabModelSelector;
 import org.chromium.content.browser.test.NativeLibraryTestBase;
-import org.chromium.content.browser.test.util.CallbackHelper;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_public.browser.WebContents;
 
@@ -258,6 +258,16 @@ public class TabPersistentStoreTest extends NativeLibraryTestBase {
         }
 
         @Override
+        protected Pair<? extends TabCreator, ? extends TabCreator> createTabCreators() {
+            return null;
+        }
+
+        @Override
+        protected TabModelSelector createTabModelSelector() {
+            return null;
+        }
+
+        @Override
         protected ChromeFullscreenManager createFullscreenManager() {
             return null;
         }
@@ -267,8 +277,7 @@ public class TabPersistentStoreTest extends NativeLibraryTestBase {
             new TabWindowManager.TabModelSelectorFactory() {
                 @Override
                 public TabModelSelector buildSelector(Activity activity,
-                        TabCreatorManager tabCreatorManager, FullscreenManager fullscreenManager,
-                        int selectorIndex) {
+                        TabCreatorManager tabCreatorManager, int selectorIndex) {
                     try {
                         return new TestTabModelSelector();
                     } catch (Exception e) {
@@ -664,7 +673,7 @@ public class TabPersistentStoreTest extends NativeLibraryTestBase {
                         tabWindowManager.onActivityStateChange(
                                 mFakeChromeActivity, ActivityState.DESTROYED);
                         return (TestTabModelSelector) tabWindowManager.requestSelector(
-                                mFakeChromeActivity, mFakeChromeActivity, null, 0);
+                                mFakeChromeActivity, mFakeChromeActivity, 0);
                     }
                 });
 

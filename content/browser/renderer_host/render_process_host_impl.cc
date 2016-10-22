@@ -1097,7 +1097,6 @@ void RenderProcessHostImpl::CreateMessageFilters() {
   AddFilter(audio_renderer_host_.get());
   AddFilter(
       new MidiHost(GetID(), BrowserMainLoop::GetInstance()->midi_manager()));
-  AddFilter(new VideoCaptureHost(media_stream_manager));
   AddFilter(new AppCacheDispatcherHost(
       storage_partition_impl_->GetAppCacheService(), GetID()));
   AddFilter(new ClipboardMessageFilter(blob_storage_context));
@@ -1156,7 +1155,9 @@ void RenderProcessHostImpl::CreateMessageFilters() {
 
   scoped_refptr<ServiceWorkerDispatcherHost> service_worker_filter =
       new ServiceWorkerDispatcherHost(
-          GetID(), message_port_message_filter_.get(), resource_context);
+          GetID(), message_port_message_filter_.get(), resource_context,
+          base::Bind(&RenderProcessHostImpl::CreateURLLoaderFactory,
+                     weak_factory_.GetWeakPtr()));
   service_worker_filter->Init(
       storage_partition_impl_->GetServiceWorkerContext());
   AddFilter(service_worker_filter.get());
@@ -1283,6 +1284,10 @@ void RenderProcessHostImpl::RegisterMojoInterfaces() {
   registry->AddInterface(base::Bind(&DeviceOrientationAbsoluteHost::Create));
   registry->AddInterface(
       base::Bind(&URLLoaderFactoryImpl::Create, resource_message_filter_));
+
+  registry->AddInterface(
+      base::Bind(&VideoCaptureHost::Create,
+                 BrowserMainLoop::GetInstance()->media_stream_manager()));
 
   // This is to support usage of WebSockets in cases in which there is no
   // associated RenderFrame (e.g., Shared Workers).
@@ -1779,7 +1784,6 @@ void RenderProcessHostImpl::PropagateBrowserCommandLineToRenderer(
 #if defined(ENABLE_WEBRTC)
     switches::kDisableWebRtcHWDecoding,
     switches::kDisableWebRtcHWEncoding,
-    switches::kEnableWebRtcHWH264Encoding,
     switches::kEnableWebRtcStunOrigin,
     switches::kEnforceWebRtcIPPermissionCheck,
     switches::kForceWebRtcIPHandlingPolicy,
@@ -2998,6 +3002,11 @@ void RenderProcessHostImpl::OnMojoError(int render_process_id,
   base::debug::Alias(&error);
   bad_message::ReceivedBadMessage(render_process_id,
                                   bad_message::RPH_MOJO_PROCESS_ERROR);
+}
+
+void RenderProcessHostImpl::CreateURLLoaderFactory(
+    mojo::InterfaceRequest<mojom::URLLoaderFactory> request) {
+  URLLoaderFactoryImpl::Create(resource_message_filter_, std::move(request));
 }
 
 }  // namespace content

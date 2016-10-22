@@ -148,7 +148,6 @@ extern const char kWebKitPasswordEchoEnabled[];
 #endif
 extern const char kDataSaverEnabled[];
 extern const char kSafeBrowsingEnabled[];
-extern const char kSafeBrowsingExtendedReportingEnabled[];
 extern const char kSafeBrowsingProceedAnywayDisabled[];
 extern const char kSafeBrowsingIncidentsSent[];
 extern const char kSafeBrowsingExtendedReportingOptInAllowed[];
@@ -168,6 +167,7 @@ extern const char kAlternateErrorPagesEnabled[];
 extern const char kDnsPrefetchingStartupList[];
 extern const char kDnsPrefetchingHostReferralList[];
 extern const char kHttpServerProperties[];
+extern const char kNetworkQualities[];
 #if defined(OS_ANDROID)
 extern const char kLastPolicyCheckTime[];
 #endif

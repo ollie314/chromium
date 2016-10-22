@@ -39,11 +39,11 @@ vars = {
   # Three lines of non-changing comments so that
   # the commit queue can handle CLs rolling Skia
   # and whatever else without interference from each other.
-  'skia_revision': 'e1d6ff172e219d3be61949b0e44091f4c85de2ad',
+  'skia_revision': '7a86423c42433ab8a7df2b06bd954b2427217bb9',
   # Three lines of non-changing comments so that
   # the commit queue can handle CLs rolling V8
   # and whatever else without interference from each other.
-  'v8_revision': 'be0bfc8461c89fda99d9982bb8e24d484dfc825b',
+  'v8_revision': 'e923cdb9c4f5f2dfb100920b1e4d3019c87111c3',
   # Three lines of non-changing comments so that
   # the commit queue can handle CLs rolling swarming_client
   # and whatever else without interference from each other.
@@ -63,7 +63,7 @@ vars = {
   # Three lines of non-changing comments so that
   # the commit queue can handle CLs rolling PDFium
   # and whatever else without interference from each other.
-  'pdfium_revision': 'dadea5f87d35f8a692b659dbff54cc8780d48ef8',
+  'pdfium_revision': 'a804fd48b71679ece1f1c2284c3c1835c9e20441',
   # Three lines of non-changing comments so that
   # the commit queue can handle CLs rolling openmax_dl
   # and whatever else without interference from each other.
@@ -71,7 +71,7 @@ vars = {
   # Three lines of non-changing comments so that
   # the commit queue can handle CLs rolling BoringSSL
   # and whatever else without interference from each other.
-  'boringssl_revision': '3ef7697ed30f28367395a5aafb57a12a19906d96',
+  'boringssl_revision': 'fc4467e5688d8f61b992684c2705e7934679d331',
   # Three lines of non-changing comments so that
   # the commit queue can handle CLs rolling google-toolbox-for-mac
   # and whatever else without interference from each other.
@@ -95,7 +95,7 @@ vars = {
   # Three lines of non-changing comments so that
   # the commit queue can handle CLs rolling catapult
   # and whatever else without interference from each other.
-  'catapult_revision': 'fb397f8421f6a4898f3637058fa8058310f34bce',
+  'catapult_revision': 'b7d8fe883c1682e6181e8f62b7039553f7c826a7',
   # Three lines of non-changing comments so that
   # the commit queue can handle CLs rolling libFuzzer
   # and whatever else without interference from each other.
@@ -186,7 +186,7 @@ deps = {
     Var('chromium_git') + '/external/bidichecker/lib.git' + '@' + '97f2aa645b74c28c57eca56992235c79850fa9e0',
 
   'src/third_party/webgl/src':
-    Var('chromium_git') + '/external/khronosgroup/webgl.git' + '@' + '4e6c509e9af95cf777a3136aed0f956d6e1608cd',
+    Var('chromium_git') + '/external/khronosgroup/webgl.git' + '@' + 'b973c091b0bf7021b53f0635a553ee79011195ec',
 
   'src/third_party/webdriver/pylib':
     Var('chromium_git') + '/external/selenium/py.git' + '@' + '5fd78261a75fe08d27ca4835fb6c5ce4b42275bd',
@@ -201,7 +201,7 @@ deps = {
     Var('chromium_git') + '/external/github.com/sctplab/usrsctp' + '@' + '7f9228152ab3d70e6848cc9c67389a0d4218740e',
 
   'src/third_party/libsrtp':
-    Var('chromium_git') + '/chromium/deps/libsrtp.git' + '@' + 'b17c065a8a63725eca216fd461984f82c331dd07',
+    Var('chromium_git') + '/chromium/deps/libsrtp.git' + '@' + '71692eaab2a06bbd87a551614a8791c7caa7e266',
 
   'src/third_party/yasm/source/patched-yasm':
     Var('chromium_git') + '/chromium/deps/yasm/patched-yasm.git' + '@' + '7da28c6c7c6a1387217352ce02b31754deb54d2a',
@@ -222,7 +222,7 @@ deps = {
     Var('chromium_git') + '/native_client/src/third_party/scons-2.0.1.git' + '@' + '1c1550e17fc26355d08627fbdec13d8291227067',
 
   'src/third_party/webrtc':
-    Var('chromium_git') + '/external/webrtc/trunk/webrtc.git' + '@' + '0ec7a4430e8b18536c3061e51943a82e8ea2ee94', # commit position 14683
+    Var('chromium_git') + '/external/webrtc/trunk/webrtc.git' + '@' + '5a1b3fe2f1dce38c120dfd48c65b23068627c267', # commit position 14722
 
   'src/third_party/openmax_dl':
     Var('chromium_git') + '/external/webrtc/deps/third_party/openmax.git' + '@' +  Var('openmax_dl_revision'),
@@ -231,7 +231,7 @@ deps = {
     Var('chromium_git') + '/external/github.com/open-source-parsers/jsoncpp.git' + '@' + 'f572e8e42e22cfcf5ab0aea26574f408943edfa4', # from svn 248
 
   'src/third_party/libyuv':
-    Var('chromium_git') + '/libyuv/libyuv.git' + '@' + '198bce39590b60486d9d5f1f10a6a0e03d8c6d8b',
+    Var('chromium_git') + '/libyuv/libyuv.git' + '@' + '550cf829fb130dc567e27717252e3510cd63b306',
 
   'src/third_party/smhasher/src':
     Var('chromium_git') + '/external/smhasher.git' + '@' + 'e87738e57558e0ec472b2fc3a643b838e5b6e88f',

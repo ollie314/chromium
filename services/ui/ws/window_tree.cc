@@ -219,6 +219,10 @@ void WindowTree::OnWindowDestroyingTreeImpl(WindowTree* tree) {
   }
 }
 
+void WindowTree::OnWmDisplayModified(const display::Display& display) {
+  window_manager_internal_->WmDisplayModified(display);
+}
+
 void WindowTree::NotifyChangeCompleted(
     uint32_t change_id,
     mojom::WindowManagerErrorCode error_code) {
@@ -1345,10 +1349,11 @@ void WindowTree::SetWindowOpacity(uint32_t change_id,
       change_id, SetWindowOpacity(ClientWindowId(window_id), opacity));
 }
 
-void WindowTree::AttachSurface(Id transport_window_id,
-                               mojom::SurfaceType type,
-                               mojo::InterfaceRequest<mojom::Surface> surface,
-                               mojom::SurfaceClientPtr client) {
+void WindowTree::AttachSurface(
+    Id transport_window_id,
+    mojom::SurfaceType type,
+    mojo::InterfaceRequest<cc::mojom::MojoCompositorFrameSink> surface,
+    cc::mojom::MojoCompositorFrameSinkClientPtr client) {
   ServerWindow* window =
       GetWindowByClientId(ClientWindowId(transport_window_id));
   const bool success =

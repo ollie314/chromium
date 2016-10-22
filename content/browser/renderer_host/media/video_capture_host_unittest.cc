@@ -23,7 +23,6 @@
 #include "content/browser/renderer_host/media/media_stream_manager.h"
 #include "content/browser/renderer_host/media/media_stream_requester.h"
 #include "content/browser/renderer_host/media/video_capture_manager.h"
-#include "content/common/media/video_capture_messages.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/test/mock_resource_context.h"
 #include "content/public/test/test_browser_context.h"
@@ -32,6 +31,7 @@
 #include "media/audio/mock_audio_manager.h"
 #include "media/base/media_switches.h"
 #include "media/base/video_capture_types.h"
+#include "mojo/public/cpp/bindings/binding.h"
 #include "net/url_request/url_request_context.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -84,33 +84,6 @@ class MockMediaStreamRequester : public MediaStreamRequester {
   DISALLOW_COPY_AND_ASSIGN(MockMediaStreamRequester);
 };
 
-class MockVideoCaptureHost : public VideoCaptureHost {
- public:
-  MockVideoCaptureHost(MediaStreamManager* manager)
-      : VideoCaptureHost(manager) {}
-
-  MOCK_METHOD4(OnNewBufferCreated,
-               void(int device_id,
-                    base::SharedMemoryHandle handle,
-                    int length,
-                    int buffer_id));
-
- private:
-  ~MockVideoCaptureHost() override {}
-
-  bool Send(IPC::Message* message) override {
-    bool handled = true;
-    IPC_BEGIN_MESSAGE_MAP(MockVideoCaptureHost, *message)
-      IPC_MESSAGE_HANDLER(VideoCaptureMsg_NewBuffer, OnNewBufferCreated)
-      IPC_MESSAGE_UNHANDLED(handled = false)
-    IPC_END_MESSAGE_MAP()
-    EXPECT_TRUE(handled);
-
-    delete message;
-    return true;
-  }
-};
-
 ACTION_P2(ExitMessageLoop, task_runner, quit_closure) {
   task_runner->PostTask(FROM_HERE, quit_closure);
 }
@@ -139,8 +112,7 @@ class VideoCaptureHostTest : public testing::Test,
     media_stream_manager_.reset(new MediaStreamManager(audio_manager_.get()));
 
     // Create a Host and connect it to a simulated IPC channel.
-    host_ = new MockVideoCaptureHost(media_stream_manager_.get());
-    host_->OnChannelConnected(base::GetCurrentProcId());
+    host_.reset(new VideoCaptureHost(media_stream_manager_.get()));
 
     OpenSession();
   }
@@ -150,9 +122,6 @@ class VideoCaptureHostTest : public testing::Test,
     EXPECT_TRUE(host_->controllers_.empty());
 
     CloseSession();
-
-    // Simulate closing the IPC sender.
-    host_->OnChannelClosing();
 
     // Release the reference to the mock object. The object will be destructed
     // on the current message loop.
@@ -228,6 +197,11 @@ class VideoCaptureHostTest : public testing::Test,
  protected:
   // mojom::VideoCaptureObserver implementation.
   MOCK_METHOD1(OnStateChanged, void(mojom::VideoCaptureState));
+  void OnBufferCreated(int32_t buffer_id,
+                       mojo::ScopedSharedBufferHandle handle) override {
+    DoOnBufferCreated(buffer_id);
+  }
+  MOCK_METHOD1(DoOnBufferCreated, void(int32_t));
   void OnBufferReady(int32_t buffer_id,
                      mojom::VideoFrameInfoPtr info) override {
     DoOnBufferReady(buffer_id);
@@ -242,12 +216,12 @@ class VideoCaptureHostTest : public testing::Test,
         gfx::Size(352, 288), 30, media::PIXEL_FORMAT_I420);
 
     EXPECT_CALL(*this, OnStateChanged(mojom::VideoCaptureState::STARTED));
-    EXPECT_CALL(*host_.get(), OnNewBufferCreated(kDeviceId, _, _, _))
+    EXPECT_CALL(*this, DoOnBufferCreated(_))
         .Times(AnyNumber())
         .WillRepeatedly(Return());
     EXPECT_CALL(*this, DoOnBufferReady(_))
         .Times(AnyNumber())
-        .WillOnce(ExitMessageLoop(task_runner_, run_loop.QuitClosure()));
+        .WillRepeatedly(ExitMessageLoop(task_runner_, run_loop.QuitClosure()));
 
     host_->Start(kDeviceId, opened_session_id_, params,
                  observer_binding_.CreateInterfacePtrAndBind());
@@ -255,7 +229,7 @@ class VideoCaptureHostTest : public testing::Test,
     run_loop.Run();
   }
 
-  void StartStopCapture() {
+  void StartAndImmediateStopCapture() {
     // Quickly start and then stop capture, without giving much chance for
     // asynchronous capture operations to produce frames.
     InSequence s;
@@ -272,7 +246,6 @@ class VideoCaptureHostTest : public testing::Test,
     EXPECT_CALL(*this, OnStateChanged(mojom::VideoCaptureState::STOPPED));
     host_->Stop(kDeviceId);
     run_loop.RunUntilIdle();
-    WaitForVideoDeviceThread();
   }
 
   void PauseResumeCapture() {
@@ -289,7 +262,6 @@ class VideoCaptureHostTest : public testing::Test,
     EXPECT_CALL(*this, OnStateChanged(mojom::VideoCaptureState::RESUMED));
     host_->Resume(kDeviceId, opened_session_id_, params);
     run_loop.RunUntilIdle();
-    WaitForVideoDeviceThread();
   }
 
   void StopCapture() {
@@ -321,18 +293,6 @@ class VideoCaptureHostTest : public testing::Test,
     base::RunLoop().RunUntilIdle();
   }
 
-  void WaitForVideoDeviceThread() {
-    base::RunLoop run_loop;
-    media_stream_manager_->video_capture_manager()->device_task_runner()
-        ->PostTaskAndReply(
-            FROM_HERE,
-            base::Bind(&base::DoNothing),
-            run_loop.QuitClosure());
-    run_loop.Run();
-  }
-
-  scoped_refptr<MockVideoCaptureHost> host_;
-
  private:
   // |media_stream_manager_| needs to outlive |thread_bundle_| because it is a
   // MessageLoop::DestructionObserver.
@@ -348,10 +308,46 @@ class VideoCaptureHostTest : public testing::Test,
   int opened_session_id_;
   std::string opened_device_label_;
 
+  std::unique_ptr<VideoCaptureHost> host_;
   mojo::Binding<mojom::VideoCaptureObserver> observer_binding_;
 
   DISALLOW_COPY_AND_ASSIGN(VideoCaptureHostTest);
 };
+
+// Construct and destruct all objects. This is a non trivial sequence.
+TEST_F(VideoCaptureHostTest, ConstructAndDestruct) {}
+
+TEST_F(VideoCaptureHostTest, StartAndImmediateStop) {
+  StartAndImmediateStopCapture();
+}
+
+TEST_F(VideoCaptureHostTest, StartAndCaptureAndStop) {
+  StartCapture();
+  WaitForOneCapturedBuffer();
+  WaitForOneCapturedBuffer();
+  StopCapture();
+}
+
+TEST_F(VideoCaptureHostTest, StartAndErrorAndStop) {
+  StartCapture();
+  SimulateError();
+  StopCapture();
+}
+
+TEST_F(VideoCaptureHostTest, StartAndCaptureAndError) {
+  EXPECT_CALL(*this, OnStateChanged(mojom::VideoCaptureState::STOPPED))
+      .Times(0);
+  StartCapture();
+  WaitForOneCapturedBuffer();
+  SimulateError();
+  base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(200));
+}
+
+TEST_F(VideoCaptureHostTest, StartAndPauseAndResumeAndStop) {
+  StartCapture();
+  PauseResumeCapture();
+  StopCapture();
+}
 
 TEST_F(VideoCaptureHostTest, CloseSessionWithoutStopping) {
   StartCapture();
@@ -361,38 +357,6 @@ TEST_F(VideoCaptureHostTest, CloseSessionWithoutStopping) {
   EXPECT_CALL(*this, OnStateChanged(mojom::VideoCaptureState::ENDED));
   CloseSession();
   base::RunLoop().RunUntilIdle();
-}
-
-TEST_F(VideoCaptureHostTest, StopWhileStartPending) {
-  StartStopCapture();
-}
-
-TEST_F(VideoCaptureHostTest, StartCapturePlayStop) {
-  StartCapture();
-  WaitForOneCapturedBuffer();
-  WaitForOneCapturedBuffer();
-  StopCapture();
-}
-
-TEST_F(VideoCaptureHostTest, StartCaptureErrorStop) {
-  StartCapture();
-  SimulateError();
-  StopCapture();
-}
-
-TEST_F(VideoCaptureHostTest, StartCaptureError) {
-  EXPECT_CALL(*this, OnStateChanged(mojom::VideoCaptureState::STOPPED))
-      .Times(0);
-  StartCapture();
-  WaitForOneCapturedBuffer();
-  SimulateError();
-  base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(200));
-}
-
-TEST_F(VideoCaptureHostTest, PauseResumeCapture) {
-  StartCapture();
-  PauseResumeCapture();
-  StopCapture();
 }
 
 }  // namespace content

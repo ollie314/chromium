@@ -41,8 +41,8 @@ Canvas2dFixedRenderingMode status=test
 EnableCanvas2dDynamicRenderingModeSwitching status=experimental
 Canvas2dImageChromium status=experimental
 ClientHints status=stable
-CompositeOpaqueFixedPosition settable_from_internals=True
-CompositeOpaqueScrollers status=stable, settable_from_internals=True
+CompositeOpaqueFixedPosition status=test, settable_from_internals=True
+CompositeOpaqueScrollers status=experimental, settable_from_internals=True
 ColorCorrectRendering settable_from_internals=True
 CompositedSelectionUpdate
 CompositorWorker status=experimental
@@ -167,7 +167,7 @@ PassiveDocumentEventListeners status=experimental
 PassiveEventListenersDueToFling status=experimental
 PassPaintVisualRectToCompositor
 PaymentRequest status=experimental
-PaymentRequestPayerName status=experimental
+PaymentRequestPayerName status=stable
 PerformanceObserver status=stable
 PermissionDelegation status=test
 Permissions status=stable
@@ -176,7 +176,7 @@ PointerEvent status=stable
 // For temporary compat testing of Edge-like model - crbug.com/640700
 PointerEventV1SpecCapturing
 PreciseMemoryInfo
-PreferredImageRasterScale settable_from_internals=True
+PreferredImageRasterBounds settable_from_internals=True
 // This feature is deprecated and we are evangelizing affected sites.
 // See https://crbug.com/346236 for current status.
 PrefixedVideoFullscreen status=stable
@@ -201,7 +201,7 @@ ScrollAnchoring status=experimental, settable_from_internals=True
 // as per the spec, matching other Web engines.
 ScrollTopLeftInterop status=experimental
 Sensor status=experimental
-ServiceWorkerNavigationPreload status=experimental
+ServiceWorkerNavigationPreload
 SetRootScroller status=experimental
 ShadowDOMV1 status=stable
 ShapeDetection status=experimental

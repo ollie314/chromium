@@ -11,7 +11,8 @@
 
 namespace blink {
 
-MediaValues* MediaValuesInitialViewport::create(LocalFrame& frame) {
+MediaValuesInitialViewport* MediaValuesInitialViewport::create(
+    LocalFrame& frame) {
   return new MediaValuesInitialViewport(frame);
 }
 
@@ -19,17 +20,13 @@ MediaValuesInitialViewport::MediaValuesInitialViewport(LocalFrame& frame)
     : MediaValuesDynamic(&frame) {}
 
 double MediaValuesInitialViewport::viewportWidth() const {
-  DCHECK(m_frame->view() && m_frame->document());
-  int viewportWidth = m_frame->view()->frameRect().width();
-  return adjustDoubleForAbsoluteZoom(
-      viewportWidth, m_frame->document()->layoutViewItem().styleRef());
+  DCHECK(m_frame->view());
+  return m_frame->view()->initialViewportWidth();
 }
 
 double MediaValuesInitialViewport::viewportHeight() const {
-  DCHECK(m_frame->view() && m_frame->document());
-  int viewportHeight = m_frame->view()->frameRect().height();
-  return adjustDoubleForAbsoluteZoom(
-      viewportHeight, m_frame->document()->layoutViewItem().styleRef());
+  DCHECK(m_frame->view());
+  return m_frame->view()->initialViewportHeight();
 }
 
 }  // namespace blink

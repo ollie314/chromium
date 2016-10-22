@@ -2322,6 +2322,7 @@ if (is_android) {
       "android/java/src/org/chromium/base/library_loader/ModernLinker.java",
       "android/java/src/org/chromium/base/library_loader/NativeLibraryPreloader.java",
       "android/java/src/org/chromium/base/library_loader/ProcessInitException.java",
+      "android/java/src/org/chromium/base/metrics/CachedMetrics.java",
       "android/java/src/org/chromium/base/metrics/RecordHistogram.java",
       "android/java/src/org/chromium/base/metrics/RecordUserAction.java",
       "android/java/src/org/chromium/base/metrics/StatisticsRecorderAndroid.java",
@@ -2358,14 +2359,19 @@ if (is_android) {
     deps = [
       ":base_java",
       "//testing/android/reporter:reporter_java",
+      "//third_party/android_support_test_runner:exposed_instrumentation_api_publish_java",
+      "//third_party/android_support_test_runner:runner_java",
       "//third_party/hamcrest:hamcrest_core_java",
+      "//third_party/junit",
     ]
     java_files = [
       "test/android/javatests/src/org/chromium/base/test/BaseActivityInstrumentationTestCase.java",
       "test/android/javatests/src/org/chromium/base/test/BaseChromiumInstrumentationTestRunner.java",
       "test/android/javatests/src/org/chromium/base/test/BaseInstrumentationTestRunner.java",
+      "test/android/javatests/src/org/chromium/base/test/BaseJUnit4ClassRunner.java",
       "test/android/javatests/src/org/chromium/base/test/BaseTestResult.java",
       "test/android/javatests/src/org/chromium/base/test/util/AdvancedMockContext.java",
+      "test/android/javatests/src/org/chromium/base/test/util/CallbackHelper.java",
       "test/android/javatests/src/org/chromium/base/test/util/CommandLineFlags.java",
       "test/android/javatests/src/org/chromium/base/test/util/DisableIf.java",
       "test/android/javatests/src/org/chromium/base/test/util/DisableIfSkipCheck.java",

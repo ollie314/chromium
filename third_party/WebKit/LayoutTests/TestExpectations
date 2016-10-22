@@ -60,6 +60,8 @@ crbug.com/531286 virtual/gpu/fast/canvas/yuv-video-on-accelerated-canvas.html [ 
 # when we swith to swiftshader.
 crbug.com/549742 [ Linux Mac Win ] virtual/gpu/fast/canvas/canvas-drawImage-video-imageSmoothingEnabled.html [ Failure ]
 
+crbug.com/658305 css3/filters/effect-reference-after.html [ Failure Pass ]
+
 crbug.com/591500 [ Win10 ] compositing/squashing/squashing-print.html [ Failure ]
 
 crbug.com/602110 hittesting/border-hittest-with-image-fallback.html [ Failure ]
@@ -71,15 +73,10 @@ crbug.com/619103 paint/invalidation/background-resize-width.html [ Failure ]
 crbug.com/619103 [ Win ] paint/invalidation/svg/text-viewbox-rescale.html [ Pass Failure ]
 crbug.com/619103 paint/selection/text-selection-newline-mixed-ltr-rtl.html [ Failure ]
 
-# WebKit test is checking for outdated semantics on TypedArray constructors.
-crbug.com/623120 virtual/gpu/fast/canvas/webgl/webgl-array-invalid-ranges.html [ NeedsManualRebaseline ]
-crbug.com/623120 fast/canvas/webgl/webgl-array-invalid-ranges.html [ NeedsManualRebaseline ]
-crbug.com/623120 virtual/display_list_2d_canvas/fast/canvas/webgl/webgl-array-invalid-ranges.html [ NeedsManualRebaseline ]
-
 # TODO(fmalita): re-enable
 # crbug.com/624709 [ Win ] virtual/gpu-rasterization/fast/images/png-with-color-profile.html [ Failure ]
 crbug.com/624709 [ Win ] virtual/gpu-rasterization/fast/images/webp-color-profile-lossy.html [ Failure ]
-crbug.com/587737 [ Mac10.11 Retina ] virtual/gpu-rasterization/fast/images/color-profile-filter.html [ Timeout Failure ]
+crbug.com/587737 [ Mac ] virtual/gpu-rasterization/fast/images/color-profile-filter.html [ Timeout Failure ]
 crbug.com/603728 [ Linux ] virtual/gpu-rasterization/fast/images/color-profile-filter.html [ Failure Timeout Pass ]
 crbug.com/624233 virtual/gpu-rasterization/fast/images/color-profile-background-clip-text.html [ Pass Failure ]
 
@@ -300,6 +297,8 @@ crbug.com/636239 [ Win7 ] media/video-zoom-controls.html [ Failure ]
 crbug.com/520189 [ Mac ] http/tests/misc/submit-post-keygen.html [ Pass Timeout ]
 crbug.com/548226 fast/events/pointerevents/mouse-pointer-event-properties.html [ Failure Pass ]
 
+crbug.com/658287 fast/forms/relayout-shifts-inner-editor.html [ Crash Failure Pass ]
+
 crbug.com/432129 fast/html/marquee-scroll.html [ Failure Pass ]
 crbug.com/518929 [ Precise Debug ] http/tests/appcache/obsolete-error-events.html [ Failure Pass Timeout ]
 crbug.com/248938 virtual/threaded/transitions/cancel-and-start-new.html [ Pass Failure ]
@@ -453,6 +452,9 @@ crbug.com/605840 [ Android ] fast/text/hyphens/hyphens-auto-mock.html [ Pass ]
 crbug.com/605840 [ Android ] fast/text/hyphens/hyphens-locale.html [ Pass ]
 
 crbug.com/655963 inspector/console/console-dir.html [ NeedsManualRebaseline ]
+
+crbug.com/657831 http/tests/inspector-enabled/console-stack-overflow-source-url.html [ NeedsManualRebaseline ]
+crbug.com/657831 fast/xmlhttprequest/xmlhttprequest-responsetype-arraybuffer.html [ NeedsManualRebaseline ]
 
 crbug.com/405389 imported/csswg-test/css-shapes-1/shape-outside/supported-shapes/polygon/shape-outside-polygon-017.html [ Failure ]
 crbug.com/424365 imported/csswg-test/css-shapes-1/shape-outside/shape-image/shape-image-010.html [ Failure ]
@@ -772,6 +774,7 @@ crbug.com/480769 http/tests/inspector/service-workers/service-workers-redundant.
 crbug.com/569901 [ Debug ] http/tests/serviceworker/navigation-redirect.html [ Pass Failure ]
 
 crbug.com/640947 [ Win ] http/tests/serviceworker/foreign-fetch-cors.html [ Pass Failure ]
+crbug.com/640947 [ Win ] virtual/mojo-service-worker/http/tests/serviceworker/foreign-fetch-cors.html [ Pass Failure ]
 
 crbug.com/599670 [ Win Linux ] http/tests/inspector/resource-parameters-ipv6.html [ Failure Pass ]
 
@@ -849,6 +852,8 @@ crbug.com/249112 imported/csswg-test/css-flexbox-1/flex-minimum-height-flex-item
 crbug.com/249112 imported/csswg-test/css-flexbox-1/flex-minimum-width-flex-items-005.xht [ Failure ]
 crbug.com/249112 imported/csswg-test/css-flexbox-1/flex-minimum-width-flex-items-007.xht [ Failure ]
 
+crbug.com/656622 inspector/sources/debugger-pause/debugger-eval-while-paused-throws.html [ NeedsManualRebaseline ]
+
 # Not implemented yet
 crbug.com/336604 imported/csswg-test/css-flexbox-1/flexbox_visibility-collapse-line-wrapping.html [ Failure ]
 crbug.com/336604 imported/csswg-test/css-flexbox-1/flexbox_visibility-collapse.html [ Failure ]
@@ -866,6 +871,8 @@ crbug.com/467127 [ Mac Win ] imported/csswg-test/css-flexbox-1/ttwf-reftest-flex
 crbug.com/467127 [ Mac Win ] imported/csswg-test/css-flexbox-1/ttwf-reftest-flex-wrap.html [ Failure ]
 
 crbug.com/654999 [ Win Linux ] fast/forms/color/color-suggestion-picker-appearance-zoom200.html [ Pass Failure ]
+
+crbug.com/658304 [ Win Linux ] fast/forms/select/input-select-after-resize.html [ Crash Timeout Pass ]
 
 # We render the expectation incorrectly for these five tests
 crbug.com/310004 imported/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/flexbox/flexbox-basic-canvas-vert-001.xhtml [ Failure ]
@@ -908,6 +915,8 @@ crbug.com/370604 imported/csswg-test/vendor-imports/mozilla/mozilla-central-reft
 
 crbug.com/553838 [ Mac ] imported/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/flexbox/flexbox-align-self-baseline-horiz-001a.xhtml [ Failure ]
 crbug.com/553838 [ Mac ] imported/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/flexbox/flexbox-align-self-baseline-horiz-001b.xhtml [ Failure ]
+
+crbug.com/658311 virtual/threaded/fast/compositorworker/basic-plumbing-main-to-worker.html [ Failure Pass ]
 
 crbug.com/582836 imported/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/variables/variable-declaration-15.html [ Failure ]
 crbug.com/582836 imported/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/variables/variable-declaration-16.html [ Pass Failure ]
@@ -1222,6 +1231,8 @@ crbug.com/645640 inspector/extensions/extensions-eval.html [ NeedsManualRebaseli
 
 crbug.com/652187 [ Win7 Debug ] http/tests/inspector/network/network-disable-cache-preloads.php [ Failure ]
 
+crbug.com/658414 [ Win7 Debug ] virtual/gpu/fast/canvas/canvas-lose-restore-googol-size.html [ Failure Pass ]
+
 crbug.com/655458 imported/wpt/workers/constructors/SharedWorker/undefined-arguments.html [ Failure ]
 crbug.com/655458 imported/wpt/workers/baseurl/alpha/worker.html [ Failure ]
 crbug.com/655458 imported/wpt/workers/interfaces/SharedWorkerGlobalScope/onconnect.html [ Failure ]
@@ -1271,3 +1282,8 @@ crbug.com/655458 imported/wpt/workers/semantics/xhr/004.html [ Failure Timeout ]
 
 crbug.com/655458 imported/wpt/workers/semantics/structured-clone/dedicated.html [ Crash Failure Timeout ]
 crbug.com/655458 imported/wpt/workers/semantics/structured-clone/shared.html [ Crash Failure Timeout ]
+
+# Web platform tests for the service workers cannot work without --enable-wptserve.
+crbug.com/602693 imported/wpt/service-workers [ Skip ]
+
+crbug.com/657839 [ Win ] fast/images/color-profile-layer.html [ NeedsRebaseline ]

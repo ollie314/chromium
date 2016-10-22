@@ -10,6 +10,7 @@
 #include "content/child/child_process.h"
 #include "content/common/video_capture.mojom.h"
 #include "content/renderer/media/video_capture_impl.h"
+#include "mojo/public/cpp/system/platform_handle.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -21,7 +22,7 @@ using ::testing::WithArgs;
 
 namespace content {
 
-const int kSessionId = 1;
+const int kSessionId = 11;
 
 void RunEmptyFormatsCallback(const VideoCaptureDeviceFormatsCB& callback) {
   media::VideoCaptureFormats formats;
@@ -75,18 +76,13 @@ class MockMojoVideoCaptureHost : public mojom::VideoCaptureHost {
 
 // This class encapsulates a VideoCaptureImpl under test and the necessary
 // accessory classes, namely:
-// - a VideoCaptureMessageFilter;
-// - a MockVideoCaptureHost, mimicking the RendererHost;
+// - a MockMojoVideoCaptureHost, mimicking the RendererHost;
 // - a few callbacks that are bound when calling operations of VideoCaptureImpl
 //  and on which we set expectations.
 class VideoCaptureImplTest : public ::testing::Test {
  public:
   VideoCaptureImplTest()
-      : message_filter_(new VideoCaptureMessageFilter),
-        video_capture_impl_(
-            new VideoCaptureImpl(kSessionId,
-                                 message_filter_.get(),
-                                 base::ThreadTaskRunnerHandle::Get())) {
+      : video_capture_impl_(new VideoCaptureImpl(kSessionId)) {
     params_small_.requested_format = media::VideoCaptureFormat(
         gfx::Size(176, 144), 30, media::PIXEL_FORMAT_I420);
     params_large_.requested_format = media::VideoCaptureFormat(
@@ -94,7 +90,6 @@ class VideoCaptureImplTest : public ::testing::Test {
 
     video_capture_impl_->SetVideoCaptureHostForTesting(
         &mock_video_capture_host_);
-    video_capture_impl_->device_id_ = 2;
   }
 
  protected:
@@ -120,13 +115,14 @@ class VideoCaptureImplTest : public ::testing::Test {
     video_capture_impl_->StopCapture(client_id);
   }
 
-  void NewBuffer(int buffer_id, const base::SharedMemory& shm) {
+  void SimulateOnBufferCreated(int buffer_id, const base::SharedMemory& shm) {
+    auto handle = base::SharedMemory::DuplicateHandle(shm.handle());
     video_capture_impl_->OnBufferCreated(
-        base::SharedMemory::DuplicateHandle(shm.handle()),
-        shm.mapped_size(), buffer_id);
+        buffer_id, mojo::WrapSharedMemoryHandle(handle, shm.mapped_size(),
+                                                true /* read_only */));
   }
 
-  void BufferReceived(int buffer_id, const gfx::Size& size) {
+  void SimulateBufferReceived(int buffer_id, const gfx::Size& size) {
     mojom::VideoFrameInfoPtr info = mojom::VideoFrameInfo::New();
 
     const base::TimeTicks now = base::TimeTicks::Now();
@@ -143,7 +139,7 @@ class VideoCaptureImplTest : public ::testing::Test {
     video_capture_impl_->OnBufferReady(buffer_id, std::move(info));
   }
 
-  void BufferDestroyed(int buffer_id) {
+  void SimulateBufferDestroyed(int buffer_id) {
     video_capture_impl_->OnBufferDestroyed(buffer_id);
   }
 
@@ -169,7 +165,6 @@ class VideoCaptureImplTest : public ::testing::Test {
 
   const base::MessageLoop message_loop_;
   const ChildProcess child_process_;
-  const scoped_refptr<VideoCaptureMessageFilter> message_filter_;
   const std::unique_ptr<VideoCaptureImpl> video_capture_impl_;
   MockMojoVideoCaptureHost mock_video_capture_host_;
   media::VideoCaptureParams params_small_;
@@ -274,10 +269,10 @@ TEST_F(VideoCaptureImplTest, BufferReceived) {
       .Times(0);
 
   StartCapture(0, params_small_);
-  NewBuffer(kBufferId, shm);
-  BufferReceived(kBufferId, params_small_.requested_format.frame_size);
+  SimulateOnBufferCreated(kBufferId, shm);
+  SimulateBufferReceived(kBufferId, params_small_.requested_format.frame_size);
   StopCapture(0);
-  BufferDestroyed(kBufferId);
+  SimulateBufferDestroyed(kBufferId);
 
   EXPECT_EQ(mock_video_capture_host_.released_buffer_count(), 0);
 }
@@ -298,11 +293,11 @@ TEST_F(VideoCaptureImplTest, BufferReceivedAfterStop) {
   EXPECT_CALL(mock_video_capture_host_, ReleaseBuffer(_, kBufferId, _, _));
 
   StartCapture(0, params_large_);
-  NewBuffer(kBufferId, shm);
+  SimulateOnBufferCreated(kBufferId, shm);
   StopCapture(0);
   // A buffer received after StopCapture() triggers an instant ReleaseBuffer().
-  BufferReceived(kBufferId, params_large_.requested_format.frame_size);
-  BufferDestroyed(kBufferId);
+  SimulateBufferReceived(kBufferId, params_large_.requested_format.frame_size);
+  SimulateBufferDestroyed(kBufferId);
 
   EXPECT_EQ(mock_video_capture_host_.released_buffer_count(), 1);
 }

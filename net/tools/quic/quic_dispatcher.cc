@@ -9,7 +9,7 @@
 #include "base/debug/stack_trace.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/stl_util.h"
+#include "base/memory/ptr_util.h"
 #include "net/quic/core/crypto/quic_random.h"
 #include "net/quic/core/quic_bug_tracker.h"
 #include "net/quic/core/quic_flags.h"
@@ -219,8 +219,8 @@ QuicDispatcher::QuicDispatcher(
 }
 
 QuicDispatcher::~QuicDispatcher() {
-  base::STLDeleteValues(&session_map_);
-  base::STLDeleteElements(&closed_session_list_);
+  session_map_.clear();
+  closed_session_list_.clear();
 }
 
 void QuicDispatcher::InitializeWithWriter(QuicPacketWriter* writer) {
@@ -275,6 +275,16 @@ bool QuicDispatcher::OnUnauthenticatedPublicHeader(
 
   if (FLAGS_quic_buffer_packets_after_chlo &&
       buffered_packets_.HasChloForConnection(connection_id)) {
+    BufferEarlyPacket(connection_id);
+    return false;
+  }
+
+  // Check if we are buffering packets for this connection ID
+  if (FLAGS_enable_async_get_proof &&
+      (temporarily_buffered_connections_.find(connection_id) !=
+       temporarily_buffered_connections_.end())) {
+    // This packet was received while the a CHLO for the same connection ID was
+    // being processed.  Buffer it.
     BufferEarlyPacket(connection_id);
     return false;
   }
@@ -358,8 +368,8 @@ void QuicDispatcher::ProcessUnauthenticatedHeaderFate(
       break;
     }
     case kFateTimeWait:
-      // MaybeRejectStatelessly might have already added the connection to
-      // time wait, in which case it should not be added again.
+      // MaybeRejectStatelessly or OnExpiredPackets might have already added the
+      // connection to time wait, in which case it should not be added again.
       if (!FLAGS_quic_use_cheap_stateless_rejects ||
           !time_wait_list_manager_->IsConnectionIdInTimeWait(connection_id)) {
         // Add this connection_id to the time-wait state, to safely reject
@@ -374,10 +384,20 @@ void QuicDispatcher::ProcessUnauthenticatedHeaderFate(
       time_wait_list_manager_->ProcessPacket(
           current_server_address_, current_client_address_, connection_id,
           packet_number, *current_packet_);
+
+      if (FLAGS_enable_async_get_proof) {
+        // Any packets which were buffered while the stateless rejector logic
+        // was running should be discarded.  Do not inform the time wait list
+        // manager, which should already have a made a decision about sending a
+        // reject based on the CHLO alone.
+        buffered_packets_.DiscardPackets(connection_id);
+      }
+
       break;
     case kFateBuffer:
-      // This packet is a non-CHLO packet which has arrived out of order.
-      // Buffer it.
+      // This packet is a non-CHLO packet which has arrived before the
+      // corresponding CHLO, *or* this packet was received while the
+      // corresponding CHLO was being processed.  Buffer it.
       BufferEarlyPacket(connection_id);
       break;
     case kFateDrop:
@@ -407,7 +427,7 @@ QuicDispatcher::QuicPacketFate QuicDispatcher::ValidityChecks(
     return kFateTimeWait;
   }
 
-  // Check that the sequence numer is within the range that the client is
+  // Check that the sequence number is within the range that the client is
   // expected to send before receiving a response from the server.
   if (header.packet_number == kInvalidPacketNumber ||
       header.packet_number > kMaxReasonableInitialPacketNumber) {
@@ -418,9 +438,8 @@ QuicDispatcher::QuicPacketFate QuicDispatcher::ValidityChecks(
 }
 
 void QuicDispatcher::CleanUpSession(SessionMap::iterator it,
+                                    QuicConnection* connection,
                                     bool should_close_statelessly) {
-  QuicConnection* connection = it->second->connection();
-
   write_blocked_list_.erase(connection);
   if (should_close_statelessly) {
     DCHECK(connection->termination_packets() != nullptr &&
@@ -433,7 +452,7 @@ void QuicDispatcher::CleanUpSession(SessionMap::iterator it,
 }
 
 void QuicDispatcher::DeleteSessions() {
-  base::STLDeleteElements(&closed_session_list_);
+  closed_session_list_.clear();
 }
 
 void QuicDispatcher::OnCanWrite() {
@@ -456,12 +475,13 @@ bool QuicDispatcher::HasPendingWrites() const {
 
 void QuicDispatcher::Shutdown() {
   while (!session_map_.empty()) {
-    QuicServerSessionBase* session = session_map_.begin()->second;
+    QuicServerSessionBase* session = session_map_.begin()->second.get();
     session->connection()->CloseConnection(
         QUIC_PEER_GOING_AWAY, "Server shutdown imminent",
         ConnectionCloseBehavior::SEND_CONNECTION_CLOSE_PACKET);
     // Validate that the session removes itself from the session map on close.
-    DCHECK(session_map_.empty() || session_map_.begin()->second != session);
+    DCHECK(session_map_.empty() ||
+           session_map_.begin()->second.get() != session);
   }
   DeleteSessions();
 }
@@ -487,10 +507,11 @@ void QuicDispatcher::OnConnectionClosed(QuicConnectionId connection_id,
     delete_sessions_alarm_->Update(helper()->GetClock()->ApproximateNow(),
                                    QuicTime::Delta::Zero());
   }
-  closed_session_list_.push_back(it->second);
+  QuicConnection* connection = it->second->connection();
+  closed_session_list_.push_back(std::move(it->second));
   const bool should_close_statelessly =
       (error == QUIC_CRYPTO_HANDSHAKE_STATELESS_REJECT);
-  CleanUpSession(it, should_close_statelessly);
+  CleanUpSession(it, connection, should_close_statelessly);
 }
 
 void QuicDispatcher::OnWriteBlocked(
@@ -636,7 +657,8 @@ void QuicDispatcher::ProcessBufferedChlos(size_t max_connections_to_create) {
     QuicServerSessionBase* session =
         CreateQuicSession(connection_id, packets.front().client_address);
     DVLOG(1) << "Created new session for " << connection_id;
-    session_map_.insert(std::make_pair(connection_id, session));
+    session_map_.insert(
+        std::make_pair(connection_id, base::WrapUnique(session)));
     DeliverPacketsToSession(packets, session);
   }
 }
@@ -732,7 +754,8 @@ void QuicDispatcher::ProcessChlo() {
   QuicServerSessionBase* session =
       CreateQuicSession(current_connection_id_, current_client_address_);
   DVLOG(1) << "Created new session for " << current_connection_id_;
-  session_map_.insert(std::make_pair(current_connection_id_, session));
+  session_map_.insert(
+      std::make_pair(current_connection_id_, base::WrapUnique(session)));
   std::list<BufferedPacket> packets =
       buffered_packets_.DeliverPackets(current_connection_id_);
   // Check if CHLO is the first packet arrived on this connection.
@@ -790,16 +813,24 @@ class StatelessRejectorProcessDoneCallback
                                        QuicPacketNumber packet_number,
                                        QuicVersion first_version)
       : dispatcher_(dispatcher),
+        current_client_address_(dispatcher->current_client_address_),
+        current_server_address_(dispatcher->current_server_address_),
+        current_packet_(
+            dispatcher->current_packet_->Clone()),  // Note: copies the packet
         packet_number_(packet_number),
         first_version_(first_version) {}
 
   void Run(std::unique_ptr<StatelessRejector> rejector) override {
-    dispatcher_->OnStatelessRejectorProcessDone(std::move(rejector),
-                                                packet_number_, first_version_);
+    dispatcher_->OnStatelessRejectorProcessDone(
+        std::move(rejector), current_client_address_, current_server_address_,
+        std::move(current_packet_), packet_number_, first_version_);
   }
 
  private:
   QuicDispatcher* dispatcher_;
+  IPEndPoint current_client_address_;
+  IPEndPoint current_server_address_;
+  std::unique_ptr<QuicReceivedPacket> current_packet_;
   QuicPacketNumber packet_number_;
   QuicVersion first_version_;
 };
@@ -861,6 +892,23 @@ void QuicDispatcher::MaybeRejectStatelessly(QuicConnectionId connection_id,
     return;
   }
 
+  // If we were able to make a decision about this CHLO based purely on the
+  // information available in OnChlo, just invoke the done callback immediately.
+  if (rejector->state() != StatelessRejector::UNKNOWN) {
+    ProcessStatelessRejectorState(std::move(rejector), header.packet_number,
+                                  header.public_header.versions.front());
+    return;
+  }
+
+  // Insert into set of connection IDs to buffer
+  if (FLAGS_enable_async_get_proof) {
+    const bool ok =
+        temporarily_buffered_connections_.insert(connection_id).second;
+    QUIC_BUG_IF(!ok)
+        << "Processing multiple stateless rejections for connection ID "
+        << connection_id;
+  }
+
   // Continue stateless rejector processing
   std::unique_ptr<StatelessRejectorProcessDoneCallback> cb(
       new StatelessRejectorProcessDoneCallback(
@@ -869,6 +917,43 @@ void QuicDispatcher::MaybeRejectStatelessly(QuicConnectionId connection_id,
 }
 
 void QuicDispatcher::OnStatelessRejectorProcessDone(
+    std::unique_ptr<StatelessRejector> rejector,
+    const IPEndPoint& current_client_address,
+    const IPEndPoint& current_server_address,
+    std::unique_ptr<QuicReceivedPacket> current_packet,
+    QuicPacketNumber packet_number,
+    QuicVersion first_version) {
+  if (FLAGS_enable_async_get_proof) {
+    // Stop buffering packets on this connection
+    const auto num_erased =
+        temporarily_buffered_connections_.erase(rejector->connection_id());
+    QUIC_BUG_IF(num_erased != 1) << "Completing stateless rejection logic for "
+                                    "non-buffered connection ID "
+                                 << rejector->connection_id();
+
+    // If this connection has gone into time-wait during the async processing,
+    // don't proceed.
+    if (time_wait_list_manager_->IsConnectionIdInTimeWait(
+            rejector->connection_id())) {
+      time_wait_list_manager_->ProcessPacket(
+          current_server_address, current_client_address,
+          rejector->connection_id(), packet_number, *current_packet);
+      return;
+    }
+  }
+
+  // Reset current_* to correspond to the packet which initiated the stateless
+  // reject logic.
+  current_client_address_ = current_client_address;
+  current_server_address_ = current_server_address;
+  current_packet_ = current_packet.get();
+  current_connection_id_ = rejector->connection_id();
+
+  ProcessStatelessRejectorState(std::move(rejector), packet_number,
+                                first_version);
+}
+
+void QuicDispatcher::ProcessStatelessRejectorState(
     std::unique_ptr<StatelessRejector> rejector,
     QuicPacketNumber packet_number,
     QuicVersion first_version) {

@@ -44,6 +44,7 @@ import org.chromium.base.PathUtils;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.library_loader.LibraryLoader;
 import org.chromium.base.library_loader.LibraryProcessType;
+import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Restriction;
@@ -54,6 +55,7 @@ import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.ChromeTabbedActivity;
 import org.chromium.chrome.browser.IntentHandler;
 import org.chromium.chrome.browser.TabsOpenedFromExternalAppTest;
+import org.chromium.chrome.browser.WarmupManager;
 import org.chromium.chrome.browser.appmenu.AppMenuHandler;
 import org.chromium.chrome.browser.document.ChromeLauncherActivity;
 import org.chromium.chrome.browser.metrics.PageLoadMetrics;
@@ -72,7 +74,6 @@ import org.chromium.chrome.test.util.browser.LocationSettingsTestUtil;
 import org.chromium.chrome.test.util.browser.contextmenu.ContextMenuUtils;
 import org.chromium.content.browser.BrowserStartupController;
 import org.chromium.content.browser.BrowserStartupController.StartupCallback;
-import org.chromium.content.browser.test.util.CallbackHelper;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
 import org.chromium.content.browser.test.util.DOMUtils;
@@ -1144,6 +1145,35 @@ public class CustomTabActivityTest extends CustomTabActivityTestBase {
                         mActivity.shouldAllocateChildConnection());
             }
         });
+    }
+
+    @SmallTest
+    @Restriction(RESTRICTION_TYPE_NON_LOW_END_DEVICE)
+    public void testRecreateSpareRendererOnTabClose() throws Exception {
+        Context context = getInstrumentation().getTargetContext().getApplicationContext();
+        warmUpAndWait();
+
+        try {
+            startCustomTabActivityWithIntent(
+                    CustomTabsTestUtils.createMinimalCustomTabIntent(context, mTestPage));
+        } catch (InterruptedException e) {
+            fail();
+        }
+
+        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
+            @Override
+            public void run() {
+                assertFalse(WarmupManager.getInstance().hasSpareWebContents());
+                final CustomTabActivity activity = (CustomTabActivity) getActivity();
+                activity.finishAndClose(false);
+            }
+        });
+        CriteriaHelper.pollUiThread(new Criteria("No new spare renderer") {
+            @Override
+            public boolean isSatisfied() {
+                return WarmupManager.getInstance().hasSpareWebContents();
+            }
+        }, 2000, 200);
     }
 
     /**

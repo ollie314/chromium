@@ -1032,9 +1032,8 @@ are declared in build/common.gypi.
         </message>
         <message name="IDS_VISIT_DESKTOP_WARNING_MESSAGE" desc="The message on the dialog which warns user about oddities which can be seen when a window gets moved to another user desktop.">
           Moving windows to another desktop may result in unexpected behaviour.
-        </message>
-        <message name="IDS_VISIT_DESKTOP_WARNING_EXPLANATION" desc="The explanation message on the dialog which warns user about oddities which can be seen when a window gets moved to another user desktop.">
-          Subsequent notifications, windows and dialogs may be split between desktops.
+
+Subsequent notifications, windows and dialogs may be split between desktops.
         </message>
         <message name="IDS_VISIT_DESKTOP_WARNING_SHOW_DISMISS" desc="Label for checkbox dismissing show of teleportation warning dialog.">
           Got it, don't show me again.
@@ -8658,13 +8657,7 @@ I don't think this site should be blocked!
           Out of bounds page reference, limit is <ph name="MAXIMUM_PAGE">$1<ex>1</ex></ph>
         </message>
         <message name="IDS_PRINT_PREVIEW_COPIES_INSTRUCTION" desc="Instruction shown when the user enters an invalid number of copies.">
-          Use a number to indicate how many copies to print (1 or more).
-        </message>
-        <message name="IDS_PRINT_PREVIEW_INCREMENT_TITLE" desc="Title shown when the user hovers mouse over the increment button. Also added for improved accessibility">
-          More copies
-        </message>
-        <message name="IDS_PRINT_PREVIEW_DECREMENT_TITLE" desc="Title shown when the user hovers mouse over the decrement button. Also added for improved accessibility">
-          Less copies
+          Use a number to indicate how many copies to print (1 to 999).
         </message>
         <message name="IDS_PRINT_PREVIEW_PRINT_PAGES_LABEL" desc="ARIA label used by screen reader to explain the purpose of the page selection textbox">
           Print Specific Pages
@@ -8910,6 +8903,9 @@ I don't think this site should be blocked!
       </message>
       <message name="IDS_LOAD_STATE_WAITING_FOR_RESPONSE">
         Waiting for <ph name="HOST_NAME">$1<ex>www.google.com</ex></ph>...
+      </message>
+      <message name="IDS_LOAD_STATE_THROTTLED" desc="Tab status shown when tab loading is blocked on other in process network operations">
+        Waiting for other requests to complete...
       </message>
 
       <!-- Tab Context Menu -->
@@ -14818,10 +14814,10 @@ Please check your email at <ph name="ACCOUNT_EMAIL">$2<ex>jane.doe@gmail.com</ex
       <!-- Strings for ARC intent picker -->
       <if expr="chromeos">
         <message name="IDS_INTENT_PICKER_BUBBLE_VIEW_ALWAYS" desc="Message contained in a button shown to the user in order to choose and remember an app selection.">
-          ALWAYS
+          Always
         </message>
         <message name="IDS_INTENT_PICKER_BUBBLE_VIEW_JUST_ONCE" desc="Message contained in a button shown to the user in order to choose to open a URL in a given app only once.">
-          JUST ONCE
+          Just once
         </message>
         <message name="IDS_INTENT_PICKER_BUBBLE_VIEW_OPEN_WITH" desc="Message contained in a label used as a header for a list of applications from which the user will pick one.">
           Open with
@@ -15562,8 +15558,8 @@ read aloud to screenreader users to announce that a completion is available.">
         <message name="IDS_FLAGS_ENABLE_DEFAULT_MEDIA_SESSION_ENABLED" desc="Option for enabling the default MediaSession">
             Enabled
         </message>
-        <message name="IDS_FLAGS_ENABLE_DEFAULT_MEDIA_SESSION_ENABLED_WITH_FLASH" desc="Option for enabling the default MediaSession with Flash">
-            Enabled (with Flash)
+        <message name="IDS_FLAGS_ENABLE_DEFAULT_MEDIA_SESSION_ENABLED_DUCK_FLASH" desc="Option for enabling the default MediaSession with Flash">
+            Enabled (Flash ducks when losing audio focus, experimental)
         </message>
     </if>
   </messages>

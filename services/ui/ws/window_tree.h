@@ -161,6 +161,9 @@ class WindowTree : public mojom::WindowTree,
   // Invoked when a tree is about to be destroyed.
   void OnWindowDestroyingTreeImpl(WindowTree* tree);
 
+  // Sends updated display information.
+  void OnWmDisplayModified(const display::Display& display);
+
   // These functions are synchronous variants of those defined in the mojom. The
   // WindowTree implementations all call into these. See the mojom for details.
   bool SetCapture(const ClientWindowId& client_window_id);
@@ -413,10 +416,11 @@ class WindowTree : public mojom::WindowTree,
   void SetWindowOpacity(uint32_t change_id,
                         Id window_id,
                         float opacity) override;
-  void AttachSurface(Id transport_window_id,
-                     mojom::SurfaceType type,
-                     mojo::InterfaceRequest<mojom::Surface> surface,
-                     mojom::SurfaceClientPtr client) override;
+  void AttachSurface(
+      Id transport_window_id,
+      mojom::SurfaceType type,
+      mojo::InterfaceRequest<cc::mojom::MojoCompositorFrameSink> surface,
+      cc::mojom::MojoCompositorFrameSinkClientPtr client) override;
   void OnWindowSurfaceDetached(Id transport_window_id,
                                const cc::SurfaceSequence& sequence) override;
   void Embed(Id transport_window_id,

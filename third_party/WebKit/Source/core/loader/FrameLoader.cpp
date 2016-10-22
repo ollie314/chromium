@@ -63,7 +63,6 @@
 #include "core/input/EventHandler.h"
 #include "core/inspector/ConsoleMessage.h"
 #include "core/inspector/InspectorInstrumentation.h"
-#include "core/inspector/InstanceCounters.h"
 #include "core/loader/DocumentLoadTiming.h"
 #include "core/loader/DocumentLoader.h"
 #include "core/loader/FormSubmission.h"
@@ -84,6 +83,7 @@
 #include "core/page/scrolling/ScrollingCoordinator.h"
 #include "core/svg/graphics/SVGImage.h"
 #include "core/xml/parser/XMLDocumentParser.h"
+#include "platform/InstanceCounters.h"
 #include "platform/PluginScriptForbiddenScope.h"
 #include "platform/ScriptForbiddenScope.h"
 #include "platform/UserGestureIndicator.h"
@@ -964,15 +964,35 @@ bool FrameLoader::prepareRequestForThisFrame(FrameLoadRequest& request) {
   return true;
 }
 
-static bool shouldOpenInNewWindow(Frame* targetFrame,
-                                  const FrameLoadRequest& request,
-                                  NavigationPolicy policy) {
-  if (!targetFrame && !request.frameName().isEmpty())
-    return true;
-  // FIXME: This case is a workaround for the fact that ctrl+clicking a form
-  // submission incorrectly sends as a GET rather than a POST if it creates a
-  // new window in a different process.
-  return request.form() && policy != NavigationPolicyCurrentTab;
+static bool shouldNavigateTargetFrame(NavigationPolicy policy) {
+  switch (policy) {
+    case NavigationPolicyCurrentTab:
+      return true;
+
+    // Navigation will target a *new* frame (e.g. because of a ctrl-click),
+    // so the target frame can be ignored.
+    case NavigationPolicyNewBackgroundTab:
+    case NavigationPolicyNewForegroundTab:
+    case NavigationPolicyNewWindow:
+    case NavigationPolicyNewPopup:
+      return false;
+
+    // Navigation won't really target any specific frame,
+    // so the target frame can be ignored.
+    case NavigationPolicyIgnore:
+    case NavigationPolicyDownload:
+      return false;
+
+    case NavigationPolicyHandledByClient:
+      // Impossible, because at this point we shouldn't yet have called
+      // client()->decidePolicyForNavigation(...).
+      NOTREACHED();
+      return true;
+
+    default:
+      NOTREACHED() << policy;
+      return true;
+  }
 }
 
 static NavigationType determineNavigationType(FrameLoadType frameLoadType,
@@ -1072,17 +1092,20 @@ void FrameLoader::load(const FrameLoadRequest& passedRequest,
   if (!prepareRequestForThisFrame(request))
     return;
 
-  Frame* targetFrame = request.form()
-                           ? nullptr
-                           : m_frame->findFrameForNavigation(
-                                 AtomicString(request.frameName()), *m_frame);
-
   if (isBackForwardLoadType(frameLoadType)) {
     DCHECK(historyItem);
     m_provisionalItem = historyItem;
   }
 
-  if (targetFrame && targetFrame != m_frame) {
+  // Form submissions appear to need their special-case of finding the target at
+  // schedule rather than at fire.
+  Frame* targetFrame = request.form()
+                           ? nullptr
+                           : m_frame->findFrameForNavigation(
+                                 AtomicString(request.frameName()), *m_frame);
+  NavigationPolicy policy = navigationPolicyForRequest(request);
+  if (targetFrame && targetFrame != m_frame &&
+      shouldNavigateTargetFrame(policy)) {
     bool wasInSamePage = targetFrame->page() == m_frame->page();
 
     request.setFrameName("_self");
@@ -1095,11 +1118,7 @@ void FrameLoader::load(const FrameLoadRequest& passedRequest,
 
   setReferrerForFrameRequest(request);
 
-  FrameLoadType newLoadType = (frameLoadType == FrameLoadTypeStandard)
-                                  ? determineFrameLoadType(request)
-                                  : frameLoadType;
-  NavigationPolicy policy = navigationPolicyForRequest(request);
-  if (shouldOpenInNewWindow(targetFrame, request, policy)) {
+  if (!targetFrame && !request.frameName().isEmpty()) {
     if (policy == NavigationPolicyDownload) {
       client()->loadURLExternally(request.resourceRequest(),
                                   NavigationPolicyDownload, String(), false);
@@ -1111,6 +1130,9 @@ void FrameLoader::load(const FrameLoadRequest& passedRequest,
   }
 
   const KURL& url = request.resourceRequest().url();
+  FrameLoadType newLoadType = (frameLoadType == FrameLoadTypeStandard)
+                                  ? determineFrameLoadType(request)
+                                  : frameLoadType;
   bool sameDocumentHistoryNavigation =
       isBackForwardLoadType(newLoadType) &&
       historyLoadType == HistorySameDocumentLoad;

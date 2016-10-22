@@ -59,13 +59,8 @@ class CORE_TEMPLATE_CLASS_EXPORT VisibleSelectionTemplate {
   VisibleSelectionTemplate(const VisibleSelectionTemplate&);
   VisibleSelectionTemplate& operator=(const VisibleSelectionTemplate&);
 
-  // Note: |create()| should be used only by |createVisibleSelection| and
-  // |selectionFromContentsOfNode|.
+  // Note: |create()| should be used only by |createVisibleSelection|.
   static VisibleSelectionTemplate create(const SelectionTemplate<Strategy>&);
-
-  // TODO(editing-dev): We should get rid of this function and instead, use
-  // EphemeralRangeTemplate::rangeOfContents and SelectionTemplate::Builder.
-  static VisibleSelectionTemplate selectionFromContentsOfNode(Node*);
 
   SelectionType getSelectionType() const { return m_selectionType; }
 
@@ -222,29 +217,12 @@ createVisibleSelection(const Position& base,
                        const Position& extent,
                        TextAffinity = SelDefaultAffinity,
                        bool isDirectional = false);
-CORE_EXPORT VisibleSelection
-createVisibleSelection(const EphemeralRange&,
-                       TextAffinity = SelDefaultAffinity,
-                       bool isDirectional = false);
-CORE_EXPORT VisibleSelection createVisibleSelection(const VisiblePosition&,
-                                                    bool isDirectional = false);
 CORE_EXPORT VisibleSelection createVisibleSelection(const VisiblePosition&,
                                                     const VisiblePosition&,
-                                                    bool isDirectional = false);
-CORE_EXPORT VisibleSelection createVisibleSelection(const PositionWithAffinity&,
                                                     bool isDirectional = false);
 
 CORE_EXPORT VisibleSelectionInFlatTree
 createVisibleSelection(const SelectionInFlatTree&);
-CORE_EXPORT VisibleSelectionInFlatTree
-createVisibleSelection(const PositionInFlatTree& base,
-                       const PositionInFlatTree& extent,
-                       TextAffinity = SelDefaultAffinity,
-                       bool isDirectional = false);
-CORE_EXPORT VisibleSelectionInFlatTree
-createVisibleSelection(const VisiblePositionInFlatTree&,
-                       const VisiblePositionInFlatTree&,
-                       bool isDirectional = false);
 
 // We don't yet support multi-range selections, so we only ever have one range
 // to return.

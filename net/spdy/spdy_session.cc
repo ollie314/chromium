@@ -644,6 +644,8 @@ SpdySession::SpdySession(const SpdySessionKey& spdy_session_key,
       unclaimed_pushed_streams_(this),
       num_pushed_streams_(0u),
       num_active_pushed_streams_(0u),
+      bytes_pushed_count_(0u),
+      bytes_pushed_and_unclaimed_count_(0u),
       in_flight_write_frame_type_(DATA),
       in_flight_write_frame_size_(0),
       is_secure_(false),
@@ -1179,6 +1181,7 @@ void SpdySession::CloseActiveStreamIterator(ActiveStreamMap::iterator it,
   // http://crbug.com/261712 .)
   if (owned_stream->type() == SPDY_PUSH_STREAM) {
     unclaimed_pushed_streams_.erase(owned_stream->url());
+    bytes_pushed_count_ += owned_stream->recv_bytes();
     num_pushed_streams_--;
     if (!owned_stream->IsReservedRemote())
       num_active_pushed_streams_--;
@@ -2181,6 +2184,7 @@ void SpdySession::DeleteExpiredPushedStreams() {
     ActiveStreamMap::iterator active_it = active_streams_.find(*to_close_it);
     if (active_it == active_streams_.end())
       continue;
+    bytes_pushed_and_unclaimed_count_ += active_it->second.stream->recv_bytes();
 
     LogAbandonedActiveStream(active_it, ERR_INVALID_SPDY_STREAM);
     // CloseActiveStreamIterator() will remove the stream from
@@ -2461,14 +2465,15 @@ bool SpdySession::TryCreatePushStream(SpdyStreamId stream_id,
 
   // Server-initiated streams must be associated with client-initiated streams.
   if ((associated_stream_id & 0x1) != 1) {
-    LOG(WARNING) << "Received invalid associated stream id " << stream_id;
+    LOG(WARNING) << "Received push stream id " << stream_id
+                 << " with invalid associated stream id";
     CloseSessionOnError(ERR_SPDY_PROTOCOL_ERROR, "Push on even stream id.");
     return false;
   }
 
   if (stream_id <= last_accepted_push_stream_id_) {
-    LOG(WARNING) << "Received push stream id lesser or equal to the last "
-                 << "accepted before " << stream_id;
+    LOG(WARNING) << "Received push stream id " << stream_id
+                 << " lesser or equal to the last accepted before";
     CloseSessionOnError(
         ERR_SPDY_PROTOCOL_ERROR,
         "New push stream id must be greater than the last accepted.");
@@ -2864,6 +2869,10 @@ void SpdySession::RecordHistograms() {
                               streams_pushed_and_claimed_count_, 1, 300, 50);
   UMA_HISTOGRAM_CUSTOM_COUNTS("Net.SpdyStreamsAbandonedPerSession",
                               streams_abandoned_count_, 1, 300, 50);
+  UMA_HISTOGRAM_COUNTS_1M("Net.SpdySession.PushedBytes", bytes_pushed_count_);
+  DCHECK_LE(bytes_pushed_and_unclaimed_count_, bytes_pushed_count_);
+  UMA_HISTOGRAM_COUNTS_1M("Net.SpdySession.PushedAndUnclaimedBytes",
+                          bytes_pushed_and_unclaimed_count_);
   UMA_HISTOGRAM_ENUMERATION("Net.SpdySettingsSent",
                             sent_settings_ ? 1 : 0, 2);
   UMA_HISTOGRAM_ENUMERATION("Net.SpdySettingsReceived",

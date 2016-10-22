@@ -15,7 +15,7 @@ GEN_INCLUDE(
  * Test fixture for Polymer Settings elements.
  * @constructor
  * @extends {PolymerTest}
-*/
+ */
 function CrSettingsBrowserTest() {}
 
 CrSettingsBrowserTest.prototype = {
@@ -61,6 +61,25 @@ CrSettingsCheckboxTest.prototype = {
 
 TEST_F('CrSettingsCheckboxTest', 'All', function() {
   settings_checkbox.registerTests();
+  mocha.run();
+});
+
+function CrSettingsToggleButtonTest() {}
+
+CrSettingsToggleButtonTest.prototype = {
+  __proto__: CrSettingsBrowserTest.prototype,
+
+  /** @override */
+  browsePreload: 'chrome://md-settings/controls/settings_toggle_button.html',
+
+  /** @override */
+  extraLibraries: CrSettingsBrowserTest.prototype.extraLibraries.concat([
+    'settings_toggle_button_tests.js',
+  ]),
+};
+
+TEST_F('CrSettingsToggleButtonTest', 'All', function() {
+  settings_toggle_button.registerTests();
   mocha.run();
 });
 
@@ -165,7 +184,7 @@ GEN('#if defined(OS_CHROMEOS)');
  * This is ChromeOS only.
  * @constructor
  * @extends {CrSettingsBrowserTest}
-*/
+ */
 function CrSettingsPeoplePageQuickUnlockAuthenticateTest() {}
 
 CrSettingsPeoplePageQuickUnlockAuthenticateTest.prototype = {
@@ -193,7 +212,7 @@ TEST_F('CrSettingsPeoplePageQuickUnlockAuthenticateTest', 'Test', function() {
  * This is ChromeOS only.
  * @constructor
  * @extends {CrSettingsBrowserTest}
-*/
+ */
 function CrSettingsPeoplePageLockScreenTest() {}
 
 CrSettingsPeoplePageLockScreenTest.prototype = {
@@ -224,7 +243,7 @@ TEST_F('CrSettingsPeoplePageLockScreenTest', 'Test', function() {
  * This is ChromeOS only.
  * @constructor
  * @extends {CrSettingsBrowserTest}
-*/
+ */
 function CrSettingsPeoplePageSetupPinDialogTest() {}
 
 CrSettingsPeoplePageSetupPinDialogTest.prototype = {
@@ -253,7 +272,7 @@ TEST_F('CrSettingsPeoplePageSetupPinDialogTest', 'Test', function() {
  * This is ChromeOS only.
  * @constructor
  * @extends {CrSettingsBrowserTest}
-*/
+ */
 function CrSettingsPeoplePageChangePictureTest() {}
 
 CrSettingsPeoplePageChangePictureTest.prototype = {
@@ -280,7 +299,7 @@ GEN('#else');  // !defined(OS_CHROMEOS)
  * This is non-ChromeOS only.
  * @constructor
  * @extends {CrSettingsBrowserTest}
-*/
+ */
 function CrSettingsPeoplePageManageProfileTest() {}
 
 CrSettingsPeoplePageManageProfileTest.prototype = {
@@ -307,7 +326,7 @@ GEN('#endif');
  * chrome/browser/resources/settings/people_page/people_page.html.
  * @constructor
  * @extends {CrSettingsBrowserTest}
-*/
+ */
 function CrSettingsPeoplePageTest() {}
 
 CrSettingsPeoplePageTest.prototype = {
@@ -333,7 +352,7 @@ TEST_F('CrSettingsPeoplePageTest', 'PeoplePage', function() {
  * chrome/browser/resources/settings/people_page/sync_page.html.
  * @constructor
  * @extends {CrSettingsBrowserTest}
-*/
+ */
 function CrSettingsPeoplePageSyncPageTest() {}
 
 CrSettingsPeoplePageSyncPageTest.prototype = {
@@ -382,7 +401,7 @@ TEST_F('CrSettingsRtlTest', 'DrawerPanelFlips', function() {
  * Test fixture for chrome/browser/resources/settings/reset_page/.
  * @constructor
  * @extends {CrSettingsBrowserTest}
-*/
+ */
 function CrSettingsResetPageTest() {}
 
 CrSettingsResetPageTest.prototype = {
@@ -408,7 +427,7 @@ TEST_F('CrSettingsResetPageTest', 'ResetPage', function() {
  * Test fixture for chrome/browser/resources/settings/appearance_page/.
  * @constructor
  * @extends {CrSettingsBrowserTest}
-*/
+ */
 function CrSettingsAppearancePageTest() {}
 
 CrSettingsAppearancePageTest.prototype = {
@@ -435,7 +454,7 @@ GEN('#if !defined(OS_CHROMEOS)');
  * Test fixture for chrome/browser/resources/settings/default_browser_page/.
  * @constructor
  * @extends {CrSettingsBrowserTest}
-*/
+ */
 function CrSettingsDefaultBrowserTest() {}
 
 CrSettingsDefaultBrowserTest.prototype = {
@@ -462,7 +481,7 @@ GEN('#endif');
  * Test fixture for chrome/browser/resources/settings/search_page/.
  * @constructor
  * @extends {CrSettingsBrowserTest}
-*/
+ */
 function CrSettingsSearchPageTest() {}
 
 CrSettingsSearchPageTest.prototype = {
@@ -488,7 +507,7 @@ TEST_F('CrSettingsSearchPageTest', 'SearchPage', function() {
  * Test fixture for chrome/browser/resources/settings/search_engines_page/.
  * @constructor
  * @extends {CrSettingsBrowserTest}
-*/
+ */
 function CrSettingsSearchEnginesTest() {}
 
 CrSettingsSearchEnginesTest.prototype = {
@@ -516,7 +535,7 @@ GEN('#if defined(USE_NSS_CERTS)');
  * Test fixture for chrome/browser/resources/settings/certificate_manager_page/.
  * @constructor
  * @extends {CrSettingsBrowserTest}
-*/
+ */
 function CrSettingsCertificateManagerTest() {}
 
 CrSettingsCertificateManagerTest.prototype = {
@@ -544,7 +563,7 @@ GEN('#endif');
  * Test fixture for chrome/browser/resources/settings/privacy_page/.
  * @constructor
  * @extends {CrSettingsBrowserTest}
-*/
+ */
 function CrSettingsPrivacyPageTest() {}
 
 CrSettingsPrivacyPageTest.prototype = {
@@ -572,7 +591,7 @@ TEST_F('CrSettingsPrivacyPageTest', 'PrivacyPage', function() {
  * Test fixture for chrome/browser/resources/settings/site_settings/.
  * @constructor
  * @extends {CrSettingsBrowserTest}
-*/
+ */
 function CrSettingsSiteSettingsTest() {}
 
 CrSettingsSiteSettingsTest.prototype = {
@@ -608,7 +627,7 @@ GEN('#if defined(OS_CHROMEOS)');
  * Test fixture for device-page.
  * @constructor
  * @extends {CrSettingsBrowserTest}
-*/
+ */
 function CrSettingsDevicePageTest() {}
 
 CrSettingsDevicePageTest.prototype = {
@@ -648,7 +667,7 @@ GEN('#endif');
  * Test fixture for chrome/browser/resources/settings/settings_menu/.
  * @constructor
  * @extends {CrSettingsBrowserTest}
-*/
+ */
 function CrSettingsMenuTest() {}
 
 CrSettingsMenuTest.prototype = {
@@ -673,7 +692,7 @@ TEST_F('CrSettingsMenuTest', 'SettingsMenu', function() {
  * chrome/browser/resources/settings/settings_page/settings_subpage.html.
  * @constructor
  * @extends {CrSettingsBrowserTest}
-*/
+ */
 function CrSettingsSubpageTest() {}
 
 CrSettingsSubpageTest.prototype = {
@@ -696,7 +715,7 @@ GEN('#if !defined(OS_CHROMEOS)');
 /**
  * @constructor
  * @extends {CrSettingsBrowserTest}
-*/
+ */
 function CrSettingsSystemPageTest() {}
 
 CrSettingsSystemPageTest.prototype = {
@@ -818,7 +837,7 @@ GEN('#endif');
 /**
  * @constructor
  * @extends {SettingsPageBrowserTest}
-*/
+ */
 function CrSettingsRouteDynamicParametersTest() {}
 
 CrSettingsRouteDynamicParametersTest.prototype = {
@@ -868,7 +887,7 @@ GEN('#endif');
  * Test fixture for chrome/browser/resources/settings/settings_main/.
  * @constructor
  * @extends {CrSettingsBrowserTest}
-*/
+ */
 function CrSettingsMainPageTest() {}
 
 CrSettingsMainPageTest.prototype = {

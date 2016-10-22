@@ -357,10 +357,6 @@ const char kDataSaverEnabled[] = "spdy_proxy.enabled";
 // Boolean that is true when SafeBrowsing is enabled.
 const char kSafeBrowsingEnabled[] = "safebrowsing.enabled";
 
-// Boolean that tell us whether Safe Browsing extended reporting is enabled.
-const char kSafeBrowsingExtendedReportingEnabled[] =
-    "safebrowsing.extended_reporting_enabled";
-
 // Boolean that is true when the SafeBrowsing interstitial should not allow
 // users to proceed anyway.
 const char kSafeBrowsingProceedAnywayDisabled[] =
@@ -429,6 +425,9 @@ const char kDnsPrefetchingHostReferralList[] =
 
 // Prefs for persisting HttpServerProperties.
 const char kHttpServerProperties[] = "net.http_server_properties";
+
+// Prefs for persisting network qualities.
+const char kNetworkQualities[] = "net.network_qualities";
 
 #if defined(OS_ANDROID)
 // Last time that a check for cloud policy management was done. This time is

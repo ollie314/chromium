@@ -72,7 +72,6 @@
 #include "core/css/resolver/StyleAdjuster.h"
 #include "core/css/resolver/StyleResolverState.h"
 #include "core/css/resolver/StyleResolverStats.h"
-#include "core/css/resolver/ViewportStyleResolver.h"
 #include "core/dom/CSSSelectorWatch.h"
 #include "core/dom/FirstLetterPseudoElement.h"
 #include "core/dom/NodeComputedStyle.h"
@@ -182,18 +181,14 @@ static void collectScopedResolversForHostedShadowTrees(
 
 StyleResolver::StyleResolver(Document& document)
     : m_document(document),
-      m_viewportStyleResolver(ViewportStyleResolver::create(document)),
       m_needCollectFeatures(false),
       m_printMediaType(false),
       m_styleSharingDepth(0) {
   FrameView* view = document.view();
-  if (view) {
-    m_medium = new MediaQueryEvaluator(&view->frame());
-    m_printMediaType =
-        equalIgnoringCase(view->mediaType(), MediaTypeNames::print);
-  } else {
-    m_medium = new MediaQueryEvaluator("all");
-  }
+  DCHECK(view);
+  m_medium = new MediaQueryEvaluator(&view->frame());
+  m_printMediaType =
+      equalIgnoringCase(view->mediaType(), MediaTypeNames::print);
 
   initWatchedSelectorRules();
 }
@@ -290,8 +285,6 @@ void StyleResolver::finishAppendAuthorStyleSheets() {
       document().layoutViewItem().style())
     document().layoutViewItem().style()->font().update(
         document().styleEngine().fontSelector());
-
-  m_viewportStyleResolver->collectViewportRules();
 
   document().styleEngine().resetCSSFeatureFlags(m_features);
 }
@@ -1235,11 +1228,12 @@ bool StyleResolver::applyAnimatedProperties(StyleResolverState& state,
   CSSAnimations::calculateUpdate(animatingElement, *element, *state.style(),
                                  state.parentStyle(), state.animationUpdate(),
                                  this);
-  if (state.animationUpdate().isEmpty())
-    return false;
 
   CSSAnimations::snapshotCompositorKeyframes(
       *element, state.animationUpdate(), *state.style(), state.parentStyle());
+
+  if (state.animationUpdate().isEmpty())
+    return false;
 
   if (state.style()->insideLink() != NotInsideLink) {
     ASSERT(state.applyPropertyToRegularStyle());
@@ -1677,7 +1671,6 @@ void StyleResolver::invalidateMatchedPropertiesCache() {
 }
 
 void StyleResolver::notifyResizeForViewportUnits() {
-  m_viewportStyleResolver->collectViewportRules();
   m_matchedPropertiesCache.clearViewportDependent();
 }
 
@@ -1944,7 +1937,6 @@ DEFINE_TRACE(StyleResolver) {
   visitor->trace(m_viewportDependentMediaQueryResults);
   visitor->trace(m_deviceDependentMediaQueryResults);
   visitor->trace(m_selectorFilter);
-  visitor->trace(m_viewportStyleResolver);
   visitor->trace(m_features);
   visitor->trace(m_siblingRuleSet);
   visitor->trace(m_uncommonAttributeRuleSet);

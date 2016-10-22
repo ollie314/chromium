@@ -112,7 +112,7 @@ void TaskQueueManager::UnregisterTimeDomain(TimeDomain* time_domain) {
 scoped_refptr<internal::TaskQueueImpl> TaskQueueManager::NewTaskQueue(
     const TaskQueue::Spec& spec) {
   TRACE_EVENT1(tracing_category_, "TaskQueueManager::NewTaskQueue",
-               "queue_name", spec.name);
+               "queue_name", TaskQueue::NameForQueueType(spec.type));
   DCHECK(main_thread_checker_.CalledOnValidThread());
   TimeDomain* time_domain =
       spec.time_domain ? spec.time_domain : real_time_domain_.get();
@@ -489,6 +489,10 @@ void TaskQueueManager::OnTriedToSelectBlockedWorkQueue(
     observer_->OnTriedToExecuteBlockedTask(*work_queue->task_queue(),
                                            *work_queue->GetFrontTask());
   }
+}
+
+bool TaskQueueManager::HasImmediateWorkForTesting() const {
+  return !selector_.EnabledWorkQueuesEmpty();
 }
 
 }  // namespace scheduler

@@ -45,6 +45,7 @@
 #include "chrome/browser/chromeos/events/event_rewriter_controller.h"
 #include "chrome/browser/chromeos/events/keyboard_driven_event_rewriter.h"
 #include "chrome/browser/chromeos/extensions/default_app_order.h"
+#include "chrome/browser/chromeos/extensions/extension_volume_observer.h"
 #include "chrome/browser/chromeos/external_metrics.h"
 #include "chrome/browser/chromeos/input_method/input_method_configuration.h"
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
@@ -52,13 +53,12 @@
 #include "chrome/browser/chromeos/login/helper.h"
 #include "chrome/browser/chromeos/login/lock/screen_locker.h"
 #include "chrome/browser/chromeos/login/login_wizard.h"
-#include "chrome/browser/chromeos/login/quick_unlock/pin_storage.h"
-#include "chrome/browser/chromeos/login/quick_unlock/pin_storage_factory.h"
 #include "chrome/browser/chromeos/login/session/user_session_manager.h"
 #include "chrome/browser/chromeos/login/startup_utils.h"
 #include "chrome/browser/chromeos/login/users/chrome_user_manager.h"
 #include "chrome/browser/chromeos/login/users/wallpaper/wallpaper_manager.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
+#include "chrome/browser/chromeos/net/network_connect_delegate_chromeos.h"
 #include "chrome/browser/chromeos/net/network_portal_detector_impl.h"
 #include "chrome/browser/chromeos/net/wake_on_wifi_manager.h"
 #include "chrome/browser/chromeos/options/cert_library.h"
@@ -87,7 +87,6 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/task_manager/task_manager_interface.h"
 #include "chrome/browser/ui/ash/ash_util.h"
-#include "chrome/browser/ui/ash/network_connect_delegate_chromeos.h"
 #include "chrome/common/channel_info.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
@@ -253,7 +252,7 @@ class DBusServices {
 
     // Initialize the NetworkConnect handler.
     network_connect_delegate_.reset(new NetworkConnectDelegateChromeOS);
-    ui::NetworkConnect::Initialize(network_connect_delegate_.get());
+    NetworkConnect::Initialize(network_connect_delegate_.get());
 
     // Likewise, initialize the upgrade detector for Chrome OS. The upgrade
     // detector starts to monitor changes from the update engine.
@@ -269,7 +268,7 @@ class DBusServices {
   }
 
   ~DBusServices() {
-    ui::NetworkConnect::Shutdown();
+    NetworkConnect::Shutdown();
     network_connect_delegate_.reset();
     CertLibrary::Shutdown();
     NetworkHandler::Shutdown();
@@ -670,28 +669,25 @@ void ChromeBrowserMainPartsChromeos::PostProfileInit() {
   if (user_manager::UserManager::Get()->IsLoggedInAsGuest())
     SetGuestLocale(profile());
 
-  peripheral_battery_observer_.reset(new PeripheralBatteryObserver());
+  // This observer uses the intialized profile to dispatch extension events.
+  extension_volume_observer_ = base::MakeUnique<ExtensionVolumeObserver>();
 
-  renderer_freezer_.reset(
-      new RendererFreezer(std::unique_ptr<RendererFreezer::Delegate>(
-          new FreezerCgroupProcessManager())));
+  peripheral_battery_observer_ = base::MakeUnique<PeripheralBatteryObserver>();
+
+  renderer_freezer_ = base::MakeUnique<RendererFreezer>(
+      base::MakeUnique<FreezerCgroupProcessManager>());
 
   g_browser_process->platform_part()->InitializeAutomaticRebootManager();
   g_browser_process->platform_part()->InitializeDeviceDisablingManager();
 
   // This observer cannot be created earlier because it requires the shell to be
   // available.
-  idle_action_warning_observer_.reset(new IdleActionWarningObserver());
+  idle_action_warning_observer_ = base::MakeUnique<IdleActionWarningObserver>();
 
   // Start watching for low disk space events to notify the user if it is not a
   // guest profile.
   if (!user_manager::UserManager::Get()->IsLoggedInAsGuest())
-    low_disk_notification_.reset(new LowDiskNotification());
-
-  // Authenticate the user for PIN quick unlock.
-  PinStorage* pin_storage = PinStorageFactory::GetForProfile(profile());
-  if (pin_storage)
-    pin_storage->MarkStrongAuth();
+    low_disk_notification_ = base::MakeUnique<LowDiskNotification>();
 
   ChromeBrowserMainPartsLinux::PostProfileInit();
 }
@@ -798,6 +794,7 @@ void ChromeBrowserMainPartsChromeos::PostMainMessageLoopRun() {
 
   // We should remove observers attached to D-Bus clients before
   // DBusThreadManager is shut down.
+  extension_volume_observer_.reset();
   peripheral_battery_observer_.reset();
   power_prefs_.reset();
   renderer_freezer_.reset();

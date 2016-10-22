@@ -181,7 +181,6 @@
 #include "core/inspector/ConsoleMessage.h"
 #include "core/inspector/InspectorInstrumentation.h"
 #include "core/inspector/InspectorTraceEvents.h"
-#include "core/inspector/InstanceCounters.h"
 #include "core/inspector/MainThreadDebugger.h"
 #include "core/layout/HitTestCanvasResult.h"
 #include "core/layout/HitTestResult.h"
@@ -223,6 +222,7 @@
 #include "platform/DateComponents.h"
 #include "platform/EventDispatchForbiddenScope.h"
 #include "platform/Histogram.h"
+#include "platform/InstanceCounters.h"
 #include "platform/Language.h"
 #include "platform/LengthFunctions.h"
 #include "platform/PluginScriptForbiddenScope.h"
@@ -3999,6 +3999,7 @@ void Document::setCSSTarget(Element* newTarget) {
 void Document::registerNodeList(const LiveNodeListBase* list) {
   DCHECK(!m_nodeLists[list->invalidationType()].contains(list));
   m_nodeLists[list->invalidationType()].add(list);
+  ScriptWrappableVisitor::writeBarrier(this, list);
   if (list->isRootedAtTreeScope())
     m_listsInvalidatedAtDocument.add(list);
 }
@@ -4015,6 +4016,7 @@ void Document::unregisterNodeList(const LiveNodeListBase* list) {
 void Document::registerNodeListWithIdNameCache(const LiveNodeListBase* list) {
   DCHECK(!m_nodeLists[InvalidateOnIdNameAttrChange].contains(list));
   m_nodeLists[InvalidateOnIdNameAttrChange].add(list);
+  ScriptWrappableVisitor::writeBarrier(this, list);
 }
 
 void Document::unregisterNodeListWithIdNameCache(const LiveNodeListBase* list) {

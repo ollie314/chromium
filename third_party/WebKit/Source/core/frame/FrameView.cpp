@@ -433,6 +433,7 @@ void FrameView::setFrameRect(const IntRect& newRect) {
 
     if (m_frame->isMainFrame())
       m_frame->host()->visualViewport().mainFrameDidChangeSize();
+
     frame().loader().restoreScrollPositionAndViewState();
   }
 }
@@ -4473,6 +4474,25 @@ bool FrameView::canThrottleRendering() const {
     return false;
   return m_subtreeThrottled ||
          (m_hiddenForThrottling && m_crossOriginForThrottling);
+}
+
+void FrameView::setInitialViewportSize(const IntSize& viewportSize) {
+  if (viewportSize == m_initialViewportSize)
+    return;
+
+  m_initialViewportSize = viewportSize;
+  if (Document* document = m_frame->document())
+    document->styleEngine().initialViewportChanged();
+}
+
+int FrameView::initialViewportWidth() const {
+  DCHECK(m_frame->isMainFrame());
+  return m_initialViewportSize.width();
+}
+
+int FrameView::initialViewportHeight() const {
+  DCHECK(m_frame->isMainFrame());
+  return m_initialViewportSize.height();
 }
 
 }  // namespace blink

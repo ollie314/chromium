@@ -4,6 +4,7 @@
 
 package org.chromium.chrome.browser.payments;
 
+import android.content.Context;
 import android.os.Handler;
 import android.view.View;
 import android.view.ViewGroup;
@@ -11,7 +12,10 @@ import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.Spinner;
 
+import org.json.JSONObject;
+
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.base.test.util.UrlUtils;
 import org.chromium.chrome.R;
@@ -27,13 +31,11 @@ import org.chromium.chrome.browser.payments.ui.PaymentRequestUI;
 import org.chromium.chrome.browser.payments.ui.PaymentRequestUI.PaymentRequestObserverForTest;
 import org.chromium.chrome.test.ChromeActivityTestCaseBase;
 import org.chromium.content.browser.ContentViewCore;
-import org.chromium.content.browser.test.util.CallbackHelper;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
 import org.chromium.content.browser.test.util.DOMUtils;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.payments.mojom.PaymentItem;
-import org.json.JSONObject;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -651,7 +653,7 @@ abstract class PaymentRequestTestBase extends ChromeActivityTestCaseBase<ChromeT
         final TestPay app = new TestPay(methodName, instrumentPresence, responseSpeed);
         PaymentAppFactory.setAdditionalFactory(new PaymentAppFactoryAddition() {
             @Override
-            public List<PaymentApp> create(WebContents webContents) {
+            public List<PaymentApp> create(Context context, WebContents webContents) {
                 List<PaymentApp> additionalApps = new ArrayList<>();
                 additionalApps.add(app);
                 return additionalApps;
@@ -717,7 +719,7 @@ abstract class PaymentRequestTestBase extends ChromeActivityTestCaseBase<ChromeT
         private final String mMethodName;
 
         TestPayInstrument(String methodName) {
-            super(methodName, "Test Pay", null, NO_ICON);
+            super(methodName, "Test Pay", null, null);
             mMethodName = methodName;
         }
 

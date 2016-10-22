@@ -363,6 +363,51 @@ bool AwContentsClientBridge::ShouldOverrideUrlLoading(const base::string16& url,
   return did_override;
 }
 
+void AwContentsClientBridge::NewDownload(const GURL& url,
+                                         const std::string& user_agent,
+                                         const std::string& content_disposition,
+                                         const std::string& mime_type,
+                                         int64_t content_length) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  JNIEnv* env = AttachCurrentThread();
+  ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
+  if (obj.is_null())
+    return;
+
+  ScopedJavaLocalRef<jstring> jstring_url =
+      ConvertUTF8ToJavaString(env, url.spec());
+  ScopedJavaLocalRef<jstring> jstring_user_agent =
+      ConvertUTF8ToJavaString(env, user_agent);
+  ScopedJavaLocalRef<jstring> jstring_content_disposition =
+      ConvertUTF8ToJavaString(env, content_disposition);
+  ScopedJavaLocalRef<jstring> jstring_mime_type =
+      ConvertUTF8ToJavaString(env, mime_type);
+
+  Java_AwContentsClientBridge_newDownload(
+      env, obj, jstring_url, jstring_user_agent, jstring_content_disposition,
+      jstring_mime_type, content_length);
+}
+
+void AwContentsClientBridge::NewLoginRequest(const std::string& realm,
+                                             const std::string& account,
+                                             const std::string& args) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  JNIEnv* env = AttachCurrentThread();
+  ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
+  if (obj.is_null())
+    return;
+
+  ScopedJavaLocalRef<jstring> jrealm = ConvertUTF8ToJavaString(env, realm);
+  ScopedJavaLocalRef<jstring> jargs = ConvertUTF8ToJavaString(env, args);
+
+  ScopedJavaLocalRef<jstring> jaccount;
+  if (!account.empty())
+    jaccount = ConvertUTF8ToJavaString(env, account);
+
+  Java_AwContentsClientBridge_newLoginRequest(env, obj, jrealm, jaccount,
+                                              jargs);
+}
+
 void AwContentsClientBridge::ConfirmJsResult(JNIEnv* env,
                                              const JavaRef<jobject>&,
                                              int id,

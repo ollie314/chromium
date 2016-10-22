@@ -871,7 +871,8 @@ void CompositeEditCommand::rebalanceWhitespaceOnTextSubstring(Text* textNode,
   // See http://crbug.com/310149
   const bool nextSiblingIsTextNode =
       textNode->nextSibling() && textNode->nextSibling()->isTextNode() &&
-      toText(textNode->nextSibling())->data().length();
+      toText(textNode->nextSibling())->data().length() &&
+      toText(textNode->nextSibling())->data()[0] != ' ';
   const bool shouldEmitNBSPbeforeEnd =
       (isEndOfParagraph(visibleDownstreamPos) ||
        (unsigned)downstream == text.length()) &&
@@ -1241,7 +1242,8 @@ void CompositeEditCommand::pushAnchorElementDown(Element* anchorNode,
 
   DCHECK(anchorNode->isLink()) << anchorNode;
 
-  setEndingSelection(VisibleSelection::selectionFromContentsOfNode(anchorNode));
+  setEndingSelection(createVisibleSelection(
+      SelectionInDOMTree::Builder().selectAllChildren(*anchorNode).build()));
   applyStyledElement(anchorNode, editingState);
   if (editingState->isAborted())
     return;
@@ -1644,8 +1646,11 @@ void CompositeEditCommand::moveParagraphs(
       Position::firstPositionInNode(document().documentElement()),
       destination.toParentAnchoredPosition(), true);
 
-  VisibleSelection destinationSelection = createVisibleSelection(
-      destination.toPositionWithAffinity(), originalIsDirectional);
+  VisibleSelection destinationSelection =
+      createVisibleSelection(SelectionInDOMTree::Builder()
+                                 .collapse(destination.toPositionWithAffinity())
+                                 .setIsDirectional(originalIsDirectional)
+                                 .build());
   if (endingSelection().isNone()) {
     // We abort executing command since |destination| becomes invisible.
     editingState->abort();
@@ -1869,8 +1874,11 @@ bool CompositeEditCommand::breakOutOfEmptyMailBlockquotedParagraph(
       return false;
     document().updateStyleAndLayoutIgnorePendingStylesheets();
   }
-  setEndingSelection(createVisibleSelection(atBR.toPositionWithAffinity(),
-                                            endingSelection().isDirectional()));
+  setEndingSelection(createVisibleSelection(
+      SelectionInDOMTree::Builder()
+          .collapse(atBR.toPositionWithAffinity())
+          .setIsDirectional(endingSelection().isDirectional())
+          .build()));
 
   // If this is an empty paragraph there must be a line break here.
   if (!lineBreakExistsAtVisiblePosition(caret))

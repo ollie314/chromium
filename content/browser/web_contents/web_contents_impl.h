@@ -327,6 +327,7 @@ class CONTENT_EXPORT WebContentsImpl
   void NotifyNavigationStateChanged(InvalidateTypes changed_flags) override;
   base::TimeTicks GetLastActiveTime() const override;
   void SetLastActiveTime(base::TimeTicks last_active_time) override;
+  base::TimeTicks GetLastHiddenTime() const override;
   void WasShown() override;
   void WasHidden() override;
   bool NeedToFireBeforeUnload() override;
@@ -417,6 +418,7 @@ class CONTENT_EXPORT WebContentsImpl
   void StopMediaSession() override;
   void OnPasswordInputShownOnHttp() override;
   void OnCreditCardInputShownOnHttp() override;
+  void SetIsOverlayContent(bool is_overlay_content) override;
 
 #if defined(OS_ANDROID)
   base::android::ScopedJavaLocalRef<jobject> GetJavaWebContents() override;
@@ -566,6 +568,7 @@ class CONTENT_EXPORT WebContentsImpl
   bool IsVirtualKeyboardRequested() override;
   bool IsOverridingUserAgent() override;
   bool IsJavaScriptDialogShowing() const override;
+  bool HideDownloadUI() const override;
 
   // NavigatorDelegate ---------------------------------------------------------
 
@@ -1270,6 +1273,10 @@ class CONTENT_EXPORT WebContentsImpl
   // the WebContents creation time.
   base::TimeTicks last_active_time_;
 
+  // The time that this WebContents was last made hidden. The initial value is
+  // zero.
+  base::TimeTicks last_hidden_time_;
+
   // See description above setter.
   bool closed_by_user_gesture_;
 
@@ -1429,6 +1436,9 @@ class CONTENT_EXPORT WebContentsImpl
 #if defined(OS_ANDROID)
   std::unique_ptr<service_manager::InterfaceProvider> java_interfaces_;
 #endif
+
+  // Whether this WebContents is for content overlay.
+  bool is_overlay_content_;
 
   base::WeakPtrFactory<WebContentsImpl> loading_weak_factory_;
   base::WeakPtrFactory<WebContentsImpl> weak_factory_;

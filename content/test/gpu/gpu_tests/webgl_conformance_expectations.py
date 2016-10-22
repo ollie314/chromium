@@ -115,6 +115,8 @@ class WebGLConformanceExpectations(GpuTestExpectations):
     self.Fail('conformance/buffers/buffer-uninitialized.html',
         bug=654201)
 
+    self.Fail('conformance/glsl/bugs/samplers-in-ternary-operator.html',
+        bug=657853)
     # We need to add WebGL 1 check in command buffer that format/type from
     # TexSubImage2D have to match the current texture's.
     self.Fail('conformance/textures/misc/tex-sub-image-2d-bad-args.html',
@@ -189,7 +191,7 @@ class WebGLConformanceExpectations(GpuTestExpectations):
 
     # Win / OpenGL / AMD failures
     self.Skip('conformance/attribs/gl-bindAttribLocation-aliasing.html',
-        ['win', ('amd', 0x6779), 'opengl'], bug=649824)
+        ['win', 'amd', 'opengl'], bug=649824)
     self.Flaky('conformance/attribs/gl-bindAttribLocation-matrix.html',
         ['win', ('amd', 0x6779), 'opengl'], bug=649824)
     self.Flaky('conformance/attribs/gl-bindAttribLocation-repeated.html',

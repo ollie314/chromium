@@ -6,6 +6,7 @@
 
 #include "base/metrics/histogram_macros.h"
 #include "chrome/browser/android/vr_shell/ui_elements.h"
+#include "chrome/browser/android/vr_shell/ui_interface.h"
 #include "chrome/browser/android/vr_shell/ui_scene.h"
 #include "chrome/browser/android/vr_shell/vr_compositor.h"
 #include "chrome/browser/android/vr_shell/vr_controller.h"
@@ -82,12 +83,15 @@ static constexpr int kBrowserUiElementId = 0;
 // into geometry (they ignore the Z buffer), leading to odd effects
 // if they are far away.
 static constexpr vr_shell::Recti kWebVrWarningTransientRect = {
-  0, 128, 512, 256};
+  0, 128, 512, 250};
 static constexpr vr_shell::Recti kWebVrWarningPermanentRect = {0, 0, 512, 128};
 static constexpr float kWebVrWarningDistance = 0.7f;  // meters
 static constexpr float kWebVrWarningPermanentAngle = 16.3f;  // degrees up
 // How long the transient warning needs to be displayed.
 static constexpr int64_t kWebVrWarningSeconds = 30;
+
+static constexpr int kFramePrimaryBuffer = 0;
+static constexpr int kFrameHeadlockedBuffer = 1;
 
 vr_shell::VrShell* g_instance;
 
@@ -142,6 +146,7 @@ VrShell::VrShell(JNIEnv* env, jobject obj,
   g_instance = this;
   j_vr_shell_.Reset(env, obj);
   scene_.reset(new UiScene);
+  html_interface_.reset(new UiInterface);
   content_compositor_.reset(new VrCompositor(content_window, false));
   ui_compositor_.reset(new VrCompositor(ui_window, true));
 
@@ -245,13 +250,33 @@ void VrShell::InitializeGl(JNIEnv* env,
   std::vector<gvr::BufferSpec> specs;
   specs.push_back(gvr_api_->CreateBufferSpec());
   render_size_ = specs[0].GetSize();
+
+  // For WebVR content
+  specs.push_back(gvr_api_->CreateBufferSpec());
+
   swap_chain_.reset(new gvr::SwapChain(gvr_api_->CreateSwapChain(specs)));
 
   vr_shell_renderer_.reset(new VrShellRenderer());
   buffer_viewport_list_.reset(
       new gvr::BufferViewportList(gvr_api_->CreateEmptyBufferViewportList()));
+  buffer_viewport_list_->SetToRecommendedBufferViewports();
+
   buffer_viewport_.reset(
       new gvr::BufferViewport(gvr_api_->CreateBufferViewport()));
+
+  headlocked_left_viewport_.reset(
+      new gvr::BufferViewport(gvr_api_->CreateBufferViewport()));
+  buffer_viewport_list_->GetBufferViewport(GVR_LEFT_EYE,
+                                           headlocked_left_viewport_.get());
+  headlocked_left_viewport_->SetSourceBufferIndex(kFrameHeadlockedBuffer);
+  headlocked_left_viewport_->SetReprojection(GVR_REPROJECTION_NONE);
+
+  headlocked_right_viewport_.reset(
+      new gvr::BufferViewport(gvr_api_->CreateBufferViewport()));
+  buffer_viewport_list_->GetBufferViewport(GVR_RIGHT_EYE,
+                                           headlocked_right_viewport_.get());
+  headlocked_right_viewport_->SetSourceBufferIndex(kFrameHeadlockedBuffer);
+  headlocked_right_viewport_->SetReprojection(GVR_REPROJECTION_NONE);
 }
 
 void VrShell::UpdateController(const gvr::Vec3f& forward_vector) {
@@ -324,7 +349,7 @@ void VrShell::UpdateController(const gvr::Vec3f& forward_vector) {
 
   for (std::size_t i = 0; i < scene_->GetUiElements().size(); ++i) {
     const ContentRectangle* plane = scene_->GetUiElements()[i].get();
-    if (!plane->visible) {
+    if (!plane->visible || !plane->hit_testable) {
       continue;
     }
     float distance_to_plane = plane->GetRayDistance(kOrigin, eye_to_target);
@@ -416,12 +441,22 @@ void VrShell::DrawFrame(JNIEnv* env, const JavaParamRef<jobject>& obj) {
     gvr_api_->ApplyNeckModel(head_pose, 1.0f);
   }
 
-  // Bind back to the default framebuffer.
-  frame.BindBuffer(0);
+  // Bind the primary framebuffer.
+  frame.BindBuffer(kFramePrimaryBuffer);
 
   if (webvr_mode_) {
     DrawWebVr();
-    if (!webvr_secure_origin_) {
+    // Wait for the DOM contents to be loaded before rendering to avoid drawing
+    // white rectangles with no content.
+    if (!webvr_secure_origin_ && IsUiTextureReady()) {
+      size_t last_viewport = buffer_viewport_list_->GetSize();
+      buffer_viewport_list_->SetBufferViewport(last_viewport++,
+          *headlocked_left_viewport_);
+      buffer_viewport_list_->SetBufferViewport(last_viewport++,
+          *headlocked_right_viewport_);
+
+      // Bind the headlocked framebuffer.
+      frame.BindBuffer(kFrameHeadlockedBuffer);
       DrawWebVrOverlay(target_time.monotonic_system_time_nanos);
     }
 
@@ -454,12 +489,6 @@ void VrShell::DrawVrShell(const gvr::Mat4f& head_pose) {
 
   UpdateController(GetForwardVector(head_pose));
 
-  // Everything should be positioned now, ready for drawing.
-  gvr::Mat4f left_eye_view_matrix =
-    MatrixMul(gvr_api_->GetEyeFromHeadMatrix(GVR_LEFT_EYE), head_pose);
-  gvr::Mat4f right_eye_view_matrix =
-      MatrixMul(gvr_api_->GetEyeFromHeadMatrix(GVR_RIGHT_EYE), head_pose);
-
   // Use culling to remove back faces.
   glEnable(GL_CULL_FACE);
 
@@ -471,14 +500,18 @@ void VrShell::DrawVrShell(const gvr::Mat4f& head_pose) {
 
   buffer_viewport_list_->GetBufferViewport(GVR_LEFT_EYE,
                                            buffer_viewport_.get());
-  DrawEye(left_eye_view_matrix, *buffer_viewport_);
+  DrawEye(GVR_LEFT_EYE, head_pose, *buffer_viewport_);
   buffer_viewport_list_->GetBufferViewport(GVR_RIGHT_EYE,
                                            buffer_viewport_.get());
-  DrawEye(right_eye_view_matrix, *buffer_viewport_);
+  DrawEye(GVR_RIGHT_EYE, head_pose, *buffer_viewport_);
 }
 
-void VrShell::DrawEye(const gvr::Mat4f& view_matrix,
+void VrShell::DrawEye(gvr::Eye eye,
+                      const gvr::Mat4f& head_pose,
                       const gvr::BufferViewport& params) {
+  gvr::Mat4f eye_matrix = gvr_api_->GetEyeFromHeadMatrix(eye);
+  gvr::Mat4f view_matrix = MatrixMul(eye_matrix, head_pose);
+
   gvr::Recti pixel_rect =
       CalculatePixelSpaceRect(render_size_, params.GetSourceUv());
   glViewport(pixel_rect.left, pixel_rect.bottom,
@@ -488,19 +521,22 @@ void VrShell::DrawEye(const gvr::Mat4f& view_matrix,
             pixel_rect.right - pixel_rect.left,
             pixel_rect.top - pixel_rect.bottom);
 
-  gvr::Mat4f render_matrix = MatrixMul(
+  const gvr::Mat4f fov_render_matrix = MatrixMul(
+      PerspectiveMatrixFromView(params.GetSourceFov(), kZNear, kZFar),
+      eye_matrix);
+  const gvr::Mat4f world_render_matrix = MatrixMul(
       PerspectiveMatrixFromView(params.GetSourceFov(), kZNear, kZFar),
       view_matrix);
 
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
   // TODO(mthiesse): Draw order for transparency.
-  DrawUI(render_matrix);
-  DrawCursor(render_matrix);
+  DrawUI(world_render_matrix, fov_render_matrix);
+  DrawCursor(world_render_matrix);
 }
 
 bool VrShell::IsUiTextureReady() {
-  return ui_tex_width_ > 0 && ui_tex_height_ > 0;
+  return ui_tex_width_ > 0 && ui_tex_height_ > 0 && dom_contents_loaded_;
 }
 
 Rectf VrShell::MakeUiGlCopyRect(Recti pixel_rect) {
@@ -512,7 +548,8 @@ Rectf VrShell::MakeUiGlCopyRect(Recti pixel_rect) {
       static_cast<float>(pixel_rect.height) / ui_tex_height_});
 }
 
-void VrShell::DrawUI(const gvr::Mat4f& render_matrix) {
+void VrShell::DrawUI(const gvr::Mat4f& world_matrix,
+                     const gvr::Mat4f& fov_matrix) {
   for (const auto& rect : scene_->GetUiElements()) {
     if (!rect->visible) {
       continue;
@@ -533,7 +570,9 @@ void VrShell::DrawUI(const gvr::Mat4f& render_matrix) {
       texture_handle = ui_texture_id_;
     }
 
-    gvr::Mat4f transform = MatrixMul(render_matrix, rect->transform.to_world);
+    const gvr::Mat4f& view_matrix =
+        rect->lock_to_fov ? fov_matrix : world_matrix;
+    gvr::Mat4f transform = MatrixMul(view_matrix, rect->transform.to_world);
     vr_shell_renderer_->GetTexturedQuadRenderer()->Draw(
         texture_handle, transform, copy_rect);
   }
@@ -638,6 +677,8 @@ void VrShell::DrawWebVrOverlay(int64_t present_time_nanos) {
       gvr_api_->GetEyeFromHeadMatrix(GVR_LEFT_EYE);
   gvr::Mat4f right_eye_view_matrix =
       gvr_api_->GetEyeFromHeadMatrix(GVR_RIGHT_EYE);
+
+  glClear(GL_COLOR_BUFFER_BIT);
 
   buffer_viewport_list_->GetBufferViewport(GVR_LEFT_EYE,
                                            buffer_viewport_.get());
@@ -749,6 +790,8 @@ void VrShell::OnDomContentsLoaded() {
   // should fix.
   ui_contents_->GetRenderWidgetHostView()->SetBackgroundColor(
       SK_ColorTRANSPARENT);
+  html_interface_->OnDomContentsLoaded();
+  dom_contents_loaded_ = true;
 }
 
 void VrShell::SetWebVrMode(JNIEnv* env,
@@ -759,8 +802,10 @@ void VrShell::SetWebVrMode(JNIEnv* env,
     int64_t now = gvr::GvrApi::GetTimePointNow().monotonic_system_time_nanos;
     constexpr int64_t seconds_to_nanos = 1000 * 1000 * 1000;
     webvr_warning_end_nanos_ = now + kWebVrWarningSeconds * seconds_to_nanos;
+    html_interface_->SetMode(UiInterface::Mode::WEB_VR);
   } else {
     webvr_warning_end_nanos_ = 0;
+    html_interface_->SetMode(UiInterface::Mode::STANDARD);
   }
 }
 
@@ -810,6 +855,10 @@ void VrShell::UiSurfaceChanged(JNIEnv* env,
 
 UiScene* VrShell::GetScene() {
   return scene_.get();
+}
+
+UiInterface* VrShell::GetUiInterface() {
+  return html_interface_.get();
 }
 
 void VrShell::QueueTask(base::Callback<void()>& callback) {

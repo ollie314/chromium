@@ -111,12 +111,8 @@ class CORE_EXPORT FrameSelection final
     return selection().isContentRichlyEditable();
   }
 
-  // TODO(yosin): We should make and rename |moveTo()| as implementation of
-  // |WebLoalFrameImpl::moveCaretSeleciton()|, since there is only one call
-  // site.
-  void moveTo(const VisiblePosition&,
-              EUserTriggered = NotUserTriggered,
-              CursorAlignOnScroll = CursorAlignOnScroll::IfNeeded);
+  // An implementation of |WebFrame::moveCaretSelection()|
+  void moveCaretSelection(const IntPoint&);
 
   template <typename Strategy>
   const VisibleSelectionTemplate<Strategy>& visibleSelection() const;
@@ -145,13 +141,6 @@ class CORE_EXPORT FrameSelection final
                     SetSelectionOptions = CloseTyping | ClearTypingStyle,
                     CursorAlignOnScroll = CursorAlignOnScroll::IfNeeded,
                     TextGranularity = CharacterGranularity);
-  // TODO(yosin) We should get rid of two parameters version of
-  // |setSelection()| to avoid conflict of four parameters version.
-  void setSelection(const VisibleSelection& selection,
-                    TextGranularity granularity) {
-    setSelection(selection, CloseTyping | ClearTypingStyle,
-                 CursorAlignOnScroll::IfNeeded, granularity);
-  }
   bool setSelectedRange(
       const EphemeralRange&,
       TextAffinity,

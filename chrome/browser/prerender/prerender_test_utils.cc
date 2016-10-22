@@ -4,6 +4,11 @@
 
 #include "chrome/browser/prerender/prerender_test_utils.h"
 
+#include <memory>
+#include <set>
+#include <string>
+#include <vector>
+
 #include "base/command_line.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/loader/chrome_resource_dispatcher_host_delegate.h"
@@ -250,23 +255,6 @@ TestPrerenderContents::~TestPrerenderContents() {
   EXPECT_EQ(should_be_shown_, was_shown_);
 }
 
-void TestPrerenderContents::RenderProcessGone(base::TerminationStatus status) {
-  // On quit, it's possible to end up here when render processes are closed
-  // before the PrerenderManager is destroyed.  As a result, it's possible to
-  // get either FINAL_STATUS_APP_TERMINATING or FINAL_STATUS_RENDERER_CRASHED
-  // on quit.
-  //
-  // It's also possible for this to be called after we've been notified of
-  // app termination, but before we've been deleted, which is why the second
-  // check is needed.
-  if (expected_final_status_ == FINAL_STATUS_APP_TERMINATING &&
-      final_status() != expected_final_status_) {
-    expected_final_status_ = FINAL_STATUS_RENDERER_CRASHED;
-  }
-
-  PrerenderContents::RenderProcessGone(status);
-}
-
 bool TestPrerenderContents::CheckURL(const GURL& url) {
   // Prevent FINAL_STATUS_UNSUPPORTED_SCHEME when navigating to about:crash in
   // the PrerenderRendererCrash test.
@@ -357,11 +345,33 @@ void DestructionWaiter::DestructionMarker::OnPrerenderStop(
 }
 
 TestPrerender::TestPrerender()
-    : contents_(nullptr), number_of_loads_(0), expected_number_of_loads_(0) {}
+    : contents_(nullptr),
+      number_of_loads_(0),
+      expected_number_of_loads_(0),
+      started_(false),
+      stopped_(false) {}
 
 TestPrerender::~TestPrerender() {
   if (contents_)
     contents_->RemoveObserver(this);
+}
+
+void TestPrerender::WaitForCreate() {
+  if (contents_)
+    return;
+  create_loop_.Run();
+}
+
+void TestPrerender::WaitForStart() {
+  if (started_)
+    return;
+  start_loop_.Run();
+}
+
+void TestPrerender::WaitForStop() {
+  if (stopped_)
+    return;
+  stop_loop_.Run();
 }
 
 void TestPrerender::WaitForLoads(int expected_number_of_loads) {
@@ -385,6 +395,7 @@ void TestPrerender::OnPrerenderCreated(TestPrerenderContents* contents) {
 }
 
 void TestPrerender::OnPrerenderStart(PrerenderContents* contents) {
+  started_ = true;
   start_loop_.Quit();
 }
 
@@ -397,6 +408,7 @@ void TestPrerender::OnPrerenderStopLoading(PrerenderContents* contents) {
 void TestPrerender::OnPrerenderStop(PrerenderContents* contents) {
   DCHECK(contents_);
   contents_ = nullptr;
+  stopped_ = true;
   stop_loop_.Quit();
   // If there is a WaitForLoads call and it has yet to see the expected number
   // of loads, stop the loop so the test fails instead of timing out.

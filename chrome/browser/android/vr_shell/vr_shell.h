@@ -28,6 +28,7 @@ class WindowAndroid;
 
 namespace vr_shell {
 
+class UiInterface;
 class UiScene;
 class VrCompositor;
 class VrController;
@@ -79,6 +80,7 @@ class VrShell : public device::GvrDelegate {
   static base::WeakPtr<VrShell> GetWeakPtr(
       const content::WebContents* web_contents);
   UiScene* GetScene();
+  UiInterface* GetUiInterface();
   void OnDomContentsLoaded();
 
   // device::GvrDelegate implementation
@@ -118,9 +120,11 @@ class VrShell : public device::GvrDelegate {
   // initialized by checking IsUiTextureReady() first.
   Rectf MakeUiGlCopyRect(Recti pixel_rect);
   void DrawVrShell(const gvr::Mat4f& head_pose);
-  void DrawEye(const gvr::Mat4f& view_matrix,
+  void DrawEye(gvr::Eye eye,
+               const gvr::Mat4f& head_pose,
                const gvr::BufferViewport& params);
-  void DrawUI(const gvr::Mat4f& render_matrix);
+  void DrawUI(const gvr::Mat4f& world_matrix,
+              const gvr::Mat4f& fov_matrix);
   void DrawCursor(const gvr::Mat4f& render_matrix);
   void DrawWebVr();
   void DrawWebVrOverlay(int64_t present_time_nanos);
@@ -141,10 +145,13 @@ class VrShell : public device::GvrDelegate {
   float desktop_height_;
 
   std::unique_ptr<UiScene> scene_;
+  std::unique_ptr<UiInterface> html_interface_;
 
   std::unique_ptr<gvr::GvrApi> gvr_api_;
   std::unique_ptr<gvr::BufferViewportList> buffer_viewport_list_;
   std::unique_ptr<gvr::BufferViewport> buffer_viewport_;
+  std::unique_ptr<gvr::BufferViewport> headlocked_left_viewport_;
+  std::unique_ptr<gvr::BufferViewport> headlocked_right_viewport_;
   std::unique_ptr<gvr::SwapChain> swap_chain_;
 
   gvr::Sizei render_size_;
@@ -169,6 +176,7 @@ class VrShell : public device::GvrDelegate {
   VrInputManager* current_input_target_ = nullptr;
   int ui_tex_width_ = 0;
   int ui_tex_height_ = 0;
+  bool dom_contents_loaded_ = false;
 
   bool webvr_mode_ = false;
   bool webvr_secure_origin_ = false;

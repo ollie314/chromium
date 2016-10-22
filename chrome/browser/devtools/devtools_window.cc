@@ -560,6 +560,7 @@ void DevToolsWindow::OpenExternalFrontend(
     if (!window)
       return;
     window->bindings_->AttachTo(agent_host);
+    window->close_on_detach_ = false;
   }
 
   window->ScheduleShow(DevToolsToggleAction::Show());
@@ -778,6 +779,7 @@ DevToolsWindow::DevToolsWindow(Profile* profile,
       browser_(nullptr),
       is_docked_(true),
       can_dock_(can_dock),
+      close_on_detach_(true),
       // This initialization allows external front-end to work without changes.
       // We don't wait for docking call, but instead immediately show undocked.
       // Passing "dockSide=undocked" parameter ensures proper UI.
@@ -1108,6 +1110,12 @@ bool DevToolsWindow::PreHandleGestureEvent(
       event.type == blink::WebGestureEvent::GesturePinchEnd;
 }
 
+void DevToolsWindow::ShowCertificateViewerInDevTools(
+    content::WebContents* web_contents,
+    scoped_refptr<net::X509Certificate> certificate) {
+  ShowCertificateViewer(certificate);
+}
+
 void DevToolsWindow::ActivateWindow() {
   if (life_stage_ != kLoadCompleted)
     return;
@@ -1198,6 +1206,8 @@ void DevToolsWindow::SetWhitelistedShortcuts(
 }
 
 void DevToolsWindow::InspectedContentsClosing() {
+  if (!close_on_detach_)
+    return;
   intercepted_page_beforeunload_ = false;
   life_stage_ = kClosing;
   main_web_contents_->ClosePage();

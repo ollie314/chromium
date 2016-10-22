@@ -128,10 +128,11 @@ class WindowTreeClient : public mojom::WindowTreeClient,
 
   void RequestClose(Window* window);
 
-  void AttachSurface(Id window_id,
-                     mojom::SurfaceType type,
-                     mojo::InterfaceRequest<mojom::Surface> surface,
-                     mojom::SurfaceClientPtr client);
+  void AttachSurface(
+      Id window_id,
+      mojom::SurfaceType type,
+      mojo::InterfaceRequest<cc::mojom::MojoCompositorFrameSink> surface,
+      cc::mojom::MojoCompositorFrameSinkClientPtr client);
 
   void OnWindowSurfaceDetached(Id window_id,
                                const cc::SurfaceSequence& sequence);
@@ -369,6 +370,7 @@ class WindowTreeClient : public mojom::WindowTreeClient,
                          mojom::WindowDataPtr root_data,
                          bool parent_drawn) override;
   void WmDisplayRemoved(int64_t display_id) override;
+  void WmDisplayModified(const display::Display& display) override;
   void WmSetBounds(uint32_t change_id,
                    Id window_id,
                    const gfx::Rect& transit_bounds) override;

@@ -23,6 +23,7 @@
 #include "base/memory/ptr_util.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/metrics/user_metrics.h"
 #include "base/process/kill.h"
 #include "base/process/process.h"
 #include "base/single_thread_task_runner.h"
@@ -1171,6 +1172,8 @@ void RenderView::ApplyWebPreferences(const WebPreferences& prefs,
   settings->setShowContextMenuOnMouseUp(prefs.context_menu_on_mouse_up);
   settings->setAlwaysShowContextMenuOnTouch(
       prefs.always_show_context_menu_on_touch);
+
+  settings->setHideDownloadUI(prefs.hide_download_ui);
 
 #if defined(OS_MACOSX)
   settings->setDoubleTapToZoomEnabled(true);
@@ -2808,6 +2811,8 @@ void RenderViewImpl::LaunchAndroidContentIntent(const GURL& intent,
   ScheduleComposite();
 
   if (!intent.is_empty()) {
+    base::RecordAction(base::UserMetricsAction(
+        "Android.ContentDetectorActivated"));
     Send(new ViewHostMsg_StartContentIntent(GetRoutingID(), intent,
                                             is_main_frame));
   }

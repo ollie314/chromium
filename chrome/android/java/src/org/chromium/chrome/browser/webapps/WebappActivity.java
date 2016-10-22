@@ -379,8 +379,7 @@ public class WebappActivity extends FullScreenActivity {
 
             @Override
             public void onDidStartProvisionalLoadForFrame(
-                    Tab tab, long frameId, long parentFrameId, boolean isMainFrame,
-                    String validatedUrl, boolean isErrorPage, boolean isIframeSrcdoc) {
+                    Tab tab, boolean isMainFrame, String validatedUrl) {
                 if (isMainFrame) updateUrlBar();
             }
 
@@ -570,7 +569,8 @@ public class WebappActivity extends FullScreenActivity {
     protected ChromeFullscreenManager createFullscreenManager() {
         return new ChromeFullscreenManager(this,
                 (ControlContainer) findViewById(R.id.control_container),
-                getControlContainerHeightResource(), false /* supportsBrowserOverride */);
+                getTabModelSelector(), getControlContainerHeightResource(),
+                false /* supportsBrowserOverride */);
     }
 
     @Override

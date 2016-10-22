@@ -441,6 +441,9 @@ class TestWindowTreeClient : public mojom::WindowTreeClient,
     NOTIMPLEMENTED();
   }
   void WmDisplayRemoved(int64_t display_id) override { NOTIMPLEMENTED(); }
+  void WmDisplayModified(const display::Display& display) override {
+    NOTIMPLEMENTED();
+  }
   void WmSetBounds(uint32_t change_id,
                    uint32_t window_id,
                    const gfx::Rect& bounds) override {
@@ -2146,9 +2149,9 @@ TEST_F(WindowTreeClientTest, SurfaceIdPropagation) {
   changes1()->clear();
 
   // Submit a CompositorFrame to window_2_101 and make sure server gets it.
-  mojom::SurfacePtr surface_ptr;
-  mojom::SurfaceClientRequest client_request;
-  mojom::SurfaceClientPtr surface_client_ptr;
+  cc::mojom::MojoCompositorFrameSinkPtr surface_ptr;
+  cc::mojom::MojoCompositorFrameSinkClientRequest client_request;
+  cc::mojom::MojoCompositorFrameSinkClientPtr surface_client_ptr;
   client_request = mojo::GetProxy(&surface_client_ptr);
   wt2()->AttachSurface(window_2_101, mojom::SurfaceType::DEFAULT,
                        mojo::GetProxy(&surface_ptr),
@@ -2162,8 +2165,7 @@ TEST_F(WindowTreeClientTest, SurfaceIdPropagation) {
                       gfx::Transform());
   compositor_frame.delegated_frame_data->render_pass_list.push_back(
       std::move(render_pass));
-  surface_ptr->SubmitCompositorFrame(std::move(compositor_frame),
-                                     base::Closure());
+  surface_ptr->SubmitCompositorFrame(std::move(compositor_frame));
   // Make sure the parent connection gets the surface ID.
   wt_client1()->WaitForChangeCount(1);
   // Verify that the submitted frame is for |window_2_101|.

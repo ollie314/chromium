@@ -620,9 +620,9 @@ const FeatureEntry::Choice kEnableDefaultMediaSessionChoices[] = {
     {IDS_FLAGS_ENABLE_DEFAULT_MEDIA_SESSION_ENABLED,
      switches::kEnableDefaultMediaSession, ""},
 #if defined(ENABLE_PLUGINS)
-    {IDS_FLAGS_ENABLE_DEFAULT_MEDIA_SESSION_ENABLED_WITH_FLASH,
+    {IDS_FLAGS_ENABLE_DEFAULT_MEDIA_SESSION_ENABLED_DUCK_FLASH,
      switches::kEnableDefaultMediaSession,
-     switches::kEnableDefaultMediaSessionWithFlash},
+     switches::kEnableDefaultMediaSessionDuckFlash},
 #endif  // defined(ENABLE_PLUGINS)
 };
 #endif  // !defined(OS_ANDROID)
@@ -1496,13 +1496,6 @@ const FeatureEntry kFeatureEntries[] = {
      IDS_FLAGS_HARFBUZZ_RENDERTEXT_DESCRIPTION, kOsMac,
      SINGLE_VALUE_TYPE(switches::kEnableHarfBuzzRenderText)},
 #endif  // OS_MACOSX
-#if defined(OS_CHROMEOS)
-    {"disable-timezone-tracking",
-     IDS_FLAGS_RESOLVE_TIMEZONE_BY_GEOLOCATION_NAME,
-     IDS_FLAGS_RESOLVE_TIMEZONE_BY_GEOLOCATION_DESCRIPTION, kOsCrOS,
-     SINGLE_DISABLE_VALUE_TYPE(
-         chromeos::switches::kDisableTimeZoneTrackingOption)},
-#endif  // OS_CHROMEOS
     {"data-reduction-proxy-lo-fi", IDS_FLAGS_DATA_REDUCTION_PROXY_LO_FI_NAME,
      IDS_FLAGS_DATA_REDUCTION_PROXY_LO_FI_DESCRIPTION, kOsAll,
      MULTI_VALUE_TYPE(kDataReductionProxyLoFiChoices)},

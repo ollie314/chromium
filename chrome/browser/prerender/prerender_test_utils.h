@@ -5,7 +5,13 @@
 #ifndef CHROME_BROWSER_PRERENDER_PRERENDER_TEST_UTILS_H_
 #define CHROME_BROWSER_PRERENDER_PRERENDER_TEST_UTILS_H_
 
+#include <deque>
 #include <functional>
+#include <memory>
+#include <set>
+#include <string>
+#include <unordered_map>
+#include <vector>
 
 #include "base/memory/weak_ptr.h"
 #include "base/run_loop.h"
@@ -105,7 +111,6 @@ class TestPrerenderContents : public PrerenderContents {
 
   ~TestPrerenderContents() override;
 
-  void RenderProcessGone(base::TerminationStatus status) override;
   bool CheckURL(const GURL& url) override;
 
   // For tests that open the prerender in a new background tab, the RenderView
@@ -153,9 +158,9 @@ class TestPrerender : public PrerenderContents::Observer,
   TestPrerenderContents* contents() const { return contents_; }
   int number_of_loads() const { return number_of_loads_; }
 
-  void WaitForCreate() { create_loop_.Run(); }
-  void WaitForStart() { start_loop_.Run(); }
-  void WaitForStop() { stop_loop_.Run(); }
+  void WaitForCreate();
+  void WaitForStart();
+  void WaitForStop();
 
   // Waits for |number_of_loads()| to be at least |expected_number_of_loads| OR
   // for the prerender to stop running (just to avoid a timeout if the prerender
@@ -178,6 +183,9 @@ class TestPrerender : public PrerenderContents::Observer,
 
   int expected_number_of_loads_;
   std::unique_ptr<base::RunLoop> load_waiter_;
+
+  bool started_;
+  bool stopped_;
 
   base::RunLoop create_loop_;
   base::RunLoop start_loop_;

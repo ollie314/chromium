@@ -24,6 +24,7 @@
 #include "chrome/common/pref_names.h"
 #include "components/prefs/pref_service.h"
 #include "components/safe_browsing_db/metadata.pb.h"
+#include "components/safe_browsing_db/safe_browsing_prefs.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_service.h"
@@ -240,9 +241,7 @@ void SafeBrowsingUIManager::DisplayBlockingPage(
     Profile* profile =
         Profile::FromBrowserContext(web_contents->GetBrowserContext());
     hit_report.is_extended_reporting =
-        profile &&
-        profile->GetPrefs()->GetBoolean(
-            prefs::kSafeBrowsingExtendedReportingEnabled);
+        profile && IsExtendedReportingEnabled(*profile->GetPrefs());
     hit_report.is_metrics_reporting_active =
         ChromeMetricsServiceAccessor::IsMetricsAndCrashReportingEnabled();
 
@@ -250,7 +249,8 @@ void SafeBrowsingUIManager::DisplayBlockingPage(
   }
 
   if (resource.threat_type != SB_THREAT_TYPE_SAFE) {
-    FOR_EACH_OBSERVER(Observer, observer_list_, OnSafeBrowsingHit(resource));
+    for (Observer& observer : observer_list_)
+      observer.OnSafeBrowsingHit(resource);
   }
   AddToWhitelistUrlSet(resource, true /* A decision is now pending */);
   SafeBrowsingBlockingPage::ShowBlockingPage(this, resource);

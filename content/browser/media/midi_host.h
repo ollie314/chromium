@@ -45,10 +45,8 @@ class CONTENT_EXPORT MidiHost : public BrowserMessageFilter,
   void CompleteStartSession(midi::mojom::Result result) override;
   void AddInputPort(const midi::MidiPortInfo& info) override;
   void AddOutputPort(const midi::MidiPortInfo& info) override;
-  void SetInputPortState(uint32_t port,
-                         midi::MidiPortState state) override;
-  void SetOutputPortState(uint32_t port,
-                          midi::MidiPortState state) override;
+  void SetInputPortState(uint32_t port, midi::mojom::PortState state) override;
+  void SetOutputPortState(uint32_t port, midi::mojom::PortState state) override;
   void ReceiveMidiData(uint32_t port,
                        const uint8_t* data,
                        size_t length,
@@ -70,16 +68,8 @@ class CONTENT_EXPORT MidiHost : public BrowserMessageFilter,
   ~MidiHost() override;
 
  private:
-  FRIEND_TEST_ALL_PREFIXES(MidiHostTest, IsValidWebMIDIData);
   friend class base::DeleteHelper<MidiHost>;
   friend class BrowserThread;
-
-  // Returns true if |data| fulfills the requirements of MidiOutput.send API
-  // defined in the Web MIDI spec.
-  // - |data| must be any number of complete MIDI messages (data abbreviation
-  //    called "running status" is disallowed).
-  // - 1-byte MIDI realtime messages can be placed at any position of |data|.
-  static bool IsValidWebMIDIData(const std::vector<uint8_t>& data);
 
   int renderer_process_id_;
 

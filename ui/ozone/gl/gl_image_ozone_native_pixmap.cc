@@ -152,9 +152,9 @@ bool GLImageOzoneNativePixmap::Initialize(NativePixmap* pixmap,
     attrs.push_back(EGL_LINUX_DRM_FOURCC_EXT);
     attrs.push_back(FourCC(format));
 
-    const EGLint kLinuxDrmModifiers[] = {EGL_LINUX_DRM_PLANE0_MODIFIER0_EXT,
-                                         EGL_LINUX_DRM_PLANE1_MODIFIER0_EXT,
-                                         EGL_LINUX_DRM_PLANE2_MODIFIER0_EXT};
+    const EGLint kLinuxDrmModifiers[] = {EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT,
+                                         EGL_DMA_BUF_PLANE1_MODIFIER_LO_EXT,
+                                         EGL_DMA_BUF_PLANE2_MODIFIER_LO_EXT};
     bool has_dma_buf_import_modifier = gl::GLSurfaceEGL::HasEGLExtension(
         "EGL_EXT_image_dma_buf_import_modifiers");
 

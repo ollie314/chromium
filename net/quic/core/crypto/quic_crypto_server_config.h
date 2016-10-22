@@ -210,17 +210,19 @@ class NET_EXPORT_PRIVATE QuicCryptoServerConfig {
 
   // Generates a QuicServerConfigProtobuf protobuf suitable for
   // AddConfig and SetConfigs.
-  static QuicServerConfigProtobuf* GenerateConfig(QuicRandom* rand,
-                                                  const QuicClock* clock,
-                                                  const ConfigOptions& options);
+  static std::unique_ptr<QuicServerConfigProtobuf> GenerateConfig(
+      QuicRandom* rand,
+      const QuicClock* clock,
+      const ConfigOptions& options);
 
-  // AddConfig adds a QuicServerConfigProtobuf to the availible configurations.
+  // AddConfig adds a QuicServerConfigProtobuf to the available configurations.
   // It returns the SCFG message from the config if successful. The caller
   // takes ownership of the CryptoHandshakeMessage. |now| is used in
   // conjunction with |protobuf->primary_time()| to determine whether the
   // config should be made primary.
-  CryptoHandshakeMessage* AddConfig(QuicServerConfigProtobuf* protobuf,
-                                    QuicWallTime now);
+  CryptoHandshakeMessage* AddConfig(
+      std::unique_ptr<QuicServerConfigProtobuf> protobuf,
+      QuicWallTime now);
 
   // AddDefaultConfig calls DefaultConfig to create a config and then calls
   // AddConfig to add it. See the comment for |DefaultConfig| for details of
@@ -236,8 +238,9 @@ class NET_EXPORT_PRIVATE QuicCryptoServerConfig {
   // known, but are missing from the protobufs are deleted, unless they are
   // currently the primary config. SetConfigs returns false if any errors were
   // encountered and no changes to the QuicCryptoServerConfig will occur.
-  bool SetConfigs(const std::vector<QuicServerConfigProtobuf*>& protobufs,
-                  QuicWallTime now);
+  bool SetConfigs(
+      const std::vector<std::unique_ptr<QuicServerConfigProtobuf>>& protobufs,
+      QuicWallTime now);
 
   // SetSourceAddressTokenKeys sets the keys to be tried, in order, when
   // decrypting a source address token.  Note that these keys are used *without*
@@ -380,7 +383,7 @@ class NET_EXPORT_PRIVATE QuicCryptoServerConfig {
   // per-connection.
   void SetEphemeralKeySource(EphemeralKeySource* ephemeral_key_source);
 
-  // Install an externall created StrikeRegisterClient for use to
+  // Install an externally created StrikeRegisterClient for use to
   // interact with the strike register.  This object takes ownership
   // of the |strike_register_client|.
   void SetStrikeRegisterClient(StrikeRegisterClient* strike_register_client);
@@ -479,7 +482,7 @@ class NET_EXPORT_PRIVATE QuicCryptoServerConfig {
     // key_exchanges contains key exchange objects with the private keys
     // already loaded. The values correspond, one-to-one, with the tags in
     // |kexs| from the parent class.
-    std::vector<KeyExchange*> key_exchanges;
+    std::vector<std::unique_ptr<KeyExchange>> key_exchanges;
 
     // tag_value_map contains the raw key/value pairs for the config.
     QuicTagValueMap tag_value_map;
@@ -545,7 +548,6 @@ class NET_EXPORT_PRIVATE QuicCryptoServerConfig {
   void EvaluateClientHello(
       const IPAddress& server_ip,
       QuicVersion version,
-      const uint8_t* primary_orbit,
       scoped_refptr<Config> requested_config,
       scoped_refptr<Config> primary_config,
       QuicCryptoProof* crypto_proof,
@@ -567,7 +569,6 @@ class NET_EXPORT_PRIVATE QuicCryptoServerConfig {
       bool found_error,
       const IPAddress& server_ip,
       QuicVersion version,
-      const uint8_t* primary_orbit,
       scoped_refptr<Config> requested_config,
       scoped_refptr<Config> primary_config,
       QuicCryptoProof* crypto_proof,
@@ -577,8 +578,14 @@ class NET_EXPORT_PRIVATE QuicCryptoServerConfig {
           client_hello_state,
       std::unique_ptr<ValidateClientHelloResultCallback> done_cb) const;
 
+  // Callback class for bridging between ProcessClientHello and
+  // ProcessClientHelloAfterGetProof.
+  class ProcessClientHelloCallback;
+  friend class ProcessClientHelloCallback;
+
   // Portion of ProcessClientHello which executes after GetProof.
   void ProcessClientHelloAfterGetProof(
+      bool found_error,
       const ValidateClientHelloResultCallback::Result& validate_chlo_result,
       bool reject_only,
       QuicConnectionId connection_id,
@@ -630,7 +637,8 @@ class NET_EXPORT_PRIVATE QuicCryptoServerConfig {
   // ParseConfigProtobuf parses the given config protobuf and returns a
   // scoped_refptr<Config> if successful. The caller adopts the reference to the
   // Config. On error, ParseConfigProtobuf returns nullptr.
-  scoped_refptr<Config> ParseConfigProtobuf(QuicServerConfigProtobuf* protobuf);
+  scoped_refptr<Config> ParseConfigProtobuf(
+      const std::unique_ptr<QuicServerConfigProtobuf>& protobuf);
 
   // NewSourceAddressToken returns a fresh source address token for the given
   // IP address. |cached_network_params| is optional, and can be nullptr.

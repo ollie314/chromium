@@ -306,6 +306,9 @@ class DevToolsWindow : public DevToolsUIBindings::Delegate,
                       const content::FileChooserParams& params) override;
   bool PreHandleGestureEvent(content::WebContents* source,
                              const blink::WebGestureEvent& event) override;
+  void ShowCertificateViewerInDevTools(
+      content::WebContents* web_contents,
+      scoped_refptr<net::X509Certificate> certificate) override;
 
   // content::DevToolsUIBindings::Delegate overrides
   void ActivateWindow() override;
@@ -340,6 +343,7 @@ class DevToolsWindow : public DevToolsUIBindings::Delegate,
   Browser* browser_;
   bool is_docked_;
   const bool can_dock_;
+  bool close_on_detach_;
   LifeStage life_stage_;
   DevToolsToggleAction action_on_load_;
   DevToolsContentsResizingStrategy contents_resizing_strategy_;

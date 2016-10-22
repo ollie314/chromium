@@ -227,7 +227,17 @@ WebGL2RenderingContextBase::WebGL2RenderingContextBase(
     : WebGLRenderingContextBase(passedCanvas,
                                 std::move(contextProvider),
                                 requestedAttributes,
-                                2) {
+                                2),
+      m_readFramebufferBinding(this, nullptr),
+      m_transformFeedbackBinding(this, nullptr),
+      m_boundCopyReadBuffer(this, nullptr),
+      m_boundCopyWriteBuffer(this, nullptr),
+      m_boundPixelPackBuffer(this, nullptr),
+      m_boundPixelUnpackBuffer(this, nullptr),
+      m_boundTransformFeedbackBuffer(this, nullptr),
+      m_boundUniformBuffer(this, nullptr),
+      m_currentBooleanOcclusionQuery(this, nullptr),
+      m_currentTransformFeedbackPrimitivesWrittenQuery(this, nullptr) {
   m_supportedInternalFormatsStorage.insert(
       kSupportedInternalFormatsStorage,
       kSupportedInternalFormatsStorage +
@@ -2849,7 +2859,7 @@ void WebGL2RenderingContextBase::bindSampler(GLuint unit,
     return;
   }
 
-  m_samplerUnits[unit] = sampler;
+  m_samplerUnits[unit] = TraceWrapperMember<WebGLSampler>(this, sampler);
 
   contextGL()->BindSampler(unit, objectOrZero(sampler));
 }
@@ -3680,7 +3690,6 @@ void WebGL2RenderingContextBase::deleteFramebuffer(
     m_readFramebufferBinding = nullptr;
   }
   if (target) {
-    drawingBuffer()->setFramebufferBinding(target, 0);
     // Have to call drawingBuffer()->bind() here to bind back to internal fbo.
     drawingBuffer()->bind(target);
   }
@@ -4042,7 +4051,8 @@ bool WebGL2RenderingContextBase::validateAndUpdateBufferBindBaseTarget(
         synthesizeGLError(GL_INVALID_VALUE, functionName, "index out of range");
         return false;
       }
-      m_boundIndexedTransformFeedbackBuffers[index] = buffer;
+      m_boundIndexedTransformFeedbackBuffers[index] =
+          TraceWrapperMember<WebGLBuffer>(this, buffer);
       m_boundTransformFeedbackBuffer = buffer;
       break;
     case GL_UNIFORM_BUFFER:
@@ -4050,7 +4060,8 @@ bool WebGL2RenderingContextBase::validateAndUpdateBufferBindBaseTarget(
         synthesizeGLError(GL_INVALID_VALUE, functionName, "index out of range");
         return false;
       }
-      m_boundIndexedUniformBuffers[index] = buffer;
+      m_boundIndexedUniformBuffers[index] =
+          TraceWrapperMember<WebGLBuffer>(this, buffer);
       m_boundUniformBuffer = buffer;
 
       // Keep track of what the maximum bound uniform buffer index is
@@ -4709,6 +4720,14 @@ WebGL2RenderingContextBase::getUnpackPixelStoreParams(
     params.skipImages = m_unpackSkipImages;
   }
   return params;
+}
+
+void WebGL2RenderingContextBase::
+    DrawingBufferClientRestorePixelUnpackBufferBinding() {
+  if (!contextGL())
+    return;
+  contextGL()->BindBuffer(GL_PIXEL_UNPACK_BUFFER,
+                          objectOrZero(m_boundPixelUnpackBuffer.get()));
 }
 
 }  // namespace blink

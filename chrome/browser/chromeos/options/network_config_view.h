@@ -44,8 +44,16 @@ class NetworkConfigView : public views::DialogDelegateView,
      virtual ~Delegate() {}
   };
 
-  // Shows a network connection dialog if none is currently visible.
-  static void Show(const std::string& service_path, gfx::NativeWindow parent);
+  // Shows a network connection dialog if none is currently visible. The dialog
+  // will be a child of |parent| (e.g. the webui settings window) which ensures
+  // it appears on the display the user is looking at.
+  static void ShowInParent(const std::string& network_id,
+                           gfx::NativeWindow parent);
+
+  // Same as above but places the dialog in the given container on the primary
+  // display. Used as a fallback when no parent is available.
+  static void ShowInContainer(const std::string& network_id, int container_id);
+
   // Shows a dialog to configure a new network. |type| must be a valid Shill
   // 'Type' property value.
   static void ShowForType(const std::string& type, gfx::NativeWindow parent);
@@ -86,6 +94,10 @@ class NetworkConfigView : public views::DialogDelegateView,
   NetworkConfigView();
   ~NetworkConfigView() override;
 
+  static void ShowImpl(const std::string& network_id,
+                       gfx::NativeWindow parent,
+                       int container_id);
+
   // Login dialog for known networks. Returns true if successfully created.
   bool InitWithNetworkState(const NetworkState* network);
   // Login dialog for new/hidden networks. Returns true if successfully created.
@@ -93,6 +105,7 @@ class NetworkConfigView : public views::DialogDelegateView,
 
   // Creates and shows a dialog containing this view.
   void ShowDialog(gfx::NativeWindow parent);
+  void ShowDialogInContainer(int container_id);
 
   // Resets the underlying view to show advanced options.
   void ShowAdvancedView();

@@ -28,7 +28,6 @@ namespace blink {
 
 class FrameSelectionTest : public EditingTestBase {
  protected:
-  FrameSelection& selection() const;
   const VisibleSelection& visibleSelectionInDOMTree() const {
     return selection().selection();
   }
@@ -55,10 +54,6 @@ class FrameSelectionTest : public EditingTestBase {
  private:
   Persistent<Text> m_textNode;
 };
-
-FrameSelection& FrameSelectionTest::selection() const {
-  return dummyPageHolder().frame().selection();
-}
 
 Text* FrameSelectionTest::appendTextNode(const String& data) {
   Text* text = document().createTextNode(data);
@@ -142,9 +137,8 @@ TEST_F(FrameSelectionTest, InvalidatePreviousCaretAfterRemovingLastCharacter) {
   // Simulate to type "Hello, World!".
   DisableCompositingQueryAsserts disabler;
   document().updateStyleAndLayout();
-  selection().moveTo(
-      createVisiblePosition(selection().end(), selection().affinity()),
-      NotUserTriggered);
+  selection().setSelection(
+      SelectionInDOMTree::Builder().collapse(selection().end()).build());
   selection().setCaretRectNeedsUpdate();
   EXPECT_TRUE(selection().isCaretBoundsDirty());
   EXPECT_FALSE(isPreviousCaretDirtyForTesting());
@@ -155,9 +149,8 @@ TEST_F(FrameSelectionTest, InvalidatePreviousCaretAfterRemovingLastCharacter) {
   // Simulate to remove all except for "H".
   text->replaceWholeText("H");
   document().updateStyleAndLayout();
-  selection().moveTo(
-      createVisiblePosition(selection().end(), selection().affinity()),
-      NotUserTriggered);
+  selection().setSelection(
+      SelectionInDOMTree::Builder().collapse(selection().end()).build());
   selection().setCaretRectNeedsUpdate();
   EXPECT_TRUE(selection().isCaretBoundsDirty());
   // "H" remains so early previousCaret invalidation isn't needed.
@@ -292,8 +285,10 @@ TEST_F(FrameSelectionTest, setNonDirectionalSelectionIfNeeded) {
 
   // top to bottom
   selection().setNonDirectionalSelectionIfNeeded(
-      createVisibleSelection(PositionInFlatTree(top, 1),
-                             PositionInFlatTree(bottom, 3)),
+      createVisibleSelection(SelectionInFlatTree::Builder()
+                                 .collapse(PositionInFlatTree(top, 1))
+                                 .extend(PositionInFlatTree(bottom, 3))
+                                 .build()),
       CharacterGranularity);
   EXPECT_EQ(Position(top, 1), visibleSelectionInDOMTree().base());
   EXPECT_EQ(Position::beforeNode(host), visibleSelectionInDOMTree().extent());
@@ -308,8 +303,10 @@ TEST_F(FrameSelectionTest, setNonDirectionalSelectionIfNeeded) {
 
   // bottom to top
   selection().setNonDirectionalSelectionIfNeeded(
-      createVisibleSelection(PositionInFlatTree(bottom, 3),
-                             PositionInFlatTree(top, 1)),
+      createVisibleSelection(SelectionInFlatTree::Builder()
+                                 .collapse(PositionInFlatTree(bottom, 3))
+                                 .extend(PositionInFlatTree(top, 1))
+                                 .build()),
       CharacterGranularity);
   EXPECT_EQ(Position(bottom, 3), visibleSelectionInDOMTree().base());
   EXPECT_EQ(Position::beforeNode(bottom->parentNode()),

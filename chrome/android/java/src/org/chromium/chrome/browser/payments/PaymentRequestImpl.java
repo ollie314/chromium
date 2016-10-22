@@ -234,7 +234,7 @@ public class PaymentRequestImpl implements PaymentRequest, PaymentRequestUI.Clie
                     }
                 });
 
-        mApps = PaymentAppFactory.create(webContents);
+        mApps = PaymentAppFactory.create(mContext, webContents);
 
         mAddressEditor = new AddressEditor();
         mCardEditor = new CardEditor(webContents, mAddressEditor, sObserverForTest);
@@ -271,11 +271,12 @@ public class PaymentRequestImpl implements PaymentRequest, PaymentRequestUI.Clie
         getMatchingPaymentInstruments();
 
         boolean requestShipping = options != null && options.requestShipping;
+        boolean requestPayerName = options != null && options.requestPayerName;
         boolean requestPayerPhone = options != null && options.requestPayerPhone;
         boolean requestPayerEmail = options != null && options.requestPayerEmail;
 
         List<AutofillProfile> profiles = null;
-        if (requestShipping || requestPayerPhone || requestPayerEmail) {
+        if (requestShipping || requestPayerName || requestPayerPhone || requestPayerEmail) {
             profiles = PersonalDataManager.getInstance().getProfilesToSuggest(
                     false /* includeNameInLabel */);
         }
@@ -287,8 +288,11 @@ public class PaymentRequestImpl implements PaymentRequest, PaymentRequestUI.Clie
                 AutofillProfile profile = profiles.get(i);
                 mAddressEditor.addPhoneNumberIfValid(profile.getPhoneNumber());
 
-                boolean isComplete = mAddressEditor.isProfileComplete(profile);
-                addresses.add(new AutofillAddress(profile, isComplete));
+                // Only suggest addresses that have a street address.
+                if (!TextUtils.isEmpty(profile.getStreetAddress())) {
+                    boolean isComplete = mAddressEditor.isProfileComplete(profile);
+                    addresses.add(new AutofillAddress(profile, isComplete));
+                }
             }
 
             // Suggest complete addresses first.
@@ -324,30 +328,34 @@ public class PaymentRequestImpl implements PaymentRequest, PaymentRequestUI.Clie
                             firstCompleteAddressIndex, addresses);
         }
 
-        if (requestPayerPhone || requestPayerEmail) {
+        if (requestPayerName || requestPayerPhone || requestPayerEmail) {
             Set<String> uniqueContactInfos = new HashSet<>();
-            mContactEditor = new ContactEditor(requestPayerPhone, requestPayerEmail);
+            mContactEditor = new ContactEditor(
+                    requestPayerName, requestPayerPhone, requestPayerEmail);
             List<AutofillContact> contacts = new ArrayList<>();
 
             for (int i = 0; i < profiles.size(); i++) {
                 AutofillProfile profile = profiles.get(i);
+                String name = requestPayerName && !TextUtils.isEmpty(profile.getFullName())
+                        ? profile.getFullName() : null;
                 String phone = requestPayerPhone && !TextUtils.isEmpty(profile.getPhoneNumber())
                         ? profile.getPhoneNumber() : null;
                 String email = requestPayerEmail && !TextUtils.isEmpty(profile.getEmailAddress())
                         ? profile.getEmailAddress() : null;
+                mContactEditor.addPayerNameIfValid(name);
                 mContactEditor.addPhoneNumberIfValid(phone);
                 mContactEditor.addEmailAddressIfValid(email);
 
-                if (phone != null || email != null) {
+                if (name != null || phone != null || email != null) {
                     // Different profiles can have identical contact info. Do not add the same
                     // contact info to the list twice.
-                    String uniqueContactInfo = phone + email;
+                    String uniqueContactInfo = name + phone + email;
                     if (!uniqueContactInfos.contains(uniqueContactInfo)) {
                         uniqueContactInfos.add(uniqueContactInfo);
 
                         boolean isComplete =
-                                mContactEditor.isContactInformationComplete(phone, email);
-                        contacts.add(new AutofillContact(profile, phone, email, isComplete));
+                                mContactEditor.isContactInformationComplete(name, phone, email);
+                        contacts.add(new AutofillContact(profile, name, phone, email, isComplete));
                     }
                 }
             }
@@ -373,8 +381,8 @@ public class PaymentRequestImpl implements PaymentRequest, PaymentRequestUI.Clie
         }
 
         mUI = new PaymentRequestUI(mContext, this, requestShipping,
-                requestPayerPhone || requestPayerEmail, mMerchantSupportsAutofillPaymentInstruments,
-                mMerchantName, mOrigin);
+                requestPayerName || requestPayerPhone || requestPayerEmail,
+                mMerchantSupportsAutofillPaymentInstruments, mMerchantName, mOrigin);
 
         if (mFavicon != null) mUI.setTitleBitmap(mFavicon);
         mFavicon = null;
@@ -654,7 +662,7 @@ public class PaymentRequestImpl implements PaymentRequest, PaymentRequestUI.Clie
         for (int i = 0; i < options.length; i++) {
             PaymentShippingOption option = options[i];
             result.add(new PaymentOption(option.id, option.label,
-                    formatter.format(option.amount.value), PaymentOption.NO_ICON));
+                    formatter.format(option.amount.value), null));
             if (option.selected) selectedItemIndex = i;
         }
 
@@ -1070,6 +1078,7 @@ public class PaymentRequestImpl implements PaymentRequest, PaymentRequestUI.Clie
             if (selectedContact != null) {
                 // Contacts are created in show(). These should all be instances of AutofillContact.
                 assert selectedContact instanceof AutofillContact;
+                response.payerName = ((AutofillContact) selectedContact).getPayerName();
                 response.payerPhone = ((AutofillContact) selectedContact).getPayerPhone();
                 response.payerEmail = ((AutofillContact) selectedContact).getPayerEmail();
             }

@@ -60,7 +60,8 @@ RemoteFontFaceSource::RemoteFontFaceSource(FontResource* font,
       m_histograms(font->url().protocolIsData()
                        ? FontLoadHistograms::FromDataURL
                        : font->isLoaded() ? FontLoadHistograms::FromMemoryCache
-                                          : FontLoadHistograms::FromUnknown),
+                                          : FontLoadHistograms::FromUnknown,
+                   m_display),
       m_isInterventionTriggered(false) {
   ThreadState::current()->registerPreFinalizer(this);
   m_font->addClient(this);
@@ -112,7 +113,9 @@ void RemoteFontFaceSource::notifyFinished(Resource*) {
                                     ? FontLoadHistograms::FromDiskCache
                                     : FontLoadHistograms::FromNetwork);
   m_histograms.recordRemoteFont(m_font.get());
-  m_histograms.fontLoaded(m_isInterventionTriggered);
+  m_histograms.fontLoaded(m_font->isCORSFailed(),
+                          m_font->getStatus() == Resource::LoadError,
+                          m_isInterventionTriggered);
 
   m_font->ensureCustomFontData();
   // FIXME: Provide more useful message such as OTS rejection reason.
@@ -133,11 +136,12 @@ void RemoteFontFaceSource::notifyFinished(Resource*) {
     m_fontSelector->fontFaceInvalidated();
     m_face->fontLoaded(this);
   }
-  // Should not do anything after this line since the m_face->fontLoaded()
-  // above may trigger deleting this object.
 }
 
 void RemoteFontFaceSource::fontLoadShortLimitExceeded(FontResource*) {
+  if (m_font->isLoaded())
+    return;
+
   if (m_display == FontDisplayFallback)
     switchToSwapPeriod();
   else if (m_display == FontDisplayOptional)
@@ -145,6 +149,9 @@ void RemoteFontFaceSource::fontLoadShortLimitExceeded(FontResource*) {
 }
 
 void RemoteFontFaceSource::fontLoadLongLimitExceeded(FontResource*) {
+  if (m_font->isLoaded())
+    return;
+
   if (m_display == FontDisplayBlock ||
       (!m_isInterventionTriggered && m_display == FontDisplayAuto))
     switchToSwapPeriod();
@@ -259,16 +266,21 @@ void RemoteFontFaceSource::FontLoadHistograms::fallbackFontPainted(
 }
 
 void RemoteFontFaceSource::FontLoadHistograms::fontLoaded(
+    bool isCorsFailed,
+    bool loadError,
     bool isInterventionTriggered) {
-  if (!m_isLongLimitExceeded)
+  if (!m_isLongLimitExceeded && m_fontDisplay == FontDisplayAuto &&
+      !isCorsFailed && !loadError) {
     recordInterventionResult(isInterventionTriggered);
+  }
 }
 
 void RemoteFontFaceSource::FontLoadHistograms::longLimitExceeded(
     bool isInterventionTriggered) {
   m_isLongLimitExceeded = true;
   maySetDataSource(FromNetwork);
-  recordInterventionResult(isInterventionTriggered);
+  if (m_fontDisplay == FontDisplayAuto)
+    recordInterventionResult(isInterventionTriggered);
 }
 
 void RemoteFontFaceSource::FontLoadHistograms::recordFallbackTime(

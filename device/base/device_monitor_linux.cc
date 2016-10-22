@@ -5,6 +5,7 @@
 #include "device/base/device_monitor_linux.h"
 
 #include <memory>
+#include <string>
 
 #include "base/bind.h"
 #include "base/lazy_instance.h"
@@ -21,8 +22,8 @@ const char kUdevActionAdd[] = "add";
 const char kUdevActionRemove[] = "remove";
 
 // The instance will be reset when message loop destroys.
-base::LazyInstance<std::unique_ptr<DeviceMonitorLinux>>::Leaky
-    g_device_monitor_linux_ptr = LAZY_INSTANCE_INITIALIZER;
+base::LazyInstance<DeviceMonitorLinux>::Leaky g_device_monitor_linux =
+    LAZY_INSTANCE_INITIALIZER;
 
 }  // namespace
 
@@ -61,9 +62,7 @@ DeviceMonitorLinux::DeviceMonitorLinux() : monitor_fd_(-1) {
 
 // static
 DeviceMonitorLinux* DeviceMonitorLinux::GetInstance() {
-  if (!g_device_monitor_linux_ptr.Get().get())
-    g_device_monitor_linux_ptr.Get().reset(new DeviceMonitorLinux());
-  return g_device_monitor_linux_ptr.Get().get();
+  return g_device_monitor_linux.Pointer();
 }
 
 void DeviceMonitorLinux::AddObserver(Observer* observer) {
@@ -74,14 +73,6 @@ void DeviceMonitorLinux::AddObserver(Observer* observer) {
 void DeviceMonitorLinux::RemoveObserver(Observer* observer) {
   DCHECK(thread_checker_.CalledOnValidThread());
   observers_.RemoveObserver(observer);
-}
-
-ScopedUdevDevicePtr DeviceMonitorLinux::GetDeviceFromPath(
-    const std::string& path) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  ScopedUdevDevicePtr device(
-      udev_device_new_from_syspath(udev_.get(), path.c_str()));
-  return device;
 }
 
 void DeviceMonitorLinux::Enumerate(const EnumerateCallback& callback) {
@@ -113,13 +104,11 @@ void DeviceMonitorLinux::WillDestroyCurrentMessageLoop() {
   DCHECK(thread_checker_.CalledOnValidThread());
   for (auto& observer : observers_)
     observer.WillDestroyMonitorMessageLoop();
-  g_device_monitor_linux_ptr.Get().reset(nullptr);
 }
 
 DeviceMonitorLinux::~DeviceMonitorLinux() {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  base::MessageLoop::current()->RemoveDestructionObserver(this);
-  close(monitor_fd_);
+  // A leaky LazyInstance is never destroyed.
+  NOTREACHED();
 }
 
 void DeviceMonitorLinux::OnMonitorCanReadWithoutBlocking() {

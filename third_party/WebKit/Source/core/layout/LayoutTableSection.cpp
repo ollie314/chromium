@@ -852,9 +852,11 @@ int LayoutTableSection::calcRowLogicalHeight() {
     m_rowPos[0] = 0;
 
   SpanningLayoutTableCells rowSpanCells;
-#if ENABLE(ASSERT)
-  HashSet<const LayoutTableCell*> uniqueCells;
-#endif
+
+  // At fragmentainer breaks we need to prevent rowspanned cells (and whatever
+  // else) from distributing their extra height requirements over the rows that
+  // it spans. Otherwise we'd need to refragment afterwards.
+  unsigned indexOfFirstStretchableRow = 0;
 
   for (unsigned r = 0; r < m_grid.size(); r++) {
     m_grid[r].baseline = -1;
@@ -879,30 +881,38 @@ int LayoutTableSection::calcRowLogicalHeight() {
 
     Row& row = m_grid[r].row;
     unsigned totalCols = row.size();
-    LayoutTableCell* lastRowSpanCell = nullptr;
 
     for (unsigned c = 0; c < totalCols; c++) {
       CellStruct& current = cellAt(r, c);
+      if (current.inColSpan)
+        continue;
       for (unsigned i = 0; i < current.cells.size(); i++) {
         cell = current.cells[i];
-        if (current.inColSpan && cell->rowSpan() == 1)
+
+        // For row spanning cells, we only handle them for the first row they
+        // span. This ensures we take their baseline into account.
+        if (cell->rowIndex() != r)
           continue;
 
-        if (cell->rowSpan() > 1) {
-          // For row spanning cells, we only handle them for the first row they
-          // span. This ensures we take their baseline into account.
-          if (lastRowSpanCell != cell && cell->rowIndex() == r) {
-#if ENABLE(ASSERT)
-            ASSERT(!uniqueCells.contains(cell));
-            uniqueCells.add(cell);
-#endif
-
-            rowSpanCells.append(cell);
-            lastRowSpanCell = cell;
-          }
+        if (r < indexOfFirstStretchableRow ||
+            (state.isPaginated() &&
+             crossesPageBoundary(
+                 LayoutUnit(m_rowPos[r]),
+                 LayoutUnit(cell->logicalHeightForRowSizing())))) {
+          // Entering or extending a range of unstretchable rows. We enter this
+          // mode when a cell in a row crosses a fragmentainer boundary, and
+          // we'll stay in this mode until we get to a row where we're past all
+          // rowspanned cells that we encountered while in this mode.
+          DCHECK(state.isPaginated());
+          unsigned rowIndexBelowCell = r + cell->rowSpan();
+          indexOfFirstStretchableRow =
+              std::max(indexOfFirstStretchableRow, rowIndexBelowCell);
+        } else if (cell->rowSpan() > 1) {
+          DCHECK(!rowSpanCells.contains(cell));
+          rowSpanCells.append(cell);
         }
 
-        if (cell->rowIndex() == r && cell->hasOverrideLogicalContentHeight()) {
+        if (cell->hasOverrideLogicalContentHeight()) {
           cell->clearIntrinsicPadding();
           cell->clearOverrideSize();
           cell->forceChildLayout();
@@ -914,9 +924,16 @@ int LayoutTableSection::calcRowLogicalHeight() {
 
         // Find out the baseline. The baseline is set on the first row in a
         // rowSpan.
-        if (cell->rowIndex() == r)
-          updateBaselineForCell(cell, r, baselineDescent);
+        updateBaselineForCell(cell, r, baselineDescent);
       }
+    }
+
+    if (r < indexOfFirstStretchableRow && m_grid[r].rowLayoutObject) {
+      // We're not allowed to resize this row. Just scratch what we've
+      // calculated so far, and use the height that we got during initial
+      // layout instead.
+      m_rowPos[r + 1] =
+          m_rowPos[r] + m_grid[r].rowLayoutObject->logicalHeight().toInt();
     }
 
     // Add the border-spacing to our final position.
@@ -1143,7 +1160,6 @@ void LayoutTableSection::layoutRows() {
   // Vertically align and flex the cells in each row.
   for (unsigned r = 0; r < totalRows; r++) {
     LayoutTableRow* rowLayoutObject = m_grid[r].rowLayoutObject;
-    int rowHeightIncreaseForPagination = INT_MIN;
 
     for (unsigned c = 0; c < nEffCols; c++) {
       CellStruct& cs = cellAt(r, c);
@@ -1194,23 +1210,6 @@ void LayoutTableSection::layoutRows() {
 
       cell->layoutIfNeeded();
 
-      // FIXME: Make pagination work with vertical tables.
-      if (view()->layoutState()->pageLogicalHeight() &&
-          cell->logicalHeight() != rHeight) {
-        // FIXME: Pagination might have made us change size. For now just shrink
-        // or grow the cell to fit without doing a relayout.
-        // We'll also do a basic increase of the row height to accommodate the
-        // cell if it's bigger, but this isn't quite right either. It's at least
-        // stable though and won't result in an infinite # of relayouts that may
-        // never stabilize.
-        LayoutUnit oldLogicalHeight = cell->logicalHeight();
-        rowHeightIncreaseForPagination =
-            std::max<int>(rowHeightIncreaseForPagination,
-                          (oldLogicalHeight - rHeight).toInt());
-        cell->setLogicalHeight(LayoutUnit(rHeight));
-        cell->computeOverflow(oldLogicalHeight, false);
-      }
-
       LayoutSize childOffset(cell->location() - oldCellRect.location());
       if (childOffset.width() || childOffset.height()) {
         // If the child moved, we have to issue paint invalidations to it as
@@ -1219,19 +1218,6 @@ void LayoutTableSection::layoutRows() {
         // invalidations ourselves (and the child) anyway.
         if (!table()->selfNeedsLayout())
           cell->setMayNeedPaintInvalidation();
-      }
-    }
-    if (rowHeightIncreaseForPagination > INT_MIN) {
-      for (unsigned rowIndex = r + 1; rowIndex <= totalRows; rowIndex++)
-        m_rowPos[rowIndex] += rowHeightIncreaseForPagination;
-      for (unsigned c = 0; c < nEffCols; ++c) {
-        Vector<LayoutTableCell*, 1>& cells = cellAt(r, c).cells;
-        for (size_t i = 0; i < cells.size(); ++i) {
-          LayoutUnit oldLogicalHeight = cells[i]->logicalHeight();
-          cells[i]->setLogicalHeight(oldLogicalHeight +
-                                     rowHeightIncreaseForPagination);
-          cells[i]->computeOverflow(oldLogicalHeight, false);
-        }
       }
     }
     if (rowLayoutObject)
@@ -1965,6 +1951,7 @@ void LayoutTableSection::relayoutCellIfFlexed(LayoutTableCell& cell,
 int LayoutTableSection::logicalHeightForRow(
     const LayoutTableRow& rowObject) const {
   unsigned rowIndex = rowObject.rowIndex();
+  DCHECK(rowIndex < m_grid.size());
   int logicalHeight = 0;
   const Row& row = m_grid[rowIndex].row;
   unsigned cols = row.size();
@@ -1973,12 +1960,33 @@ int LayoutTableSection::logicalHeightForRow(
     const LayoutTableCell* cell = cellStruct.primaryCell();
     if (!cell || cellStruct.inColSpan)
       continue;
-    // TODO(mstensho): Rowspanned cells also need to contribute to row heights
-    // during the first layout pass, in order to get fragmentation right.
-    if (cell->rowSpan() == 1) {
+    unsigned rowSpan = cell->rowSpan();
+    if (rowSpan == 1) {
       logicalHeight =
           std::max(logicalHeight, cell->logicalHeightForRowSizing());
+      continue;
     }
+    unsigned rowIndexForCell = cell->rowIndex();
+    if (rowIndex == m_grid.size() - 1 ||
+        (rowSpan > 1 && rowIndex - rowIndexForCell == rowSpan - 1)) {
+      // This is the last row of the rowspanned cell. Add extra height if
+      // needed.
+      if (LayoutTableRow* firstRowForCell =
+              m_grid[rowIndexForCell].rowLayoutObject) {
+        int minLogicalHeight = cell->logicalHeightForRowSizing();
+        // Subtract space provided by previous rows.
+        minLogicalHeight -= rowObject.logicalTop().toInt() -
+                            firstRowForCell->logicalTop().toInt();
+
+        logicalHeight = std::max(logicalHeight, minLogicalHeight);
+      }
+    }
+  }
+
+  if (m_grid[rowIndex].logicalHeight.isSpecified()) {
+    LayoutUnit specifiedLogicalHeight =
+        minimumValueForLength(m_grid[rowIndex].logicalHeight, LayoutUnit());
+    logicalHeight = std::max(logicalHeight, specifiedLogicalHeight.toInt());
   }
   return logicalHeight;
 }

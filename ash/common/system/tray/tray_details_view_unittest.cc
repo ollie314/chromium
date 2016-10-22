@@ -138,6 +138,10 @@ class TrayDetailsViewTest : public AshTestBase {
     detailed->TransitionToDefaultView();
   }
 
+  void FocusBackButton(TestDetailsView* detailed) {
+    detailed->back_button_->RequestFocus();
+  }
+
  private:
   DISALLOW_COPY_AND_ASSIGN(TrayDetailsViewTest);
 };
@@ -167,7 +171,11 @@ TEST_F(TrayDetailsViewTest, TransitionToDefaultViewTest) {
 
   // Transition back to default view, the default view of item 2 should have
   // focus.
-  test_item_2->detailed_view()->FocusTitleRow();
+  tray->GetSystemBubble()->bubble_view()->set_can_activate(true);
+  if (MaterialDesignController::IsSystemTrayMenuMaterial())
+    FocusBackButton(test_item_2->detailed_view());
+  else
+    test_item_2->detailed_view()->FocusTitleRow();
   TransitionFromDetailedToDefaultView(test_item_2->detailed_view());
   RunAllPendingInMessageLoop();
 
