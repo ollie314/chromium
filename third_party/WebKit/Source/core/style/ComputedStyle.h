@@ -82,6 +82,11 @@ inline bool compareEqual(const T& t, const U& u) {
   return t == static_cast<T>(u);
 }
 
+template <typename T>
+inline bool compareEqual(const T& a, const T& b) {
+  return a == b;
+}
+
 #define SET_VAR(group, variable, value)      \
   if (!compareEqual(group->variable, value)) \
   group.access()->variable = value
@@ -3603,6 +3608,11 @@ class CORE_EXPORT ComputedStyle : public ComputedStyleBase,
   }
   bool isOverflowPaged() const {
     return overflowY() == OverflowPagedX || overflowY() == OverflowPagedY;
+  }
+
+  // Visibility utility functions.
+  bool visibleToHitTesting() const {
+    return visibility() == EVisibility::Visible && pointerEvents() != PE_NONE;
   }
 
   // Animation utility functions.

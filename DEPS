@@ -51,7 +51,7 @@ vars = {
   # Three lines of non-changing comments so that
   # the commit queue can handle CLs rolling ANGLE
   # and whatever else without interference from each other.
-  'angle_revision': '336b147073e0ba86bf1fdf69f8e4d0c37220b662',
+  'angle_revision': 'f01731530e7f754e5ebaf32d00f3e23b62376424',
   # Three lines of non-changing comments so that
   # the commit queue can handle CLs rolling build tools
   # and whatever else without interference from each other.
@@ -63,7 +63,7 @@ vars = {
   # Three lines of non-changing comments so that
   # the commit queue can handle CLs rolling PDFium
   # and whatever else without interference from each other.
-  'pdfium_revision': 'a804fd48b71679ece1f1c2284c3c1835c9e20441',
+  'pdfium_revision': '3cad596c55cd4db64e002aba118904f65c385168',
   # Three lines of non-changing comments so that
   # the commit queue can handle CLs rolling openmax_dl
   # and whatever else without interference from each other.
@@ -95,7 +95,7 @@ vars = {
   # Three lines of non-changing comments so that
   # the commit queue can handle CLs rolling catapult
   # and whatever else without interference from each other.
-  'catapult_revision': 'b7d8fe883c1682e6181e8f62b7039553f7c826a7',
+  'catapult_revision': '6962f5c0344a79b152bf84460a93e1b2e11ea0f4',
   # Three lines of non-changing comments so that
   # the commit queue can handle CLs rolling libFuzzer
   # and whatever else without interference from each other.

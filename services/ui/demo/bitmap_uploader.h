@@ -12,16 +12,20 @@
 #include "base/compiler_specific.h"
 #include "base/containers/hash_tables.h"
 #include "base/macros.h"
+#include "base/memory/weak_ptr.h"
 #include "cc/output/compositor_frame_sink_client.h"
 #include "gpu/GLES2/gl2chromium.h"
 #include "gpu/GLES2/gl2extchromium.h"
-#include "services/ui/public/cpp/compositor_frame_sink.h"
-#include "services/ui/public/cpp/window_surface.h"
-#include "services/ui/public/cpp/window_surface_client.h"
+#include "services/ui/public/cpp/window_compositor_frame_sink.h"
+
+namespace gpu {
+class GpuChannelHost;
+}
 
 namespace ui {
-class GLES2Context;
+
 class GpuService;
+class Window;
 
 extern const char kBitmapUploaderForAcceleratedWidget[];
 
@@ -50,6 +54,8 @@ class BitmapUploader : public cc::CompositorFrameSinkClient {
  private:
   void Upload();
 
+  void OnGpuChannelEstablished(scoped_refptr<gpu::GpuChannelHost> gpu_channel);
+
   uint32_t BindTextureForSize(const gfx::Size& size);
 
   uint32_t TextureFormat() const {
@@ -73,7 +79,7 @@ class BitmapUploader : public cc::CompositorFrameSinkClient {
       const gfx::Transform& transform) override;
 
   Window* window_;
-  std::unique_ptr<CompositorFrameSink> compositor_frame_sink_;
+  std::unique_ptr<WindowCompositorFrameSink> compositor_frame_sink_;
 
   uint32_t color_;
   int width_;
@@ -82,6 +88,8 @@ class BitmapUploader : public cc::CompositorFrameSinkClient {
   std::unique_ptr<std::vector<unsigned char>> bitmap_;
   uint32_t next_resource_id_;
   base::hash_map<uint32_t, uint32_t> resource_to_texture_id_map_;
+
+  base::WeakPtrFactory<BitmapUploader> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(BitmapUploader);
 };

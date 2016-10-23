@@ -398,22 +398,11 @@ static void runAutofocusTask(ExecutionContext* context) {
   }
 }
 
-// These are logged to UMA, so don't re-arrange them without creating a new
-// histogram.
-enum DocumentVisibilityForDeferredLoading {
-  Created,
-  WouldLoadBecauseVisible,
-  // TODO(dgrogan): Add WouldLoadBecauseTopOrLeft, WouldLoadBecauseDisplayNone,
-  // etc
-
-  DocumentVisibilityForDeferredLoadingEnd
-};
-
-static void RecordStateToHistogram(DocumentVisibilityForDeferredLoading state) {
-  DEFINE_STATIC_LOCAL(EnumerationHistogram, unseenFrameHistogram,
-                      ("Navigation.DeferredDocumentLoading.StatesV1",
-                       DocumentVisibilityForDeferredLoadingEnd));
-  unseenFrameHistogram.count(state);
+static void recordLoadReasonToHistogram(WouldLoadReason reason) {
+  DEFINE_STATIC_LOCAL(
+      EnumerationHistogram, unseenFrameHistogram,
+      ("Navigation.DeferredDocumentLoading.StatesV2", WouldLoadReasonEnd));
+  unseenFrameHistogram.count(reason);
 }
 
 Document::Document(const DocumentInit& initializer,
@@ -498,7 +487,7 @@ Document::Document(const DocumentInit& initializer,
       m_hasViewportUnits(false),
       m_parserSyncPolicy(AllowAsynchronousParsing),
       m_nodeCount(0),
-      m_visibilityWasLogged(false) {
+      m_wouldLoadReason(Created) {
   if (m_frame) {
     DCHECK(m_frame->page());
     provideContextFeaturesToDocumentFrom(*this, *m_frame->page());
@@ -529,11 +518,6 @@ Document::Document(const DocumentInit& initializer,
     setURL(initializer.url());
 
   initSecurityContext(initializer);
-  DCHECK(getSecurityOrigin());
-  if (frame() && frame()->tree().top()->securityContext() &&
-      !getSecurityOrigin()->canAccess(
-          frame()->tree().top()->securityContext()->getSecurityOrigin()))
-    RecordStateToHistogram(Created);
 
   initDNSPrefetch();
 
@@ -1780,8 +1764,6 @@ static void assertLayoutTreeUpdated(Node& root) {
       continue;
     DCHECK(!node.needsStyleRecalc());
     DCHECK(!node.childNeedsStyleRecalc());
-    DCHECK(!node.needsReattachLayoutTree());
-    DCHECK(!node.childNeedsReattachLayoutTree());
     DCHECK(!node.childNeedsDistributionRecalc());
     DCHECK(!node.needsStyleInvalidation());
     DCHECK(!node.childNeedsStyleInvalidation());
@@ -1914,7 +1896,6 @@ void Document::updateStyle() {
   }
 
   clearNeedsStyleRecalc();
-  clearNeedsReattachLayoutTree();
 
   StyleResolver& resolver = ensureStyleResolver();
 
@@ -1937,14 +1918,11 @@ void Document::updateStyle() {
   // LayoutTreeConstruction.
   m_nonAttachedStyle.clear();
   clearChildNeedsStyleRecalc();
-  clearChildNeedsReattachLayoutTree();
 
   resolver.clearStyleSharingList();
 
   DCHECK(!needsStyleRecalc());
   DCHECK(!childNeedsStyleRecalc());
-  DCHECK(!needsReattachLayoutTree());
-  DCHECK(!childNeedsReattachLayoutTree());
   DCHECK(inStyleRecalc());
   DCHECK_EQ(styleResolver(), &resolver);
   DCHECK(m_nonAttachedStyle.isEmpty());
@@ -6373,12 +6351,14 @@ DEFINE_TRACE(Document) {
   SecurityContext::trace(visitor);
 }
 
-void Document::onVisibilityMaybeChanged(bool visible) {
+void Document::maybeRecordLoadReason(WouldLoadReason reason) {
+  DCHECK(m_wouldLoadReason == Created || reason != Created);
   DCHECK(frame());
-  if (visible && !m_visibilityWasLogged && frame()->isCrossOriginSubframe()) {
-    m_visibilityWasLogged = true;
-    RecordStateToHistogram(WouldLoadBecauseVisible);
+  if (m_wouldLoadReason == Created && frame()->isCrossOriginSubframe() &&
+      frame()->loader().stateMachine()->committedFirstRealDocumentLoad()) {
+    recordLoadReasonToHistogram(reason);
   }
+  m_wouldLoadReason = reason;
 }
 
 DEFINE_TRACE_WRAPPERS(Document) {

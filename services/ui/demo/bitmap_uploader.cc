@@ -18,7 +18,6 @@
 #include "services/ui/public/cpp/gles2_context.h"
 #include "services/ui/public/cpp/gpu_service.h"
 #include "services/ui/public/cpp/window.h"
-#include "services/ui/public/cpp/window_surface.h"
 
 namespace ui {
 namespace {
@@ -36,14 +35,12 @@ BitmapUploader::BitmapUploader(Window* window)
       width_(0),
       height_(0),
       format_(BGRA),
-      next_resource_id_(1u) {
-}
+      next_resource_id_(1u),
+      weak_factory_(this) {}
 
 void BitmapUploader::Init(ui::GpuService* gpu_service) {
-  compositor_frame_sink_ = window_->RequestCompositorFrameSink(
-      mojom::SurfaceType::DEFAULT,
-      new ContextProvider(gpu_service->EstablishGpuChannelSync()));
-  compositor_frame_sink_->BindToClient(this);
+  gpu_service->EstablishGpuChannel(base::Bind(
+      &BitmapUploader::OnGpuChannelEstablished, weak_factory_.GetWeakPtr()));
 }
 
 BitmapUploader::~BitmapUploader() {
@@ -173,6 +170,14 @@ void BitmapUploader::Upload() {
 
   // TODO(rjkroege, fsamuel): We should throttle frames.
   compositor_frame_sink_->SubmitCompositorFrame(std::move(frame));
+}
+
+void BitmapUploader::OnGpuChannelEstablished(
+    scoped_refptr<gpu::GpuChannelHost> gpu_channel) {
+  compositor_frame_sink_ = window_->RequestCompositorFrameSink(
+      mojom::CompositorFrameSinkType::DEFAULT,
+      new ContextProvider(std::move(gpu_channel)));
+  compositor_frame_sink_->BindToClient(this);
 }
 
 uint32_t BitmapUploader::BindTextureForSize(const gfx::Size& size) {
