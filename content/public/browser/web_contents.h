@@ -7,6 +7,7 @@
 
 #include <stdint.h>
 
+#include <memory>
 #include <set>
 
 #include "base/callback_forward.h"
@@ -34,7 +35,6 @@
 #endif
 
 namespace base {
-class DictionaryValue;
 class TimeTicks;
 }
 
@@ -293,8 +293,9 @@ class WebContents : public PageNavigator,
   // necessary. However if the embedder wants to create its own WebUI object and
   // keep track of it manually, it can use this. |frame_name| is used to
   // identify the frame and cannot be empty.
-  virtual WebUI* CreateSubframeWebUI(const GURL& url,
-                                     const std::string& frame_name) = 0;
+  virtual std::unique_ptr<WebUI> CreateSubframeWebUI(
+      const GURL& url,
+      const std::string& frame_name) = 0;
 
   // Returns the committed WebUI if one exists, otherwise the pending one.
   virtual WebUI* GetWebUI() const = 0;
@@ -397,6 +398,9 @@ class WebContents : public PageNavigator,
   // change.
   virtual void NotifyNavigationStateChanged(InvalidateTypes changed_flags) = 0;
 
+  // Notifies the WebContents that audio started or stopped being audible.
+  virtual void OnAudioStateChanged(bool is_audio_playing) = 0;
+
   // Get/Set the last time that the WebContents was made active (either when it
   // was created or shown with WasShown()).
   virtual base::TimeTicks GetLastActiveTime() const = 0;
@@ -427,6 +431,9 @@ class WebContents : public PageNavigator,
   virtual void AttachToOuterWebContentsFrame(
       WebContents* outer_web_contents,
       RenderFrameHost* outer_contents_frame) = 0;
+
+  // Invoked when visible security state changes.
+  virtual void DidChangeVisibleSecurityState() = 0;
 
   // Commands ------------------------------------------------------------------
 
@@ -703,18 +710,17 @@ class WebContents : public PageNavigator,
   // as soon as they are ready.
   virtual void ResumeLoadingCreatedWebContents() = 0;
 
-  // Requests to resume the current media session.
-  virtual void ResumeMediaSession() = 0;
-  // Requests to suspend the current media session.
-  virtual void SuspendMediaSession() = 0;
-  // Requests to stop the current media session.
-  virtual void StopMediaSession() = 0;
-
   // Called when the WebContents has displayed a password field on an
   // HTTP page. This method modifies the appropriate NavigationEntry's
   // SSLStatus to record the sensitive input field, so that embedders
   // can adjust the UI if desired.
   virtual void OnPasswordInputShownOnHttp() = 0;
+
+  // Called when the WebContents has hidden all password fields on an
+  // HTTP page. This method modifies the appropriate NavigationEntry's
+  // SSLStatus to remove the presence of sensitive input fields, so that
+  // embedders can adjust the UI if desired.
+  virtual void OnAllPasswordInputsHiddenOnHttp() = 0;
 
   // Called when the WebContents has displayed a credit card field on an
   // HTTP page. This method modifies the appropriate NavigationEntry's

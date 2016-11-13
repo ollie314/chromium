@@ -7,6 +7,7 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "components/leveldb/leveldb_service_impl.h"
 #include "services/service_manager/public/cpp/interface_registry.h"
+#include "services/service_manager/public/cpp/service_context.h"
 
 namespace leveldb {
 
@@ -14,11 +15,11 @@ LevelDBApp::LevelDBApp() {}
 
 LevelDBApp::~LevelDBApp() {}
 
-void LevelDBApp::OnStart(const service_manager::Identity& identity) {
-  tracing_.Initialize(connector(), identity.name());
+void LevelDBApp::OnStart() {
+  tracing_.Initialize(context()->connector(), context()->identity().name());
 }
 
-bool LevelDBApp::OnConnect(const service_manager::Identity& remote_identity,
+bool LevelDBApp::OnConnect(const service_manager::ServiceInfo& remote_info,
                            service_manager::InterfaceRegistry* registry) {
   registry->AddInterface<mojom::LevelDBService>(this);
   return true;

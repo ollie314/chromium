@@ -19,7 +19,7 @@ const char kGpuDriverBugListJson[] = LONG_STRING_CONST(
 {
   "name": "gpu driver bug list",
   // Please update the version number whenever you change this file.
-  "version": "9.12",
+  "version": "9.16",
   "entries": [
     {
       "id": 1,
@@ -419,6 +419,7 @@ const char kGpuDriverBugListJson[] = LONG_STRING_CONST(
     },
     {
       "id": 52,
+      "cr_bugs": [449116, 471200, 612474],
       "description": "ES3 MSAA is broken on Qualcomm",
       "os": {
         "type": "android"
@@ -2152,6 +2153,60 @@ LONG_STRING_CONST(
       "vendor_id": "0x1002",
       "features": [
         "adjust_src_dst_region_for_blitframebuffer"
+      ]
+    },
+    {
+      "id": 200,
+      "description": "ES3 support is unreliable on some older drivers",
+      "cr_bugs": [657925],
+      "os": {
+        "type": "android",
+        "version": {
+          "op": "<",
+          "value": "4.4"
+        }
+      },
+      "features": [
+        "disable_es3_gl_context"
+      ]
+    },
+    {
+      "id": 201,
+      "cr_bugs": [659326],
+      "description": "AMD drivers in Linux require invariant qualifier to match between vertex and fragment shaders",
+      "os": {
+        "type": "linux"
+      },
+      "vendor_id": "0x1002",
+      "features": [
+        "dont_remove_invariant_for_fragment_input"
+      ]
+    },
+    {
+      "id": 202,
+      "cr_bugs": [639760,641129],
+      "description": "Mac driver GL 4.1 requires invariant and centroid to match between shaders",
+      "os": {
+        "type": "macosx"
+      },
+      "features": [
+        "remove_invariant_and_centroid_for_essl3"
+      ]
+    },
+    {
+      "id": 203,
+      "cr_bugs": [639760,641129],
+      "description": "Mesa driver GL 3.3 requires invariant and centroid to match between shaders",
+      "os": {
+        "type": "linux"
+      },
+      "driver_vendor": "Mesa",
+      "gl_version": {
+        "op": "=",
+        "value": "3.3"
+      },
+      "features": [
+        "remove_invariant_and_centroid_for_essl3"
       ]
     }
   ]

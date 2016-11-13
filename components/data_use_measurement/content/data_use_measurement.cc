@@ -4,7 +4,7 @@
 
 #include "components/data_use_measurement/content/data_use_measurement.h"
 
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/metrics/sparse_histogram.h"
 #include "base/strings/stringprintf.h"
 #include "build/build_config.h"
@@ -173,10 +173,10 @@ void DataUseMeasurement::ReportDataUseUMA(const net::URLRequest& request,
         time_since_background, bytes);
     if (no_reads_since_background_) {
       no_reads_since_background_ = false;
-      UMA_HISTOGRAM_LONG_TIMES(
+      IncrementLatencyHistogramByCount(
           is_user_traffic ? "DataUse.BackgroundToFirstDownstream.User"
                           : "DataUse.BackgroundToFirstDownstream.System",
-          time_since_background);
+          time_since_background, 1);
     }
   }
 #endif

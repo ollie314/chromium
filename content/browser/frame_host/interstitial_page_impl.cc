@@ -151,7 +151,6 @@ InterstitialPageImpl::InterstitialPageImpl(
       url_(url),
       new_navigation_(new_navigation),
       should_discard_pending_nav_entry_(new_navigation),
-      reload_on_dont_proceed_(false),
       enabled_(true),
       action_taken_(NO_ACTION),
       render_view_host_(NULL),
@@ -235,7 +234,8 @@ void InterstitialPageImpl::Show() {
 
     controller_->SetTransientEntry(std::move(entry));
 
-    static_cast<WebContentsImpl*>(web_contents_)->DidChangeVisibleSSLState();
+    static_cast<WebContentsImpl*>(web_contents_)
+        ->DidChangeVisibleSecurityState();
   }
 
   DCHECK(!render_view_host_);
@@ -301,7 +301,7 @@ void InterstitialPageImpl::Hide() {
   if (entry && !new_navigation_ && should_revert_web_contents_title_)
     web_contents_->UpdateTitleForEntry(entry, original_web_contents_title_);
 
-  static_cast<WebContentsImpl*>(web_contents_)->DidChangeVisibleSSLState();
+  static_cast<WebContentsImpl*>(web_contents_)->DidChangeVisibleSecurityState();
 
   InterstitialPageMap::iterator iter =
       g_web_contents_to_interstitial_page->find(web_contents_);
@@ -576,7 +576,7 @@ RenderViewHostImpl* InterstitialPageImpl::CreateRenderViewHost() {
   int32_t widget_routing_id = site_instance->GetProcess()->GetNextRoutingID();
   frame_tree_.root()->render_manager()->Init(
       site_instance.get(), widget_routing_id, MSG_ROUTING_NONE,
-      widget_routing_id);
+      widget_routing_id, false);
   return frame_tree_.root()->current_frame_host()->render_view_host();
 }
 
@@ -666,9 +666,6 @@ void InterstitialPageImpl::DontProceed() {
     // cancelled.
     controller_->DiscardNonCommittedEntries();
   }
-
-  if (reload_on_dont_proceed_)
-    controller_->Reload(true);
 
   Hide();
   delegate_->OnDontProceed();

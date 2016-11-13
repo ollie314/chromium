@@ -12,9 +12,9 @@
 #include "base/strings/string_number_conversions.h"
 #include "services/ui/common/types.h"
 #include "services/ui/common/util.h"
+#include "services/ui/display/platform_screen.h"
 #include "services/ui/public/interfaces/window_tree.mojom.h"
 #include "services/ui/surfaces/display_compositor.h"
-#include "services/ui/ws/display_binding.h"
 #include "services/ui/ws/display_manager.h"
 #include "services/ui/ws/ids.h"
 #include "services/ui/ws/platform_display.h"
@@ -35,6 +35,23 @@ namespace ui {
 namespace ws {
 namespace test {
 namespace {
+
+// Stub PlatformScreen implementation so PlatformScreen::GetInstance() doesn't
+// fail.
+class TestPlatformScreen : public display::PlatformScreen {
+ public:
+  TestPlatformScreen() {}
+  ~TestPlatformScreen() override {}
+
+  // display::PlatformScreen:
+  void AddInterfaces(service_manager::InterfaceRegistry* registry) override {}
+  void Init(display::PlatformScreenDelegate* delegate) override {}
+  void RequestCloseDisplay(int64_t display_id) override {}
+  int64_t GetPrimaryDisplayId() const override { return 1; }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(TestPlatformScreen);
+};
 
 class TestDisplayManagerObserver : public mojom::DisplayManagerObserver {
  public:
@@ -66,7 +83,9 @@ class TestDisplayManagerObserver : public mojom::DisplayManagerObserver {
   }
 
   // mojom::DisplayManagerObserver:
-  void OnDisplays(mojo::Array<mojom::WsDisplayPtr> displays) override {
+  void OnDisplays(mojo::Array<mojom::WsDisplayPtr> displays,
+                  int64_t primary_display_id,
+                  int64_t internal_display_id) override {
     AddCall("OnDisplays " + DisplayIdsToString(displays));
   }
   void OnDisplaysChanged(mojo::Array<mojom::WsDisplayPtr> displays) override {
@@ -74,6 +93,9 @@ class TestDisplayManagerObserver : public mojom::DisplayManagerObserver {
   }
   void OnDisplayRemoved(int64_t id) override {
     AddCall("OnDisplayRemoved " + base::Int64ToString(id));
+  }
+  void OnPrimaryDisplayChanged(int64_t id) override {
+    AddCall("OnPrimaryDisplayChanged " + base::Int64ToString(id));
   }
 
   std::string observer_calls_;
@@ -100,19 +122,18 @@ class UserDisplayManagerTest : public testing::Test {
   }
 
  private:
+  TestPlatformScreen platform_screen_;
   WindowServerTestHelper ws_test_helper_;
   DISALLOW_COPY_AND_ASSIGN(UserDisplayManagerTest);
 };
 
 TEST_F(UserDisplayManagerTest, OnlyNotifyWhenFrameDecorationsSet) {
-  window_server_delegate()->set_num_displays_to_create(1);
+  window_server_delegate()->CreateDisplays(1);
 
   const UserId kUserId1 = "2";
   TestDisplayManagerObserver display_manager_observer1;
   DisplayManager* display_manager = window_server()->display_manager();
-  WindowManagerWindowTreeFactorySetTestApi(
-      window_server()->window_manager_window_tree_factory_set())
-      .Add(kUserId1);
+  AddWindowManager(window_server(), kUserId1);
   UserDisplayManager* user_display_manager1 =
       display_manager->GetUserDisplayManager(kUserId1);
   ASSERT_TRUE(user_display_manager1);
@@ -135,14 +156,12 @@ TEST_F(UserDisplayManagerTest, OnlyNotifyWhenFrameDecorationsSet) {
 }
 
 TEST_F(UserDisplayManagerTest, AddObserverAfterFrameDecorationsSet) {
-  window_server_delegate()->set_num_displays_to_create(1);
+  window_server_delegate()->CreateDisplays(1);
 
   const UserId kUserId1 = "2";
   TestDisplayManagerObserver display_manager_observer1;
   DisplayManager* display_manager = window_server()->display_manager();
-  WindowManagerWindowTreeFactorySetTestApi(
-      window_server()->window_manager_window_tree_factory_set())
-      .Add(kUserId1);
+  AddWindowManager(window_server(), kUserId1);
   UserDisplayManager* user_display_manager1 =
       display_manager->GetUserDisplayManager(kUserId1);
   ASSERT_TRUE(user_display_manager1);
@@ -161,14 +180,12 @@ TEST_F(UserDisplayManagerTest, AddObserverAfterFrameDecorationsSet) {
 }
 
 TEST_F(UserDisplayManagerTest, AddRemoveDisplay) {
-  window_server_delegate()->set_num_displays_to_create(1);
+  window_server_delegate()->CreateDisplays(1);
 
   const UserId kUserId1 = "2";
   TestDisplayManagerObserver display_manager_observer1;
   DisplayManager* display_manager = window_server()->display_manager();
-  WindowManagerWindowTreeFactorySetTestApi(
-      window_server()->window_manager_window_tree_factory_set())
-      .Add(kUserId1);
+  AddWindowManager(window_server(), kUserId1);
   UserDisplayManager* user_display_manager1 =
       display_manager->GetUserDisplayManager(kUserId1);
   ASSERT_TRUE(user_display_manager1);
@@ -200,14 +217,12 @@ TEST_F(UserDisplayManagerTest, AddRemoveDisplay) {
 }
 
 TEST_F(UserDisplayManagerTest, NegativeCoordinates) {
-  window_server_delegate()->set_num_displays_to_create(1);
+  window_server_delegate()->CreateDisplays(1);
 
   const UserId kUserId1 = "2";
   TestDisplayManagerObserver display_manager_observer1;
   DisplayManager* display_manager = window_server()->display_manager();
-  WindowManagerWindowTreeFactorySetTestApi(
-      window_server()->window_manager_window_tree_factory_set())
-      .Add(kUserId1);
+  AddWindowManager(window_server(), kUserId1);
   UserDisplayManager* user_display_manager1 =
       display_manager->GetUserDisplayManager(kUserId1);
   ASSERT_TRUE(user_display_manager1);

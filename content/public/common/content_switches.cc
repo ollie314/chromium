@@ -62,11 +62,6 @@ const char kBrowserCrashTest[]              = "crash-test";
 // Path to the exe to run for the renderer and plugin subprocesses.
 const char kBrowserSubprocessPath[]         = "browser-subprocess-path";
 
-// Causes the implementations of guests (inner WebContents) to use
-// out-of-process iframes.
-const char kUseCrossProcessFramesForGuests[]   =
-    "use-cross-process-frames-for-guests";
-
 // Sets the tile size used by composited layers.
 const char kDefaultTileWidth[]              = "default-tile-width";
 const char kDefaultTileHeight[]             = "default-tile-height";
@@ -163,8 +158,8 @@ const char kDisableGpuMemoryBufferCompositorResources[] =
 const char kDisableGpuMemoryBufferVideoFrames[] =
     "disable-gpu-memory-buffer-video-frames";
 
-// Disable the limit on the number of times the GPU process may be restarted
-// This switch is intended only for tests.
+// Disable the limit on the number of times the GPU process may be restarted.
+// For tests and platforms where software fallback is disabled.
 const char kDisableGpuProcessCrashLimit[] = "disable-gpu-process-crash-limit";
 
 // Disable async GL worker context. Overrides kEnableGpuAsyncWorkerContext.
@@ -215,6 +210,9 @@ const char kDisableLocalStorage[]           = "disable-local-storage";
 // Force logging to be disabled.  Logging is enabled by default in debug
 // builds.
 const char kDisableLogging[]                = "disable-logging";
+
+// Disables using CODECAPI_AVLowLatencyMode when creating DXVA decoders.
+const char kDisableLowLatencyDxva[]         = "disable-low-latency-dxva";
 
 // Disables usage of the namespace sandbox.
 const char kDisableNamespaceSandbox[]       = "disable-namespace-sandbox";
@@ -372,9 +370,6 @@ const char kEnableExperimentalWebPlatformFeatures[] =
 
 // Comma-separated list of feature names to enable. See also kDisableFeatures.
 const char kEnableFeatures[] = "enable-features";
-
-// Enable Web Bluetooth.
-const char kEnableWebBluetooth[] = "enable-web-bluetooth";
 
 // WebFonts intervention v2 flag and values.
 const char kEnableWebFontsInterventionV2[] = "enable-webfonts-intervention-v2";
@@ -647,8 +642,8 @@ const char kMHTMLSkipNostoreAll[]           = "skip-nostore-all";
 // Use a Mojo-based LocalStorage implementation.
 const char kMojoLocalStorage[]              = "mojo-local-storage";
 
-// Use a Mojo-based ServiceWorker implementation.
-const char kMojoServiceWorker[]             = "mojo-service-worker";
+// Disables a Mojo-based ServiceWorker implementation.
+const char kDisableMojoServiceWorker[]      = "disable-mojo-service-worker";
 
 // Mutes audio sent to the audio device so it is not audible during
 // automated testing.
@@ -750,6 +745,8 @@ const char kRegisterPepperPlugins[]         = "register-pepper-plugins";
 
 // Enables remote debug over HTTP on the specified port.
 const char kRemoteDebuggingPort[]           = "remote-debugging-port";
+
+const char kRendererClientId[] = "renderer-client-id";
 
 // The contents of this flag are prepended to the renderer command line.
 // Useful values might be "valgrind" or "xterm -e gdb --args".
@@ -949,6 +946,10 @@ const char kDisableScreenOrientationLock[]  = "disable-screen-orientation-lock";
 // viewport boundaries.
 const char kEnableAdaptiveSelectionHandleOrientation[] =
     "enable-adaptive-selection-handle-orientation";
+
+// Enable content intent detection in the renderer.
+const char kEnableContentIntentDetection[] =
+    "enable-content-intent-detection";
 
 // Enable drag manipulation of longpress-triggered text selections.
 const char kEnableLongpressDragSelection[]  = "enable-longpress-drag-selection";

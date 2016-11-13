@@ -372,7 +372,7 @@ void PacketSavingConnection::SendOrQueuePacket(SerializedPacket* packet) {
 }
 
 MockQuicSession::MockQuicSession(QuicConnection* connection)
-    : QuicSession(connection, DefaultQuicConfig()) {
+    : QuicSession(connection, nullptr, DefaultQuicConfig()) {
   crypto_stream_.reset(new QuicCryptoStream(this));
   Initialize();
   ON_CALL(*this, WritevData(_, _, _, _, _, _))
@@ -385,7 +385,7 @@ MockQuicSession::~MockQuicSession() {
 
 // static
 QuicConsumedData MockQuicSession::ConsumeAllData(
-    ReliableQuicStream* /*stream*/,
+    QuicStream* /*stream*/,
     QuicStreamId /*id*/,
     const QuicIOVector& data,
     QuicStreamOffset /*offset*/,
@@ -395,7 +395,7 @@ QuicConsumedData MockQuicSession::ConsumeAllData(
 }
 
 MockQuicSpdySession::MockQuicSpdySession(QuicConnection* connection)
-    : QuicSpdySession(connection, DefaultQuicConfig()) {
+    : QuicSpdySession(connection, nullptr, DefaultQuicConfig()) {
   crypto_stream_.reset(new QuicCryptoStream(this));
   Initialize();
   ON_CALL(*this, WritevData(_, _, _, _, _, _))
@@ -441,6 +441,22 @@ TestQuicSpdyServerSession::CreateQuicCryptoServerStream(
 QuicCryptoServerStream* TestQuicSpdyServerSession::GetCryptoStream() {
   return static_cast<QuicCryptoServerStream*>(
       QuicServerSessionBase::GetCryptoStream());
+}
+
+TestPushPromiseDelegate::TestPushPromiseDelegate(bool match)
+    : match_(match), rendezvous_fired_(false), rendezvous_stream_(nullptr) {}
+
+bool TestPushPromiseDelegate::CheckVary(
+    const SpdyHeaderBlock& client_request,
+    const SpdyHeaderBlock& promise_request,
+    const SpdyHeaderBlock& promise_response) {
+  DVLOG(1) << "match " << match_;
+  return match_;
+}
+
+void TestPushPromiseDelegate::OnRendezvousResult(QuicSpdyStream* stream) {
+  rendezvous_fired_ = true;
+  rendezvous_stream_ = stream;
 }
 
 TestQuicSpdyClientSession::TestQuicSpdyClientSession(

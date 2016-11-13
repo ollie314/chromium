@@ -424,11 +424,10 @@ bool LayoutBlockFlow::checkIfIsSelfCollapsingBlock() const {
       return !firstLineBox();
 
     // Whether or not we collapse is dependent on whether all our normal flow
-    // children
-    // are also self-collapsing.
+    // children are also self-collapsing.
     for (LayoutBox* child = firstChildBox(); child;
          child = child->nextSiblingBox()) {
-      if (child->isFloatingOrOutOfFlowPositioned())
+      if (child->isFloatingOrOutOfFlowPositioned() || child->isColumnSpanAll())
         continue;
       if (!child->isSelfCollapsingBlock())
         return false;
@@ -454,11 +453,6 @@ void LayoutBlockFlow::layoutBlock(bool relayoutChildren) {
   LayoutUnit pageLogicalHeight;
   while (!done)
     done = layoutBlockFlow(relayoutChildren, pageLogicalHeight, layoutScope);
-
-  LayoutView* layoutView = view();
-  if (layoutView->layoutState()->pageLogicalHeight())
-    setPageLogicalOffset(
-        layoutView->layoutState()->pageLogicalOffset(*this, logicalTop()));
 
   updateLayerTransformAfterLayout();
 
@@ -489,8 +483,15 @@ inline bool LayoutBlockFlow::layoutBlockFlow(bool relayoutChildren,
   if (pageLogicalHeightChanged)
     relayoutChildren = true;
 
-  LayoutState state(*this, locationOffset(), pageLogicalHeight,
-                    pageLogicalHeightChanged, logicalWidthChanged);
+  LayoutState state(*this, pageLogicalHeight, logicalWidthChanged);
+
+  if (m_paginationStateChanged) {
+    // We now need a deep layout to clean up struts after pagination, if we
+    // just ceased to be paginated, or, if we just became paginated on the
+    // other hand, we now need the deep layout, to insert pagination struts.
+    m_paginationStateChanged = false;
+    state.setPaginationStateChanged();
+  }
 
   // We use four values, maxTopPos, maxTopNeg, maxBottomPos, and maxBottomNeg,
   // to track our current maximal positive and negative margins. These values
@@ -772,10 +773,12 @@ bool LayoutBlockFlow::positionAndLayoutOnceIfNeeded(
     }
   }
 
-  if (!child.needsLayout())
-    return false;
-  child.layout();
-  return true;
+  bool neededLayout = child.needsLayout();
+  if (neededLayout)
+    child.layout();
+  if (view()->layoutState()->isPaginated())
+    updateFragmentationInfoForChild(child);
+  return neededLayout;
 }
 
 void LayoutBlockFlow::insertForcedBreakBeforeChildIfNeeded(
@@ -825,8 +828,6 @@ void LayoutBlockFlow::layoutBlockChild(LayoutBox& child,
   LayoutUnit logicalTopEstimate =
       estimateLogicalTopPosition(child, layoutInfo, estimateWithoutPagination);
 
-  // Cache our old rect so that we can dirty the proper paint invalidation rects
-  // if the child moves.
   LayoutRect oldRect = child.frameRect();
 
   if (LayoutFlowThread* flowThread = flowThreadContainingBlock())
@@ -1037,7 +1038,7 @@ LayoutUnit LayoutBlockFlow::adjustBlockChildForPagination(
       // happens e.g. when a tall break-inside:avoid object with a top margin is
       // the first in-flow child in the fragmentation context.
       if (allowsPaginationStrut()) {
-        paginationStrut += logicalTop + marginBeforeIfFloating();
+        paginationStrut += logicalTop;
         setPaginationStrutPropagatedFromChild(paginationStrut);
         if (childBlockFlow)
           childBlockFlow->setPaginationStrutPropagatedFromChild(LayoutUnit());
@@ -1115,6 +1116,8 @@ void LayoutBlockFlow::adjustLinePositionForPagination(RootInlineBox& lineBox,
   logicalOffset += delta;
   lineBox.setPaginationStrut(LayoutUnit());
   lineBox.setIsFirstAfterPageBreak(false);
+  if (!view()->layoutState()->isPaginated())
+    return;
   LayoutUnit pageLogicalHeight = pageLogicalHeightForOffset(logicalOffset);
   if (!pageLogicalHeight)
     return;
@@ -1157,9 +1160,7 @@ void LayoutBlockFlow::adjustLinePositionForPagination(RootInlineBox& lineBox,
       // beginning of a block before a break, if it can be avoided. After all,
       // that's the reason for setting struts on blocks and not lines in the
       // first place.
-      LayoutUnit strut =
-          paginationStrut + logicalOffset + marginBeforeIfFloating();
-      setPaginationStrutPropagatedFromChild(strut);
+      setPaginationStrutPropagatedFromChild(paginationStrut + logicalOffset);
     } else {
       delta += paginationStrut;
       lineBox.setPaginationStrut(paginationStrut);
@@ -1174,27 +1175,24 @@ void LayoutBlockFlow::adjustLinePositionForPagination(RootInlineBox& lineBox,
     // We're at the very top of a page or column.
     if (lineBox != firstRootBox())
       lineBox.setIsFirstAfterPageBreak(true);
-    // If this is the first line in the block, and the block has a top border,
-    // padding, or (in case it's a float) margin, we may want to set a strut on
-    // the block, so that everything ends up in the next column or page. Setting
-    // a strut on the block is also important when it comes to satisfying orphan
-    // requirements.
+    // If this is the first line in the block, and the block has a top border or
+    // padding, we may want to set a strut on the block, so that everything ends
+    // up in the next column or page. Setting a strut on the block is also
+    // important when it comes to satisfying orphan requirements.
     if (shouldSetStrutOnBlock(*this, lineBox, logicalOffset, lineIndex,
                               pageLogicalHeight))
-      strutToPropagate = logicalOffset + marginBeforeIfFloating();
+      strutToPropagate = logicalOffset;
   } else if (lineBox == firstRootBox() && allowsPaginationStrut()) {
     // This is the first line in the block. The block may still start in the
     // previous column or page, and if that's the case, attempt to pull it over
-    // to where this line is, so that we don't split the top border, padding, or
-    // (in case it's a float) margin.
-    LayoutUnit totalLogicalOffset = logicalOffset + marginBeforeIfFloating();
+    // to where this line is, so that we don't split the top border or padding.
     LayoutUnit strut =
-        remainingLogicalHeight + totalLogicalOffset - pageLogicalHeight;
-    if (strut > 0) {
+        remainingLogicalHeight + logicalOffset - pageLogicalHeight;
+    if (strut > LayoutUnit()) {
       // The block starts in a previous column or page. Set a strut on the block
-      // if there's room for the top border, padding and (if it's a float)
-      // margin and the line in one column or page.
-      if (totalLogicalOffset + lineHeight <= pageLogicalHeight)
+      // if there's room for the top border, padding and the line in one column
+      // or page.
+      if (logicalOffset + lineHeight <= pageLogicalHeight)
         strutToPropagate = strut;
     }
   }
@@ -2120,12 +2118,10 @@ void LayoutBlockFlow::adjustFloatingBlock(const MarginInfo& marginInfo) {
   // tested for by simply calling canCollapseWithMarginBefore. See
   // http://www.hixie.ch/tests/adhoc/css/box/block/margin-collapse/046.html for
   // an example of this scenario.
-  LayoutUnit marginOffset = marginInfo.canCollapseWithMarginBefore()
-                                ? LayoutUnit()
-                                : marginInfo.margin();
-  setLogicalHeight(logicalHeight() + marginOffset);
-  positionNewFloats();
-  setLogicalHeight(logicalHeight() - marginOffset);
+  LayoutUnit logicalTop = logicalHeight();
+  if (!marginInfo.canCollapseWithMarginBefore())
+    logicalTop += marginInfo.margin();
+  positionNewFloats(logicalTop);
 }
 
 void LayoutBlockFlow::handleAfterSideOfBlock(LayoutBox* lastChild,
@@ -3128,6 +3124,12 @@ void LayoutBlockFlow::collapseAnonymousBlockChild(LayoutBlockFlow* child) {
       LayoutInvalidationReason::ChildAnonymousBlockChanged);
 
   child->moveAllChildrenTo(this, child->nextSibling(), child->hasLayer());
+  // If we make an object's children inline we are going to frustrate any future
+  // attempts to remove floats from its children's float-lists before the next
+  // layout happens so clear down all the floatlists now - they will be rebuilt
+  // at layout.
+  if (child->childrenInline())
+    removeFloatingObjectsFromDescendants();
   setChildrenInline(child->childrenInline());
 
   children()->removeChildNode(this, child, child->hasLayer());
@@ -3336,7 +3338,7 @@ void LayoutBlockFlow::childBecameNonInline(LayoutObject*) {
 }
 
 void LayoutBlockFlow::clearFloats(EClear clear) {
-  positionNewFloats();
+  positionNewFloats(logicalHeight());
   // set y position
   LayoutUnit newY;
   switch (clear) {
@@ -3522,13 +3524,8 @@ FloatingObject* LayoutBlockFlow::insertFloatingObject(LayoutBox& floatBox) {
 
   std::unique_ptr<FloatingObject> newObj = FloatingObject::create(&floatBox);
 
-  // Our location is irrelevant if we're unsplittable or no pagination is in
-  // effect. Just go ahead and lay out the float.
-  bool isChildLayoutBlock = floatBox.isLayoutBlock();
-  if (isChildLayoutBlock && !floatBox.needsLayout() &&
-      view()->layoutState()->pageLogicalHeightChanged())
-    floatBox.setChildNeedsLayout(MarkOnlyThis);
-
+  // TODO(mstensho): Avoid laying out before positioning the object, as that's
+  // bad for pagination.
   floatBox.layoutIfNeeded();
 
   setLogicalWidthForFloat(*newObj, logicalWidthForChild(floatBox) +
@@ -3593,7 +3590,8 @@ void LayoutBlockFlow::removeFloatingObjectsBelow(FloatingObject* lastFloat,
   }
 }
 
-bool LayoutBlockFlow::positionNewFloats(LineWidth* width) {
+bool LayoutBlockFlow::positionNewFloats(LayoutUnit logicalTop,
+                                        LineWidth* width) {
   if (!m_floatingObjects)
     return false;
 
@@ -3621,8 +3619,6 @@ bool LayoutBlockFlow::positionNewFloats(LineWidth* width) {
     }
   }
 
-  LayoutUnit logicalTop = logicalHeight();
-
   // The float cannot start above the top position of the last positioned float.
   if (lastPlacedFloatingObject)
     logicalTop =
@@ -3633,100 +3629,130 @@ bool LayoutBlockFlow::positionNewFloats(LineWidth* width) {
   for (; it != end; ++it) {
     FloatingObject& floatingObject = *it->get();
     // The containing block is responsible for positioning floats, so if we have
-    // floats in our list that come from somewhere else, do not attempt to
-    // position them.
-    if (floatingObject.layoutObject()->containingBlock() != this)
-      continue;
+    // unplaced floats in our list that come from somewhere else, we have a bug.
+    DCHECK_EQ(floatingObject.layoutObject()->containingBlock(), this);
 
-    LayoutBox* childBox = floatingObject.layoutObject();
-
-    // FIXME Investigate if this can be removed. crbug.com/370006
-    childBox->setMayNeedPaintInvalidation();
-
-    LayoutUnit childLogicalLeftMargin = style()->isLeftToRightDirection()
-                                            ? marginStartForChild(*childBox)
-                                            : marginEndForChild(*childBox);
-    if (childBox->style()->clear() & ClearLeft)
-      logicalTop = std::max(lowestFloatLogicalBottom(FloatingObject::FloatLeft),
-                            logicalTop);
-    if (childBox->style()->clear() & ClearRight)
-      logicalTop = std::max(
-          lowestFloatLogicalBottom(FloatingObject::FloatRight), logicalTop);
-
-    bool isPaginated = view()->layoutState()->isPaginated();
-    if (isPaginated && !childrenInline()) {
-      // Forced breaks are inserted at class A break points. Floats may be
-      // affected by a break-after value on the previous in-flow sibling.
-      if (LayoutBox* previousInFlowBox = childBox->previousInFlowSiblingBox())
-        logicalTop =
-            applyForcedBreak(logicalTop, previousInFlowBox->breakAfter());
-    }
-
-    LayoutPoint floatLogicalLocation =
-        computeLogicalLocationForFloat(floatingObject, logicalTop);
-
-    setLogicalLeftForFloat(floatingObject, floatLogicalLocation.x());
-
-    setLogicalLeftForChild(*childBox,
-                           floatLogicalLocation.x() + childLogicalLeftMargin);
-    setLogicalTopForChild(
-        *childBox, floatLogicalLocation.y() + marginBeforeForChild(*childBox));
-
-    SubtreeLayoutScope layoutScope(*childBox);
-    if (isPaginated && !childBox->needsLayout())
-      markChildForPaginationRelayoutIfNeeded(*childBox, layoutScope);
-
-    childBox->layoutIfNeeded();
-
-    if (isPaginated) {
-      LayoutBlockFlow* childBlockFlow =
-          childBox->isLayoutBlockFlow() ? toLayoutBlockFlow(childBox) : nullptr;
-      // The first piece of content inside the child may have set a strut during
-      // layout.
-      LayoutUnit strut =
-          childBlockFlow ? childBlockFlow->paginationStrutPropagatedFromChild()
-                         : LayoutUnit();
-      if (!strut) {
-        // Otherwise, if we are unsplittable and don't fit, move to the next
-        // page or column if that helps the situation.
-        strut =
-            adjustForUnsplittableChild(*childBox, floatLogicalLocation.y()) -
-            floatLogicalLocation.y();
-      }
-
-      childBox->setPaginationStrut(strut);
-      if (strut) {
-        floatLogicalLocation = computeLogicalLocationForFloat(
-            floatingObject, floatLogicalLocation.y() + strut);
-        setLogicalLeftForFloat(floatingObject, floatLogicalLocation.x());
-
-        setLogicalLeftForChild(
-            *childBox, floatLogicalLocation.x() + childLogicalLeftMargin);
-        setLogicalTopForChild(*childBox, floatLogicalLocation.y() +
-                                             marginBeforeForChild(*childBox));
-
-        if (childBox->isLayoutBlock())
-          childBox->setChildNeedsLayout(MarkOnlyThis);
-        childBox->layoutIfNeeded();
-      }
-    }
-
-    setLogicalTopForFloat(floatingObject, floatLogicalLocation.y());
-
-    setLogicalHeightForFloat(floatingObject,
-                             logicalHeightForChild(*childBox) +
-                                 marginBeforeForChild(*childBox) +
-                                 marginAfterForChild(*childBox));
+    positionAndLayoutFloat(floatingObject, logicalTop);
 
     m_floatingObjects->addPlacedObject(floatingObject);
-
-    if (ShapeOutsideInfo* shapeOutside = childBox->shapeOutsideInfo())
-      shapeOutside->setReferenceBoxLogicalSize(logicalSizeForChild(*childBox));
 
     if (width)
       width->shrinkAvailableWidthForNewFloatIfNeeded(floatingObject);
   }
   return true;
+}
+
+LayoutUnit LayoutBlockFlow::positionAndLayoutFloat(
+    FloatingObject& floatingObject,
+    LayoutUnit logicalTop) {
+  LayoutBox& childBox = *floatingObject.layoutObject();
+
+  // FIXME Investigate if this can be removed. crbug.com/370006
+  childBox.setMayNeedPaintInvalidation();
+
+  LayoutUnit childLogicalLeftMargin = style()->isLeftToRightDirection()
+                                          ? marginStartForChild(childBox)
+                                          : marginEndForChild(childBox);
+  if (childBox.style()->clear() & ClearLeft) {
+    logicalTop = std::max(lowestFloatLogicalBottom(FloatingObject::FloatLeft),
+                          logicalTop);
+  }
+  if (childBox.style()->clear() & ClearRight) {
+    logicalTop = std::max(lowestFloatLogicalBottom(FloatingObject::FloatRight),
+                          logicalTop);
+  }
+
+  bool isPaginated = view()->layoutState()->isPaginated();
+  if (isPaginated && !childrenInline()) {
+    // Forced breaks are inserted at class A break points. Floats may be
+    // affected by a break-after value on the previous in-flow sibling.
+    if (LayoutBox* previousInFlowBox = childBox.previousInFlowSiblingBox()) {
+      logicalTop =
+          applyForcedBreak(logicalTop, previousInFlowBox->breakAfter());
+    }
+  }
+
+  LayoutPoint floatLogicalLocation =
+      computeLogicalLocationForFloat(floatingObject, logicalTop);
+
+  setLogicalLeftForFloat(floatingObject, floatLogicalLocation.x());
+
+  setLogicalLeftForChild(childBox,
+                         floatLogicalLocation.x() + childLogicalLeftMargin);
+  setLogicalTopForChild(
+      childBox, floatLogicalLocation.y() + marginBeforeForChild(childBox));
+
+  SubtreeLayoutScope layoutScope(childBox);
+  if (isPaginated && !childBox.needsLayout())
+    markChildForPaginationRelayoutIfNeeded(childBox, layoutScope);
+
+  childBox.layoutIfNeeded();
+
+  if (isPaginated) {
+    LayoutBlockFlow* childBlockFlow =
+        childBox.isLayoutBlockFlow() ? toLayoutBlockFlow(&childBox) : nullptr;
+    // The first piece of content inside the child may have set a strut during
+    // layout.
+    LayoutUnit strut =
+        childBlockFlow ? childBlockFlow->paginationStrutPropagatedFromChild()
+                       : LayoutUnit();
+
+    LayoutUnit marginBefore = marginBeforeForChild(childBox);
+    if (marginBefore > LayoutUnit()) {
+      // Avoid breaking inside the top margin of a float.
+      if (strut) {
+        // If we already had decided to break, just add the margin. The strut
+        // so far only accounts for pushing the top border edge to the next
+        // fragmentainer. We need to push the margin over as well, because
+        // there's no break opportunity between margin and border.
+        strut += marginBefore;
+      } else {
+        // Even if we didn't break before the border box to the next
+        // fragmentainer, we need to check if we can fit the margin before
+        // it.
+        LayoutUnit marginEdge = childBox.logicalTop() - marginBefore;
+        if (LayoutUnit pageHeight = pageLogicalHeightForOffset(marginEdge)) {
+          LayoutUnit remainingSpace = pageRemainingLogicalHeightForOffset(
+              marginEdge, AssociateWithLatterPage);
+          if (remainingSpace <= marginBefore)
+            strut += remainingSpace;
+        }
+      }
+    }
+    if (!strut) {
+      // If we are unsplittable and don't fit, move to the next page or column
+      // if that helps the situation.
+      strut = adjustForUnsplittableChild(childBox, floatLogicalLocation.y()) -
+              floatLogicalLocation.y();
+    }
+
+    childBox.setPaginationStrut(strut);
+    if (strut) {
+      floatLogicalLocation = computeLogicalLocationForFloat(
+          floatingObject, floatLogicalLocation.y() + strut);
+      setLogicalLeftForFloat(floatingObject, floatLogicalLocation.x());
+
+      setLogicalLeftForChild(childBox,
+                             floatLogicalLocation.x() + childLogicalLeftMargin);
+      setLogicalTopForChild(
+          childBox, floatLogicalLocation.y() + marginBeforeForChild(childBox));
+
+      if (childBox.isLayoutBlock())
+        childBox.setChildNeedsLayout(MarkOnlyThis);
+      childBox.layoutIfNeeded();
+    }
+  }
+
+  setLogicalTopForFloat(floatingObject, floatLogicalLocation.y());
+
+  setLogicalHeightForFloat(floatingObject, logicalHeightForChild(childBox) +
+                                               marginBeforeForChild(childBox) +
+                                               marginAfterForChild(childBox));
+
+  if (ShapeOutsideInfo* shapeOutside = childBox.shapeOutsideInfo())
+    shapeOutside->setReferenceBoxLogicalSize(logicalSizeForChild(childBox));
+
+  return floatLogicalLocation.y();
 }
 
 bool LayoutBlockFlow::hasOverhangingFloat(LayoutBox* layoutBox) {
@@ -3892,6 +3918,11 @@ LayoutUnit LayoutBlockFlow::nextFloatLogicalBottomBelowForBlock(
 
   return m_floatingObjects->findNextFloatLogicalBottomBelowForBlock(
       logicalHeight);
+}
+
+LayoutUnit LayoutBlockFlow::logicalHeightWithVisibleOverflow() const {
+  LayoutUnit logicalHeight = LayoutBlock::logicalHeightWithVisibleOverflow();
+  return std::max(logicalHeight, lowestFloatLogicalBottom());
 }
 
 Node* LayoutBlockFlow::nodeForHitTest() const {
@@ -4206,6 +4237,7 @@ void LayoutBlockFlow::createOrDestroyMultiColumnFlowThreadIfNeeded(
       // spanners, paged containers may not).
       multiColumnFlowThread()->evacuateAndDestroy();
       ASSERT(!multiColumnFlowThread());
+      m_paginationStateChanged = true;
     }
   }
 
@@ -4225,6 +4257,7 @@ void LayoutBlockFlow::createOrDestroyMultiColumnFlowThreadIfNeeded(
 
   LayoutMultiColumnFlowThread* flowThread = createMultiColumnFlowThread(type);
   addChild(flowThread);
+  m_paginationStateChanged = true;
 
   // Check that addChild() put the flow thread as a direct child, and didn't do
   // fancy things.

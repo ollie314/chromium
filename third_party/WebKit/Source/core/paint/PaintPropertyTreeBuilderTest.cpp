@@ -92,8 +92,7 @@ class PaintPropertyTreeBuilderTest
                           slopFactor)                                          \
   do {                                                                         \
     GeometryMapper geometryMapper;                                             \
-    LayoutRect source(                                                         \
-        (sourceLayoutObject)->localOverflowRectForPaintInvalidation());        \
+    LayoutRect source((sourceLayoutObject)->localVisualRect());                \
     source.moveBy((sourceLayoutObject)                                         \
                       ->paintProperties()                                      \
                       ->localBorderBoxProperties()                             \
@@ -116,8 +115,7 @@ class PaintPropertyTreeBuilderTest
                                                                                \
     if (slopFactor == LayoutUnit::max())                                       \
       break;                                                                   \
-    LayoutRect slowPathRect =                                                  \
-        (sourceLayoutObject)->localOverflowRectForPaintInvalidation();         \
+    LayoutRect slowPathRect = (sourceLayoutObject)->localVisualRect();         \
     (sourceLayoutObject)                                                       \
         ->mapToVisualRectInAncestorSpace(ancestorLayoutObject, slowPathRect);  \
     if (slopFactor) {                                                          \
@@ -241,11 +239,8 @@ TEST_P(PaintPropertyTreeBuilderTest, PositionAndScroll) {
   EXPECT_EQ(FloatRoundedRect(120, 340, 413, 317),
             scrollerProperties->overflowClip()->clipRect());
   EXPECT_EQ(frameContentClip(), scrollerProperties->overflowClip()->parent());
-  // http://crbug.com/638415
-  if (!RuntimeEnabledFeatures::rootLayerScrollingEnabled()) {
-    CHECK_EXACT_VISUAL_RECT(LayoutRect(120, 340, 413, 317),
-                            scroller->layoutObject(), frameView->layoutView());
-  }
+  CHECK_EXACT_VISUAL_RECT(LayoutRect(120, 340, 413, 317),
+                          scroller->layoutObject(), frameView->layoutView());
 
   // The relative-positioned element should have accumulated box offset (exclude
   // scrolling), and should be affected by ancestor scroll transforms.
@@ -279,11 +274,8 @@ TEST_P(PaintPropertyTreeBuilderTest, PositionAndScroll) {
   EXPECT_EQ(FloatRoundedRect(0, 0, 300, 400),
             absPosProperties->overflowClip()->clipRect());
   EXPECT_EQ(frameContentClip(), absPosProperties->overflowClip()->parent());
-  // http://crbug.com/638415
-  if (!RuntimeEnabledFeatures::rootLayerScrollingEnabled()) {
     CHECK_EXACT_VISUAL_RECT(LayoutRect(123, 456, 300, 400),
                             absPos->layoutObject(), frameView->layoutView());
-  }
 }
 
 TEST_P(PaintPropertyTreeBuilderTest, FrameScrollingTraditional) {
@@ -303,16 +295,13 @@ TEST_P(PaintPropertyTreeBuilderTest, FrameScrollingTraditional) {
   EXPECT_EQ(FloatRoundedRect(0, 0, 800, 600), frameContentClip()->clipRect());
   EXPECT_TRUE(frameContentClip()->parent()->isRoot());
 
-  LayoutViewItem layoutViewItem = document().layoutViewItem();
-  const ObjectPaintProperties* layoutViewProperties =
-      layoutViewItem.paintProperties();
-  // http://crbug.com/638415
   if (!RuntimeEnabledFeatures::rootLayerScrollingEnabled()) {
-    EXPECT_EQ(nullptr, layoutViewProperties->scrollTranslation());
-    CHECK_EXACT_VISUAL_RECT(LayoutRect(8, 8, 784, 10000),
-                            document().body()->layoutObject(),
-                            frameView->layoutView());
+    const auto* viewProperties = frameView->layoutView()->paintProperties();
+    EXPECT_EQ(nullptr, viewProperties->scrollTranslation());
   }
+  CHECK_EXACT_VISUAL_RECT(LayoutRect(8, 8, 784, 10000),
+                          document().body()->layoutObject(),
+                          frameView->layoutView());
 }
 
 TEST_P(PaintPropertyTreeBuilderTest, Perspective) {
@@ -359,12 +348,9 @@ TEST_P(PaintPropertyTreeBuilderTest, Transform) {
             transformProperties->paintOffsetTranslation()->matrix());
   EXPECT_EQ(frameScrollTranslation(),
             transformProperties->paintOffsetTranslation()->parent());
-  // http://crbug.com/638415
-  if (!RuntimeEnabledFeatures::rootLayerScrollingEnabled()) {
     CHECK_EXACT_VISUAL_RECT(LayoutRect(173, 556, 400, 300),
                             transform->layoutObject(),
                             document().view()->layoutView());
-  }
 }
 
 TEST_P(PaintPropertyTreeBuilderTest, RelativePositionInline) {
@@ -991,11 +977,8 @@ TEST_P(PaintPropertyTreeBuilderTest, TransformNodesAcrossSubframes) {
       divWithTransform->paintProperties();
   EXPECT_EQ(TransformationMatrix().translate3d(1, 2, 3),
             divWithTransformProperties->transform()->matrix());
-  // http://crbug.com/638415
-  if (!RuntimeEnabledFeatures::rootLayerScrollingEnabled()) {
     CHECK_EXACT_VISUAL_RECT(LayoutRect(1, 2, 800, 164), divWithTransform,
                             frameView->layoutView());
-  }
 
   LayoutObject* innerDivWithTransform =
       frameDocument.getElementById("transform")->layoutObject();
@@ -1084,11 +1067,8 @@ TEST_P(PaintPropertyTreeBuilderTest, TransformNodesInTransformedSubframes) {
       document().getElementById("divWithTransform")->layoutObject();
   EXPECT_EQ(divWithTransformTransform,
             divWithTransform->paintProperties()->transform());
-  // http://crbug.com/638415
-  if (!RuntimeEnabledFeatures::rootLayerScrollingEnabled()) {
     CHECK_EXACT_VISUAL_RECT(LayoutRect(1, 2, 800, 248), divWithTransform,
                             frameView->layoutView());
-  }
 }
 
 TEST_P(PaintPropertyTreeBuilderTest, TreeContextClipByNonStackingContext) {
@@ -1155,10 +1135,8 @@ TEST_P(PaintPropertyTreeBuilderTest,
   EXPECT_EQ(
       scrollerProperties->effect(),
       childProperties->localBorderBoxProperties()->propertyTreeState.effect());
-  if (!RuntimeEnabledFeatures::rootLayerScrollingEnabled()) {
     CHECK_EXACT_VISUAL_RECT(LayoutRect(0, 0, 800, 10000), &scroller,
                             document().view()->layoutView());
-  }
   CHECK_EXACT_VISUAL_RECT(LayoutRect(0, 0, 100, 200), &child,
                           document().view()->layoutView());
 }
@@ -1696,6 +1674,41 @@ TEST_P(PaintPropertyTreeBuilderTest, SvgPixelSnappingShouldResetPaintOffset) {
   // transform.
   EXPECT_EQ(svgWithTransformProperties->transform(),
             rectWithTransformProperties->transform()->parent());
+}
+
+TEST_P(PaintPropertyTreeBuilderTest, SvgRootAndForeignObjectPixelSnapping) {
+  setBodyInnerHTML(
+      "<svg id=svg style='position: relative; left: 0.6px; top: 0.3px'>"
+      "  <foreignObject id=foreign x='3.5' y='5.4' transform='translate(1,1)'>"
+      "    <div id=div style='position: absolute; left: 5.6px; top: 7.3px'>"
+      "    </div>"
+      "  </foreignObject>"
+      "</svg>");
+
+  const auto* svgProperties =
+      getLayoutObjectByElementId("svg")->paintProperties();
+  EXPECT_EQ(nullptr, svgProperties->paintOffsetTranslation());
+  EXPECT_EQ(LayoutPoint(LayoutUnit(8.6), LayoutUnit(8.3)),
+            svgProperties->localBorderBoxProperties()->paintOffset);
+  // Paint offset of SVGRoot be baked into svgLocalToBorderBoxTransform after
+  // snapped to pixels.
+  EXPECT_EQ(TransformationMatrix().translate(9, 8),
+            svgProperties->svgLocalToBorderBoxTransform()->matrix());
+
+  const auto* foreignObjectProperties =
+      getLayoutObjectByElementId("foreign")->paintProperties();
+  EXPECT_EQ(nullptr, foreignObjectProperties->paintOffsetTranslation());
+  // Paint offset of foreignObject should be originated from SVG root and
+  // snapped to pixels.
+  EXPECT_EQ(LayoutPoint(4, 5),
+            foreignObjectProperties->localBorderBoxProperties()->paintOffset);
+
+  const auto* divProperties =
+      getLayoutObjectByElementId("div")->paintProperties();
+  // Paint offset of descendant of foreignObject accumulates on paint offset of
+  // foreignObject.
+  EXPECT_EQ(LayoutPoint(LayoutUnit(4 + 5.6), LayoutUnit(5 + 7.3)),
+            divProperties->localBorderBoxProperties()->paintOffset);
 }
 
 TEST_P(PaintPropertyTreeBuilderTest, NoRenderingContextByDefault) {
@@ -2613,8 +2626,11 @@ TEST_P(PaintPropertyTreeBuilderTest,
                       MainThreadScrollingReason::kThreadedScrollingDisabled));
 }
 
-TEST_P(PaintPropertyTreeBuilderTest,
-       BackgroundAttachmentFixedMainThreadScrollReasonsWithNestedScrollers) {
+// Disabled due to missing main thread scrolling property invalidation support.
+// See: https://crbug.com/664672
+TEST_P(
+    PaintPropertyTreeBuilderTest,
+    DISABLED_BackgroundAttachmentFixedMainThreadScrollReasonsWithNestedScrollers) {
   setBodyInnerHTML(
       "<style>"
       "  #overflowA {"
@@ -2699,8 +2715,11 @@ TEST_P(PaintPropertyTreeBuilderTest,
               MainThreadScrollingReason::kHasBackgroundAttachmentFixedObjects));
 }
 
-TEST_P(PaintPropertyTreeBuilderTest,
-       BackgroundAttachmentFixedMainThreadScrollReasonsWithFixedScroller) {
+// Disabled due to missing main thread scrolling property invalidation support.
+// See: https://crbug.com/664672
+TEST_P(
+    PaintPropertyTreeBuilderTest,
+    DISABLED_BackgroundAttachmentFixedMainThreadScrollReasonsWithFixedScroller) {
   setBodyInnerHTML(
       "<style>"
       "  #overflowA {"
@@ -2860,4 +2879,47 @@ TEST_P(PaintPropertyTreeBuilderTest,
   EXPECT_TRUE(
       getLayoutObjectByElementId("absolute")->container()->isLayoutBlock());
 }
+
+TEST_P(PaintPropertyTreeBuilderTest, SimpleFilter) {
+  setBodyInnerHTML(
+      "<div id='filter' style='filter:opacity(0.5); height:1000px;'>"
+      "</div>");
+  const ObjectPaintProperties* filterProperties =
+      getLayoutObjectByElementId("filter")->paintProperties();
+  EXPECT_TRUE(filterProperties->effect()->parent()->isRoot());
+  EXPECT_EQ(frameScrollTranslation(),
+            filterProperties->effect()->localTransformSpace());
+  EXPECT_EQ(frameContentClip(), filterProperties->effect()->outputClip());
+}
+
+TEST_P(PaintPropertyTreeBuilderTest, FilterReparentClips) {
+  setBodyInnerHTML(
+      "<div id='clip' style='overflow:hidden;'>"
+      "  <div id='filter' style='filter:opacity(0.5); height:1000px;'>"
+      "    <div id='child' style='position:fixed;'></div>"
+      "  </div>"
+      "</div>");
+  const ObjectPaintProperties* clipProperties =
+      getLayoutObjectByElementId("clip")->paintProperties();
+  const ObjectPaintProperties* filterProperties =
+      getLayoutObjectByElementId("filter")->paintProperties();
+  EXPECT_TRUE(filterProperties->effect()->parent()->isRoot());
+  EXPECT_EQ(frameScrollTranslation(),
+            filterProperties->effect()->localTransformSpace());
+  EXPECT_EQ(clipProperties->overflowClip(),
+            filterProperties->effect()->outputClip());
+
+  const ObjectPaintProperties* childProperties =
+      getLayoutObjectByElementId("child")->paintProperties();
+  const PropertyTreeState& childPaintState =
+      childProperties->localBorderBoxProperties()->propertyTreeState;
+  EXPECT_EQ(framePreTranslation(),
+            childProperties->paintOffsetTranslation()->parent());
+  EXPECT_EQ(childProperties->paintOffsetTranslation(),
+            childPaintState.transform());
+  // This will change once we added clip expansion node.
+  EXPECT_EQ(filterProperties->effect()->outputClip(), childPaintState.clip());
+  EXPECT_EQ(filterProperties->effect(), childPaintState.effect());
+}
+
 }  // namespace blink

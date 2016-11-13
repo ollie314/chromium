@@ -7,7 +7,10 @@
 #include "ash/autoclick/mus/autoclick_application.h"
 #include "ash/mus/window_manager_application.h"
 #include "ash/touch_hud/mus/touch_hud_application.h"
-#include "mash/app_driver/app_driver.h"
+#include "base/base_switches.h"
+#include "base/command_line.h"
+#include "base/debug/debugger.h"
+#include "mash/catalog_viewer/catalog_viewer.h"
 #include "mash/quick_launch/quick_launch.h"
 #include "mash/session/session.h"
 #include "mash/task_viewer/task_viewer.h"
@@ -26,7 +29,7 @@ MashPackagedService::MashPackagedService() {}
 MashPackagedService::~MashPackagedService() {}
 
 bool MashPackagedService::OnConnect(
-    const service_manager::Identity& remote_identity,
+    const service_manager::ServiceInfo& remote_info,
     service_manager::InterfaceRegistry* registry) {
   registry->AddInterface<ServiceFactory>(this);
   return true;
@@ -41,14 +44,14 @@ void MashPackagedService::Create(
 void MashPackagedService::CreateService(
     service_manager::mojom::ServiceRequest request,
     const std::string& mojo_name) {
-  if (service_) {
+  if (context_) {
     LOG(ERROR) << "request to create additional service " << mojo_name;
     return;
   }
-  service_ = CreateService(mojo_name);
-  if (service_) {
-    service_->set_context(base::MakeUnique<service_manager::ServiceContext>(
-        service_.get(), std::move(request)));
+  std::unique_ptr<service_manager::Service> service = CreateService(mojo_name);
+  if (service) {
+    context_.reset(new service_manager::ServiceContext(
+        std::move(service), std::move(request)));
     return;
   }
   LOG(ERROR) << "unknown name " << mojo_name;
@@ -58,10 +61,23 @@ void MashPackagedService::CreateService(
 // Please see header file for details on adding new services.
 std::unique_ptr<service_manager::Service> MashPackagedService::CreateService(
     const std::string& name) {
+  const std::string debugger_target =
+      base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+          switches::kWaitForDebugger);
+  if (!debugger_target.empty()) {
+    const size_t index = name.find(':');
+    if (index != std::string::npos &&
+        name.substr(index + 1) == debugger_target) {
+      LOG(WARNING) << "waiting for debugger to attach for service " << name;
+      base::debug::WaitForDebugger(120, true);
+    }
+  }
   if (name == "service:ash")
     return base::WrapUnique(new ash::mus::WindowManagerApplication);
   if (name == "service:accessibility_autoclick")
     return base::WrapUnique(new ash::autoclick::AutoclickApplication);
+  if (name == "service:catalog_viewer")
+    return base::WrapUnique(new mash::catalog_viewer::CatalogViewer);
   if (name == "service:touch_hud")
     return base::WrapUnique(new ash::touch_hud::TouchHudApplication);
   if (name == "service:mash_session")
@@ -78,8 +94,6 @@ std::unique_ptr<service_manager::Service> MashPackagedService::CreateService(
   if (name == "service:font_service")
     return base::WrapUnique(new font_service::FontServiceApp);
 #endif
-  if (name == "service:app_driver")
-    return base::WrapUnique(new mash::app_driver::AppDriver);
   return nullptr;
 }
 

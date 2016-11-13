@@ -68,12 +68,9 @@ class ColorInputType final : public InputType,
   void countUsage() override;
   const AtomicString& formControlType() const override;
   bool supportsRequired() const override;
-  String fallbackValue() const override;
   String sanitizeValue(const String&) const override;
   void createShadowSubtree() override;
-  void setValue(const String&,
-                bool valueChanged,
-                TextFieldEventBehavior) override;
+  void didSetValue(const String&, bool valueChanged) override;
   void handleDOMActivateEvent(Event*) override;
   void closePopupView() override;
   bool shouldRespectListAttribute() override;

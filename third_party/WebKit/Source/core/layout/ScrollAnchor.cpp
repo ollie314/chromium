@@ -21,7 +21,7 @@ ScrollAnchor::ScrollAnchor()
     : m_anchorObject(nullptr),
       m_corner(Corner::TopLeft),
       m_scrollAnchorDisablingStyleChanged(false),
-      m_saved(false) {}
+      m_queued(false) {}
 
 ScrollAnchor::ScrollAnchor(ScrollableArea* scroller) : ScrollAnchor() {
   setScroller(scroller);
@@ -98,22 +98,11 @@ static LayoutRect relativeBounds(const LayoutObject* layoutObject,
     // Only LayoutBox and LayoutText are supported.
     ASSERT_NOT_REACHED();
   }
-  LayoutBox* scrollerBox = scrollerLayoutBox(scroller);
 
   LayoutRect relativeBounds = LayoutRect(
-      layoutObject->localToAncestorQuad(FloatRect(localBounds), scrollerBox)
+      scroller->localToVisibleContentQuad(FloatRect(localBounds), layoutObject)
           .boundingBox());
-  // When root layer scrolling is off, the LayoutView will have no scroll
-  // offset (since scrolling is handled by the FrameView) so
-  // localToAncestorQuad returns document coords, so we must subtract scroll
-  // offset to get viewport coords. We discard the fractional part of the
-  // scroll offset so that the rounding in restore() matches the snapping of
-  // the anchor node to the pixel grid of the layer it paints into. For
-  // non-FrameView scrollers, we rely on the flooring behavior of
-  // LayoutBox::scrolledContentOffset.
-  if (!RuntimeEnabledFeatures::rootLayerScrollingEnabled() &&
-      scrollerBox->isLayoutView())
-    relativeBounds.moveBy(IntPoint(-scroller->scrollOffsetInt()));
+
   return relativeBounds;
 }
 
@@ -212,10 +201,12 @@ bool ScrollAnchor::computeScrollAnchorDisablingStyleChanged() {
   }
 }
 
-void ScrollAnchor::save() {
-  if (m_saved)
+void ScrollAnchor::notifyBeforeLayout() {
+  if (m_queued) {
+    m_scrollAnchorDisablingStyleChanged |=
+        computeScrollAnchorDisablingStyleChanged();
     return;
-  m_saved = true;
+  }
   DCHECK(m_scroller);
   ScrollOffset scrollOffset = m_scroller->scrollOffset();
   float blockDirectionScrollOffset =
@@ -237,11 +228,16 @@ void ScrollAnchor::save() {
         computeRelativeOffset(m_anchorObject, m_scroller, m_corner);
   }
 
-  // Note that we must compute this during save() since the scroller's
-  // descendants have finished layout (and had the bit cleared) by the
-  // time restore() is called.
   m_scrollAnchorDisablingStyleChanged =
       computeScrollAnchorDisablingStyleChanged();
+
+  FrameView* frameView = scrollerLayoutBox(m_scroller)->frameView();
+  ScrollableArea* owningScroller =
+      m_scroller->isRootFrameViewport()
+          ? &toRootFrameViewport(m_scroller)->layoutViewport()
+          : m_scroller.get();
+  frameView->enqueueScrollAnchoringAdjustment(owningScroller);
+  m_queued = true;
 }
 
 IntSize ScrollAnchor::computeAdjustment() const {
@@ -264,10 +260,10 @@ IntSize ScrollAnchor::computeAdjustment() const {
   return delta;
 }
 
-void ScrollAnchor::restore() {
-  if (!m_saved)
+void ScrollAnchor::adjust() {
+  if (!m_queued)
     return;
-  m_saved = false;
+  m_queued = false;
   DCHECK(m_scroller);
   if (!m_anchorObject)
     return;
@@ -299,16 +295,12 @@ void ScrollAnchor::restore() {
                     UseCounter::ScrollAnchored);
 }
 
-void ScrollAnchor::clearSelf(bool unconditionally) {
+void ScrollAnchor::clearSelf() {
   LayoutObject* anchorObject = m_anchorObject;
   m_anchorObject = nullptr;
 
   if (anchorObject)
-    anchorObject->clearIsScrollAnchorObject(unconditionally);
-}
-
-void ScrollAnchor::clearSelf() {
-  clearSelf(false);
+    anchorObject->maybeClearIsScrollAnchorObject();
 }
 
 void ScrollAnchor::clear() {
@@ -323,7 +315,7 @@ void ScrollAnchor::clear() {
     if (PaintLayerScrollableArea* scrollableArea = layer->getScrollableArea()) {
       ScrollAnchor* anchor = scrollableArea->scrollAnchor();
       DCHECK(anchor);
-      anchor->clearSelf(true);
+      anchor->clearSelf();
     }
     layer = layer->parent();
   }
@@ -331,7 +323,7 @@ void ScrollAnchor::clear() {
   if (FrameView* view = layoutObject->frameView()) {
     ScrollAnchor* anchor = view->scrollAnchor();
     DCHECK(anchor);
-    anchor->clearSelf(true);
+    anchor->clearSelf();
   }
 }
 

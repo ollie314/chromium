@@ -56,7 +56,6 @@ using namespace blink;
 @interface BlinkScrollbarObserver : NSObject {
   blink::ScrollbarThemeClient* _scrollbar;
   RetainPtr<ScrollbarPainter> _scrollbarPainter;
-  BOOL _visible;
 }
 - (id)initWithScrollbar:(blink::ScrollbarThemeClient*)scrollbar
                 painter:(const RetainPtr<ScrollbarPainter>&)painter;
@@ -92,10 +91,7 @@ using namespace blink;
                        context:(void*)context {
   if ([keyPath isEqualToString:@"knobAlpha"]) {
     BOOL visible = [_scrollbarPainter.get() knobAlpha] > 0;
-    if (_visible != visible) {
-      _visible = visible;
-      _scrollbar->visibilityChanged();
-    }
+    _scrollbar->setScrollbarsHidden(!visible);
   }
 }
 
@@ -287,7 +283,7 @@ void ScrollbarThemeMac::registerScrollbar(ScrollbarThemeClient& scrollbar) {
 
   scrollbarPainterMap().add(&scrollbar, observer);
   updateEnabledState(scrollbar);
-  updateScrollbarOverlayStyle(scrollbar);
+  updateScrollbarOverlayColorTheme(scrollbar);
 }
 
 void ScrollbarThemeMac::unregisterScrollbar(ScrollbarThemeClient& scrollbar) {
@@ -305,7 +301,7 @@ void ScrollbarThemeMac::setNewPainterForScrollbar(
                                                 painter:scrollbarPainter]);
   scrollbarPainterMap().set(&scrollbar, observer);
   updateEnabledState(scrollbar);
-  updateScrollbarOverlayStyle(scrollbar);
+  updateScrollbarOverlayColorTheme(scrollbar);
 }
 
 ScrollbarPainter ScrollbarThemeMac::painterForScrollbar(
@@ -400,17 +396,14 @@ bool ScrollbarThemeMac::usesOverlayScrollbars() const {
   return recommendedScrollerStyle() == NSScrollerStyleOverlay;
 }
 
-void ScrollbarThemeMac::updateScrollbarOverlayStyle(
+void ScrollbarThemeMac::updateScrollbarOverlayColorTheme(
     const ScrollbarThemeClient& scrollbar) {
   ScrollbarPainter painter = painterForScrollbar(scrollbar);
-  switch (scrollbar.getScrollbarOverlayStyle()) {
-    case ScrollbarOverlayStyleDefault:
-      [painter setKnobStyle:NSScrollerKnobStyleDefault];
-      break;
-    case ScrollbarOverlayStyleDark:
+  switch (scrollbar.getScrollbarOverlayColorTheme()) {
+    case ScrollbarOverlayColorThemeDark:
       [painter setKnobStyle:NSScrollerKnobStyleDark];
       break;
-    case ScrollbarOverlayStyleLight:
+    case ScrollbarOverlayColorThemeLight:
       [painter setKnobStyle:NSScrollerKnobStyleLight];
       break;
   }

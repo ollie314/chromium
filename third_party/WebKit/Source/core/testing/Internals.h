@@ -42,6 +42,7 @@
 
 namespace blink {
 
+class Animation;
 class CallbackFunctionTest;
 class CanvasRenderingContext;
 class ClientRect;
@@ -54,13 +55,14 @@ class DocumentMarker;
 class Element;
 class ExceptionState;
 class GCObservation;
+class HTMLSelectElement;
 class HTMLMediaElement;
 class InternalRuntimeFlags;
 class InternalSettings;
-class Iterator;
 class LayerRectList;
 class LocalDOMWindow;
 class LocalFrame;
+class Location;
 class Node;
 class OriginTrialsTest;
 class Page;
@@ -288,9 +290,9 @@ class Internals final : public GarbageCollectedFinalized<Internals>,
                                 bool allowChildFrameContent,
                                 ExceptionState&) const;
 
-  bool hasSpellingMarker(Document*, int from, int length);
-  bool hasGrammarMarker(Document*, int from, int length);
-  void setSpellCheckingEnabled(bool);
+  bool hasSpellingMarker(Document*, int from, int length, ExceptionState&);
+  bool hasGrammarMarker(Document*, int from, int length, ExceptionState&);
+  void setSpellCheckingEnabled(bool, ExceptionState&);
 
   bool canHyphenate(const AtomicString& locale);
   void setMockHyphenation(const AtomicString& locale);
@@ -333,9 +335,6 @@ class Internals final : public GarbageCollectedFinalized<Internals>,
   String dumpRefCountedInstanceCounts() const;
   LocalDOMWindow* openDummyInspectorFrontend(const String& url);
   void closeDummyInspectorFrontend();
-  Vector<unsigned long> setMemoryCacheCapacities(unsigned long minDeadBytes,
-                                                 unsigned long maxDeadBytes,
-                                                 unsigned long totalBytes);
 
   String counterValue(Element*);
 
@@ -372,7 +371,6 @@ class Internals final : public GarbageCollectedFinalized<Internals>,
 
   void mediaPlayerRemoteRouteAvailabilityChanged(HTMLMediaElement*, bool);
   void mediaPlayerPlayingRemotelyChanged(HTMLMediaElement*, bool);
-  void setAllowHiddenVolumeControls(HTMLMediaElement*, bool);
 
   void registerURLSchemeAsBypassingContentSecurityPolicy(const String& scheme);
   void registerURLSchemeAsBypassingContentSecurityPolicy(

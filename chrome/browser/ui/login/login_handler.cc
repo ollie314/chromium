@@ -32,6 +32,7 @@
 #include "content/public/browser/resource_request_info.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/origin_util.h"
+#include "extensions/features/features.h"
 #include "net/base/auth.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/load_flags.h"
@@ -43,9 +44,13 @@
 #include "ui/gfx/text_elider.h"
 #include "url/origin.h"
 
-#if defined(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
 #include "components/guest_view/browser/guest_view_base.h"
 #include "extensions/browser/view_type_utils.h"
+#endif
+
+#if !defined(OS_ANDROID)
+#include "chrome/browser/ui/blocked_content/app_modal_dialog_helper.h"
 #endif
 
 using autofill::PasswordForm;
@@ -112,14 +117,14 @@ LoginHandler::LoginHandler(net::AuthChallengeInfo* auth_info,
 
   AddRef();  // matched by LoginHandler::ReleaseSoon().
 
-  BrowserThread::PostTask(
-      BrowserThread::UI, FROM_HERE,
-      base::Bind(&LoginHandler::AddObservers, this));
-
   const content::ResourceRequestInfo* info =
       ResourceRequestInfo::ForRequest(request);
   DCHECK(info);
   web_contents_getter_ = info->GetWebContentsGetterForRequest();
+
+  BrowserThread::PostTask(
+      BrowserThread::UI, FROM_HERE,
+      base::Bind(&LoginHandler::AddObservers, this));
 }
 
 void LoginHandler::OnRequestCancelled() {
@@ -332,6 +337,12 @@ void LoginHandler::AddObservers() {
                   content::NotificationService::AllBrowserContextsAndSources());
   registrar_->Add(this, chrome::NOTIFICATION_AUTH_CANCELLED,
                   content::NotificationService::AllBrowserContextsAndSources());
+
+#if !defined(OS_ANDROID)
+  WebContents* requesting_contents = GetWebContentsForLogin();
+  if (requesting_contents)
+    dialog_helper_.reset(new AppModalDialogHelper(requesting_contents));
+#endif
 }
 
 void LoginHandler::RemoveObservers() {
@@ -439,6 +450,9 @@ void LoginHandler::CloseContentsDeferred() {
   CloseDialog();
   if (interstitial_delegate_)
     interstitial_delegate_->Proceed();
+#if !defined(OS_ANDROID)
+  dialog_helper_.reset();
+#endif
 }
 
 // static
@@ -535,7 +549,7 @@ void LoginHandler::ShowLoginPrompt(const GURL& request_url,
       handler->GetPasswordManagerForLogin();
 
   if (!password_manager) {
-#if defined(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
     // A WebContents in a <webview> (a GuestView type) does not have a password
     // manager, but still needs to be able to show login prompts.
     const auto* guest =

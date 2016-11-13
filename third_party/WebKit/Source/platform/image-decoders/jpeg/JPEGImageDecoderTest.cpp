@@ -47,9 +47,9 @@ static const size_t LargeEnoughSize = 1000 * 1000;
 namespace {
 
 std::unique_ptr<ImageDecoder> createDecoder(size_t maxDecodedBytes) {
-  return wrapUnique(new JPEGImageDecoder(
-      ImageDecoder::AlphaNotPremultiplied,
-      ImageDecoder::GammaAndColorProfileApplied, maxDecodedBytes));
+  return wrapUnique(new JPEGImageDecoder(ImageDecoder::AlphaNotPremultiplied,
+                                         ImageDecoder::ColorSpaceApplied,
+                                         maxDecodedBytes));
 }
 
 std::unique_ptr<ImageDecoder> createDecoder() {
@@ -297,6 +297,20 @@ TEST(JPEGImageDecoderTest, byteByByteRGBJPEGWithAdobeMarkers) {
 TEST(JPEGImageDecoderTest, mergeBuffer) {
   const char* jpegFile = "/LayoutTests/fast/images/resources/lenna.jpg";
   testMergeBuffer(&createDecoder, jpegFile);
+}
+
+// This tests decoding a JPEG with many progressive scans.  Decoding should
+// fail, but not hang (crbug.com/642462).
+TEST(JPEGImageDecoderTest, manyProgressiveScans) {
+  RefPtr<SharedBuffer> testData =
+      readFile(decodersTestingDir, "many-progressive-scans.jpg");
+  ASSERT_TRUE(testData.get());
+
+  std::unique_ptr<ImageDecoder> testDecoder = createDecoder();
+  testDecoder->setData(testData.get(), true);
+  EXPECT_EQ(1u, testDecoder->frameCount());
+  ASSERT_TRUE(testDecoder->frameBufferAtIndex(0));
+  EXPECT_TRUE(testDecoder->failed());
 }
 
 }  // namespace blink

@@ -35,6 +35,7 @@ import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.ChromeVersionInfo;
 import org.chromium.chrome.browser.WebContentsFactory;
 import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.chrome.browser.tab.TabContentViewParent;
 import org.chromium.content.browser.ContentView;
 import org.chromium.content.browser.ContentViewCore;
 import org.chromium.content_public.browser.WebContents;
@@ -53,7 +54,7 @@ public class VrShellImpl extends GvrLayout implements GLSurfaceView.Renderer, Vr
     private static final String TAG = "VrShellImpl";
 
     @UsedByReflection("VrShellDelegate.java")
-    public static final String VR_EXTRA = com.google.vr.sdk.base.Constants.EXTRA_VR_LAUNCH;
+    public static final String VR_EXTRA = "android.intent.extra.VR_LAUNCH";
 
     private Activity mActivity;
 
@@ -73,12 +74,11 @@ public class VrShellImpl extends GvrLayout implements GLSurfaceView.Renderer, Vr
 
     // The ContentViewCore for the main content rect in VR.
     private ContentViewCore mContentCVC;
-
-    // The non-VR container view for mContentCVC.
-    private ViewGroup mOriginalContentViewParent;
+    private TabContentViewParent mTabParent;
+    private ViewGroup mTabParentParent;
 
     // TODO(mthiesse): Instead of caching these values, make tab reparenting work for this case.
-    private int mOriginalContentViewIndex;
+    private int mOriginalTabParentIndex;
     private ViewGroup.LayoutParams mOriginalLayoutParams;
     private WindowAndroid mOriginalWindowAndroid;
 
@@ -162,28 +162,28 @@ public class VrShellImpl extends GvrLayout implements GLSurfaceView.Renderer, Vr
     private void reparentContentWindow() {
         mOriginalWindowAndroid = mContentCVC.getWindowAndroid();
 
-        // TODO(mthiesse): Update the WindowAndroid in ChromeActivity too?
-        mTab.updateWindowAndroid(null);
         mTab.updateWindowAndroid(mContentVrWindowAndroid);
 
-        ViewGroup contentContentView = mContentCVC.getContainerView();
-        mOriginalContentViewParent = ((ViewGroup) contentContentView.getParent());
-        mOriginalContentViewIndex = mOriginalContentViewParent.indexOfChild(contentContentView);
-        mOriginalLayoutParams = contentContentView.getLayoutParams();
-        mOriginalContentViewParent.removeView(contentContentView);
+        mTabParent = mTab.getView();
+        mTabParentParent = (ViewGroup) mTabParent.getParent();
+        mOriginalTabParentIndex = mTabParentParent.indexOfChild(mTabParent);
+        mOriginalLayoutParams = mTabParent.getLayoutParams();
+        mTabParentParent.removeView(mTabParent);
 
-        mContentViewCoreContainer.addView(contentContentView, new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT));
+        mContentViewCoreContainer.addView(mTabParent, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
     }
 
     private void restoreContentWindow() {
-        ViewGroup contentContentView = mContentCVC.getContainerView();
-        mTab.updateWindowAndroid(null);
         mTab.updateWindowAndroid(mOriginalWindowAndroid);
-        mContentViewCoreContainer.removeView(contentContentView);
-        mOriginalContentViewParent.addView(contentContentView, mOriginalContentViewIndex,
-                mOriginalLayoutParams);
+
+        // If the tab's view has changed, the necessary view reparenting has already been done.
+        if (mTab.getView() == mTabParent) {
+            mContentViewCoreContainer.removeView(mTabParent);
+            mTabParentParent.addView(mTabParent, mOriginalTabParentIndex, mOriginalLayoutParams);
+            mTabParent.requestFocus();
+        }
+        mTabParent = null;
     }
 
     private static class FrameListener implements OnFrameAvailableListener {
@@ -342,7 +342,7 @@ public class VrShellImpl extends GvrLayout implements GLSurfaceView.Renderer, Vr
 
     @Override
     public FrameLayout getContainer() {
-        return (FrameLayout) this;
+        return this;
     }
 
     /**

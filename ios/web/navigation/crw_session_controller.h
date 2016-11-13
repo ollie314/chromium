@@ -13,7 +13,6 @@
 
 @class CRWSessionEntry;
 @class CRWSessionCertificatePolicyManager;
-@class XCallbackParameters;
 
 namespace web {
 class NavigationManagerImpl;
@@ -54,7 +53,6 @@ struct SSLStatus;
 @property(nonatomic, assign) NSTimeInterval lastVisitedTimestamp;
 @property(nonatomic, readonly, copy) NSString* openerId;
 @property(nonatomic, readonly, assign) NSInteger openerNavigationIndex;
-@property(nonatomic, strong) XCallbackParameters* xCallbackParameters;
 
 // CRWSessionController doesn't have public constructors. New
 // CRWSessionControllers are created by deserialization, or via a
@@ -114,6 +112,7 @@ struct SSLStatus;
 // current entry.
 - (BOOL)canGoBack;
 - (BOOL)canGoForward;
+- (BOOL)canGoDelta:(int)delta;
 // Adjusts the current entry to reflect the navigation in the corresponding
 // direction in history.
 - (void)goBack;
@@ -141,10 +140,10 @@ struct SSLStatus;
 // Returns the URLs in the entries that are redirected to the current entry.
 - (std::vector<GURL>)currentRedirectedUrls;
 
-// Determines if navigation between the two given entries is a push state
-// navigation. Entries can be passed in in any order.
-- (BOOL)isPushStateNavigationBetweenEntry:(CRWSessionEntry*)firstEntry
-                                 andEntry:(CRWSessionEntry*)secondEntry;
+// Determines whether a navigation between |firstEntry| and |secondEntry| is a
+// same-document navigation.  Entries can be passed in any order.
+- (BOOL)isSameDocumentNavigationBetweenEntry:(CRWSessionEntry*)firstEntry
+                                    andEntry:(CRWSessionEntry*)secondEntry;
 
 // Find the most recent session entry that is not a redirect. Returns nil if
 // |entries_| is empty.
@@ -153,6 +152,11 @@ struct SSLStatus;
 // Set |useDesktopUserAgentForNextPendingEntry_| to YES if there is no pending
 // entry, otherwise set |useDesktopUserAgent| in the pending entry.
 - (void)useDesktopUserAgentForNextPendingEntry;
+
+// Returns the navigation index that differs from the current entry by the
+// specified |delta|, skipping redirect navigation items. The index returned is
+// not guaranteed to be valid.
+- (NSInteger)indexOfEntryForDelta:(int)delta;
 
 @end
 

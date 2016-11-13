@@ -34,6 +34,23 @@ cr.define('cr_toolbar_search_field', function() {
         searches = null;
       });
 
+      // Test that no initial 'search-changed' event is fired during
+      // construction and initialization of the cr-toolbar-search-field element.
+      test('no initial search-changed event', function() {
+        var didFire = false;
+        var onSearchChanged = function () { didFire = true; };
+
+        // Need to attach listener event before the element is created, to catch
+        // the unnecessary initial event.
+        document.body.addEventListener('search-changed', onSearchChanged);
+        document.body.innerHTML =
+            '<cr-toolbar-search-field></cr-toolbar-search-field>';
+        // Remove event listener on |body| so that other tests are not affected.
+        document.body.removeEventListener('search-changed', onSearchChanged);
+
+        assertFalse(didFire, 'Should not have fired search-changed event');
+      });
+
       test('opens and closes correctly', function() {
         assertFalse(field.showingSearch);
         MockInteractions.tap(field);
@@ -91,6 +108,31 @@ cr.define('cr_toolbar_search_field', function() {
         field.setValue('bar');
         field.setValue('baz');
         assertEquals(['foo', '', 'bar', 'baz'].join(), searches.join());
+      });
+
+      test('does not notify on setValue with noEvent=true', function() {
+        MockInteractions.tap(field);
+        field.setValue('foo', true);
+        field.setValue('bar');
+        field.setValue('baz', true);
+        assertEquals(['bar'].join(), searches.join());
+      });
+
+      // Tests that calling setValue() from within a 'search-changed' callback
+      // does not result in an infinite loop.
+      test('no infinite loop', function() {
+        var counter = 0;
+        field.addEventListener('search-changed', function(event) {
+          counter++;
+          // Calling setValue() with the already existing value should not
+          // trigger another 'search-changed' event.
+          field.setValue(event.detail);
+        });
+
+        MockInteractions.tap(field);
+        field.setValue('bar');
+        assertEquals(1, counter);
+        assertEquals(['bar'].join(), searches.join());
       });
 
       test('blur does not close field when a search is active', function() {

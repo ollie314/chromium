@@ -227,7 +227,7 @@ void AbortRequestBeforeItStarts(
     ResourceMessageFilter* filter,
     const SyncLoadResultCallback& sync_result_handler,
     int request_id,
-    mojom::URLLoaderClientPtr url_loader_client) {
+    mojom::URLLoaderClientAssociatedPtr url_loader_client) {
   if (sync_result_handler) {
     SyncLoadResult result;
     result.error_code = net::ERR_ABORTED;
@@ -1014,7 +1014,6 @@ bool ResourceDispatcherHostImpl::OnMessageReceived(
     IPC_MESSAGE_HANDLER_DELAY_REPLY(ResourceHostMsg_SyncLoad, OnSyncLoad)
     IPC_MESSAGE_HANDLER(ResourceHostMsg_ReleaseDownloadedFile,
                         OnReleaseDownloadedFile)
-    IPC_MESSAGE_HANDLER(ResourceHostMsg_DataDownloaded_ACK, OnDataDownloadedACK)
     IPC_MESSAGE_HANDLER(ResourceHostMsg_CancelRequest, OnCancelRequest)
     IPC_MESSAGE_HANDLER(ResourceHostMsg_DidChangePriority, OnDidChangePriority)
     IPC_MESSAGE_UNHANDLED(handled = false)
@@ -1057,8 +1056,8 @@ void ResourceDispatcherHostImpl::OnRequestResourceInternal(
     int routing_id,
     int request_id,
     const ResourceRequest& request_data,
-    mojo::InterfaceRequest<mojom::URLLoader> mojo_request,
-    mojom::URLLoaderClientPtr url_loader_client) {
+    mojom::URLLoaderAssociatedRequest mojo_request,
+    mojom::URLLoaderClientAssociatedPtr url_loader_client) {
   // TODO(pkasting): Remove ScopedTracker below once crbug.com/477117 is fixed.
   tracked_objects::ScopedTracker tracking_profile(
       FROM_HERE_WITH_EXPLICIT_FUNCTION(
@@ -1195,13 +1194,64 @@ void ResourceDispatcherHostImpl::UpdateRequestForTransfer(
   }
 }
 
+void ResourceDispatcherHostImpl::CompleteTransfer(
+    int request_id,
+    const ResourceRequest& request_data,
+    int route_id) {
+  // Caller should ensure that |request_data| is associated with a transfer.
+  DCHECK(request_data.transferred_request_child_id != -1 ||
+         request_data.transferred_request_request_id != -1);
+
+  bool is_navigational_request =
+      request_data.resource_type == RESOURCE_TYPE_MAIN_FRAME ||
+      request_data.resource_type == RESOURCE_TYPE_SUB_FRAME;
+  if (!is_navigational_request) {
+    // Transfers apply only to navigational requests - the renderer seems to
+    // have sent bogus IPC data.
+    bad_message::ReceivedBadMessage(
+        filter_, bad_message::RDH_TRANSFERRING_NONNAVIGATIONAL_REQUEST);
+    return;
+  }
+
+  // Attempt to find a loader associated with the deferred transfer request.
+  LoaderMap::iterator it = pending_loaders_.find(
+      GlobalRequestID(request_data.transferred_request_child_id,
+                      request_data.transferred_request_request_id));
+  if (it == pending_loaders_.end()) {
+    // Renderer sent transferred_request_request_id and/or
+    // transferred_request_child_id that doesn't have a corresponding entry on
+    // the browser side.
+    // TODO(lukasza): https://crbug.com/659613: Need to understand the scenario
+    // that can lead here (and then attempt to reintroduce a renderer kill
+    // below).
+    return;
+  }
+  ResourceLoader* pending_loader = it->second.get();
+
+  if (!pending_loader->is_transferring()) {
+    // Renderer sent transferred_request_request_id and/or
+    // transferred_request_child_id that doesn't correspond to an actually
+    // transferring loader on the browser side.
+    base::debug::Alias(pending_loader);
+    bad_message::ReceivedBadMessage(filter_,
+                                    bad_message::RDH_REQUEST_NOT_TRANSFERRING);
+    return;
+  }
+
+  // If the request is transferring to a new process, we can update our
+  // state and let it resume with its existing ResourceHandlers.
+  UpdateRequestForTransfer(filter_->child_id(), route_id, request_id,
+                           request_data, it);
+  pending_loader->CompleteTransfer();
+}
+
 void ResourceDispatcherHostImpl::BeginRequest(
     int request_id,
     const ResourceRequest& request_data,
-    const SyncLoadResultCallback& sync_result_handler, // only valid for sync
+    const SyncLoadResultCallback& sync_result_handler,  // only valid for sync
     int route_id,
-    mojo::InterfaceRequest<mojom::URLLoader> mojo_request,
-    mojom::URLLoaderClientPtr url_loader_client) {
+    mojom::URLLoaderAssociatedRequest mojo_request,
+    mojom::URLLoaderClientAssociatedPtr url_loader_client) {
   int process_type = filter_->process_type();
   int child_id = filter_->child_id();
 
@@ -1239,24 +1289,12 @@ void ResourceDispatcherHostImpl::BeginRequest(
 
   // If the request that's coming in is being transferred from another process,
   // we want to reuse and resume the old loader rather than start a new one.
-  LoaderMap::iterator it = pending_loaders_.find(
-      GlobalRequestID(request_data.transferred_request_child_id,
-                      request_data.transferred_request_request_id));
-  if (it != pending_loaders_.end()) {
+  if (request_data.transferred_request_child_id != -1 ||
+      request_data.transferred_request_request_id != -1) {
     // TODO(yhirano): Make mojo work for this case.
     DCHECK(!url_loader_client);
 
-    // If the request is transferring to a new process, we can update our
-    // state and let it resume with its existing ResourceHandlers.
-    if (it->second->is_transferring()) {
-      ResourceLoader* deferred_loader = it->second.get();
-      UpdateRequestForTransfer(child_id, route_id, request_id,
-                               request_data, it);
-      deferred_loader->CompleteTransfer();
-    } else {
-      bad_message::ReceivedBadMessage(
-          filter_, bad_message::RDH_REQUEST_NOT_TRANSFERRING);
-    }
+    CompleteTransfer(request_id, request_data, route_id);
     return;
   }
 
@@ -1313,11 +1351,11 @@ void ResourceDispatcherHostImpl::BeginRequest(
 void ResourceDispatcherHostImpl::ContinuePendingBeginRequest(
     int request_id,
     const ResourceRequest& request_data,
-    const SyncLoadResultCallback& sync_result_handler, // only valid for sync
+    const SyncLoadResultCallback& sync_result_handler,  // only valid for sync
     int route_id,
     const net::HttpRequestHeaders& headers,
-    mojo::InterfaceRequest<mojom::URLLoader> mojo_request,
-    mojom::URLLoaderClientPtr url_loader_client,
+    mojom::URLLoaderAssociatedRequest mojo_request,
+    mojom::URLLoaderClientAssociatedPtr url_loader_client,
     bool continue_request,
     int error_code) {
   if (!continue_request) {
@@ -1369,6 +1407,12 @@ void ResourceDispatcherHostImpl::ContinuePendingBeginRequest(
 
   new_request->set_first_party_for_cookies(
       request_data.first_party_for_cookies);
+
+  // The initiator should normally be present, unless this is a navigation in a
+  // top-level frame. It may be null for some top-level navigations (eg:
+  // browser-initiated ones).
+  DCHECK(request_data.request_initiator.has_value() ||
+         request_data.resource_type == RESOURCE_TYPE_MAIN_FRAME);
   new_request->set_initiator(request_data.request_initiator);
 
   if (request_data.originated_from_service_worker) {
@@ -1549,8 +1593,8 @@ ResourceDispatcherHostImpl::CreateResourceHandler(
     int process_type,
     int child_id,
     ResourceContext* resource_context,
-    mojo::InterfaceRequest<mojom::URLLoader> mojo_request,
-    mojom::URLLoaderClientPtr url_loader_client) {
+    mojom::URLLoaderAssociatedRequest mojo_request,
+    mojom::URLLoaderClientAssociatedPtr url_loader_client) {
   // TODO(pkasting): Remove ScopedTracker below once crbug.com/456331 is fixed.
   tracked_objects::ScopedTracker tracking_profile(
       FROM_HERE_WITH_EXPLICIT_FUNCTION(
@@ -1719,10 +1763,6 @@ void ResourceDispatcherHostImpl::OnDidChangePriority(
 
   scheduler_->ReprioritizeRequest(loader->request(), new_priority,
                                   intra_priority_value);
-}
-
-void ResourceDispatcherHostImpl::OnDataDownloadedACK(int request_id) {
-  // TODO(michaeln): maybe throttle DataDownloaded messages
 }
 
 void ResourceDispatcherHostImpl::RegisterDownloadedTempFile(
@@ -2181,7 +2221,7 @@ void ResourceDispatcherHostImpl::BeginNavigationRequest(
       // same mechanism as the cookie one.
       blink::WebPageVisibilityStateVisible, resource_context,
       base::WeakPtr<ResourceMessageFilter>(),  // filter
-      false,  // request_data.report_raw_headers
+      info.report_raw_headers,
       true,   // is_async
       IsUsingLoFi(info.common_params.lofi_state, delegate_, *new_request,
                   resource_context, info.is_main_frame),
@@ -2262,13 +2302,25 @@ void ResourceDispatcherHostImpl::OnRequestResourceWithMojo(
     int routing_id,
     int request_id,
     const ResourceRequest& request,
-    mojo::InterfaceRequest<mojom::URLLoader> mojo_request,
-    mojom::URLLoaderClientPtr url_loader_client,
+    mojom::URLLoaderAssociatedRequest mojo_request,
+    mojom::URLLoaderClientAssociatedPtr url_loader_client,
     ResourceMessageFilter* filter) {
   filter_ = filter;
   OnRequestResourceInternal(routing_id, request_id, request,
                             std::move(mojo_request),
                             std::move(url_loader_client));
+  filter_ = nullptr;
+}
+
+void ResourceDispatcherHostImpl::OnSyncLoadWithMojo(
+    int routing_id,
+    int request_id,
+    const ResourceRequest& request_data,
+    ResourceMessageFilter* filter,
+    const SyncLoadResultCallback& result_handler) {
+  filter_ = filter;
+  BeginRequest(request_id, request_data, result_handler, routing_id,
+               nullptr, nullptr);
   filter_ = nullptr;
 }
 

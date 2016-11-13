@@ -9,6 +9,7 @@
 #define CHROME_COMMON_CHROME_SWITCHES_H_
 
 #include "build/build_config.h"
+#include "printing/features/features.h"
 
 // Don't add more switch files here. This is linked into some places like the
 // installer where dependencies should be limited. Instead, have files
@@ -58,6 +59,7 @@ extern const char kCloudPrintPrintTicket[];
 extern const char kCloudPrintSetupProxy[];
 extern const char kCrashOnHangThreads[];
 extern const char kCreateBrowserOnStartupForTests[];
+extern const char kCustomDevtoolsFrontend[];
 extern const char kDebugEnableFrameToggle[];
 extern const char kDebugPackedApps[];
 extern const char kDevToolsFlags[];
@@ -81,7 +83,6 @@ extern const char kDisableExtensions[];
 extern const char kDisableExtensionsExcept[];
 extern const char kDisableExtensionsFileAccessCheck[];
 extern const char kDisableExtensionsHttpThrottling[];
-extern const char kDisableFieldTrialTestingConfig[];
 extern const char kDisableHttp2[];
 extern const char kDisableMinimizeOnSecondLauncherItemClick[];
 extern const char kDisableNewBookmarkApps[];
@@ -160,7 +161,6 @@ extern const char kExtensionsNotWebstore[];
 extern const char kExtensionsUpdateFrequency[];
 extern const char kFastStart[];
 extern const char kForceAppMode[];
-extern const char kForceFieldTrialParams[];
 extern const char kForceFirstRun[];
 extern const char kForceLocalNtp[];
 extern const char kForceVariationIds[];
@@ -179,6 +179,7 @@ extern const char kKioskMode[];
 extern const char kKioskModePrinting[];
 extern const char kLoadComponentExtension[];
 extern const char kLoadExtension[];
+extern const char kLoadMediaRouterComponentExtension[];
 extern const char kMakeDefaultBrowser[];
 extern const char kSecurityChip[];
 extern const char kSecurityChipShowNonSecureOnly[];
@@ -188,7 +189,6 @@ extern const char kSecurityChipAnimationNone[];
 extern const char kSecurityChipAnimationNonSecureOnly[];
 extern const char kSecurityChipAnimationAll[];
 extern const char kMediaCacheSize[];
-extern const char kMediaRouter[];
 extern const char kMetricsRecordingOnly[];
 extern const char kMonitoringDestinationID[];
 extern const char kNetLogCaptureMode[];
@@ -311,7 +311,6 @@ extern const char kNtpSwitchToExistingTab[];
 extern const char kProgressBarAnimation[];
 extern const char kTabManagementExperimentTypeDisabled[];
 extern const char kTabManagementExperimentTypeElderberry[];
-extern const char kWebApkServerUrl[];
 #endif  // defined(OS_ANDROID)
 
 #if defined(OS_CHROMEOS)
@@ -372,7 +371,7 @@ extern const char kWindows10CustomTitlebar[];
 extern const char kWindows8Search[];
 #endif  // defined(OS_WIN)
 
-#if defined(ENABLE_PRINT_PREVIEW) && !defined(OFFICIAL_BUILD)
+#if BUILDFLAG(ENABLE_PRINT_PREVIEW) && !defined(OFFICIAL_BUILD)
 extern const char kDebugPrint[];
 #endif
 

@@ -52,10 +52,10 @@ class DictionaryValue;
 
 namespace cc {
 
-class AnimationHost;
 class LayerTreeHostImpl;
 class LayerTreeImpl;
 class MicroBenchmarkImpl;
+class MutatorHost;
 class Occlusion;
 class EffectTree;
 class PrioritizedTile;
@@ -375,14 +375,19 @@ class CC_EXPORT LayerImpl {
   virtual void DidBeginTracing();
 
   // Release resources held by this layer. Called when the output surface
-  // that rendered this layer was lost or a rendering mode switch has occured.
+  // that rendered this layer was lost.
   virtual void ReleaseResources();
 
-  // Recreate resources that are required after they were released by a
-  // ReleaseResources call.
-  virtual void RecreateResources();
+  // Release tile resources held by this layer. Called when a rendering mode
+  // switch has occured and tiles are no longer valid.
+  virtual void ReleaseTileResources();
+
+  // Recreate tile resources held by this layer after they were released by a
+  // ReleaseTileResources call.
+  virtual void RecreateTileResources();
 
   virtual std::unique_ptr<LayerImpl> CreateLayerImpl(LayerTreeImpl* tree_impl);
+  virtual bool IsSnapped();
   virtual void PushPropertiesTo(LayerImpl* layer);
 
   virtual void GetAllPrioritizedTilesForTracing(
@@ -456,7 +461,7 @@ class CC_EXPORT LayerImpl {
   }
   void ClearPreferredRasterBounds();
 
-  AnimationHost* GetAnimationHost() const;
+  MutatorHost* GetMutatorHost() const;
 
   ElementListType GetElementTypeForAnimation() const;
 
@@ -578,6 +583,7 @@ class CC_EXPORT LayerImpl {
   bool scrolls_drawn_descendant_ : 1;
   bool has_will_change_transform_hint_ : 1;
   bool needs_push_properties_ : 1;
+  bool scrollbars_hidden_ : 1;
 
   DISALLOW_COPY_AND_ASSIGN(LayerImpl);
 };

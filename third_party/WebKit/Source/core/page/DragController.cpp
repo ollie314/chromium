@@ -34,6 +34,7 @@
 #include "core/clipboard/DataTransferAccessPolicy.h"
 #include "core/dom/Document.h"
 #include "core/dom/DocumentFragment.h"
+#include "core/dom/DocumentUserGestureToken.h"
 #include "core/dom/Element.h"
 #include "core/dom/Node.h"
 #include "core/dom/Text.h"
@@ -69,6 +70,7 @@
 #include "core/page/DragState.h"
 #include "core/page/Page.h"
 #include "platform/DragImage.h"
+#include "platform/SharedBuffer.h"
 #include "platform/geometry/IntRect.h"
 #include "platform/geometry/IntSize.h"
 #include "platform/graphics/BitmapImage.h"
@@ -84,6 +86,7 @@
 #include "public/platform/WebScreenInfo.h"
 #include "wtf/Assertions.h"
 #include "wtf/CurrentTime.h"
+#include "wtf/PassRefPtr.h"
 #include "wtf/RefPtr.h"
 #include <memory>
 
@@ -205,10 +208,6 @@ void DragController::dragEnded() {
   m_page->dragCaretController().clear();
 }
 
-DragSession DragController::dragEntered(DragData* dragData) {
-  return dragEnteredOrUpdated(dragData);
-}
-
 void DragController::dragExited(DragData* dragData) {
   DCHECK(dragData);
   LocalFrame* mainFrame = m_page->deprecatedLocalMainFrame();
@@ -233,14 +232,12 @@ void DragController::dragExited(DragData* dragData) {
   m_fileInputElementUnderMouse = nullptr;
 }
 
-DragSession DragController::dragUpdated(DragData* dragData) {
-  return dragEnteredOrUpdated(dragData);
-}
-
 bool DragController::performDrag(DragData* dragData) {
   DCHECK(dragData);
   m_documentUnderMouse = m_page->deprecatedLocalMainFrame()->documentAtPoint(
       dragData->clientPosition());
+  UserGestureIndicator gesture(DocumentUserGestureToken::create(
+      m_documentUnderMouse, UserGestureToken::NewGesture));
   if ((m_dragDestinationAction & DragDestinationActionDHTML) &&
       m_documentIsHandlingDrag) {
     LocalFrame* mainFrame = m_page->deprecatedLocalMainFrame();
@@ -612,12 +609,10 @@ bool DragController::concludeEditDrag(DragData* dragData) {
               dragCaret.base()))
         return false;
 
-      // TODO(xiaochengh): Use of updateStyleAndLayoutIgnorePendingStylesheets
-      // needs to be audited.  See http://crbug.com/590369 for more details.
-      innerFrame->document()->updateStyleAndLayoutIgnorePendingStylesheets();
-
       innerFrame->selection().setSelection(
-          createVisibleSelection(range->startPosition(), range->endPosition()));
+          SelectionInDOMTree::Builder()
+              .setBaseAndExtent(EphemeralRange(range))
+              .build());
       if (innerFrame->selection().isAvailable()) {
         DCHECK(m_documentUnderMouse);
         if (!innerFrame->editor().replaceSelectionAfterDraggingWithEvents(
@@ -1086,7 +1081,7 @@ bool DragController::startDrag(LocalFrame* src,
       return false;
     Element* element = toElement(node);
     Image* image = getImage(element);
-    if (!image || image->isNull())
+    if (!image || image->isNull() || !image->data() || !image->data()->size())
       return false;
     // We shouldn't be starting a drag for an image that can't provide an
     // extension.
@@ -1155,13 +1150,10 @@ void DragController::doSystemDrag(DragImage* image,
                                   DataTransfer* dataTransfer,
                                   LocalFrame* frame,
                                   bool forLink) {
-  // TODO(dcheng): Drag and drop is not yet supported for OOPI.
-  if (m_page->mainFrame()->isRemoteFrame())
-    return;
   m_didInitiateDrag = true;
   m_dragInitiator = frame->document();
 
-  LocalFrame* mainFrame = m_page->deprecatedLocalMainFrame();
+  LocalFrame* mainFrame = frame->localFrameRoot();
   FrameView* mainFrameView = mainFrame->view();
   IntPoint adjustedDragLocation = mainFrameView->rootFrameToContents(
       frame->view()->contentsToRootFrame(dragLocation));

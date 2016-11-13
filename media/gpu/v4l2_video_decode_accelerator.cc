@@ -343,8 +343,9 @@ void V4L2VideoDecodeAccelerator::AssignPictureBuffersTask(
   DCHECK(decoder_thread_.task_runner()->BelongsToCurrentThread());
   DCHECK_EQ(decoder_state_, kAwaitingPictureBuffers);
 
-  const uint32_t req_buffer_count =
-      output_dpb_size_ + kDpbOutputBufferExtraCount;
+  uint32_t req_buffer_count = output_dpb_size_ + kDpbOutputBufferExtraCount;
+  if (image_processor_device_)
+    req_buffer_count += kDpbOutputBufferExtraCountForImageProcessor;
 
   if (buffers.size() < req_buffer_count) {
     LOGF(ERROR) << "Failed to provide requested picture buffers. (Got "
@@ -384,11 +385,13 @@ void V4L2VideoDecodeAccelerator::AssignPictureBuffersTask(
     DCHECK_EQ(output_record.egl_sync, EGL_NO_SYNC_KHR);
     DCHECK_EQ(output_record.picture_id, -1);
     DCHECK_EQ(output_record.cleared, false);
-    DCHECK_EQ(1u, buffers[i].texture_ids().size());
     DCHECK(output_record.processor_input_fds.empty());
 
     output_record.picture_id = buffers[i].id();
-    output_record.texture_id = buffers[i].texture_ids()[0];
+    output_record.texture_id = buffers[i].service_texture_ids().empty()
+                                   ? 0
+                                   : buffers[i].service_texture_ids()[0];
+
     // This will remain kAtClient until ImportBufferForPicture is called, either
     // by the client, or by ourselves, if we are allocating.
     output_record.state = kAtClient;
@@ -445,6 +448,7 @@ void V4L2VideoDecodeAccelerator::CreateEGLImageFor(
     uint32_t fourcc) {
   DVLOGF(3) << "index=" << buffer_index;
   DCHECK(child_task_runner_->BelongsToCurrentThread());
+  DCHECK_NE(texture_id, 0u);
 
   if (get_gl_context_cb_.is_null() || make_context_current_cb_.is_null()) {
     DLOGF(ERROR) << "GL callbacks required for binding to EGLImages";
@@ -1922,6 +1926,7 @@ void V4L2VideoDecodeAccelerator::StartResolutionChange() {
     return;
 
   decoder_state_ = kChangingResolution;
+  SendPictureReady();  // Send all pending PictureReady.
 
   if (!image_processor_bitstream_buffer_ids_.empty()) {
     DVLOGF(3) << "Wait image processor to finish before destroying buffers.";
@@ -2422,7 +2427,10 @@ bool V4L2VideoDecodeAccelerator::CreateOutputBuffers() {
 
   // Output format setup in Initialize().
 
-  const uint32_t buffer_count = output_dpb_size_ + kDpbOutputBufferExtraCount;
+  uint32_t buffer_count = output_dpb_size_ + kDpbOutputBufferExtraCount;
+  if (image_processor_device_)
+    buffer_count += kDpbOutputBufferExtraCountForImageProcessor;
+
   DVLOGF(3) << "buffer_count=" << buffer_count
             << ", coded_size=" << egl_image_size_.ToString();
 
@@ -2536,8 +2544,8 @@ bool V4L2VideoDecodeAccelerator::DestroyOutputBuffers() {
 void V4L2VideoDecodeAccelerator::SendPictureReady() {
   DVLOGF(3);
   DCHECK(decoder_thread_.task_runner()->BelongsToCurrentThread());
-  bool resetting_or_flushing =
-      (decoder_state_ == kResetting || decoder_flushing_);
+  bool send_now = (decoder_state_ == kChangingResolution ||
+                   decoder_state_ == kResetting || decoder_flushing_);
   while (pending_picture_ready_.size() > 0) {
     bool cleared = pending_picture_ready_.front().cleared;
     const Picture& picture = pending_picture_ready_.front().picture;
@@ -2549,15 +2557,16 @@ void V4L2VideoDecodeAccelerator::SendPictureReady() {
           FROM_HERE,
           base::Bind(&Client::PictureReady, decode_client_, picture));
       pending_picture_ready_.pop();
-    } else if (!cleared || resetting_or_flushing) {
+    } else if (!cleared || send_now) {
       DVLOGF(3) << "cleared=" << pending_picture_ready_.front().cleared
                 << ", decoder_state_=" << decoder_state_
                 << ", decoder_flushing_=" << decoder_flushing_
                 << ", picture_clearing_count_=" << picture_clearing_count_;
       // If the picture is not cleared, post it to the child thread because it
       // has to be cleared in the child thread. A picture only needs to be
-      // cleared once. If the decoder is resetting or flushing, send all
-      // pictures to ensure PictureReady arrive before reset or flush done.
+      // cleared once. If the decoder is changing resolution, resetting or
+      // flushing, send all pictures to ensure PictureReady arrive before
+      // ProvidePictureBuffers, NotifyResetDone, or NotifyFlushDone.
       child_task_runner_->PostTaskAndReply(
           FROM_HERE, base::Bind(&Client::PictureReady, client_, picture),
           // Unretained is safe. If Client::PictureReady gets to run, |this| is

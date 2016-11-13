@@ -22,21 +22,18 @@
 #include "ash/common/system/chromeos/shutdown_policy_observer.h"
 #include "ash/common/system/date/clock_observer.h"
 #include "ash/common/system/ime/ime_observer.h"
-#include "ash/common/system/tray/system_tray.h"
-#include "ash/common/system/tray/system_tray_delegate.h"
 #include "ash/common/system/tray/system_tray_notifier.h"
 #include "ash/common/system/tray_accessibility.h"
 #include "ash/common/system/update/update_observer.h"
 #include "ash/common/system/user/user_observer.h"
 #include "ash/common/wm_shell.h"
-#include "ash/shell.h"
 #include "ash/system/chromeos/rotation/tray_rotation_lock.h"
-#include "ash/wm/lock_state_controller.h"
 #include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/weak_ptr.h"
+#include "base/metrics/user_metrics.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/sys_info.h"
@@ -54,19 +51,15 @@
 #include "chrome/browser/chromeos/login/user_flow.h"
 #include "chrome/browser/chromeos/login/users/chrome_user_manager.h"
 #include "chrome/browser/chromeos/login/users/supervised_user_manager.h"
-#include "chrome/browser/chromeos/options/network_config_view.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
 #include "chrome/browser/chromeos/policy/device_cloud_policy_manager_chromeos.h"
 #include "chrome/browser/chromeos/profiles/multiprofiles_intro_dialog.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
-#include "chrome/browser/chromeos/set_time_dialog.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
-#include "chrome/browser/chromeos/ui/choose_mobile_network_dialog.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/supervised_user/supervised_user_service.h"
 #include "chrome/browser/supervised_user/supervised_user_service_factory.h"
-#include "chrome/browser/ui/ash/cast_config_delegate_chromeos.h"
 #include "chrome/browser/ui/ash/cast_config_delegate_media_router.h"
 #include "chrome/browser/ui/ash/multi_user/multi_user_util.h"
 #include "chrome/browser/ui/ash/networking_config_delegate_chromeos.h"
@@ -80,6 +73,7 @@
 #include "chrome/browser/ui/singleton_tabs.h"
 #include "chrome/browser/upgrade_detector.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/features.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
@@ -100,16 +94,14 @@
 #include "device/bluetooth/bluetooth_adapter.h"
 #include "device/bluetooth/bluetooth_adapter_factory.h"
 #include "device/bluetooth/bluetooth_device.h"
-#include "third_party/cros_system_api/dbus/service_constants.h"
 #include "ui/base/ime/chromeos/extension_ime_util.h"
-#include "ui/base/ime/chromeos/ime_keyboard.h"
 #include "ui/base/ime/chromeos/input_method_manager.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/time_format.h"
 #include "ui/chromeos/ime/input_method_menu_item.h"
 #include "ui/chromeos/ime/input_method_menu_manager.h"
 
-#if defined(ENABLE_SUPERVISED_USERS)
+#if BUILDFLAG(ENABLE_SUPERVISED_USERS)
 #include "chrome/browser/supervised_user/supervised_user_service.h"
 #include "chrome/browser/supervised_user/supervised_user_service_factory.h"
 #endif
@@ -142,17 +134,6 @@ void BluetoothDeviceConnectError(
     device::BluetoothDevice::ConnectErrorCode error_code) {
 }
 
-std::unique_ptr<ash::CastConfigDelegate> CreateCastConfigDelegate() {
-  if (CastConfigDelegateMediaRouter::IsEnabled())
-    return base::MakeUnique<CastConfigDelegateMediaRouter>();
-  return base::MakeUnique<CastConfigDelegateChromeos>();
-}
-
-void ShowSettingsSubPageForActiveUser(const std::string& sub_page) {
-  chrome::ShowSettingsSubPageForProfile(
-      ProfileManager::GetActiveUserProfile(), sub_page);
-}
-
 void OnAcceptMultiprofilesIntro(bool no_show_again) {
   PrefService* prefs = ProfileManager::GetActiveUserProfile()->GetPrefs();
   prefs->SetBoolean(prefs::kMultiProfileNeverShowIntro, no_show_again);
@@ -162,13 +143,7 @@ void OnAcceptMultiprofilesIntro(bool no_show_again) {
 }  // namespace
 
 SystemTrayDelegateChromeOS::SystemTrayDelegateChromeOS()
-    : user_profile_(NULL),
-      search_key_mapped_to_(input_method::kSearchKey),
-      have_session_start_time_(false),
-      have_session_length_limit_(false),
-      should_run_bluetooth_discovery_(false),
-      session_started_(false),
-      cast_config_delegate_(nullptr),
+    : cast_config_delegate_(base::MakeUnique<CastConfigDelegateMediaRouter>()),
       networking_config_delegate_(new NetworkingConfigDelegateChromeos()),
       vpn_delegate_(new VPNDelegateChromeOS),
       weak_ptr_factory_(this) {
@@ -216,9 +191,6 @@ void SystemTrayDelegateChromeOS::Initialize() {
                  weak_ptr_factory_.GetWeakPtr()));
 
   ash::WmShell::Get()->GetSessionStateDelegate()->AddSessionStateObserver(this);
-
-  if (CrasAudioHandler::IsInitialized())
-    CrasAudioHandler::Get()->AddAudioObserver(this);
 
   BrowserList::AddObserver(this);
 }
@@ -272,9 +244,6 @@ SystemTrayDelegateChromeOS::~SystemTrayDelegateChromeOS() {
   ash::WmShell::Get()->GetSessionStateDelegate()->RemoveSessionStateObserver(
       this);
 
-  if (CrasAudioHandler::IsInitialized())
-    CrasAudioHandler::Get()->RemoveAudioObserver(this);
-
   BrowserList::RemoveObserver(this);
   StopObservingAppWindowRegistry();
   StopObservingCustodianInfoChanges();
@@ -297,11 +266,21 @@ std::string SystemTrayDelegateChromeOS::GetEnterpriseDomain() const {
   return enterprise_domain_;
 }
 
+std::string SystemTrayDelegateChromeOS::GetEnterpriseRealm() const {
+  return enterprise_realm_;
+}
+
 base::string16 SystemTrayDelegateChromeOS::GetEnterpriseMessage() const {
-  if (GetEnterpriseDomain().empty())
-    return base::string16();
-  return l10n_util::GetStringFUTF16(IDS_DEVICE_OWNED_BY_NOTICE,
-                                    base::UTF8ToUTF16(GetEnterpriseDomain()));
+  if (!GetEnterpriseRealm().empty()) {
+    // TODO(rsorokin): Maybe change a message for the Active Directory devices.
+    return l10n_util::GetStringFUTF16(IDS_DEVICE_OWNED_BY_NOTICE,
+                                      base::UTF8ToUTF16(GetEnterpriseRealm()));
+  }
+  if (!GetEnterpriseDomain().empty()) {
+    return l10n_util::GetStringFUTF16(IDS_DEVICE_OWNED_BY_NOTICE,
+                                      base::UTF8ToUTF16(GetEnterpriseDomain()));
+  }
+  return base::string16();
 }
 
 std::string SystemTrayDelegateChromeOS::GetSupervisedUserManager() const {
@@ -348,12 +327,6 @@ bool SystemTrayDelegateChromeOS::ShouldShowSettings() {
          !wm_shell->GetSessionStateDelegate()->IsInSecondaryLoginScreen();
 }
 
-void SystemTrayDelegateChromeOS::ShowSetTimeDialog() {
-  // TODO(mash): Move to SystemTrayClient.
-  SetTimeDialog::ShowDialogInContainer(
-      SystemTrayClient::GetDialogParentContainerId());
-}
-
 void SystemTrayDelegateChromeOS::ShowEnterpriseInfo() {
   // TODO(mash): Refactor out SessionStateDelegate and move to SystemTrayClient.
   ash::LoginStatus status = GetUserLoginStatus();
@@ -362,7 +335,7 @@ void SystemTrayDelegateChromeOS::ShowEnterpriseInfo() {
       status == ash::LoginStatus::LOCKED ||
       wm_shell->GetSessionStateDelegate()->IsInSecondaryLoginScreen()) {
     scoped_refptr<chromeos::HelpAppLauncher> help_app(
-        new chromeos::HelpAppLauncher(GetNativeWindow()));
+        new chromeos::HelpAppLauncher(nullptr /* parent_window */));
     help_app->ShowHelpTopic(chromeos::HelpAppLauncher::HELP_ENTERPRISE);
   } else {
     chrome::ScopedTabbedBrowserDisplayer displayer(
@@ -427,10 +400,6 @@ void SystemTrayDelegateChromeOS::RequestRestartForUpdate() {
   chrome::NotifyAndTerminate(true /* fast path */);
 }
 
-void SystemTrayDelegateChromeOS::RequestShutdown() {
-  ash::Shell::GetInstance()->lock_state_controller()->RequestShutdown();
-}
-
 void SystemTrayDelegateChromeOS::GetAvailableBluetoothDevices(
     ash::BluetoothDeviceList* list) {
   device::BluetoothAdapter::DeviceList devices =
@@ -482,19 +451,19 @@ void SystemTrayDelegateChromeOS::ConnectToBluetoothDevice(
   if (device->IsPaired() && !device->IsConnectable())
     return;
   if (device->IsPaired() || !device->IsPairable()) {
-    ash::WmShell::Get()->RecordUserMetricsAction(
-        ash::UMA_STATUS_AREA_BLUETOOTH_CONNECT_KNOWN_DEVICE);
+    base::RecordAction(
+        base::UserMetricsAction("StatusArea_Bluetooth_Connect_Known"));
     device->Connect(NULL,
                     base::Bind(&base::DoNothing),
                     base::Bind(&BluetoothDeviceConnectError));
-  } else {  // Show paring dialog for the unpaired device.
-    ash::WmShell::Get()->RecordUserMetricsAction(
-        ash::UMA_STATUS_AREA_BLUETOOTH_CONNECT_UNKNOWN_DEVICE);
-    BluetoothPairingDialog* dialog =
-        new BluetoothPairingDialog(GetNativeWindow(), device);
-    // The dialog deletes itself on close.
-    dialog->Show();
+    return;
   }
+  // Show pairing dialog for the unpaired device.
+  base::RecordAction(
+      base::UserMetricsAction("StatusArea_Bluetooth_Connect_Unknown"));
+  BluetoothPairingDialog* dialog = new BluetoothPairingDialog(device);
+  // The dialog deletes itself on close.
+  dialog->ShowInContainer(SystemTrayClient::GetDialogParentContainerId());
 }
 
 bool SystemTrayDelegateChromeOS::IsBluetoothDiscovering() {
@@ -556,25 +525,14 @@ void SystemTrayDelegateChromeOS::ActivateIMEProperty(const std::string& key) {
 
 void SystemTrayDelegateChromeOS::ManageBluetoothDevices() {
   content::RecordAction(base::UserMetricsAction("ShowBluetoothSettingsPage"));
-  std::string sub_page =
-      std::string(chrome::kSearchSubPage) + "#" +
-      l10n_util::GetStringUTF8(IDS_OPTIONS_SETTINGS_SECTION_TITLE_BLUETOOTH);
-  ShowSettingsSubPageForActiveUser(sub_page);
+  chrome::ShowSettingsSubPageForProfile(ProfileManager::GetActiveUserProfile(),
+                                        chrome::kBluetoothSubPage);
 }
 
 void SystemTrayDelegateChromeOS::ToggleBluetooth() {
   bluetooth_adapter_->SetPowered(!bluetooth_adapter_->IsPowered(),
                                  base::Bind(&base::DoNothing),
                                  base::Bind(&base::DoNothing));
-}
-
-void SystemTrayDelegateChromeOS::ShowOtherNetworkDialog(
-    const std::string& type) {
-  if (type == shill::kTypeCellular) {
-    ChooseMobileNetworkDialog::ShowDialog(GetNativeWindow());
-    return;
-  }
-  NetworkConfigView::ShowForType(type, GetNativeWindow());
 }
 
 bool SystemTrayDelegateChromeOS::GetBluetoothAvailable() {
@@ -591,8 +549,6 @@ bool SystemTrayDelegateChromeOS::GetBluetoothDiscovering() {
 }
 
 ash::CastConfigDelegate* SystemTrayDelegateChromeOS::GetCastConfigDelegate() {
-  if (!cast_config_delegate_)
-    cast_config_delegate_ = CreateCastConfigDelegate();
   return cast_config_delegate_.get();
 }
 
@@ -677,10 +633,6 @@ void SystemTrayDelegateChromeOS::UserChangedChildStatus(
   // At some point profile is not yet fully initiated.
   if (session_started_ && user_profile && user_profile_ == user_profile)
     ash::WmShell::Get()->UpdateAfterLoginStatusChange(GetUserLoginStatus());
-}
-
-ash::SystemTray* SystemTrayDelegateChromeOS::GetPrimarySystemTray() {
-  return ash::Shell::GetInstance()->GetPrimarySystemTray();
 }
 
 ash::SystemTrayNotifier* SystemTrayDelegateChromeOS::GetSystemTrayNotifier() {
@@ -844,12 +796,6 @@ void SystemTrayDelegateChromeOS::ScreenIsUnlocked() {
   ash::WmShell::Get()->UpdateAfterLoginStatusChange(GetUserLoginStatus());
 }
 
-gfx::NativeWindow SystemTrayDelegateChromeOS::GetNativeWindow() const {
-  int container_id = SystemTrayClient::GetDialogParentContainerId();
-  return ash::Shell::GetContainer(ash::Shell::GetPrimaryRootWindow(),
-                                  container_id);
-}
-
 // content::NotificationObserver implementation.
 void SystemTrayDelegateChromeOS::Observe(
     int type,
@@ -928,36 +874,6 @@ void SystemTrayDelegateChromeOS::InputMethodMenuItemChanged(
   GetSystemTrayNotifier()->NotifyRefreshIME();
 }
 
-// Overridden from CrasAudioHandler::AudioObserver.
-void SystemTrayDelegateChromeOS::OnOutputNodeVolumeChanged(uint64_t node_id,
-                                                           int volume) {
-  GetSystemTrayNotifier()->NotifyAudioOutputVolumeChanged(node_id, volume);
-}
-
-void SystemTrayDelegateChromeOS::OnOutputMuteChanged(bool mute_on,
-                                                     bool system_adjust) {
-  GetSystemTrayNotifier()->NotifyAudioOutputMuteChanged(mute_on, system_adjust);
-}
-
-void SystemTrayDelegateChromeOS::OnInputNodeGainChanged(uint64_t /* node_id */,
-                                                        int /* gain */) {
-}
-
-void SystemTrayDelegateChromeOS::OnInputMuteChanged(bool /* mute_on */) {
-}
-
-void SystemTrayDelegateChromeOS::OnAudioNodesChanged() {
-  GetSystemTrayNotifier()->NotifyAudioNodesChanged();
-}
-
-void SystemTrayDelegateChromeOS::OnActiveOutputNodeChanged() {
-  GetSystemTrayNotifier()->NotifyAudioActiveOutputNodeChanged();
-}
-
-void SystemTrayDelegateChromeOS::OnActiveInputNodeChanged() {
-  GetSystemTrayNotifier()->NotifyAudioActiveInputNodeChanged();
-}
-
 // Overridden from BluetoothAdapter::Observer.
 void SystemTrayDelegateChromeOS::AdapterPresentChanged(
     device::BluetoothAdapter* adapter,
@@ -1010,8 +926,11 @@ void SystemTrayDelegateChromeOS::UpdateEnterpriseDomain() {
   policy::BrowserPolicyConnectorChromeOS* connector =
       g_browser_process->platform_part()->browser_policy_connector_chromeos();
   std::string enterprise_domain = connector->GetEnterpriseDomain();
-  if (enterprise_domain_ != enterprise_domain) {
+  std::string enterprise_realm = connector->GetRealm();
+  if (enterprise_domain_ != enterprise_domain ||
+      enterprise_realm_ != enterprise_realm) {
     enterprise_domain_ = enterprise_domain;
+    enterprise_realm_ = enterprise_realm;
     GetSystemTrayNotifier()->NotifyEnterpriseDomainChanged();
   }
 }
@@ -1089,7 +1008,7 @@ SystemTrayDelegateChromeOS::GetLegacySupervisedUserMessage() const {
 
 const base::string16
 SystemTrayDelegateChromeOS::GetChildUserMessage() const {
-#if defined(ENABLE_SUPERVISED_USERS)
+#if BUILDFLAG(ENABLE_SUPERVISED_USERS)
   SupervisedUserService* service =
       SupervisedUserServiceFactory::GetForProfile(user_profile_);
   base::string16 first_custodian =

@@ -7,6 +7,7 @@
 #include <stdint.h>
 
 #include "base/command_line.h"
+#include "base/test/histogram_tester.h"
 #include "components/security_state/security_state_model_client.h"
 #include "components/security_state/switches.h"
 #include "net/cert/x509_certificate.h"
@@ -33,7 +34,8 @@ class TestSecurityStateModelClient : public SecurityStateModelClient {
         cert_status_(net::CERT_STATUS_SHA1_SIGNATURE_PRESENT),
         displayed_mixed_content_(false),
         ran_mixed_content_(false),
-        fails_malware_check_(false),
+        malicious_content_status_(
+            SecurityStateModel::MALICIOUS_CONTENT_STATUS_NONE),
         displayed_password_field_on_http_(false),
         displayed_credit_card_field_on_http_(false) {
     cert_ =
@@ -56,8 +58,9 @@ class TestSecurityStateModelClient : public SecurityStateModelClient {
   void SetRanMixedContent(bool ran_mixed_content) {
     ran_mixed_content_ = ran_mixed_content;
   }
-  void set_fails_malware_check(bool fails_malware_check) {
-    fails_malware_check_ = fails_malware_check;
+  void set_malicious_content_status(
+      SecurityStateModel::MaliciousContentStatus malicious_content_status) {
+    malicious_content_status_ = malicious_content_status;
   }
   void set_displayed_password_field_on_http(
       bool displayed_password_field_on_http) {
@@ -81,7 +84,7 @@ class TestSecurityStateModelClient : public SecurityStateModelClient {
     state->security_bits = 256;
     state->displayed_mixed_content = displayed_mixed_content_;
     state->ran_mixed_content = ran_mixed_content_;
-    state->fails_malware_check = fails_malware_check_;
+    state->malicious_content_status = malicious_content_status_;
     state->displayed_password_field_on_http = displayed_password_field_on_http_;
     state->displayed_credit_card_field_on_http =
         displayed_credit_card_field_on_http_;
@@ -100,7 +103,7 @@ class TestSecurityStateModelClient : public SecurityStateModelClient {
   net::CertStatus cert_status_;
   bool displayed_mixed_content_;
   bool ran_mixed_content_;
-  bool fails_malware_check_;
+  SecurityStateModel::MaliciousContentStatus malicious_content_status_;
   bool displayed_password_field_on_http_;
   bool displayed_credit_card_field_on_http_;
 };
@@ -217,10 +220,18 @@ TEST(SecurityStateModelTest, MalwareOverride) {
   client.set_connection_status(net::SSL_CONNECTION_VERSION_TLS1_2
                                << net::SSL_CONNECTION_VERSION_SHIFT);
   client.SetCipherSuite(ciphersuite);
-  client.set_fails_malware_check(true);
+
   SecurityStateModel::SecurityInfo security_info;
   model.GetSecurityInfo(&security_info);
-  EXPECT_TRUE(security_info.fails_malware_check);
+  EXPECT_EQ(SecurityStateModel::MALICIOUS_CONTENT_STATUS_NONE,
+            security_info.malicious_content_status);
+
+  client.set_malicious_content_status(
+      SecurityStateModel::MALICIOUS_CONTENT_STATUS_MALWARE);
+  model.GetSecurityInfo(&security_info);
+
+  EXPECT_EQ(SecurityStateModel::MALICIOUS_CONTENT_STATUS_MALWARE,
+            security_info.malicious_content_status);
   EXPECT_EQ(SecurityStateModel::DANGEROUS, security_info.security_level);
 }
 
@@ -230,10 +241,12 @@ TEST(SecurityStateModelTest, MalwareWithoutCOnnectionState) {
   TestSecurityStateModelClient client;
   SecurityStateModel model;
   model.SetClient(&client);
-  client.set_fails_malware_check(true);
+  client.set_malicious_content_status(
+      SecurityStateModel::MALICIOUS_CONTENT_STATUS_SOCIAL_ENGINEERING);
   SecurityStateModel::SecurityInfo security_info;
   model.GetSecurityInfo(&security_info);
-  EXPECT_TRUE(security_info.fails_malware_check);
+  EXPECT_EQ(SecurityStateModel::MALICIOUS_CONTENT_STATUS_SOCIAL_ENGINEERING,
+            security_info.malicious_content_status);
   EXPECT_EQ(SecurityStateModel::DANGEROUS, security_info.security_level);
 }
 
@@ -250,7 +263,7 @@ TEST(SecurityStateModelTest, PasswordFieldWarning) {
   client.set_displayed_password_field_on_http(true);
   SecurityStateModel::SecurityInfo security_info;
   model.GetSecurityInfo(&security_info);
-  EXPECT_TRUE(security_info.displayed_private_user_data_input_on_http);
+  EXPECT_TRUE(security_info.displayed_password_field_on_http);
   EXPECT_EQ(SecurityStateModel::HTTP_SHOW_WARNING,
             security_info.security_level);
 }
@@ -268,7 +281,7 @@ TEST(SecurityStateModelTest, CreditCardFieldWarning) {
   client.set_displayed_credit_card_field_on_http(true);
   SecurityStateModel::SecurityInfo security_info;
   model.GetSecurityInfo(&security_info);
-  EXPECT_TRUE(security_info.displayed_private_user_data_input_on_http);
+  EXPECT_TRUE(security_info.displayed_credit_card_field_on_http);
   EXPECT_EQ(SecurityStateModel::HTTP_SHOW_WARNING,
             security_info.security_level);
 }
@@ -282,15 +295,20 @@ TEST(SecurityStateModelTest, HttpWarningNotSetWithoutSwitch) {
   SecurityStateModel model;
   model.SetClient(&client);
   client.set_displayed_password_field_on_http(true);
-  client.set_displayed_credit_card_field_on_http(true);
   SecurityStateModel::SecurityInfo security_info;
   model.GetSecurityInfo(&security_info);
-  EXPECT_TRUE(security_info.displayed_private_user_data_input_on_http);
+  EXPECT_TRUE(security_info.displayed_password_field_on_http);
+  EXPECT_EQ(SecurityStateModel::NONE, security_info.security_level);
+
+  client.set_displayed_credit_card_field_on_http(true);
+  model.GetSecurityInfo(&security_info);
+  EXPECT_TRUE(security_info.displayed_credit_card_field_on_http);
   EXPECT_EQ(SecurityStateModel::NONE, security_info.security_level);
 }
 
-// Tests that |displayed_private_user_data_input_on_http| is not set
-// when the corresponding VisibleSecurityState flags are not set.
+// Tests that neither |displayed_password_field_on_http| nor
+// |displayed_credit_card_field_on_http| is set when the corresponding
+// VisibleSecurityState flags are not set.
 TEST(SecurityStateModelTest, PrivateUserDataNotSet) {
   TestSecurityStateModelClient client;
   client.UseHttpUrl();
@@ -298,8 +316,35 @@ TEST(SecurityStateModelTest, PrivateUserDataNotSet) {
   model.SetClient(&client);
   SecurityStateModel::SecurityInfo security_info;
   model.GetSecurityInfo(&security_info);
-  EXPECT_FALSE(security_info.displayed_private_user_data_input_on_http);
+  EXPECT_FALSE(security_info.displayed_password_field_on_http);
+  EXPECT_FALSE(security_info.displayed_credit_card_field_on_http);
   EXPECT_EQ(SecurityStateModel::NONE, security_info.security_level);
+}
+
+// Tests that SSL.MarkHttpAsStatus histogram is updated when security state is
+// computed for a page.
+TEST(SecurityStateModelTest, MarkHttpAsStatusHistogram) {
+  const char* kHistogramName = "SSL.MarkHttpAsStatus";
+  base::HistogramTester histograms;
+  base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+      switches::kMarkHttpAs, switches::kMarkHttpWithPasswordsOrCcWithChip);
+  TestSecurityStateModelClient client;
+  client.UseHttpUrl();
+  SecurityStateModel model;
+  model.SetClient(&client);
+
+  // Ensure histogram recorded correctly when a non-secure password input is
+  // found on the page.
+  client.set_displayed_password_field_on_http(true);
+  SecurityStateModel::SecurityInfo security_info;
+  histograms.ExpectTotalCount(kHistogramName, 0);
+  model.GetSecurityInfo(&security_info);
+  histograms.ExpectUniqueSample(kHistogramName, 2 /* HTTP_SHOW_WARNING */, 1);
+
+  // Ensure histogram recorded correctly even without a password input.
+  client.set_displayed_password_field_on_http(false);
+  model.GetSecurityInfo(&security_info);
+  histograms.ExpectUniqueSample(kHistogramName, 2 /* HTTP_SHOW_WARNING */, 2);
 }
 
 }  // namespace

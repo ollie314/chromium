@@ -27,6 +27,9 @@ For information about privacy, please see the Google Privacy Policy (http://goo.
 <translation id="1654128982815600832">Enabling remote connections for this computer…</translation>
 <translation id="170207782578677537">Failed to register this computer.</translation>
 <translation id="1704090719919187045">Chromoting Host Preferences</translation>
+<translation id="1730409684442507495">• Improved desktop image quality, responsiveness and battery consumption.
+• Improved responsiveness of click-drag operations.
+• Improved several UI animation effects.</translation>
 <translation id="174018511426417793">You have no computers registered. To enable remote connections to a computer, install Chrome Remote Desktop there and click “<ph name="BUTTON_NAME" />”.</translation>
 <translation id="1742469581923031760">Connecting…</translation>
 <translation id="1770394049404108959">I can't open the application.</translation>
@@ -73,7 +76,6 @@ For information about privacy, please see the Google Privacy Policy (http://goo.
 <translation id="2699970397166997657">Chromoting</translation>
 <translation id="2747641796667576127">Software updates usually happen automatically, but can fail in some rare cases. Updating the software should take no more than a few minutes and can be done while connected to your computer remotely.</translation>
 <translation id="2841013758207633010">Time</translation>
-<translation id="2851674870054673688">Once they have entered the code your sharing session will begin.</translation>
 <translation id="2851754573186462851">Chromium App Streaming</translation>
 <translation id="2855866366045322178">offline</translation>
 <translation id="2888969873284818612">A network error occurred. We will restart the app when your device is on-line again.</translation>
@@ -126,6 +128,7 @@ Host</translation>
 <translation id="409800995205263688">NOTE: Policy settings permit connections only between computers within your network.</translation>
 <translation id="4155497795971509630">Some required components are missing. Please make sure that you have installed the latest version of the software and try again.</translation>
 <translation id="4156740505453712750">To protect access to this computer, please choose a PIN of <ph name="BOLD_START" />at least six digits<ph name="BOLD_END" />. This PIN will be required when connecting from another location.</translation>
+<translation id="4156741816461781891">Signed in as <ph name="EMAIL_ADDRESS" />.</translation>
 <translation id="4176825807642096119">Access code</translation>
 <translation id="4207623512727273241">Please run the installer before continuing.</translation>
 <translation id="4227991223508142681">Host Provisioning Utility</translation>
@@ -208,10 +211,6 @@ Desktop Host</translation>
 <translation id="6304318647555713317">Client</translation>
 <translation id="6381670701864002291">Something else.</translation>
 <translation id="6398765197997659313">Exit full screen</translation>
-<translation id="6408143143164565232">• Listen to audio from Windows or Linux computers.
-• Remove unwanted connections by long-pressing on the computer name.
-• Smoother pinch-to-zoom and two-finger scrolling.
-• New Help &amp; Feedback screen.</translation>
 <translation id="6441316101718669559">Desktop integration is not supported on this platform. You can still use the application, but the user experience will be degraded.</translation>
 <translation id="652218476070540101">The PIN for this computer is being updated…</translation>
 <translation id="6527303717912515753">Share</translation>

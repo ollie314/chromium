@@ -10,8 +10,8 @@
 #include "ash/common/session/session_state_delegate.h"
 #include "ash/common/shelf/wm_shelf.h"
 #include "ash/common/shelf/wm_shelf_util.h"
-#include "ash/common/system/cast/tray_cast.h"
 #include "ash/common/system/date/tray_date.h"
+#include "ash/common/system/date/tray_system_info.h"
 #include "ash/common/system/tiles/tray_tiles.h"
 #include "ash/common/system/tray/system_tray_controller.h"
 #include "ash/common/system/tray/system_tray_delegate.h"
@@ -49,9 +49,10 @@
 #include "ui/views/widget/widget.h"
 
 #if defined(OS_CHROMEOS)
-#include "ash/common/system/chromeos/audio/tray_audio_chromeos.h"
+#include "ash/common/system/chromeos/audio/tray_audio.h"
 #include "ash/common/system/chromeos/bluetooth/tray_bluetooth.h"
 #include "ash/common/system/chromeos/brightness/tray_brightness.h"
+#include "ash/common/system/chromeos/cast/tray_cast.h"
 #include "ash/common/system/chromeos/enterprise/tray_enterprise.h"
 #include "ash/common/system/chromeos/media_security/multi_profile_media_tray_item.h"
 #include "ash/common/system/chromeos/network/tray_network.h"
@@ -73,6 +74,42 @@
 using views::TrayBubbleView;
 
 namespace ash {
+
+namespace {
+
+// A tray item that just reserves space in the tray.
+class PaddingTrayItem : public SystemTrayItem {
+ public:
+  PaddingTrayItem() : SystemTrayItem(nullptr, UMA_NOT_RECORDED) {}
+  ~PaddingTrayItem() override {}
+
+  // SystemTrayItem:
+  views::View* CreateTrayView(LoginStatus status) override {
+    return new PaddingView();
+  }
+
+ private:
+  class PaddingView : public views::View {
+   public:
+    PaddingView() {}
+    ~PaddingView() override {}
+
+   private:
+    gfx::Size GetPreferredSize() const override {
+      // The other tray items already have some padding baked in so we have to
+      // subtract that off.
+      const int side =
+          kTrayEdgePadding - GetTrayConstant(TRAY_IMAGE_ITEM_PADDING);
+      return gfx::Size(side, side);
+    }
+
+    DISALLOW_COPY_AND_ASSIGN(PaddingView);
+  };
+
+  DISALLOW_COPY_AND_ASSIGN(PaddingTrayItem);
+};
+
+}  // namespace
 
 // The minimum width of the system tray menu.
 const int kMinimumSystemTrayMenuWidth = 300;
@@ -178,6 +215,8 @@ SystemTray::SystemTray(WmShelf* wm_shelf)
       tray_audio_(nullptr),
       tray_cast_(nullptr),
       tray_date_(nullptr),
+      tray_tiles_(nullptr),
+      tray_system_info_(nullptr),
       tray_update_(nullptr),
       screen_capture_tray_item_(nullptr),
       screen_share_tray_item_(nullptr) {
@@ -219,6 +258,11 @@ void SystemTray::CreateItems(SystemTrayDelegate* delegate) {
   for (int i = 0; i < maximum_user_profiles; i++)
     AddTrayItem(new TrayUser(this, i));
 
+  // Crucially, this trailing padding has to be inside the user item(s).
+  // Otherwise it could be a main axis margin on the tray's box layout.
+  if (MaterialDesignController::IsSystemTrayMenuMaterial())
+    AddTrayItem(new PaddingTrayItem());
+
   if (maximum_user_profiles > 1) {
     // Add a special double line separator between users and the rest of the
     // menu if more than one user is logged in.
@@ -226,8 +270,11 @@ void SystemTray::CreateItems(SystemTrayDelegate* delegate) {
   }
 #endif
 
+  const bool use_material_design =
+      MaterialDesignController::IsSystemTrayMenuMaterial();
   tray_accessibility_ = new TrayAccessibility(this);
-  tray_date_ = new TrayDate(this);
+  if (!use_material_design)
+    tray_date_ = new TrayDate(this);
   tray_update_ = new TrayUpdate(this);
 
 #if defined(OS_CHROMEOS)
@@ -249,7 +296,7 @@ void SystemTray::CreateItems(SystemTrayDelegate* delegate) {
   screen_share_tray_item_ = new ScreenShareTrayItem(this);
   AddTrayItem(screen_share_tray_item_);
   AddTrayItem(new MultiProfileMediaTrayItem(this));
-  tray_audio_ = new TrayAudioChromeOs(this);
+  tray_audio_ = new TrayAudio(this);
   AddTrayItem(tray_audio_);
   AddTrayItem(new TrayBrightness(this));
   AddTrayItem(new TrayCapsLock(this));
@@ -259,17 +306,26 @@ void SystemTray::CreateItems(SystemTrayDelegate* delegate) {
       delegate->CreateRotationLockTrayItem(this);
   if (tray_rotation_lock)
     AddTrayItem(tray_rotation_lock.release());
-  AddTrayItem(new TraySettings(this));
+  if (!use_material_design)
+    AddTrayItem(new TraySettings(this));
   AddTrayItem(tray_update_);
-  if (MaterialDesignController::IsSystemTrayMenuMaterial())
-    AddTrayItem(new TrayTiles(this));
-  // TODO(tdanderson): Do not add |tray_date_| in material design.
-  AddTrayItem(tray_date_);
+  if (use_material_design) {
+    tray_tiles_ = new TrayTiles(this);
+    AddTrayItem(tray_tiles_);
+    tray_system_info_ = new TraySystemInfo(this);
+    AddTrayItem(tray_system_info_);
+  } else {
+    AddTrayItem(tray_date_);
+  }
 #elif defined(OS_WIN)
   AddTrayItem(tray_accessibility_);
   AddTrayItem(tray_update_);
-  AddTrayItem(tray_date_);
+  if (!use_material_design)
+    AddTrayItem(tray_date_);
 #endif
+  // Leading padding.
+  if (MaterialDesignController::IsSystemTrayMenuMaterial())
+    AddTrayItem(new PaddingTrayItem());
 }
 
 void SystemTray::AddTrayItem(SystemTrayItem* item) {
@@ -427,6 +483,8 @@ bool SystemTray::CloseSystemBubble() const {
 }
 
 views::View* SystemTray::GetHelpButtonView() const {
+  if (MaterialDesignController::IsSystemTrayMenuMaterial())
+    return tray_tiles_->GetHelpButtonView();
   return tray_date_->GetHelpButtonView();
 }
 
@@ -783,6 +841,14 @@ TrayCast* SystemTray::GetTrayCastForTesting() const {
 
 TrayDate* SystemTray::GetTrayDateForTesting() const {
   return tray_date_;
+}
+
+TraySystemInfo* SystemTray::GetTraySystemInfoForTesting() const {
+  return tray_system_info_;
+}
+
+TrayTiles* SystemTray::GetTrayTilesForTesting() const {
+  return tray_tiles_;
 }
 
 TrayUpdate* SystemTray::GetTrayUpdateForTesting() const {

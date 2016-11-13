@@ -16,6 +16,7 @@ _typemap_imports = [
   "//device/bluetooth/public/interfaces/typemaps.gni",
   "//device/generic_sensor/public/interfaces/typemaps.gni",
   "//gpu/ipc/common/typemaps.gni",
+  "//media/capture/mojo/typemaps.gni",
   "//media/mojo/interfaces/typemaps.gni",
   "//mojo/common/typemaps.gni",
   "//mojo/public/cpp/bindings/tests/chromium_typemaps.gni",
@@ -29,6 +30,7 @@ _typemap_imports = [
   "//ui/events/devices/mojo/typemaps.gni",
   "//ui/events/mojo/typemaps.gni",
   "//ui/gfx/typemaps.gni",
+  "//ui/message_center/mojo/typemaps.gni",
   "//url/mojo/typemaps.gni",
 ]
 

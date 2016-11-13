@@ -8,7 +8,6 @@
 #include "base/memory/ref_counted.h"
 #include "base/threading/thread.h"
 #include "cc/animation/animation_delegate.h"
-#include "cc/test/remote_proto_channel_bridge.h"
 #include "cc/test/test_gpu_memory_buffer_manager.h"
 #include "cc/test/test_hooks.h"
 #include "cc/test/test_task_graph_runner.h"
@@ -18,6 +17,8 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace cc {
+
+class AnimationHost;
 class AnimationPlayer;
 class FakeLayerTreeHostClient;
 class LayerImpl;
@@ -31,7 +32,6 @@ class ProxyImpl;
 class ProxyMain;
 class TestContextProvider;
 class TestCompositorFrameSink;
-class TestGpuMemoryBufferManager;
 class TestTaskGraphRunner;
 class TestWebGraphicsContext3D;
 
@@ -95,6 +95,8 @@ class LayerTreeTest : public testing::Test, public TestHooks {
   void DoBeginTest();
   void Timeout();
 
+  AnimationHost* animation_host() const { return animation_host_.get(); }
+
  protected:
   LayerTreeTest();
 
@@ -152,8 +154,8 @@ class LayerTreeTest : public testing::Test, public TestHooks {
   // CompositorFrameSink. Or override it and create your own OutputSurface to
   // change what type of OutputSurface is used, such as a real OutputSurface for
   // pixel tests or a software-compositing OutputSurface.
-  virtual std::unique_ptr<OutputSurface> CreateDisplayOutputSurface(
-      scoped_refptr<ContextProvider> compositor_context_provider);
+  std::unique_ptr<OutputSurface> CreateDisplayOutputSurfaceOnThread(
+      scoped_refptr<ContextProvider> compositor_context_provider) override;
 
   bool IsRemoteTest() const;
 
@@ -180,6 +182,7 @@ class LayerTreeTest : public testing::Test, public TestHooks {
 
   std::unique_ptr<LayerTreeHostClientForTesting> client_;
   std::unique_ptr<LayerTreeHost> layer_tree_host_;
+  std::unique_ptr<AnimationHost> animation_host_;
   LayerTreeHostInProcess* layer_tree_host_in_process_;
 
   bool beginning_ = false;

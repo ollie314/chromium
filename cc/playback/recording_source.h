@@ -19,10 +19,6 @@
 
 namespace cc {
 
-namespace proto {
-class RecordingSource;
-}  // namespace proto
-
 class ClientPictureCache;
 class ContentLayerClient;
 class DisplayItemList;
@@ -44,11 +40,6 @@ class CC_EXPORT RecordingSource {
   RecordingSource();
   virtual ~RecordingSource();
 
-  void ToProtobuf(proto::RecordingSource* proto) const;
-  void FromProtobuf(const proto::RecordingSource& proto,
-                    const scoped_refptr<DisplayItemList>& display_list,
-                    const gfx::Rect& recorded_viewport);
-
   bool UpdateAndExpandInvalidation(Region* invalidation,
                                    const gfx::Size& layer_size,
                                    const gfx::Rect& new_recorded_viewport);
@@ -68,6 +59,7 @@ class CC_EXPORT RecordingSource {
       bool can_use_lcd_text) const;
 
   const DisplayItemList* GetDisplayItemList();
+  gfx::Rect recorded_viewport() const { return recorded_viewport_; }
 
  protected:
   gfx::Rect recorded_viewport_;

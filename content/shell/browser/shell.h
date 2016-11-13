@@ -36,6 +36,9 @@ namespace views {
 class Widget;
 class ViewsDelegate;
 }
+namespace wm {
+class WMState;
+}
 #endif  // defined(USE_AURA)
 
 class GURL;
@@ -155,11 +158,11 @@ class Shell : public WebContentsDelegate,
   void HandleKeyboardEvent(WebContents* source,
                            const NativeWebKeyboardEvent& event) override;
 #endif
-  bool AddMessageToConsole(WebContents* source,
-                           int32_t level,
-                           const base::string16& message,
-                           int32_t line_no,
-                           const base::string16& source_id) override;
+  bool DidAddMessageToConsole(WebContents* source,
+                              int32_t level,
+                              const base::string16& message,
+                              int32_t line_no,
+                              const base::string16& source_id) override;
   void RendererUnresponsive(
       WebContents* source,
       const WebContentsUnresponsiveState& unresponsive_state) override;
@@ -253,6 +256,8 @@ class Shell : public WebContentsDelegate,
 #if defined(OS_CHROMEOS)
   static wm::WMTestHelper* wm_test_helper_;
   static display::Screen* test_screen_;
+#else
+  static wm::WMState* wm_state_;
 #endif
 #if defined(TOOLKIT_VIEWS)
   static views::ViewsDelegate* views_delegate_;

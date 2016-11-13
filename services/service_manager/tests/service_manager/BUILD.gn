@@ -18,14 +18,16 @@ source_set("service_manager") {
     "//base",
     "//base/test:test_config",
     "//mojo/common:common_base",
+    "//mojo/edk/system",
     "//services/service_manager/public/cpp:service_test_support",
     "//services/service_manager/public/cpp:sources",
     "//services/service_manager/public/interfaces",
+    "//services/service_manager/runner/common",
   ]
 
   data_deps = [
     ":manifest",
-    ":service_manager_unittest_driver",
+    ":service_manager_unittest_embedder",
     ":service_manager_unittest_target",
   ]
 }
@@ -43,36 +45,6 @@ mojom("interfaces") {
 service_manifest("manifest") {
   name = "service_manager_unittest"
   source = "service_manager_unittest_manifest.json"
-}
-
-executable("service_manager_unittest_driver") {
-  testonly = true
-
-  sources = [
-    "driver.cc",
-  ]
-
-  deps = [
-    ":interfaces",
-    "//base",
-    "//build/win:default_exe_manifest",
-    "//mojo/edk/system",
-    "//services/service_manager/public/cpp",
-    "//services/service_manager/public/interfaces",
-    "//services/service_manager/runner:init",
-    "//services/service_manager/runner/child:test_native_main",
-    "//services/service_manager/runner/common",
-  ]
-
-  data_deps = [
-    ":driver_manifest",
-  ]
-}
-
-service_manifest("driver_manifest") {
-  type = "exe"
-  name = "service_manager_unittest_driver"
-  source = "driver_manifest.json"
 }
 
 executable("service_manager_unittest_target") {
@@ -96,7 +68,45 @@ executable("service_manager_unittest_target") {
 }
 
 service_manifest("target_manifest") {
-  type = "exe"
   name = "service_manager_unittest_target"
   source = "target_manifest.json"
+}
+
+service_manifest("embedder_manifest") {
+  name = "service_manager_unittest_embedder"
+  source = "embedder_manifest.json"
+  deps = [
+    ":singleton_manifest",
+  ]
+  packaged_services = [ "service_manager_unittest_singleton" ]
+}
+
+service_manifest("singleton_manifest") {
+  name = "service_manager_unittest_singleton"
+  source = "singleton_manifest.json"
+}
+
+service("service_manager_unittest_embedder") {
+  testonly = true
+
+  sources = [
+    "embedder.cc",
+  ]
+
+  deps = [
+    ":interfaces",
+    "//base",
+    "//build/win:default_exe_manifest",
+    "//mojo/edk/system",
+    "//services/service_manager/public/cpp",
+    "//services/service_manager/public/interfaces",
+    "//services/service_manager/runner:init",
+    "//services/service_manager/runner/child:test_native_main",
+    "//services/service_manager/runner/common",
+  ]
+
+  data_deps = [
+    ":embedder_manifest",
+    ":singleton_manifest",
+  ]
 }

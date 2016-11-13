@@ -7,6 +7,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/sys_string_conversions.h"
 #include "ios/web/interstitials/web_interstitial_impl.h"
@@ -453,12 +454,12 @@ void WebStateImpl::RunJavaScriptDialog(
                                  message_text, default_prompt_text, callback);
 }
 
-void WebStateImpl::CancelActiveAndPendingDialogs() {
+void WebStateImpl::CancelDialogs() {
   if (delegate_) {
     JavaScriptDialogPresenter* presenter =
         delegate_->GetJavaScriptDialogPresenter(this);
     if (presenter) {
-      presenter->CancelActiveAndPendingDialogs(this);
+      presenter->CancelDialogs(this);
     }
   }
 }
@@ -544,7 +545,8 @@ int WebStateImpl::DownloadImage(
 
 service_manager::InterfaceRegistry* WebStateImpl::GetMojoInterfaceRegistry() {
   if (!mojo_interface_registry_) {
-    mojo_interface_registry_.reset(new service_manager::InterfaceRegistry);
+    mojo_interface_registry_.reset(
+        new service_manager::InterfaceRegistry(std::string()));
   }
   return mojo_interface_registry_.get();
 }
@@ -676,10 +678,12 @@ void WebStateImpl::OnProvisionalNavigationStarted(const GURL& url) {
 
 #pragma mark - NavigationManagerDelegate implementation
 
-// Mirror WebContentsImpl::NavigateToPendingEntry() so that
-// NavigationControllerIO::GoBack() actually goes back.
-void WebStateImpl::NavigateToPendingEntry() {
-  [web_controller_ loadCurrentURL];
+void WebStateImpl::GoToOffset(int offset) {
+  [web_controller_ goDelta:offset];
+}
+
+void WebStateImpl::GoToIndex(int index) {
+  [web_controller_ goToItemAtIndex:index];
 }
 
 void WebStateImpl::LoadURLWithParams(

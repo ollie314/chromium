@@ -32,7 +32,6 @@ class SingleThreadTaskRunner;
 }
 
 namespace blink {
-class WebAppBannerClient;
 class WebAudioDevice;
 class WebClipboard;
 class WebFrame;
@@ -42,13 +41,13 @@ class WebMIDIAccessorClient;
 class WebMediaStreamCenter;
 class WebMediaStreamCenterClient;
 class WebPlugin;
-class WebPluginContainer;
 class WebPrescientNetworking;
 class WebRTCPeerConnectionHandler;
 class WebRTCPeerConnectionHandlerClient;
 class WebSpeechSynthesizer;
 class WebSpeechSynthesizerClient;
 class WebThemeEngine;
+class WebURL;
 class WebURLResponse;
 class WebURLRequest;
 class WebWorkerContentSettingsClientProxy;
@@ -58,6 +57,7 @@ struct WebURLError;
 
 namespace cc {
 class ImageSerializationProcessor;
+class RemoteCompositorBridge;
 }
 
 namespace gfx {
@@ -65,9 +65,7 @@ class ICCProfile;
 }
 
 namespace media {
-class GpuVideoAcceleratorFactories;
 class KeySystemProperties;
-class MediaLog;
 class RendererFactory;
 }
 
@@ -77,12 +75,10 @@ class InterfaceRegistry;
 
 namespace content {
 class BrowserPluginDelegate;
-class DocumentState;
 class MediaStreamRendererFactory;
+class RemoteProtoChannel;
 class RenderFrame;
 class RenderView;
-class SynchronousCompositor;
-struct WebPluginInfo;
 
 // Embedder API for participating in renderer logic.
 class CONTENT_EXPORT ContentRendererClient {
@@ -244,8 +240,7 @@ class CONTENT_EXPORT ContentRendererClient {
   // |url|.  If the function returns true, the url is changed to |new_url|.
   virtual bool WillSendRequest(blink::WebFrame* frame,
                                ui::PageTransition transition_type,
-                               const GURL& url,
-                               const GURL& first_party_for_cookies,
+                               const blink::WebURL& url,
                                GURL* new_url);
 
   // Returns true if the request is associated with a document that is in
@@ -275,6 +270,14 @@ class CONTENT_EXPORT ContentRendererClient {
 
   // Allows an embedder to provide a cc::ImageSerializationProcessor.
   virtual cc::ImageSerializationProcessor* GetImageSerializationProcessor();
+
+  // Allows an embedder to create the cc::RemoteCompositorBridge when using
+  // remote compositing.
+  // The |remote_proto_channel| outlives the RemoteCompositorBridge.
+  virtual std::unique_ptr<cc::RemoteCompositorBridge>
+  CreateRemoteCompositorBridge(
+      RemoteProtoChannel* remote_proto_channel,
+      scoped_refptr<base::SingleThreadTaskRunner> compositor_main_task_runner);
 
   // Allows an embedder to provide a default image decode color space.
   virtual std::unique_ptr<gfx::ICCProfile> GetImageDecodeColorProfile();
@@ -318,10 +321,6 @@ class CONTENT_EXPORT ContentRendererClient {
   // Records a domain and registry of a url to a Rappor privacy-preserving
   // metric. See: https://www.chromium.org/developers/design-documents/rappor
   virtual void RecordRapporURL(const std::string& metric, const GURL& url) {}
-
-  // Allows an embedder to provide a blink::WebAppBannerClient.
-  virtual std::unique_ptr<blink::WebAppBannerClient> CreateAppBannerClient(
-      RenderFrame* render_frame);
 
   // Gives the embedder a chance to add properties to the context menu.
   // Currently only called when the context menu is for an image.

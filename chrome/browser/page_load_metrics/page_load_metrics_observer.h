@@ -70,7 +70,7 @@ struct PageLoadExtraInfo {
       const base::Optional<base::TimeDelta>& first_background_time,
       const base::Optional<base::TimeDelta>& first_foreground_time,
       bool started_in_foreground,
-      bool user_gesture,
+      bool user_initiated,
       const GURL& committed_url,
       const GURL& start_url,
       UserAbortType abort_type,
@@ -95,7 +95,7 @@ struct PageLoadExtraInfo {
 
   // True if this is either a browser initiated navigation or the user_gesture
   // bit is true in the renderer.
-  const bool user_gesture;
+  const bool user_initiated;
 
   // Committed URL. If the page load did not commit, |committed_url| will be
   // empty.
@@ -108,6 +108,15 @@ struct PageLoadExtraInfo {
   // aborted, |abort_type| will be |ABORT_NONE|.
   const UserAbortType abort_type;
 
+  // Whether the abort for this page load was user initiated. For example, if
+  // this page load was aborted by a new navigation, this field tracks whether
+  // that new navigation was user-initiated. This field is only useful if this
+  // page load's abort type is a value other than ABORT_NONE. Note that this
+  // value is currently experimental, and is subject to change. In particular,
+  // this field is never set to true for some abort types, such as stop and
+  // close, since we don't yet have sufficient instrumentation to know if a stop
+  // or close was caused by a user action.
+  //
   // TODO(csharrison): If more metadata for aborts is needed we should provide a
   // better abstraction. Note that this is an approximation.
   bool abort_user_initiated;
@@ -158,7 +167,8 @@ class PageLoadMetricsObserver {
   // The navigation handle holds relevant data for the navigation, but will
   // be destroyed soon after this call. Don't hold a reference to it. This can
   // be called multiple times.
-  virtual void OnRedirect(content::NavigationHandle* navigation_handle) {}
+  virtual ObservePolicy OnRedirect(
+      content::NavigationHandle* navigation_handle);
 
   // OnCommit is triggered when a page load commits, i.e. when we receive the
   // first data for the request. The navigation handle holds relevant data for
@@ -172,11 +182,12 @@ class PageLoadMetricsObserver {
   // OnHidden is triggered when a page leaves the foreground. It does not fire
   // when a foreground page is permanently closed; for that, listen to
   // OnComplete instead.
-  virtual void OnHidden() {}
+  virtual ObservePolicy OnHidden(const PageLoadTiming& timing,
+                                 const PageLoadExtraInfo& extra_info);
 
   // OnShown is triggered when a page is brought to the foreground. It does not
   // fire when the page first loads; for that, listen for OnStart instead.
-  virtual void OnShown() {}
+  virtual ObservePolicy OnShown();
 
   // The callbacks below are only invoked after a navigation commits, for
   // tracked page loads. Page loads that don't meet the criteria for being

@@ -5,6 +5,7 @@
 #ifndef ASH_COMMON_SYSTEM_TILES_TILES_DEFAULT_VIEW_H_
 #define ASH_COMMON_SYSTEM_TILES_TILES_DEFAULT_VIEW_H_
 
+#include "ash/ash_export.h"
 #include "ash/common/login_status.h"
 #include "ash/common/system/chromeos/shutdown_policy_observer.h"
 #include "base/macros.h"
@@ -22,9 +23,9 @@ class SystemTrayItem;
 
 // The container view for the tiles in the bottom row of the system menu
 // (settings, help, lock, and power).
-class TilesDefaultView : public views::View,
-                         public views::ButtonListener,
-                         public ShutdownPolicyObserver {
+class ASH_EXPORT TilesDefaultView : public views::View,
+                                    public views::ButtonListener,
+                                    public ShutdownPolicyObserver {
  public:
   TilesDefaultView(SystemTrayItem* owner, LoginStatus login);
   ~TilesDefaultView() override;
@@ -40,16 +41,15 @@ class TilesDefaultView : public views::View,
   // ShutdownPolicyObserver:
   void OnShutdownPolicyChanged(bool reboot_on_shutdown) override;
 
+  // Accessor needed to obtain the help button view for the first-run flow.
+  views::View* GetHelpButtonView() const;
+
+  const views::CustomButton* GetShutdownButtonViewForTest() const;
+
  private:
   friend class TrayTilesTest;
 
-  // Helper function to add a separator line between two tiles.
-  // TODO(tdanderson|bruthig): Consider moving this to a location which can be
-  // shared by other system menu rows.
-  void AddSeparator();
-
   SystemTrayItem* owner_;
-
   LoginStatus login_;
 
   // Pointers to the child buttons of |this|. Note that some buttons may not

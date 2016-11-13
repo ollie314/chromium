@@ -8,7 +8,8 @@ import android.content.Context;
 import android.util.TypedValue;
 
 import org.chromium.base.VisibleForTesting;
-import org.chromium.ui.base.WindowAndroid;
+
+import java.lang.ref.WeakReference;
 
 /**
  * Cached copy of all positions and scales (CSS-to-DIP-to-physical pixels)
@@ -38,7 +39,7 @@ public class RenderCoordinates {
     private float mMaxPageScaleFactor = 1.0f;
 
     // Cached device density.
-    private float mDeviceScaleFactor;
+    private float mDeviceScaleFactor = 1.0f;
 
     // Multiplier that determines how many (device) pixels to scroll per mouse
     // wheel tick. Defaults to the preferred list item height.
@@ -61,14 +62,14 @@ public class RenderCoordinates {
         mContentHeightCss = contentHeightCss;
     }
 
-    void updateDeviceScaleFactorFromWindow(WindowAndroid windowAndroid) {
-        mDeviceScaleFactor = windowAndroid.getDisplay().getDIPScale();
+    void setDeviceScaleFactor(float dipScale, WeakReference<Context> displayContext) {
+        mDeviceScaleFactor = dipScale;
 
         // The wheel scroll factor depends on the theme in the context.
         // This code assumes that the theme won't change between this call and
         // getWheelScrollFactor().
 
-        Context context = windowAndroid.getContext().get();
+        Context context = displayContext.get();
         TypedValue outValue = new TypedValue();
         // This is the same attribute used by Android Views to scale wheel
         // event motion into scroll deltas.
@@ -105,7 +106,7 @@ public class RenderCoordinates {
     /**
      * Sets several fields for unit test. (used by {@link CursorAnchorInfoControllerTest}).
      * @param deviceScaleFactor Device scale factor (maps DIP pixels to physical pixels).
-     * @param contentOffsetYPix Physical on-screen Y offset amount below the top controls.
+     * @param contentOffsetYPix Physical on-screen Y offset amount below the browser controls.
      */
     @VisibleForTesting
     public void setFrameInfoForTest(float deviceScaleFactor, float contentOffsetYPix) {
@@ -325,7 +326,7 @@ public class RenderCoordinates {
     }
 
     /**
-     * @return The Physical on-screen Y offset amount below the top controls.
+     * @return The Physical on-screen Y offset amount below the browser controls.
      */
     public float getContentOffsetYPix() {
         return mTopContentOffsetYPix;

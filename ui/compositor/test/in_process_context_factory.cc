@@ -22,7 +22,6 @@
 #include "cc/surfaces/display_scheduler.h"
 #include "cc/surfaces/surface_id_allocator.h"
 #include "cc/test/pixel_test_output_surface.h"
-#include "cc/test/test_shared_bitmap_manager.h"
 #include "gpu/command_buffer/client/context_support.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
 #include "gpu/command_buffer/common/gles2_cmd_utils.h"
@@ -56,8 +55,8 @@ class DirectOutputSurface : public cc::OutputSurface {
   ~DirectOutputSurface() override {}
 
   // cc::OutputSurface implementation.
-  bool BindToClient(cc::OutputSurfaceClient* client) override {
-    return OutputSurface::BindToClient(client);
+  void BindToClient(cc::OutputSurfaceClient* client) override {
+    client_ = client;
   }
   void EnsureBackbuffer() override {}
   void DiscardBackbuffer() override {}
@@ -106,6 +105,7 @@ class DirectOutputSurface : public cc::OutputSurface {
  private:
   void OnSwapBuffersComplete() { client_->DidReceiveSwapBuffersAck(); }
 
+  cc::OutputSurfaceClient* client_ = nullptr;
   base::WeakPtrFactory<DirectOutputSurface> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(DirectOutputSurface);
@@ -190,16 +190,17 @@ void InProcessContextFactory::CreateCompositorFrameSink(
       begin_frame_source.get(), compositor->task_runner().get(),
       display_output_surface->capabilities().max_frames_pending));
   per_compositor_data_[compositor.get()] = base::MakeUnique<cc::Display>(
-      GetSharedBitmapManager(), GetGpuMemoryBufferManager(),
-      compositor->GetRendererSettings(), std::move(begin_frame_source),
-      std::move(display_output_surface), std::move(scheduler),
-      base::MakeUnique<cc::TextureMailboxDeleter>(
-          compositor->task_runner().get()));
+      &shared_bitmap_manager_, &gpu_memory_buffer_manager_,
+      compositor->GetRendererSettings(), compositor->frame_sink_id(),
+      std::move(begin_frame_source), std::move(display_output_surface),
+      std::move(scheduler), base::MakeUnique<cc::TextureMailboxDeleter>(
+                                compositor->task_runner().get()));
 
   auto* display = per_compositor_data_[compositor.get()].get();
   auto compositor_frame_sink = base::MakeUnique<cc::DirectCompositorFrameSink>(
       compositor->frame_sink_id(), surface_manager_, display, context_provider,
-      shared_worker_context_provider_);
+      shared_worker_context_provider_, &gpu_memory_buffer_manager_,
+      &shared_bitmap_manager_);
   compositor->SetCompositorFrameSink(std::move(compositor_frame_sink));
 }
 
@@ -242,10 +243,6 @@ uint32_t InProcessContextFactory::GetImageTextureTarget(
     gfx::BufferFormat format,
     gfx::BufferUsage usage) {
   return GL_TEXTURE_2D;
-}
-
-cc::SharedBitmapManager* InProcessContextFactory::GetSharedBitmapManager() {
-  return &shared_bitmap_manager_;
 }
 
 gpu::GpuMemoryBufferManager*

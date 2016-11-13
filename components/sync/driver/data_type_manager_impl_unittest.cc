@@ -78,8 +78,8 @@ class FakeBackendDataTypeConfigurer : public BackendDataTypeConfigurer {
     for (auto iter = expected_configure_types_.begin();
          iter != expected_configure_types_.end(); ++iter) {
       if (!iter->second.Empty()) {
-        EXPECT_TRUE(iter->second ==
-                    GetDataTypesInState(iter->first, config_state_map))
+        EXPECT_EQ(iter->second,
+                  GetDataTypesInState(iter->first, config_state_map))
             << "State " << iter->first << " : "
             << ModelTypeSetToString(iter->second) << " v.s. "
             << ModelTypeSetToString(
@@ -1334,6 +1334,34 @@ TEST_F(SyncDataTypeManagerImplTest, UnreadyType) {
   EXPECT_TRUE(configurer_.activated_types().Empty());
 }
 
+// Tests that unready types are not started after ResetDataTypeErrors and
+// reconfiguration.
+TEST_F(SyncDataTypeManagerImplTest, UnreadyTypeResetReconfigure) {
+  AddController(BOOKMARKS);
+  GetController(BOOKMARKS)->SetReadyForStart(false);
+
+  // Bookmarks is never started due to being unready.
+  SetConfigureStartExpectation();
+  SetConfigureDoneExpectation(
+      DataTypeManager::OK,
+      BuildStatusTable(ModelTypeSet(), ModelTypeSet(), ModelTypeSet(BOOKMARKS),
+                       ModelTypeSet()));
+  Configure(dtm_.get(), ModelTypeSet(BOOKMARKS));
+  // Second Configure sets a flag to perform reconfiguration after the first one
+  // is done.
+  Configure(dtm_.get(), ModelTypeSet(BOOKMARKS));
+
+  // Reset errors before triggering reconfiguration.
+  dtm_->ResetDataTypeErrors();
+
+  // Reconfiguration should update unready errors. Bookmarks shouldn't start.
+  FinishDownload(*dtm_, ModelTypeSet(), ModelTypeSet());
+  FinishDownload(*dtm_, ModelTypeSet(), ModelTypeSet());
+  EXPECT_EQ(DataTypeController::NOT_RUNNING, GetController(BOOKMARKS)->state());
+  EXPECT_EQ(DataTypeManager::CONFIGURED, dtm_->state());
+  EXPECT_EQ(0U, configurer_.activated_types().Size());
+}
+
 TEST_F(SyncDataTypeManagerImplTest, ModelLoadError) {
   AddController(BOOKMARKS);
   GetController(BOOKMARKS)->SetModelLoadError(
@@ -1671,7 +1699,31 @@ TEST_F(SyncDataTypeManagerImplTest, RegisterWithBackendOnEncryptionError) {
   EXPECT_EQ(0, GetController(BOOKMARKS)->register_with_backend_call_count());
   EXPECT_EQ(0, GetController(PASSWORDS)->register_with_backend_call_count());
 
-  dtm_->OnAllDataTypesReadyForConfigure();
+  GetController(PASSWORDS)->SimulateModelLoadFinishing();
+  EXPECT_EQ(0, GetController(BOOKMARKS)->register_with_backend_call_count());
+  EXPECT_EQ(1, GetController(PASSWORDS)->register_with_backend_call_count());
+}
+
+// Test that RegisterWithBackend is not called for datatypes that failed
+// LoadModels().
+TEST_F(SyncDataTypeManagerImplTest, RegisterWithBackendAfterLoadModelsError) {
+  // Initiate configuration for two datatypes but block them at LoadModels.
+  AddController(BOOKMARKS, true, true);
+  AddController(PASSWORDS, true, true);
+  SetConfigureStartExpectation();
+  Configure(dtm_.get(), ModelTypeSet(BOOKMARKS, PASSWORDS));
+  EXPECT_EQ(DataTypeController::MODEL_STARTING,
+            GetController(BOOKMARKS)->state());
+  EXPECT_EQ(DataTypeController::MODEL_STARTING,
+            GetController(PASSWORDS)->state());
+
+  // Make bookmarks fail LoadModels. Passwords load normally.
+  GetController(BOOKMARKS)->SetModelLoadError(
+      SyncError(FROM_HERE, SyncError::DATATYPE_ERROR, "load error", BOOKMARKS));
+  GetController(BOOKMARKS)->SimulateModelLoadFinishing();
+  GetController(PASSWORDS)->SimulateModelLoadFinishing();
+
+  // RegisterWithBackend should be called for passwords, but not bookmarks.
   EXPECT_EQ(0, GetController(BOOKMARKS)->register_with_backend_call_count());
   EXPECT_EQ(1, GetController(PASSWORDS)->register_with_backend_call_count());
 }

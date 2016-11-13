@@ -61,8 +61,7 @@ class InteractiveRenderWidget : public RenderWidget {
                      false),
         always_overscroll_(false) {
     webwidget_internal_ = &mock_webwidget_;
-    // A RenderWidget is not fully initialized until it has a routing ID.
-    SetRoutingID(++next_routing_id_);
+    InitRoutingID(++next_routing_id_);
   }
 
   void SetTouchRegion(const std::vector<gfx::Rect>& rects) {
@@ -350,7 +349,6 @@ TEST_F(RenderWidgetUnittest, TouchDuringOrOutsideFlingUmaMetrics) {
   SyntheticWebTouchEvent touch;
   touch.PressPoint(10, 10);
   touch.dispatchType = blink::WebInputEvent::DispatchType::Blocking;
-  touch.dispatchedDuringFling = false;
   touch.touchStartOrFirstTouchMove = true;
   widget()->SendInputEvent(touch);
   histogram_tester().ExpectTotalCount("Event.Touch.TouchLatencyOutsideFling",
@@ -379,8 +377,7 @@ class PopupRenderWidget : public RenderWidget {
                      false,
                      false) {
     webwidget_internal_ = &mock_webwidget_;
-    // A RenderWidget is not fully initialized until it has a routing ID.
-    SetRoutingID(1);
+    InitRoutingID(1);
     did_show_ = true;
   }
 

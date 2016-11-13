@@ -18,7 +18,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "components/signin/core/account_id/account_id.h"
 #include "components/user_manager/user_info.h"
-#include "ui/accessibility/ax_view_state.h"
+#include "ui/accessibility/ax_node_data.h"
 #include "ui/events/test/event_generator.h"
 #include "ui/gfx/animation/animation_container_element.h"
 #include "ui/views/view.h"
@@ -157,12 +157,12 @@ TEST_F(TrayUserTest, AccessibleLabelContainsSingleUserInfo) {
 
   views::View* view =
       tray_user(0)->user_view_for_test()->user_card_view_for_test();
-  ui::AXViewState state;
-  view->GetAccessibleState(&state);
+  ui::AXNodeData node_data;
+  view->GetAccessibleNodeData(&node_data);
   EXPECT_EQ(
       base::UTF8ToUTF16("Über tray Über tray Über tray Über tray First@tray"),
-      state.name);
-  EXPECT_EQ(ui::AX_ROLE_STATIC_TEXT, state.role);
+      node_data.GetString16Attribute(ui::AX_ATTR_NAME));
+  EXPECT_EQ(ui::AX_ROLE_STATIC_TEXT, node_data.role);
 }
 
 TEST_F(TrayUserTest, AccessibleLabelContainsMultiUserInfo) {
@@ -172,12 +172,12 @@ TEST_F(TrayUserTest, AccessibleLabelContainsMultiUserInfo) {
 
   views::View* view =
       tray_user(0)->user_view_for_test()->user_card_view_for_test();
-  ui::AXViewState state;
-  view->GetAccessibleState(&state);
+  ui::AXNodeData node_data;
+  view->GetAccessibleNodeData(&node_data);
   EXPECT_EQ(
       base::UTF8ToUTF16("Über tray Über tray Über tray Über tray First@tray"),
-      state.name);
-  EXPECT_EQ(ui::AX_ROLE_BUTTON, state.role);
+      node_data.GetString16Attribute(ui::AX_ATTR_NAME));
+  EXPECT_EQ(ui::AX_ROLE_BUTTON, node_data.role);
 }
 
 #if defined(OS_CHROMEOS)
@@ -185,7 +185,7 @@ TEST_F(TrayUserTest, AccessibleLabelContainsMultiUserInfo) {
 // will be one panel for each user plus one additional separator at the end.
 // Note: the mouse watcher (for automatic closing upon leave) cannot be tested
 // here since it does not work with the event system in unit tests.
-TEST_F(TrayUserTest, MutiUserModeDoesNotAllowToAddUser) {
+TEST_F(TrayUserTest, MultiUserModeDoesNotAllowToAddUser) {
   InitializeParameters(1, true);
 
   // Move the mouse over the status area and click to open the status menu.
@@ -234,6 +234,7 @@ TEST_F(TrayUserTest, MutiUserModeDoesNotAllowToAddUser) {
 
     // Click the button again to see that the menu goes away.
     ClickUserItem(&generator, 0);
+    MoveOverUserItem(&generator, 0);
     EXPECT_EQ(TrayUser::HOVERED, tray_user(0)->GetStateForTest());
 
     // Close and check that everything is deleted.
@@ -245,7 +246,7 @@ TEST_F(TrayUserTest, MutiUserModeDoesNotAllowToAddUser) {
 }
 
 // Make sure that user changing gets properly executed.
-TEST_F(TrayUserTest, MutiUserModeButtonClicks) {
+TEST_F(TrayUserTest, MultiUserModeButtonClicks) {
   // Have two users.
   InitializeParameters(2, true);
   ui::test::EventGenerator& generator = GetEventGenerator();
@@ -256,10 +257,10 @@ TEST_F(TrayUserTest, MutiUserModeButtonClicks) {
   const user_manager::UserInfo* active_user = delegate()->GetActiveUserInfo();
   const user_manager::UserInfo* second_user = delegate()->GetUserInfo(1);
   EXPECT_EQ(active_user->GetAccountId(), second_user->GetAccountId());
-  // Since the name is capitalized, the email should be different then the
+  // Since the name is capitalized, the email should be different than the
   // user_id.
   EXPECT_NE(active_user->GetAccountId().GetUserEmail(),
-            second_user->GetEmail());
+            second_user->GetDisplayEmail());
   tray()->CloseSystemBubble();
 }
 

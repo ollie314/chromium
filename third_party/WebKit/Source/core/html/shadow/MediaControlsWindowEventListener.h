@@ -11,7 +11,6 @@
 namespace blink {
 
 class MediaControls;
-class LocalDOMWindow;
 
 class MediaControlsWindowEventListener final : public EventListener {
  public:
@@ -32,8 +31,6 @@ class MediaControlsWindowEventListener final : public EventListener {
                                             std::unique_ptr<Callback>);
 
   void handleEvent(ExecutionContext*, Event*) override;
-
-  LocalDOMWindow* getLocalDOMWindow() const;
 
   Member<MediaControls> m_mediaControls;
   std::unique_ptr<Callback> m_callback;

@@ -50,7 +50,6 @@
 #include "chrome/browser/ui/webui/profiler_ui.h"
 #include "chrome/browser/ui/webui/settings/md_settings_ui.h"
 #include "chrome/browser/ui/webui/settings_utils.h"
-#include "chrome/browser/ui/webui/signin/md_user_manager_ui.h"
 #include "chrome/browser/ui/webui/signin/profile_signin_confirmation_ui.h"
 #include "chrome/browser/ui/webui/signin_internals_ui.h"
 #include "chrome/browser/ui/webui/supervised_user_internals_ui.h"
@@ -80,6 +79,8 @@
 #include "content/public/browser/web_ui.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/url_utils.h"
+#include "extensions/features/features.h"
+#include "printing/features/features.h"
 #include "ui/gfx/favicon_size.h"
 #include "ui/web_dialogs/web_dialog_ui.h"
 #include "url/gurl.h"
@@ -92,7 +93,7 @@
 #include "chrome/browser/ui/webui/media/webrtc_logs_ui.h"
 #endif
 
-#if defined(ENABLE_PRINT_PREVIEW)
+#if BUILDFLAG(ENABLE_PRINT_PREVIEW)
 #include "chrome/browser/ui/webui/print_preview/print_preview_ui.h"
 #endif
 
@@ -118,6 +119,7 @@
 #include "chrome/browser/signin/easy_unlock_service_factory.h"
 #include "chrome/browser/ui/webui/devtools_ui.h"
 #include "chrome/browser/ui/webui/inspect_ui.h"
+#include "chrome/browser/ui/webui/md_bookmarks/md_bookmarks_ui.h"
 #include "chrome/browser/ui/webui/md_downloads/md_downloads_ui.h"
 #include "chrome/browser/ui/webui/md_feedback/md_feedback_ui.h"
 #include "chrome/browser/ui/webui/md_history_ui.h"
@@ -151,7 +153,7 @@
 #include "components/proximity_auth/webui/url_constants.h"
 #endif
 
-#if defined(OS_CHROMEOS) && !defined(NDEBUG)
+#if defined(OS_CHROMEOS) && !defined(OFFICIAL_BUILD)
 #include "chrome/browser/ui/webui/chromeos/emulator/device_emulator_ui.h"
 #endif
 
@@ -162,15 +164,16 @@
 #if !defined(OS_CHROMEOS) && !defined(OS_ANDROID)
 #include "chrome/browser/ui/sync/sync_promo_ui.h"
 #include "chrome/browser/ui/webui/signin/inline_login_ui.h"
+#include "chrome/browser/ui/webui/signin/md_user_manager_ui.h"
 #include "chrome/browser/ui/webui/signin/signin_error_ui.h"
 #include "chrome/browser/ui/webui/signin/sync_confirmation_ui.h"
-#include "chrome/browser/ui/webui/signin/user_manager_ui.h"
 #include "chrome/browser/ui/webui/welcome_ui.h"
 #endif
 
 #if defined(OS_WIN)
 #include "chrome/browser/ui/webui/conflicts_ui.h"
 #include "chrome/browser/ui/webui/set_as_default_browser_ui_win.h"
+#include "chrome/browser/ui/webui/welcome_win10_ui.h"
 #endif
 
 #if (defined(USE_NSS_CERTS) || defined(USE_OPENSSL_CERTS)) && defined(USE_AURA)
@@ -185,7 +188,7 @@
 #include "chrome/browser/ui/webui/app_list/start_page_ui.h"
 #endif
 
-#if defined(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
 #include "chrome/browser/extensions/extension_web_ui.h"
 #include "chrome/browser/ui/webui/extensions/extensions_ui.h"
 #include "chrome/common/extensions/extension_constants.h"
@@ -213,15 +216,6 @@ template<class T>
 WebUIController* NewWebUI(WebUI* web_ui, const GURL& url) {
   return new T(web_ui);
 }
-
-#if defined(ENABLE_EXTENSIONS)
-// Special cases for extensions.
-template<>
-WebUIController* NewWebUI<ExtensionWebUI>(WebUI* web_ui,
-                                          const GURL& url) {
-  return new ExtensionWebUI(web_ui, url);
-}
-#endif  // defined(ENABLE_EXTENSIONS)
 
 // Special case for older about: handlers.
 template<>
@@ -277,22 +271,12 @@ WebUIController* NewWebUI<WelcomeUI>(WebUI* web_ui, const GURL& url) {
 #endif  // !defined(OS_CHROMEOS)
 #endif  // !defined(OS_ANDROID)
 
-#if defined(ENABLE_EXTENSIONS)
-// Only create ExtensionWebUI for URLs that are allowed extension bindings,
-// hosted by actual tabs.
-bool NeedsExtensionWebUI(Profile* profile, const GURL& url) {
-  if (!profile)
-    return false;
-
-  const extensions::Extension* extension =
-      extensions::ExtensionRegistry::Get(profile)->enabled_extensions().
-          GetExtensionOrAppByURL(url);
-  // Allow bindings for all packaged extensions and component hosted apps.
-  return extension &&
-      (!extension->is_hosted_app() ||
-       extension->location() == extensions::Manifest::COMPONENT);
+#if defined(OS_WIN)
+template <>
+WebUIController* NewWebUI<WelcomeWin10UI>(WebUI* web_ui, const GURL& url) {
+  return new WelcomeWin10UI(web_ui, url);
 }
-#endif
+#endif  // defined(OS_WIN)
 
 bool IsAboutUI(const GURL& url) {
   return (url.host() == chrome::kChromeUIChromeURLsHost ||
@@ -308,7 +292,7 @@ bool IsAboutUI(const GURL& url) {
 #if defined(OS_CHROMEOS)
           || url.host() == chrome::kChromeUIOSCreditsHost
 #endif
-#if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_CHROMEOS)
+#if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_LINUX)
           || url.host() == chrome::kChromeUIDiscardsHost
 #endif
           );  // NOLINT
@@ -320,11 +304,6 @@ bool IsAboutUI(const GURL& url) {
 WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
                                              Profile* profile,
                                              const GURL& url) {
-#if defined(ENABLE_EXTENSIONS)
-  if (NeedsExtensionWebUI(profile, url))
-    return &NewWebUI<ExtensionWebUI>;
-#endif
-
   // This will get called a lot to check all URLs, so do a quick check of other
   // schemes to filter out most URLs.
   if (!url.SchemeIs(content::kChromeDevToolsScheme) &&
@@ -416,8 +395,10 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
 #endif  // !defined(OS_CHROMEOS)
 
   // Bookmarks are part of NTP on Android.
-  if (url.host() == chrome::kChromeUIBookmarksHost)
-    return &NewWebUI<BookmarksUI>;
+  if (url.host() == chrome::kChromeUIBookmarksHost) {
+    return MdBookmarksUI::IsEnabled() ? &NewWebUI<MdBookmarksUI>
+                                      : &NewWebUI<BookmarksUI>;
+  }
   // Downloads list on Android uses the built-in download manager.
   if (url.host() == chrome::kChromeUIDownloadsHost)
     return &NewWebUI<MdDownloadsUI>;
@@ -517,12 +498,12 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
     return &NewWebUI<chromeos::SlowTraceController>;
   if (url.host() == chrome::kChromeUIVoiceSearchHost)
     return &NewWebUI<VoiceSearchUI>;
-#if !defined(NDEBUG)
+#if !defined(OFFICIAL_BUILD)
   if (!base::SysInfo::IsRunningOnChromeOS()) {
     if (url.host() == chrome::kChromeUIDeviceEmulatorHost)
       return &NewWebUI<DeviceEmulatorUI>;
   }
-#endif  // !defined(NDEBUG)
+#endif  // !defined(OFFICIAL_BUILD)
 #endif  // defined(OS_CHROMEOS)
 #if defined(OS_ANDROID)
   if (url.host() == chrome::kChromeUIOfflineInternalsHost)
@@ -549,8 +530,6 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
 #if !defined(OS_CHROMEOS) && !defined(OS_ANDROID)
   if (url.host() == chrome::kChromeUIChromeSigninHost)
     return &NewWebUI<InlineLoginUI>;
-  if (url.host() == chrome::kChromeUIUserManagerHost)
-    return &NewWebUI<UserManagerUI>;
   if (url.host() == chrome::kChromeUIMdUserManagerHost)
     return &NewWebUI<MDUserManagerUI>;
   if (url.host() == chrome::kChromeUISigninErrorHost)
@@ -562,6 +541,10 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
   if (url.host() == chrome::kChromeUIWelcomeHost)
     return &NewWebUI<WelcomeUI>;
 #endif
+#if defined(OS_WIN)
+  if (url.host() == chrome::kChromeUIWelcomeWin10Host)
+    return &NewWebUI<WelcomeWin10UI>;
+#endif  // defined(OS_WIN)
 
   /****************************************************************************
    * Other #defines and special logics.
@@ -595,7 +578,7 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
   if (url.host() == chrome::kChromeUIAppListStartPageHost)
     return &NewWebUI<app_list::StartPageUI>;
 #endif
-#if defined(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
   if (url.host() == chrome::kChromeUIExtensionsFrameHost)
     return &NewWebUI<extensions::ExtensionsUI>;
 #endif
@@ -605,7 +588,7 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
   if (url.host() == chrome::kChromeUIPluginsHost)
     return &NewWebUI<PluginsUI>;
 #endif
-#if defined(ENABLE_PRINT_PREVIEW)
+#if BUILDFLAG(ENABLE_PRINT_PREVIEW)
   if (url.host() == chrome::kChromeUIPrintHost &&
       !profile->GetPrefs()->GetBoolean(prefs::kPrintPreviewDisabled)) {
     return &NewWebUI<PrintPreviewUI>;
@@ -675,14 +658,7 @@ bool ChromeWebUIControllerFactory::UseWebUIForURL(
 
 bool ChromeWebUIControllerFactory::UseWebUIBindingsForURL(
     content::BrowserContext* browser_context, const GURL& url) const {
-  bool needs_extensions_web_ui = false;
-#if defined(ENABLE_EXTENSIONS)
-  // Extensions are rendered via WebUI in tabs, but don't actually need WebUI
-  // bindings (see the ExtensionWebUI constructor).
-  needs_extensions_web_ui =
-      NeedsExtensionWebUI(Profile::FromBrowserContext(browser_context), url);
-#endif
-  return !needs_extensions_web_ui && UseWebUIForURL(browser_context, url);
+  return UseWebUIForURL(browser_context, url);
 }
 
 WebUIController* ChromeWebUIControllerFactory::CreateWebUIControllerForURL(
@@ -708,7 +684,7 @@ void ChromeWebUIControllerFactory::GetFaviconForURL(
   // overrides. This changes urls in |kChromeUIScheme| to extension urls, and
   // allows to use ExtensionWebUI::GetFaviconForURL.
   GURL url(page_url);
-#if defined(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
   ExtensionWebUI::HandleChromeURLOverride(&url, profile);
 
   // All extensions but the bookmark manager get their favicon from the icons
@@ -778,8 +754,10 @@ base::RefCountedMemory* ChromeWebUIControllerFactory::GetFaviconResourceBytes(
 #if !defined(OS_ANDROID)  // Bookmarks are part of NTP on Android.
   // The bookmark manager is a chrome extension, so we have to check for it
   // before we check for extension scheme.
-  if (page_url.host() == extension_misc::kBookmarkManagerId)
+  if (page_url.host() == extension_misc::kBookmarkManagerId ||
+      page_url.host() == chrome::kChromeUIBookmarksHost) {
     return BookmarksUI::GetFaviconResourceBytes(scale_factor);
+  }
 
   // The extension scheme is handled in GetFaviconForURL.
   if (page_url.SchemeIs(extensions::kExtensionScheme)) {
@@ -829,7 +807,7 @@ base::RefCountedMemory* ChromeWebUIControllerFactory::GetFaviconResourceBytes(
       page_url.host() == chrome::kChromeUIMdSettingsHost)
     return settings_utils::GetFaviconResourceBytes(scale_factor);
 
-#if defined(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
   if (page_url.host() == chrome::kChromeUIExtensionsHost ||
       page_url.host() == chrome::kChromeUIExtensionsFrameHost)
     return extensions::ExtensionsUI::GetFaviconResourceBytes(scale_factor);

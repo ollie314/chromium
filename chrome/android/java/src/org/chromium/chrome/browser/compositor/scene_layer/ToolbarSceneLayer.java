@@ -64,17 +64,17 @@ public class ToolbarSceneLayer extends SceneOverlayLayer implements SceneOverlay
     /**
      * Update the toolbar and progress bar layers.
      *
-     * @param topControlsBackgroundColor The background color of the top controls.
-     * @param topControlsUrlBarAlpha The alpha of the URL bar.
+     * @param browserControlsBackgroundColor The background color of the browser controls.
+     * @param browserControlsUrlBarAlpha The alpha of the URL bar.
      * @param fullscreenManager A ChromeFullscreenManager instance.
      * @param resourceManager A ResourceManager for loading static resources.
-     * @param forceHideAndroidTopControls True if the Android top controls are being hidden.
+     * @param forceHideAndroidBrowserControls True if the Android browser controls are being hidden.
      * @param sizingFlags The sizing flags for the toolbar.
      * @param isTablet If the device is a tablet.
      */
-    private void update(int topControlsBackgroundColor, float topControlsUrlBarAlpha,
+    private void update(int browserControlsBackgroundColor, float browserControlsUrlBarAlpha,
             ChromeFullscreenManager fullscreenManager, ResourceManager resourceManager,
-            boolean forceHideAndroidTopControls, int sizingFlags, boolean isTablet) {
+            boolean forceHideAndroidBrowserControls, int sizingFlags, boolean isTablet) {
         if (!DeviceClassManager.enableFullscreen()) return;
 
         if (fullscreenManager == null) return;
@@ -88,11 +88,12 @@ public class ToolbarSceneLayer extends SceneOverlayLayer implements SceneOverlay
 
         mLayoutProvider.getViewportPixel(mViewport);
 
-        float offset = fullscreenManager.getControlOffset();
-        boolean useTexture = fullscreenManager.drawControlsAsTexture() || offset == 0
-                || forceHideAndroidTopControls;
+        // Texture is always used unless it is completely off-screen.
+        boolean useTexture = !fullscreenManager.areBrowserControlsOffScreen();
+        boolean showShadow = fullscreenManager.drawControlsAsTexture()
+                || forceHideAndroidBrowserControls;
 
-        fullscreenManager.setHideTopControlsAndroidView(forceHideAndroidTopControls);
+        fullscreenManager.setHideBrowserControlsAndroidView(forceHideAndroidBrowserControls);
 
         if ((sizingFlags & SizingFlags.REQUIRE_FULLSCREEN_SIZE) != 0
                 && (sizingFlags & SizingFlags.ALLOW_TOOLBAR_HIDE) == 0
@@ -100,9 +101,13 @@ public class ToolbarSceneLayer extends SceneOverlayLayer implements SceneOverlay
             useTexture = false;
         }
 
+        // Note that the bottom controls offset is not passed here. Conveniently, the viewport
+        // size changes will push the controls off screen when they are at the bottom; see
+        // mViewport.height().
         nativeUpdateToolbarLayer(mNativePtr, resourceManager, R.id.control_container,
-                topControlsBackgroundColor, R.drawable.textbox, topControlsUrlBarAlpha, offset,
-                mViewport.height(), useTexture, forceHideAndroidTopControls);
+                browserControlsBackgroundColor, R.drawable.textbox, browserControlsUrlBarAlpha,
+                fullscreenManager.getTopControlOffset(), mViewport.height(), useTexture,
+                showShadow, fullscreenManager.areBrowserControlsAtBottom());
 
         if (mProgressBarDrawingInfo == null) return;
         nativeUpdateProgressBar(mNativePtr,
@@ -145,13 +150,14 @@ public class ToolbarSceneLayer extends SceneOverlayLayer implements SceneOverlay
     @Override
     public SceneOverlayLayer getUpdatedSceneOverlayTree(LayerTitleCache layerTitleCache,
             ResourceManager resourceManager, float yOffset) {
-        boolean forceHideTopControlsAndroidView =
-                mLayoutProvider.getActiveLayout().forceHideTopControlsAndroidView();
+        boolean forceHideBrowserControlsAndroidView =
+                mLayoutProvider.getActiveLayout().forceHideBrowserControlsAndroidView();
         int flags = mLayoutProvider.getActiveLayout().getSizingFlags();
 
-        update(mRenderHost.getTopControlsBackgroundColor(), mRenderHost.getTopControlsUrlBarAlpha(),
-                mLayoutProvider.getFullscreenManager(), resourceManager,
-                forceHideTopControlsAndroidView, flags, DeviceFormFactor.isTablet(mContext));
+        update(mRenderHost.getBrowserControlsBackgroundColor(),
+                mRenderHost.getBrowserControlsUrlBarAlpha(), mLayoutProvider.getFullscreenManager(),
+                resourceManager, forceHideBrowserControlsAndroidView, flags,
+                DeviceFormFactor.isTablet(mContext));
 
         return this;
     }
@@ -174,7 +180,7 @@ public class ToolbarSceneLayer extends SceneOverlayLayer implements SceneOverlay
     public void getVirtualViews(List<VirtualView> views) {}
 
     @Override
-    public boolean shouldHideAndroidTopControls() {
+    public boolean shouldHideAndroidBrowserControls() {
         return false;
     }
 
@@ -246,7 +252,8 @@ public class ToolbarSceneLayer extends SceneOverlayLayer implements SceneOverlay
             float topOffset,
             float viewHeight,
             boolean visible,
-            boolean showShadow);
+            boolean showShadow,
+            boolean browserControlsAtBottom);
     private native void nativeUpdateProgressBar(
             long nativeToolbarSceneLayer,
             int progressBarX,

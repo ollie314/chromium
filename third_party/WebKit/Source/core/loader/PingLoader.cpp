@@ -33,6 +33,7 @@
 
 #include "core/dom/DOMArrayBufferView.h"
 #include "core/dom/Document.h"
+#include "core/dom/SecurityContext.h"
 #include "core/fetch/CrossOriginAccessControl.h"
 #include "core/fetch/FetchContext.h"
 #include "core/fetch/FetchInitiatorTypeNames.h"
@@ -42,6 +43,7 @@
 #include "core/fileapi/File.h"
 #include "core/frame/FrameConsole.h"
 #include "core/frame/LocalFrame.h"
+#include "core/frame/csp/ContentSecurityPolicy.h"
 #include "core/html/FormData.h"
 #include "core/inspector/ConsoleMessage.h"
 #include "core/inspector/InspectorInstrumentation.h"
@@ -295,11 +297,10 @@ bool PingLoaderImpl::willFollowRedirect(
   if (!m_isBeacon)
     return true;
 
-  // TODO(tyoshino): Check if setAllowStoredCredentials() should be called also
-  // for non beacon cases.
-  passedNewRequest.setAllowStoredCredentials(true);
   if (m_corsMode == NotCORSEnabled)
     return true;
+
+  DCHECK(passedNewRequest.allowStoredCredentials());
 
   ResourceRequest& newRequest(passedNewRequest.toMutableResourceRequest());
   const ResourceResponse& redirectResponse(
@@ -473,6 +474,12 @@ void PingLoader::sendLinkAuditPing(LocalFrame* frame,
                                    const KURL& destinationURL) {
   if (!pingURL.protocolIsInHTTPFamily())
     return;
+
+  if (ContentSecurityPolicy* policy =
+          frame->securityContext()->contentSecurityPolicy()) {
+    if (!policy->allowConnectToSource(pingURL))
+      return;
+  }
 
   ResourceRequest request(pingURL);
   request.setHTTPMethod(HTTPNames::POST);

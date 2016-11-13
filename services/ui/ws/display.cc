@@ -34,9 +34,13 @@ namespace ws {
 
 Display::Display(WindowServer* window_server,
                  const PlatformDisplayInitParams& platform_display_init_params)
-    : window_server_(window_server),
-      platform_display_(PlatformDisplay::Create(platform_display_init_params)),
-      last_cursor_(mojom::Cursor::CURSOR_NULL) {
+    : window_server_(window_server), last_cursor_(mojom::Cursor::CURSOR_NULL) {
+  CreateRootWindow(platform_display_init_params.metrics.pixel_size);
+
+  // Pass the display root ServerWindow to PlatformDisplay.
+  PlatformDisplayInitParams param_copy = platform_display_init_params;
+  param_copy.root_window = root_.get();
+  platform_display_.reset(PlatformDisplay::Create(param_copy));
   platform_display_->Init(this);
 
   window_server_->window_manager_window_tree_factory_set()->AddObserver(this);
@@ -85,17 +89,6 @@ const DisplayManager* Display::display_manager() const {
   return window_server_->display_manager();
 }
 
-mojom::WsDisplayPtr Display::ToWsDisplay() const {
-  mojom::WsDisplayPtr display_ptr = mojom::WsDisplay::New();
-
-  display_ptr->display = ToDisplay();
-  display_ptr->is_primary = platform_display_->IsPrimaryDisplay();
-
-  // TODO(sky): make this real.
-  display_ptr->frame_decoration_values = mojom::FrameDecorationValues::New();
-  return display_ptr;
-}
-
 display::Display Display::ToDisplay() const {
   display::Display display(GetId());
 
@@ -110,12 +103,6 @@ display::Display Display::ToDisplay() const {
       display::Display::TouchSupport::TOUCH_SUPPORT_UNKNOWN);
 
   return display;
-}
-
-void Display::SchedulePaint(const ServerWindow* window,
-                            const gfx::Rect& bounds) {
-  DCHECK(root_->Contains(window));
-  platform_display_->SchedulePaint(window, bounds);
 }
 
 gfx::Size Display::GetSize() const {
@@ -308,11 +295,11 @@ void Display::OnNativeCaptureLost() {
 }
 
 void Display::OnViewportMetricsChanged(
-    const display::ViewportMetrics& new_metrics) {
-  if (!root_ || root_->bounds().size() == new_metrics.bounds.size())
+    const display::ViewportMetrics& metrics) {
+  if (root_->bounds().size() == metrics.pixel_size)
     return;
 
-  gfx::Rect new_bounds(new_metrics.bounds.size());
+  gfx::Rect new_bounds(metrics.pixel_size);
   root_->SetBounds(new_bounds);
   for (auto& pair : window_manager_display_root_map_)
     pair.second->root()->SetBounds(new_bounds);

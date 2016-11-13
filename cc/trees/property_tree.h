@@ -28,14 +28,6 @@ class TracedValue;
 
 namespace cc {
 
-namespace proto {
-class PropertyTree;
-class PropertyTrees;
-class ScrollNodeData;
-class StickyPositionNodeData;
-class TreeNode;
-}  // namespace proto
-
 class CopyOutputRequest;
 class LayerTreeImpl;
 class ScrollState;
@@ -45,13 +37,6 @@ struct ScrollAndScaleSet;
 struct ScrollNode;
 struct TransformNode;
 struct TransformCachedNodeData;
-
-// ------------------------------*IMPORTANT*---------------------------------
-// Each class declared here has a corresponding proto defined in
-// cc/proto/property_tree.proto. When making any changes to a class structure
-// including addition/deletion/updation of a field, please also make the
-// change to its proto and the ToProtobuf and FromProtobuf methods for that
-// class.
 
 typedef SyncedProperty<AdditionGroup<gfx::ScrollOffset>> SyncedScrollOffset;
 
@@ -106,10 +91,6 @@ class CC_EXPORT PropertyTree {
 
   int next_available_id() const { return static_cast<int>(size()); }
 
-  void ToProtobuf(proto::PropertyTree* proto) const;
-  void FromProtobuf(const proto::PropertyTree& proto,
-                    std::unordered_map<int, int>* node_id_to_index_map);
-
   void SetPropertyTrees(PropertyTrees* property_trees) {
     property_trees_ = property_trees;
   }
@@ -135,8 +116,6 @@ struct StickyPositionNodeData {
   gfx::Vector2dF main_thread_offset;
 
   StickyPositionNodeData() : scroll_ancestor(-1) {}
-  void ToProtobuf(proto::StickyPositionNodeData* proto) const;
-  void FromProtobuf(const proto::StickyPositionNodeData& proto);
 };
 
 class CC_EXPORT TransformTree final : public PropertyTree<TransformNode> {
@@ -158,19 +137,6 @@ class CC_EXPORT TransformTree final : public PropertyTree<TransformNode> {
   int Insert(const TransformNode& tree_node, int parent_id);
 
   void clear();
-
-  // Computes the change of basis transform from node |source_id| to |dest_id|.
-  // The function returns false iff the inverse of a singular transform was
-  // used (and the result should, therefore, not be trusted). Transforms may
-  // be computed between any pair of nodes that have an ancestor/descendant
-  // relationship. Transforms between other pairs of nodes may only be computed
-  // if the following condition holds: let id1 the larger id and let id2 be the
-  // other id; then the nearest ancestor of node id1 whose id is smaller than
-  // id2 is the lowest common ancestor of the pair of nodes, and the transform
-  // from this lowest common ancestor to node id2 is only a 2d translation.
-  bool ComputeTransform(int source_id,
-                        int dest_id,
-                        gfx::Transform* transform) const;
 
   void OnTransformAnimated(const gfx::Transform& transform,
                            int id,
@@ -224,9 +190,10 @@ class CC_EXPORT TransformTree final : public PropertyTree<TransformNode> {
   }
   float device_scale_factor() const { return device_scale_factor_; }
 
-  void SetDeviceTransform(const gfx::Transform& transform,
-                          gfx::PointF root_position);
-  void SetDeviceTransformScaleFactor(const gfx::Transform& transform);
+  void SetRootTransformsAndScales(float device_scale_factor,
+                                  float page_scale_factor_for_root,
+                                  const gfx::Transform& device_transform,
+                                  gfx::PointF root_position);
   float device_transform_scale_factor() const {
     return device_transform_scale_factor_;
   }
@@ -250,14 +217,6 @@ class CC_EXPORT TransformTree final : public PropertyTree<TransformNode> {
     return nodes_affected_by_outer_viewport_bounds_delta_;
   }
 
-  gfx::Transform FromTarget(int node_id, int effect) const;
-  void SetFromTarget(int node_id, const gfx::Transform& transform);
-
-  // TODO(sunxd): Remove target space transforms in cached data when we
-  // completely implement computing draw transforms on demand.
-  gfx::Transform ToTarget(int node_id, int effect_id) const;
-  void SetToTarget(int node_id, const gfx::Transform& transform);
-
   const gfx::Transform& FromScreen(int node_id) const;
   void SetFromScreen(int node_id, const gfx::Transform& transform);
 
@@ -275,10 +234,6 @@ class CC_EXPORT TransformTree final : public PropertyTree<TransformNode> {
   }
 
   StickyPositionNodeData* StickyPositionData(int node_id);
-
-  void ToProtobuf(proto::PropertyTree* proto) const;
-  void FromProtobuf(const proto::PropertyTree& proto,
-                    std::unordered_map<int, int>* node_id_to_index_map);
 
   // Computes the combined transform between |source_id| and |dest_id|. These
   // two nodes must be on the same ancestor chain.
@@ -301,9 +256,6 @@ class CC_EXPORT TransformTree final : public PropertyTree<TransformNode> {
   void UpdateLocalTransform(TransformNode* node);
   void UpdateScreenSpaceTransform(TransformNode* node,
                                   TransformNode* parent_node,
-                                  TransformNode* target_node);
-  void UpdateSurfaceContentsScale(TransformNode* node);
-  void UpdateTargetSpaceTransform(TransformNode* node,
                                   TransformNode* target_node);
   void UpdateAnimationProperties(TransformNode* node,
                                  TransformNode* parent_node);
@@ -335,10 +287,6 @@ class CC_EXPORT ClipTree final : public PropertyTree<ClipNode> {
 
   void SetViewportClip(gfx::RectF viewport_rect);
   gfx::RectF ViewportClip() const;
-
-  void ToProtobuf(proto::PropertyTree* proto) const;
-  void FromProtobuf(const proto::PropertyTree& proto,
-                    std::unordered_map<int, int>* node_id_to_index_map);
 };
 
 class CC_EXPORT EffectTree final : public PropertyTree<EffectNode> {
@@ -383,10 +331,6 @@ class CC_EXPORT EffectTree final : public PropertyTree<EffectNode> {
 
   void ResetChangeTracking();
 
-  void ToProtobuf(proto::PropertyTree* proto) const;
-  void FromProtobuf(const proto::PropertyTree& proto,
-                    std::unordered_map<int, int>* node_id_to_index_map);
-
  private:
   void UpdateOpacities(EffectNode* node, EffectNode* parent_node);
   void UpdateIsDrawn(EffectNode* node, EffectNode* parent_node);
@@ -408,14 +352,11 @@ class CC_EXPORT ScrollTree final : public PropertyTree<ScrollNode> {
   ScrollTree& operator=(const ScrollTree& from);
   bool operator==(const ScrollTree& other) const;
 
-  void ToProtobuf(proto::PropertyTree* proto) const;
-  void FromProtobuf(const proto::PropertyTree& proto,
-                    std::unordered_map<int, int>* node_id_to_index_map);
-
   void clear();
 
   typedef std::unordered_map<int, scoped_refptr<SyncedScrollOffset>>
       ScrollOffsetMap;
+  typedef std::unordered_map<int, bool> ScrollbarsEnabledMap;
 
   gfx::ScrollOffset MaxScrollOffset(int scroll_node_id) const;
   void OnScrollOffsetAnimated(int layer_id,
@@ -464,6 +405,7 @@ class CC_EXPORT ScrollTree final : public PropertyTree<ScrollNode> {
  private:
   int currently_scrolling_node_id_;
   ScrollOffsetMap layer_id_to_scroll_offset_map_;
+  ScrollbarsEnabledMap layer_id_to_scrollbars_enabled_map_;
 
   SyncedScrollOffset* synced_scroll_offset(int layer_id);
   const SyncedScrollOffset* synced_scroll_offset(int layer_id) const;
@@ -576,9 +518,6 @@ class CC_EXPORT PropertyTrees final {
   bool operator==(const PropertyTrees& other) const;
   PropertyTrees& operator=(const PropertyTrees& from);
 
-  void ToProtobuf(proto::PropertyTrees* proto) const;
-  void FromProtobuf(const proto::PropertyTrees& proto);
-
   std::unordered_map<int, int> transform_id_to_index_map;
   std::unordered_map<int, int> effect_id_to_index_map;
   std::unordered_map<int, int> clip_id_to_index_map;
@@ -651,9 +590,6 @@ class CC_EXPORT PropertyTrees final {
   gfx::Transform ToScreenSpaceTransformWithoutSurfaceContentsScale(
       int transform_id,
       int effect_id) const;
-  bool ComputeTransformToTarget(int transform_id,
-                                int effect_id,
-                                gfx::Transform* transform) const;
 
   bool ComputeTransformFromTarget(int transform_id,
                                   int effect_id,

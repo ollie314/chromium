@@ -35,7 +35,6 @@
 #import "content/browser/accessibility/browser_accessibility_cocoa.h"
 #import "content/browser/accessibility/browser_accessibility_mac.h"
 #include "content/browser/accessibility/browser_accessibility_manager_mac.h"
-#include "content/browser/bad_message.h"
 #import "content/browser/cocoa/system_hotkey_helper_mac.h"
 #import "content/browser/cocoa/system_hotkey_map.h"
 #include "content/browser/frame_host/frame_tree.h"
@@ -98,6 +97,7 @@ using content::RenderFrameHost;
 using content::RenderViewHost;
 using content::RenderViewHostImpl;
 using content::RenderWidgetHostImpl;
+using content::RenderWidgetHostView;
 using content::RenderWidgetHostViewMac;
 using content::RenderWidgetHostViewMacEditCommandHelper;
 using content::TextInputClientMac;
@@ -119,7 +119,7 @@ BOOL EventIsReservedBySystem(NSEvent* event) {
   return helper->map()->IsEventReserved(event);
 }
 
-RenderWidgetHostViewMac* GetRenderWidgetHostViewToUse(
+RenderWidgetHostView* GetRenderWidgetHostViewToUse(
     RenderWidgetHostViewMac* render_widget_host_view) {
   WebContents* web_contents = render_widget_host_view->GetWebContents();
   if (!web_contents)
@@ -132,8 +132,7 @@ RenderWidgetHostViewMac* GetRenderWidgetHostViewToUse(
       guest_manager->GetFullPageGuest(web_contents);
   if (!guest)
     return render_widget_host_view;
-  return static_cast<RenderWidgetHostViewMac*>(
-      guest->GetRenderWidgetHostView());
+  return guest->GetRenderWidgetHostView();
 }
 
 }  // namespace
@@ -451,7 +450,6 @@ RenderWidgetHostViewMac::RenderWidgetHostViewMac(RenderWidgetHost* widget,
       allow_pause_for_resize_or_repaint_(true),
       is_guest_view_hack_(is_guest_view_hack),
       fullscreen_parent_host_view_(nullptr),
-      needs_begin_frames_(false),
       needs_flush_input_(false),
       weak_factory_(this) {
   // |cocoa_view_| owns us and we will be deleted when |cocoa_view_|
@@ -494,6 +492,16 @@ RenderWidgetHostViewMac::RenderWidgetHostViewMac(RenderWidgetHost* widget,
 
   if (GetTextInputManager())
     GetTextInputManager()->AddObserver(this);
+
+  // Because of the way Mac pumps messages during resize, (see the code
+  // in RenderMessageFilter::OnMessageReceived), SetNeedsBeginFrame
+  // messages are not delayed on Mac.  This leads to creation-time
+  // raciness where renderer sends a SetNeedsBeginFrame(true) before
+  // the renderer host is created to recieve it.  In general, all
+  // renderers want begin frames initially anyway, so start this value
+  // at true here to avoid startup raciness and decrease latency.
+  needs_begin_frames_ = true;
+  UpdateNeedsBeginFramesInternal();
 }
 
 RenderWidgetHostViewMac::~RenderWidgetHostViewMac() {
@@ -1407,15 +1415,9 @@ void RenderWidgetHostViewMac::OnSwapCompositorFrame(
 
   page_at_minimum_scale_ =
       frame.metadata.page_scale_factor == frame.metadata.min_page_scale_factor;
-  if (frame.delegated_frame_data) {
-    browser_compositor_->SwapCompositorFrame(compositor_frame_sink_id,
-                                             std::move(frame));
-    UpdateDisplayVSyncParameters();
-  } else {
-    DLOG(ERROR) << "Received unexpected frame type.";
-    bad_message::ReceivedBadMessage(render_widget_host_->GetProcess(),
-                                    bad_message::RWHVM_UNEXPECTED_FRAME_TYPE);
-  }
+  browser_compositor_->SwapCompositorFrame(compositor_frame_sink_id,
+                                           std::move(frame));
+  UpdateDisplayVSyncParameters();
 }
 
 void RenderWidgetHostViewMac::ClearCompositorFrame() {
@@ -1515,7 +1517,7 @@ cc::FrameSinkId RenderWidgetHostViewMac::FrameSinkIdAtPoint(
 
   // It is possible that the renderer has not yet produced a surface, in which
   // case we return our current namespace.
-  if (id.is_null())
+  if (!id.is_valid())
     return GetFrameSinkId();
   return id.frame_sink_id();
 }
@@ -3243,8 +3245,14 @@ extern NSString *NSTextInputReplacementRangeAttributeName;
 - (void)viewDidChangeBackingProperties {
   NSScreen* screen = [[self window] screen];
   if (screen) {
+    CGColorSpaceRef color_space = [[screen colorSpace] CGColorSpace];
+    // On Sierra, we need to operate in a single screen's color space because
+    // IOSurfaces do not opt-out of color correction.
+    // https://crbug.com/654488
+    if (base::mac::IsAtLeastOS10_12())
+      color_space = base::mac::GetSystemColorSpace();
     gfx::ICCProfile icc_profile =
-        gfx::ICCProfile::FromCGColorSpace([[screen colorSpace] CGColorSpace]);
+        gfx::ICCProfile::FromCGColorSpace(color_space);
     renderWidgetHostView_->browser_compositor_->SetDisplayColorSpace(
         icc_profile.GetColorSpace());
   }

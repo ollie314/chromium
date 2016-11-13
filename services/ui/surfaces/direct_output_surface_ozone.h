@@ -11,6 +11,7 @@
 #include "cc/output/context_provider.h"
 #include "cc/output/output_surface.h"
 #include "components/display_compositor/gl_helper.h"
+#include "services/ui/surfaces/surfaces_context_provider.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/swap_result.h"
@@ -30,8 +31,6 @@ class GpuMemoryBufferManager;
 }
 
 namespace ui {
-
-class SurfacesContextProvider;
 
 // An OutputSurface implementation that directly draws and swap to a GL
 // "surfaceless" surface (aka one backed by a buffer managed explicitly in
@@ -53,7 +52,7 @@ class DirectOutputSurfaceOzone : public cc::OutputSurface {
 
  private:
   // cc::OutputSurface implementation.
-  bool BindToClient(cc::OutputSurfaceClient* client) override;
+  void BindToClient(cc::OutputSurfaceClient* client) override;
   void EnsureBackbuffer() override;
   void DiscardBackbuffer() override;
   void BindFramebuffer() override;
@@ -76,6 +75,8 @@ class DirectOutputSurfaceOzone : public cc::OutputSurface {
 
   // Called when a swap completion is sent from the GPU process.
   void OnGpuSwapBuffersCompleted(gfx::SwapResult result);
+
+  cc::OutputSurfaceClient* client_ = nullptr;
 
   display_compositor::GLHelper gl_helper_;
   std::unique_ptr<display_compositor::BufferQueue> buffer_queue_;

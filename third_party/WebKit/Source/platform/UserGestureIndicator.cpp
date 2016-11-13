@@ -55,7 +55,6 @@ void UserGestureToken::transferGestureTo(UserGestureToken* other) {
     return;
   m_consumableGestures--;
   other->m_consumableGestures++;
-  other->m_timestamp = WTF::currentTime();
 }
 
 bool UserGestureToken::consumeGesture() {
@@ -68,6 +67,10 @@ bool UserGestureToken::consumeGesture() {
 void UserGestureToken::setTimeoutPolicy(TimeoutPolicy policy) {
   if (!hasTimedOut() && hasGestures() && policy > m_timeoutPolicy)
     m_timeoutPolicy = policy;
+}
+
+void UserGestureToken::resetTimestamp() {
+  m_timestamp = WTF::currentTime();
 }
 
 bool UserGestureToken::hasTimedOut() const {
@@ -114,21 +117,21 @@ static void RecordUserGestureMerge(const UserGestureToken& oldToken,
 }
 
 UserGestureToken* UserGestureIndicator::s_rootToken = nullptr;
-bool UserGestureIndicator::s_processedUserGestureSinceLoad = false;
 
-UserGestureIndicator::UserGestureIndicator(PassRefPtr<UserGestureToken> token)
-    : m_token(token) {
-  // Silently ignore UserGestureIndicators on non-main threads.
-  if (!isMainThread() || !m_token)
+UserGestureIndicator::UserGestureIndicator(PassRefPtr<UserGestureToken> token) {
+  // Silently ignore UserGestureIndicators on non-main threads and tokens that
+  // are already active.
+  if (!isMainThread() || !token || token == s_rootToken)
     return;
 
+  m_token = token;
   if (!s_rootToken) {
     s_rootToken = m_token.get();
   } else {
     RecordUserGestureMerge(*s_rootToken, *m_token);
     m_token->transferGestureTo(s_rootToken);
   }
-  s_processedUserGestureSinceLoad = true;
+  m_token->resetTimestamp();
 }
 
 UserGestureIndicator::~UserGestureIndicator() {
@@ -173,19 +176,6 @@ UserGestureToken* UserGestureIndicator::currentToken() {
   if (!isMainThread() || !s_rootToken)
     return nullptr;
   return s_rootToken;
-}
-
-// static
-void UserGestureIndicator::clearProcessedUserGestureSinceLoad() {
-  if (isMainThread())
-    s_processedUserGestureSinceLoad = false;
-}
-
-// static
-bool UserGestureIndicator::processedUserGestureSinceLoad() {
-  if (!isMainThread())
-    return false;
-  return s_processedUserGestureSinceLoad;
 }
 
 }  // namespace blink

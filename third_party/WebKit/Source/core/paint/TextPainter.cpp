@@ -10,7 +10,6 @@
 #include "core/layout/LayoutTextCombine.h"
 #include "core/layout/api/LineLayoutAPIShim.h"
 #include "core/layout/api/LineLayoutItem.h"
-#include "core/layout/line/InlineTextBox.h"
 #include "core/paint/BoxPainter.h"
 #include "core/paint/PaintInfo.h"
 #include "core/style/ComputedStyle.h"
@@ -53,7 +52,7 @@ void TextPainter::setEmphasisMark(const AtomicString& emphasisMark,
     m_emphasisMarkOffset = -fontData->getFontMetrics().ascent() -
                            m_font.emphasisMarkDescent(emphasisMark);
   } else {
-    ASSERT(position == TextEmphasisPositionUnder);
+    DCHECK(position == TextEmphasisPositionUnder);
     m_emphasisMarkOffset = fontData->getFontMetrics().descent() +
                            m_font.emphasisMarkAscent(emphasisMark);
   }
@@ -156,7 +155,7 @@ TextPainter::Style TextPainter::textPaintingStyle(LineLayoutItem lineLayoutItem,
     textStyle.shadow = style.textShadow();
 
     // Adjust text color when printing with a white background.
-    ASSERT(lineLayoutItem.document().printing() == isPrinting);
+    DCHECK(lineLayoutItem.document().printing() == isPrinting);
     bool forceBackgroundToWhite =
         BoxPainter::shouldForceWhiteBackgroundForPrintEconomy(
             style, lineLayoutItem.document());
@@ -218,8 +217,8 @@ template <TextPainter::PaintInternalStep step>
 void TextPainter::paintInternalRun(TextRunPaintInfo& textRunPaintInfo,
                                    unsigned from,
                                    unsigned to) {
-  ASSERT(from <= textRunPaintInfo.run.length());
-  ASSERT(to <= textRunPaintInfo.run.length());
+  DCHECK(from <= textRunPaintInfo.run.length());
+  DCHECK(to <= textRunPaintInfo.run.length());
 
   textRunPaintInfo.from = from;
   textRunPaintInfo.to = to;
@@ -229,7 +228,7 @@ void TextPainter::paintInternalRun(TextRunPaintInfo& textRunPaintInfo,
         m_font, textRunPaintInfo, m_emphasisMark,
         FloatPoint(m_textOrigin) + IntSize(0, m_emphasisMarkOffset));
   } else {
-    ASSERT(step == PaintText);
+    DCHECK(step == PaintText);
     m_graphicsContext.drawText(m_font, textRunPaintInfo,
                                FloatPoint(m_textOrigin));
   }

@@ -7,13 +7,14 @@
             "title": "Audits 2.0",
             "order": 90,
             "persistence": "closeable",
-            "className": "WebInspector.Audits2Panel"
+            "className": "Audits2.Audits2Panel"
         }
     ],
     "dependencies": [
+        "components",
         "sdk",
-        "ui",
-        "services"
+        "services",
+        "ui"
     ],
     "experiment": "audits2",
     "scripts": [

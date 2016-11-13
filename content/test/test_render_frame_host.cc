@@ -61,10 +61,12 @@ TestRenderFrameHost::TestRenderFrameHost(SiteInstance* site_instance,
                           frame_tree_node,
                           routing_id,
                           widget_routing_id,
-                          flags),
+                          flags,
+                          false),
       child_creation_observer_(delegate ? delegate->GetAsWebContents() : NULL),
       contents_mime_type_("text/html"),
-      simulate_history_list_was_cleared_(false) {}
+      simulate_history_list_was_cleared_(false),
+      last_commit_was_error_page_(false) {}
 
 TestRenderFrameHost::~TestRenderFrameHost() {
 }
@@ -156,9 +158,14 @@ void TestRenderFrameHost::SimulateNavigationCommit(const GURL& url) {
 
   url::Replacements<char> replacements;
   replacements.ClearRef();
+
+  // This approach to determining whether a navigation is to be treated as
+  // same page is not robust, as it will not handle pushState type navigation.
+  // Do not use elsewhere!
   params.was_within_same_page =
-      url.ReplaceComponents(replacements) ==
-      GetLastCommittedURL().ReplaceComponents(replacements);
+      (GetLastCommittedURL().is_valid() && !last_commit_was_error_page_ &&
+       url.ReplaceComponents(replacements) ==
+           GetLastCommittedURL().ReplaceComponents(replacements));
 
   params.page_state = PageState::CreateForTesting(url, false, nullptr, nullptr);
 
@@ -319,8 +326,10 @@ void TestRenderFrameHost::SendNavigateWithParameters(
   params.history_list_was_cleared = simulate_history_list_was_cleared_;
   params.original_request_url = url_copy;
 
-  // Simulate Blink assigning an item sequence number to the navigation.
+  // Simulate Blink assigning an item and document sequence number to the
+  // navigation.
   params.item_sequence_number = base::Time::Now().ToDoubleT() * 1000000;
+  params.document_sequence_number = params.item_sequence_number + 1;
 
   // When the user hits enter in the Omnibox without changing the URL, Blink
   // behaves similarly to a reload and does not change the item and document
@@ -350,14 +359,21 @@ void TestRenderFrameHost::SendNavigateWithParameters(
 
   url::Replacements<char> replacements;
   replacements.ClearRef();
+
+  // This approach to determining whether a navigation is to be treated as
+  // same page is not robust, as it will not handle pushState type navigation.
+  // Do not use elsewhere!
   params.was_within_same_page =
       !ui::PageTransitionCoreTypeIs(transition, ui::PAGE_TRANSITION_RELOAD) &&
       !ui::PageTransitionCoreTypeIs(transition, ui::PAGE_TRANSITION_TYPED) &&
-      url_copy.ReplaceComponents(replacements) ==
-          GetLastCommittedURL().ReplaceComponents(replacements);
+      (GetLastCommittedURL().is_valid() && !last_commit_was_error_page_ &&
+       url_copy.ReplaceComponents(replacements) ==
+           GetLastCommittedURL().ReplaceComponents(replacements));
 
   params.page_state =
-      PageState::CreateForTesting(url_copy, false, nullptr, nullptr);
+      PageState::CreateForTestingWithSequenceNumbers(
+          url_copy, params.item_sequence_number,
+          params.document_sequence_number);
 
   if (!callback.is_null())
     callback.Run(&params);
@@ -369,6 +385,7 @@ void TestRenderFrameHost::SendNavigateWithParams(
     FrameHostMsg_DidCommitProvisionalLoad_Params* params) {
   FrameHostMsg_DidCommitProvisionalLoad msg(GetRoutingID(), *params);
   OnDidCommitProvisionalLoad(msg);
+  last_commit_was_error_page_ = params->url_is_unreachable;
 }
 
 void TestRenderFrameHost::SendRendererInitiatedNavigationRequest(

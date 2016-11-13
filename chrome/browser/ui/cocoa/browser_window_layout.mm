@@ -99,8 +99,8 @@ const CGFloat kLocationBarRightOffset = 35;
   parameters_.inAnyFullscreen = inAnyFullscreen;
 }
 
-- (void)setSlidingStyle:(FullscreenSlidingStyle)slidingStyle {
-  parameters_.slidingStyle = slidingStyle;
+- (void)setFullscreenToolbarStyle:(FullscreenToolbarStyle)style {
+  parameters_.toolbarStyle = style;
 }
 
 - (void)setFullscreenMenubarOffset:(CGFloat)menubarOffset {
@@ -210,7 +210,7 @@ const CGFloat kLocationBarRightOffset = 35;
 
   // Set left indentation based on fullscreen mode status.
   if (!parameters_.inAnyFullscreen || layout.addCustomWindowControls)
-    layout.leftIndent = [TabStripController defaultLeftIndentForControls];
+    layout.leadingIndent = [TabStripController defaultLeadingIndentForControls];
 
   // Lay out the icognito/avatar badge because calculating the indentation on
   // the right depends on it.
@@ -257,10 +257,9 @@ const CGFloat kLocationBarRightOffset = 35;
   if (parameters_.shouldShowAvatar) {
     maxX = std::min(maxX, NSMinX(layout.avatarFrame));
   }
-  layout.rightIndent = width - maxX;
+  layout.trailingIndent = width - maxX;
 
   if (cocoa_l10n_util::ShouldDoExperimentalRTLLayout()) {
-    std::swap(layout.leftIndent, layout.rightIndent);
     layout.avatarFrame.origin.x =
         width - parameters_.avatarSize.width - layout.avatarFrame.origin.x;
   }
@@ -280,8 +279,14 @@ const CGFloat kLocationBarRightOffset = 35;
 
   // Lay out the toolbar.
   if (parameters.hasToolbar) {
-    output_.toolbarFrame = NSMakeRect(
-        0, maxY - parameters_.toolbarHeight, width, parameters_.toolbarHeight);
+    CGFloat toolbarY = maxY;
+    if (parameters_.inAnyFullscreen &&
+        parameters_.toolbarStyle == FullscreenToolbarStyle::TOOLBAR_NONE) {
+      toolbarY = parameters_.windowSize.height + fullscreenYOffset_;
+    }
+
+    output_.toolbarFrame = NSMakeRect(0, toolbarY - parameters_.toolbarHeight,
+                                      width, parameters_.toolbarHeight);
     maxY = NSMinY(output_.toolbarFrame);
   } else if (parameters_.hasLocationBar) {
     CGFloat toolbarX = kLocBarLeftRightInset;
@@ -312,12 +317,11 @@ const CGFloat kLocationBarRightOffset = 35;
   output_.findBarMaxY = maxY;
 
   if (parameters_.inAnyFullscreen &&
-      (parameters_.slidingStyle ==
-           FullscreenSlidingStyle::OMNIBOX_TABS_HIDDEN ||
-       parameters_.slidingStyle == FullscreenSlidingStyle::OMNIBOX_TABS_NONE)) {
-    // If in presentation mode, reset |maxY| to top of screen, so that the
-    // floating bar slides over the things which appear to be in the content
-    // area.
+      (parameters_.toolbarStyle == FullscreenToolbarStyle::TOOLBAR_HIDDEN ||
+       parameters_.toolbarStyle == FullscreenToolbarStyle::TOOLBAR_NONE)) {
+    // If the toolbar is hidden or missing, reset |maxY| to top of screen, so
+    // that the toolbar slides over the things which appear to be in the
+    // content area.
     maxY = parameters_.windowSize.height;
   }
 
@@ -364,8 +368,7 @@ const CGFloat kLocationBarRightOffset = 35;
   }
 
   if (parameters_.inAnyFullscreen &&
-      parameters_.slidingStyle ==
-          FullscreenSlidingStyle::OMNIBOX_TABS_PRESENT) {
+      parameters_.toolbarStyle == FullscreenToolbarStyle::TOOLBAR_PRESENT) {
     // If in Canonical Fullscreen, content should be shifted down by an amount
     // equal to all the widgets and views at the top of the window. It should
     // not be further shifted by the appearance/disappearance of the AppKit

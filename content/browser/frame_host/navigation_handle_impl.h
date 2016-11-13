@@ -77,7 +77,7 @@ class CONTENT_EXPORT NavigationHandleImpl : public NavigationHandle {
       const GURL& url,
       FrameTreeNode* frame_tree_node,
       bool is_renderer_initiated,
-      bool is_synchronous,
+      bool is_same_page,
       bool is_srcdoc,
       const base::TimeTicks& navigation_start,
       int pending_nav_entry_id,
@@ -90,7 +90,6 @@ class CONTENT_EXPORT NavigationHandleImpl : public NavigationHandle {
   bool IsInMainFrame() override;
   bool IsParentMainFrame() override;
   bool IsRendererInitiated() override;
-  bool IsSynchronousNavigation() override;
   bool IsSrcdoc() override;
   bool WasServerRedirect() override;
   int GetFrameTreeNodeId() override;
@@ -107,6 +106,7 @@ class CONTENT_EXPORT NavigationHandleImpl : public NavigationHandle {
   bool HasCommitted() override;
   bool IsErrorPage() override;
   const net::HttpResponseHeaders* GetResponseHeaders() override;
+  net::HttpResponseInfo::ConnectionInfo GetConnectionInfo() override;
   void Resume() override;
   void CancelDeferredNavigation(
       NavigationThrottle::ThrottleCheckResult result) override;
@@ -217,6 +217,7 @@ class CONTENT_EXPORT NavigationHandleImpl : public NavigationHandle {
       const GURL& new_referrer_url,
       bool new_is_external_protocol,
       scoped_refptr<net::HttpResponseHeaders> response_headers,
+      net::HttpResponseInfo::ConnectionInfo connection_info,
       const ThrottleChecksFinishedCallback& callback);
 
   // Called when the URLRequest has delivered response headers and metadata.
@@ -231,6 +232,7 @@ class CONTENT_EXPORT NavigationHandleImpl : public NavigationHandle {
   void WillProcessResponse(
       RenderFrameHostImpl* render_frame_host,
       scoped_refptr<net::HttpResponseHeaders> response_headers,
+      net::HttpResponseInfo::ConnectionInfo connection_info,
       const SSLStatus& ssl_status,
       const GlobalRequestID& request_id,
       bool should_replace_current_entry,
@@ -300,7 +302,7 @@ class CONTENT_EXPORT NavigationHandleImpl : public NavigationHandle {
   NavigationHandleImpl(const GURL& url,
                        FrameTreeNode* frame_tree_node,
                        bool is_renderer_initiated,
-                       bool is_synchronous,
+                       bool is_same_page,
                        bool is_srcdoc,
                        const base::TimeTicks& navigation_start,
                        int pending_nav_entry_id,
@@ -343,11 +345,11 @@ class CONTENT_EXPORT NavigationHandleImpl : public NavigationHandle {
   net::Error net_error_code_;
   RenderFrameHostImpl* render_frame_host_;
   const bool is_renderer_initiated_;
-  bool is_same_page_;
-  const bool is_synchronous_;
+  const bool is_same_page_;
   const bool is_srcdoc_;
   bool was_redirected_;
   scoped_refptr<net::HttpResponseHeaders> response_headers_;
+  net::HttpResponseInfo::ConnectionInfo connection_info_;
 
   // The original url of the navigation. This may differ from |url_| if the
   // navigation encounters redirects.

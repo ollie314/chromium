@@ -53,8 +53,6 @@
 #include "core/html/parser/HTMLParserIdioms.h"
 #include "core/html/track/vtt/VTTElement.h"
 #include "core/inspector/InspectorInstrumentation.h"
-#include "core/layout/LayoutObject.h"
-#include "core/layout/LayoutScrollbar.h"
 #include "core/page/FocusController.h"
 #include "core/page/Page.h"
 #include "core/style/ComputedStyle.h"
@@ -561,8 +559,17 @@ static bool anyAttributeMatches(Element& element,
 
   AttributeCollection attributes = element.attributesWithoutUpdate();
   for (const auto& attributeItem : attributes) {
-    if (!attributeItem.matches(selectorAttr))
-      continue;
+    if (!attributeItem.matches(selectorAttr)) {
+      if (element.isHTMLElement() || !element.document().isHTMLDocument())
+        continue;
+      // Non-html attributes in html documents are normalized to their camel-
+      // cased version during parsing if applicable. Yet, attribute selectors
+      // are lower-cased for selectors in html documents. Compare the selector
+      // and the attribute local name insensitively to e.g. allow matching SVG
+      // attributes like viewBox.
+      if (!attributeItem.matchesCaseInsensitive(selectorAttr))
+        continue;
+    }
 
     if (attributeValueMatches(attributeItem, match, selectorValue,
                               caseSensitivity))

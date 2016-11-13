@@ -49,18 +49,24 @@ struct V4ProtocolConfig {
   // The safe browsing client name sent in each request.
   std::string client_name;
 
-  // Current product version sent in each request.
-  std::string version;
+  // Disable auto-updates using a command line switch.
+  bool disable_auto_update;
 
   // The Google API key.
   std::string key_param;
 
-  // Disable auto-updates using a command line switch?
-  bool disable_auto_update;
+  // Current product version sent in each request.
+  std::string version;
 
-  V4ProtocolConfig();
+  V4ProtocolConfig(const std::string& client_name,
+                   bool disable_auto_update,
+                   const std::string& key_param,
+                   const std::string& version);
   V4ProtocolConfig(const V4ProtocolConfig& other);
   ~V4ProtocolConfig();
+
+ private:
+  V4ProtocolConfig();
 };
 
 // Different types of threats that SafeBrowsing protects against. This is the
@@ -131,7 +137,10 @@ std::ostream& operator<<(std::ostream& os, const ListIdentifier& id);
 
 PlatformType GetCurrentPlatformType();
 const ListIdentifier GetChromeUrlApiId();
+const ListIdentifier GetChromeUrlClientIncidentId();
+const ListIdentifier GetChromeUrlMalwareId();
 const ListIdentifier GetUrlMalwareId();
+const ListIdentifier GetUrlMalBinId();
 const ListIdentifier GetUrlSocEngId();
 const ListIdentifier GetUrlUwsId();
 
@@ -141,7 +150,6 @@ typedef base::hash_map<ListIdentifier, std::string> StoreStateMap;
 // Sever response, parsed in vector form.
 typedef std::vector<std::unique_ptr<ListUpdateResponse>> ParsedServerResponse;
 
-// TODO(vakh): Consider using a std::pair for this.
 // Holds the hash prefix and the store that it matched in.
 struct StoreAndHashPrefix {
  public:
@@ -249,7 +257,7 @@ class V4ProtocolManagerUtil {
 
   // Generate the set of FullHashes to check for |url|.
   static void UrlToFullHashes(const GURL& url,
-                              std::unordered_set<FullHash>* full_hashes);
+                              std::vector<FullHash>* full_hashes);
 
   static bool FullHashToHashPrefix(const FullHash& full_hash,
                                    PrefixSize prefix_size,

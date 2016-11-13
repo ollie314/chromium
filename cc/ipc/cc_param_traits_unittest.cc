@@ -21,7 +21,7 @@
 #include "base/file_descriptor_posix.h"
 #endif
 
-using cc::DelegatedFrameData;
+using cc::CompositorFrame;
 using cc::DebugBorderDrawQuad;
 using cc::DrawQuad;
 using cc::FilterOperation;
@@ -361,8 +361,9 @@ TEST_F(CCParamTraitsTest, AllQuads) {
   pass_cmp->CopyFromAndAppendDrawQuad(streamvideo_in,
                                       streamvideo_in->shared_quad_state);
 
-  cc::SurfaceId arbitrary_surface_id(kArbitraryFrameSinkId,
-                                     cc::LocalFrameId(3, 0));
+  cc::SurfaceId arbitrary_surface_id(
+      kArbitraryFrameSinkId,
+      cc::LocalFrameId(3, base::UnguessableToken::Create()));
   SurfaceDrawQuad* surface_in =
       pass_in->CreateAndAppendDrawQuad<SurfaceDrawQuad>();
   surface_in->SetAll(shared_state3_in, arbitrary_rect2,
@@ -430,16 +431,15 @@ TEST_F(CCParamTraitsTest, AllQuads) {
     EXPECT_EQ(same_shared_quad_state_cmp, same_shared_quad_state_in);
   }
 
-  DelegatedFrameData frame_in;
+  CompositorFrame frame_in;
   frame_in.render_pass_list.push_back(std::move(child_pass_in));
   frame_in.render_pass_list.push_back(std::move(pass_in));
 
-  IPC::ParamTraits<DelegatedFrameData>::Write(&msg, frame_in);
+  IPC::ParamTraits<CompositorFrame>::Write(&msg, frame_in);
 
-  DelegatedFrameData frame_out;
+  CompositorFrame frame_out;
   base::PickleIterator iter(msg);
-  EXPECT_TRUE(
-      IPC::ParamTraits<DelegatedFrameData>::Read(&msg, &iter, &frame_out));
+  EXPECT_TRUE(IPC::ParamTraits<CompositorFrame>::Read(&msg, &iter, &frame_out));
 
   // Make sure the out and cmp RenderPasses match.
   std::unique_ptr<RenderPass> child_pass_out =
@@ -523,16 +523,15 @@ TEST_F(CCParamTraitsTest, UnusedSharedQuadStates) {
   ASSERT_EQ(5u, pass_in->shared_quad_state_list.size());
   ASSERT_EQ(2u, pass_in->quad_list.size());
 
-  DelegatedFrameData frame_in;
+  CompositorFrame frame_in;
   frame_in.render_pass_list.push_back(std::move(pass_in));
 
   IPC::Message msg(1, 2, IPC::Message::PRIORITY_NORMAL);
-  IPC::ParamTraits<DelegatedFrameData>::Write(&msg, frame_in);
+  IPC::ParamTraits<CompositorFrame>::Write(&msg, frame_in);
 
-  DelegatedFrameData frame_out;
+  CompositorFrame frame_out;
   base::PickleIterator iter(msg);
-  EXPECT_TRUE(
-      IPC::ParamTraits<DelegatedFrameData>::Read(&msg, &iter, &frame_out));
+  EXPECT_TRUE(IPC::ParamTraits<CompositorFrame>::Read(&msg, &iter, &frame_out));
 
   std::unique_ptr<RenderPass> pass_out =
       std::move(frame_out.render_pass_list[0]);
@@ -563,14 +562,10 @@ TEST_F(CCParamTraitsTest, Resources) {
   arbitrary_token2.SetVerifyFlush();
 
   GLbyte arbitrary_mailbox1[GL_MAILBOX_SIZE_CHROMIUM] = {
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2,
-      3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4,
-      5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4};
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6};
 
   GLbyte arbitrary_mailbox2[GL_MAILBOX_SIZE_CHROMIUM] = {
-      0, 9, 8, 7, 6, 5, 4, 3, 2, 1, 9, 7, 5, 3, 1, 2, 4, 6, 8, 0, 0, 9,
-      8, 7, 6, 5, 4, 3, 2, 1, 9, 7, 5, 3, 1, 2, 4, 6, 8, 0, 0, 9, 8, 7,
-      6, 5, 4, 3, 2, 1, 9, 7, 5, 3, 1, 2, 4, 6, 8, 0, 0, 9, 8, 7};
+      0, 9, 8, 7, 6, 5, 4, 3, 2, 1, 9, 7, 5, 3, 1, 2};
 
   TransferableResource arbitrary_resource1;
   arbitrary_resource1.id = 2178312;
@@ -596,17 +591,16 @@ TEST_F(CCParamTraitsTest, Resources) {
   renderpass_in->SetNew(RenderPassId(1, 1), gfx::Rect(), gfx::Rect(),
                         gfx::Transform());
 
-  DelegatedFrameData frame_in;
+  CompositorFrame frame_in;
   frame_in.resource_list.push_back(arbitrary_resource1);
   frame_in.resource_list.push_back(arbitrary_resource2);
   frame_in.render_pass_list.push_back(std::move(renderpass_in));
 
-  IPC::ParamTraits<DelegatedFrameData>::Write(&msg, frame_in);
+  IPC::ParamTraits<CompositorFrame>::Write(&msg, frame_in);
 
-  DelegatedFrameData frame_out;
+  CompositorFrame frame_out;
   base::PickleIterator iter(msg);
-  EXPECT_TRUE(
-      IPC::ParamTraits<DelegatedFrameData>::Read(&msg, &iter, &frame_out));
+  EXPECT_TRUE(IPC::ParamTraits<CompositorFrame>::Read(&msg, &iter, &frame_out));
 
   ASSERT_EQ(2u, frame_out.resource_list.size());
   Compare(arbitrary_resource1, frame_out.resource_list[0]);

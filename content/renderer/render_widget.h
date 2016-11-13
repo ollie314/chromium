@@ -22,8 +22,10 @@
 #include "build/build_config.h"
 #include "content/common/content_export.h"
 #include "content/common/cursors/webcursor.h"
+#include "content/common/drag_event_source_info.h"
 #include "content/common/edit_command.h"
 #include "content/common/input/synthetic_gesture_params.h"
+#include "content/public/common/drop_data.h"
 #include "content/public/common/screen_info.h"
 #include "content/renderer/devtools/render_widget_screen_metrics_emulator_delegate.h"
 #include "content/renderer/gpu/render_widget_compositor_delegate.h"
@@ -33,10 +35,12 @@
 #include "content/renderer/mouse_lock_dispatcher.h"
 #include "content/renderer/render_widget_mouse_lock_dispatcher.h"
 #include "ipc/ipc_listener.h"
+#include "ipc/ipc_message.h"
 #include "ipc/ipc_sender.h"
 #include "third_party/WebKit/public/platform/WebDisplayMode.h"
 #include "third_party/WebKit/public/platform/WebInputEvent.h"
 #include "third_party/WebKit/public/platform/WebRect.h"
+#include "third_party/WebKit/public/platform/WebReferrerPolicy.h"
 #include "third_party/WebKit/public/platform/WebTextInputInfo.h"
 #include "third_party/WebKit/public/web/WebCompositionUnderline.h"
 #include "third_party/WebKit/public/web/WebPopupType.h"
@@ -65,8 +69,11 @@ namespace scheduler {
 class RenderWidgetSchedulingState;
 }
 struct WebDeviceEmulationParams;
+class WebDragData;
 class WebFrameWidget;
 class WebGestureEvent;
+class WebImage;
+class WebInputMethodController;
 class WebLocalFrame;
 class WebMouseEvent;
 class WebNode;
@@ -128,7 +135,7 @@ class CONTENT_EXPORT RenderWidget
                               const ScreenInfo& screen_info);
 
   // Creates a new RenderWidget that will be attached to a RenderFrame.
-  static RenderWidget* CreateForFrame(int routing_id,
+  static RenderWidget* CreateForFrame(int widget_routing_id,
                                       bool hidden,
                                       const ScreenInfo& screen_info,
                                       CompositorDependencies* compositor_deps,
@@ -153,11 +160,18 @@ class CONTENT_EXPORT RenderWidget
   // https://crbug.com/545684
   virtual void CloseForFrame();
 
-  int32_t routing_id() const { return routing_id_; }
-  void SetRoutingID(int32_t routing_id);
+  int32_t routing_id() const {
+    return routing_id_;
+  }
 
   CompositorDependencies* compositor_deps() const { return compositor_deps_; }
   virtual blink::WebWidget* GetWebWidget() const;
+
+  // Returns the current instance of WebInputMethodController which is to be
+  // used for IME related tasks. This instance corresponds to the one from
+  // focused frame and can be nullptr.
+  blink::WebInputMethodController* GetInputMethodController() const;
+
   const gfx::Size& size() const { return size_; }
   bool is_fullscreen_granted() const { return is_fullscreen_granted_; }
   blink::WebDisplayMode display_mode() const { return display_mode_; }
@@ -287,12 +301,15 @@ class CONTENT_EXPORT RenderWidget
   bool requestPointerLock() override;
   void requestPointerUnlock() override;
   bool isPointerLocked() override;
+  void startDragging(blink::WebReferrerPolicy policy,
+                     const blink::WebDragData& data,
+                     blink::WebDragOperationsMask mask,
+                     const blink::WebImage& image,
+                     const blink::WebPoint& imageOffset) override;
 
   // Override point to obtain that the current input method state and caret
   // position.
   virtual ui::TextInputType GetTextInputType();
-  virtual ui::TextInputType WebKitToUiTextInputType(
-      blink::WebTextInputType type);
 
 #if defined(OS_ANDROID)
   // Notifies that a tap was not consumed, so showing a UI for the unhandled
@@ -317,15 +334,6 @@ class CONTENT_EXPORT RenderWidget
   }
 
   void SetHandlingInputEventForTesting(bool handling_input_event);
-
-  // When paused in debugger, we send ack for mouse event early. This ensures
-  // that we continue receiving mouse moves and pass them to debugger. Returns
-  // whether we are paused in mouse move event and have sent the ack.
-  bool SendAckForMouseMoveFromDebugger();
-
-  // When resumed from pause in debugger while handling mouse move,
-  // we should not send an extra ack (see SendAckForMouseMoveFromDebugger).
-  void IgnoreAckForMouseMoveFromDebugger();
 
   // Callback for use with synthetic gestures (e.g. BeginSmoothScroll).
   typedef base::Callback<void()> SyntheticGestureCompletionCallback;
@@ -406,6 +414,9 @@ class CONTENT_EXPORT RenderWidget
   // When emulated, this returns original device scale factor.
   float GetOriginalDeviceScaleFactor() const;
 
+  // Helper to convert |point| using ConvertWindowToViewport().
+  gfx::Point ConvertWindowPointToViewport(const gfx::Point& point);
+
  protected:
   // Friend RefCounted so that the dtor can be non-public. Using this class
   // without ref-counting is an error.
@@ -435,13 +446,12 @@ class CONTENT_EXPORT RenderWidget
   // Creates a WebWidget based on the popup type.
   static blink::WebWidget* CreateWebWidget(RenderWidget* render_widget);
 
-  // Initializes this view with the given opener.
-  bool Init(int32_t opener_id);
+  // Called by Create() functions and subclasses, after the routing_id is
+  // available. Must be called before Init().
+  void InitRoutingID(int32_t routing_id);
 
-  // Called by Init and subclasses to perform initialization.
-  bool DoInit(int32_t opener_id,
-              blink::WebWidget* web_widget,
-              IPC::SyncMessage* create_widget_message);
+  // Called by Create() functions and subclasses to finish initialization.
+  void Init(int32_t opener_id, blink::WebWidget* web_widget);
 
   // Allows the process to exit once the unload handler has finished, if there
   // are no other active RenderWidgets.
@@ -505,9 +515,23 @@ class CONTENT_EXPORT RenderWidget
   void OnUpdateScreenRects(const gfx::Rect& view_screen_rect,
                            const gfx::Rect& window_screen_rect);
   void OnUpdateWindowScreenRect(const gfx::Rect& window_screen_rect);
-  void OnShowImeIfNeeded();
-  void OnSetFrameSinkId(const cc::FrameSinkId& frame_sink_id);
   void OnHandleCompositorProto(const std::vector<uint8_t>& proto);
+  // Real data that is dragged is not included at DragEnter time.
+  void OnDragTargetDragEnter(
+      const std::vector<DropData::Metadata>& drop_meta_data,
+      const gfx::Point& client_pt,
+      const gfx::Point& screen_pt,
+      blink::WebDragOperationsMask operations_allowed,
+      int key_modifiers);
+  void OnDragTargetDragOver(const gfx::Point& client_pt,
+                            const gfx::Point& screen_pt,
+                            blink::WebDragOperationsMask operations_allowed,
+                            int key_modifiers);
+  void OnDragTargetDragLeave();
+  void OnDragTargetDrop(const DropData& drop_data,
+                        const gfx::Point& client_pt,
+                        const gfx::Point& screen_pt,
+                        int key_modifiers);
 
 #if defined(OS_ANDROID)
   // Called when we send IME event that expects an ACK.
@@ -518,10 +542,6 @@ class CONTENT_EXPORT RenderWidget
 
   // Called by the browser process to update text input state.
   void OnRequestTextInputStateUpdate();
-
-  // Called by the browser process to begin (when |begin| is set) or end batch
-  // edit mode. Note that text input state will not be updated in this mode.
-  void OnImeBatchEdit(bool begin);
 #endif
 
   // Called by the browser process to update the cursor and composition
@@ -540,12 +560,8 @@ class CONTENT_EXPORT RenderWidget
 
   // Override points to notify derived classes that a paint has happened.
   // DidInitiatePaint happens when that has completed, and subsequent rendering
-  // won't affect the painted content. DidFlushPaint happens once we've received
-  // the ACK that the screen has been updated. For a given paint operation,
-  // these overrides will always be called in the order DidInitiatePaint,
-  // DidFlushPaint.
+  // won't affect the painted content.
   virtual void DidInitiatePaint() {}
-  virtual void DidFlushPaint();
 
   virtual GURL GetURLForGraphicsContext3D();
 
@@ -685,10 +701,6 @@ class CONTENT_EXPORT RenderWidget
   // ImeEventGuard. We keep track of the outermost one, and update it as needed.
   ImeEventGuard* ime_event_guard_;
 
-  // Whether IME is in batch edit mode, in which case we do not update text
-  // input state.
-  bool ime_in_batch_edit_;
-
   // True if we have requested this widget be closed.  No more messages will
   // be sent, except for a Close.
   bool closing_;
@@ -706,6 +718,9 @@ class CONTENT_EXPORT RenderWidget
 
   // Stores information about the current text input.
   blink::WebTextInputInfo text_input_info_;
+
+  // Stores the current text input type of |webwidget_|.
+  ui::TextInputType text_input_type_;
 
   // Stores the current text input mode of |webwidget_|.
   ui::TextInputMode text_input_mode_;
@@ -812,6 +827,17 @@ class CONTENT_EXPORT RenderWidget
   void ScreenRectToEmulatedIfNeeded(blink::WebRect* window_rect) const;
   void EmulatedToScreenRectIfNeeded(blink::WebRect* window_rect) const;
 
+  bool CreateWidget(int32_t opener_id,
+                    blink::WebPopupType popup_type,
+                    int32_t* routing_id);
+
+  // A variant of Send but is fatal if it fails. The browser may
+  // be waiting for this IPC Message and if the send fails the browser will
+  // be left in a state waiting for something that never comes. And if it
+  // never comes then it may later determine this is a hung renderer; so
+  // instead fail right away.
+  void SendOrCrash(IPC::Message* msg);
+
   // Indicates whether this widget has focus.
   bool has_focus_;
 
@@ -828,6 +854,11 @@ class CONTENT_EXPORT RenderWidget
   // Stores edit commands associated to the next key event.
   // Will be cleared as soon as the next key event is processed.
   EditCommands edit_commands_;
+
+  // This field stores drag/drop related info for the event that is currently
+  // being handled. If the current event results in starting a drag/drop
+  // session, this info is sent to the browser along with other drag/drop info.
+  DragEventSourceInfo possible_drag_event_info_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderWidget);
 };

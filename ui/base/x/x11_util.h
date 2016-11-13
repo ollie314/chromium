@@ -37,22 +37,6 @@ class SkBitmap;
 
 namespace ui {
 
-// These constants are defined in the EWMH spec for _NET_WM_MOVERESIZE.
-enum class NetWmMoveResize {
-  SIZE_TOPLEFT = 0,
-  SIZE_TOP = 1,
-  SIZE_TOPRIGHT = 2,
-  SIZE_RIGHT = 3,
-  SIZE_BOTTOMRIGHT = 4,
-  SIZE_BOTTOM = 5,
-  SIZE_BOTTOMLEFT = 6,
-  SIZE_LEFT = 7,
-  MOVE = 8,            // movement only
-  SIZE_KEYBOARD = 9,   // size via keyboard
-  MOVE_KEYBOARD = 10,  // move via keyboard
-  CANCEL = 11,         // cancel operation
-};
-
 // These functions use the default display and this /must/ be called from
 // the UI thread. Thus, they don't support multiple displays.
 
@@ -99,13 +83,6 @@ UI_BASE_X_EXPORT::Cursor CreateInvisibleCursor();
 
 // Sets whether |window| should use the OS window frame.
 UI_BASE_X_EXPORT void SetUseOSWindowFrame(XID window, bool use_os_window_frame);
-
-// Requests the window manager move or resize the window on behalf of Chromium.
-// Clients MUST release all grabs prior to calling.  Callers must check that the
-// WM supports the _NET_WM_MOVERESIZE protocol.
-UI_BASE_X_EXPORT void MoveResizeManagedWindow(XID window,
-                                              gfx::Point root_location,
-                                              NetWmMoveResize mode);
 
 // These functions do not cache their results --------------------------
 
@@ -266,7 +243,10 @@ UI_BASE_X_EXPORT bool CopyAreaToCanvas(XID drawable,
                                        gfx::Canvas* canvas);
 
 enum WindowManagerName {
-  WM_UNKNOWN,
+  WM_OTHER,    // We were able to obtain the WM's name, but there is
+               // no corresponding entry in this enum.
+  WM_UNNAMED,  // Either there is no WM or there is no way to obtain
+               // the WM name.
 
   WM_AWESOME,
   WM_BLACKBOX,
@@ -288,9 +268,10 @@ enum WindowManagerName {
   WM_STUMPWM,
   WM_WMII,
   WM_XFWM4,
+  WM_XMONAD,
 };
-// Attempts to guess the window maager. Returns WM_UNKNOWN if we can't
-// determine it for one reason or another.
+// Attempts to guess the window maager. Returns WM_OTHER or WM_UNNAMED
+// if we can't determine it for one reason or another.
 UI_BASE_X_EXPORT WindowManagerName GuessWindowManager();
 
 // The same as GuessWindowManager(), but returns the raw string.  If we

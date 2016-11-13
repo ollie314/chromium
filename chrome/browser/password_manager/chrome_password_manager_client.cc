@@ -17,6 +17,7 @@
 #include "chrome/browser/browsing_data/browsing_data_helper.h"
 #include "chrome/browser/metrics/chrome_metrics_service_accessor.h"
 #include "chrome/browser/password_manager/password_store_factory.h"
+#include "chrome/browser/prerender/prerender_contents.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
@@ -117,6 +118,10 @@ void ReportMetrics(bool password_manager_enabled,
             password_manager::SYNCING_WITH_CUSTOM_PASSPHRASE);
   }
   UMA_HISTOGRAM_BOOLEAN("PasswordManager.Enabled", password_manager_enabled);
+  UMA_HISTOGRAM_BOOLEAN(
+      "PasswordManager.ShouldShowAutoSignInFirstRunExperience",
+      password_bubble_experiment::ShouldShowAutoSignInPromptFirstRunExperience(
+          profile->GetPrefs()));
 }
 
 }  // namespace
@@ -206,10 +211,18 @@ bool ChromePasswordManagerClient::IsSavingAndFillingEnabledForCurrentPage()
 }
 
 bool ChromePasswordManagerClient::IsFillingEnabledForCurrentPage() const {
-  return (!password_manager::IsSettingsBehaviorChangeActive() ||
-          *saving_and_filling_passwords_enabled_) &&
-         !DidLastPageLoadEncounterSSLErrors() &&
+  return !DidLastPageLoadEncounterSSLErrors() &&
          IsPasswordManagementEnabledForCurrentPage();
+}
+
+bool ChromePasswordManagerClient::OnCredentialManagerUsed() {
+  prerender::PrerenderContents* prerender_contents =
+      prerender::PrerenderContents::FromWebContents(web_contents());
+  if (prerender_contents) {
+    prerender_contents->Destroy(prerender::FINAL_STATUS_CREDENTIAL_MANAGER_API);
+    return false;
+  }
+  return true;
 }
 
 bool ChromePasswordManagerClient::PromptUserToSaveOrUpdatePassword(
@@ -237,7 +250,7 @@ bool ChromePasswordManagerClient::PromptUserToSaveOrUpdatePassword(
   if (form_to_save->IsBlacklisted())
     return false;
 
-  if (update_password && IsUpdatePasswordUIEnabled()) {
+  if (update_password) {
     UpdatePasswordInfoBarDelegate::Create(web_contents(),
                                           std::move(form_to_save));
     return true;
@@ -526,10 +539,6 @@ void ChromePasswordManagerClient::PromptUserToEnableAutosigninIfNecessary() {
 void ChromePasswordManagerClient::GenerationAvailableForForm(
     const autofill::PasswordForm& form) {
   password_manager_.GenerationAvailableForForm(form);
-}
-
-bool ChromePasswordManagerClient::IsUpdatePasswordUIEnabled() const {
-  return true;
 }
 
 const GURL& ChromePasswordManagerClient::GetMainFrameURL() const {

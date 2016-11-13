@@ -483,15 +483,12 @@ void InputType::setFiles(FileList*) {}
 
 void InputType::setFilesFromPaths(const Vector<String>& paths) {}
 
-bool InputType::getTypeSpecificValue(String&) {
-  return false;
-}
-
-String InputType::fallbackValue() const {
+String InputType::valueInFilenameValueMode() const {
+  NOTREACHED();
   return String();
 }
 
-String InputType::defaultValue() const {
+String InputType::defaultLabel() const {
   return String();
 }
 
@@ -513,7 +510,11 @@ void InputType::dispatchSearchEvent() {}
 void InputType::setValue(const String& sanitizedValue,
                          bool valueChanged,
                          TextFieldEventBehavior eventBehavior) {
-  element().setValueInternal(sanitizedValue, eventBehavior);
+  // This setValue() implementation is used only for ValueMode::kValue except
+  // TextFieldInputType. That is to say, type=color, type=range, and temporal
+  // input types.
+  DCHECK_EQ(valueMode(), ValueMode::kValue);
+  element().setNonAttributeValue(sanitizedValue);
   if (!valueChanged)
     return;
   switch (eventBehavior) {
@@ -525,6 +526,7 @@ void InputType::setValue(const String& sanitizedValue,
       element().dispatchFormControlChangeEvent();
       break;
     case DispatchNoEvent:
+      element().setTextAsOfLastFormControlChangeEvent(element().value());
       break;
   }
 }
@@ -643,6 +645,10 @@ const AtomicString& InputType::defaultAutocapitalize() const {
 
 void InputType::copyNonAttributeProperties(const HTMLInputElement&) {}
 
+void InputType::onAttachWithLayoutObject() {}
+
+void InputType::onDetachWithLayoutObject() {}
+
 bool InputType::shouldAppearIndeterminate() const {
   return false;
 }
@@ -668,7 +674,7 @@ ColorChooserClient* InputType::colorChooserClient() {
 }
 
 void InputType::applyStep(const Decimal& current,
-                          int count,
+                          double count,
                           AnyStepHandling anyStepHandling,
                           TextFieldEventBehavior eventBehavior,
                           ExceptionState& exceptionState) {
@@ -721,7 +727,7 @@ void InputType::applyStep(const Decimal& current,
       --count;
     }
   }
-  newValue = newValue + stepRange.step() * count;
+  newValue = newValue + stepRange.step() * Decimal::fromDouble(count);
 
   if (!equalIgnoringCase(stepString, "any"))
     newValue = stepRange.alignValueForStep(current, newValue);
@@ -764,7 +770,7 @@ StepRange InputType::createStepRange(AnyStepHandling) const {
   return StepRange();
 }
 
-void InputType::stepUp(int n, ExceptionState& exceptionState) {
+void InputType::stepUp(double n, ExceptionState& exceptionState) {
   if (!isSteppable()) {
     exceptionState.throwDOMException(InvalidStateError,
                                      "This form element is not steppable.");

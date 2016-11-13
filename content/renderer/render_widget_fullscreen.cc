@@ -5,6 +5,7 @@
 #include "content/renderer/render_widget_fullscreen.h"
 
 #include "content/common/view_messages.h"
+#include "content/renderer/render_thread_impl.h"
 #include "third_party/WebKit/public/web/WebWidget.h"
 
 using blink::WebWidget;
@@ -43,16 +44,16 @@ WebWidget* RenderWidgetFullscreen::CreateWebWidget() {
 bool RenderWidgetFullscreen::Init(int32_t opener_id) {
   DCHECK(!GetWebWidget());
 
-  bool success = RenderWidget::DoInit(
-      opener_id, CreateWebWidget(),
-      new ViewHostMsg_CreateFullscreenWidget(opener_id, &routing_id_));
-  if (success) {
-    // TODO(fsamuel): This is a bit ugly. The |create_widget_message| should
-    // probably be factored out of RenderWidget::DoInit.
-    SetRoutingID(routing_id_);
-    return true;
+  // Synchronous IPC to obtain a routing id for ourselves.
+  int32_t routing_id = MSG_ROUTING_NONE;
+  if (!RenderThreadImpl::current_render_message_filter()
+           ->CreateFullscreenWidget(opener_id, &routing_id)) {
+    return false;
   }
-  return false;
+
+  RenderWidget::InitRoutingID(routing_id);
+  RenderWidget::Init(opener_id, CreateWebWidget());
+  return true;
 }
 
 }  // namespace content

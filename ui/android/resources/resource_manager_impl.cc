@@ -16,6 +16,7 @@
 #include "base/strings/stringprintf.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/memory_dump_manager.h"
+#include "base/trace_event/memory_usage_estimator.h"
 #include "base/trace_event/process_memory_dump.h"
 #include "base/trace_event/trace_event.h"
 #include "cc/resources/scoped_ui_resource.h"
@@ -35,7 +36,8 @@ using base::android::JavaRef;
 namespace ui {
 
 // static
-ResourceManagerImpl* ResourceManagerImpl::FromJavaObject(jobject jobj) {
+ResourceManagerImpl* ResourceManagerImpl::FromJavaObject(
+    const JavaRef<jobject>& jobj) {
   return reinterpret_cast<ResourceManagerImpl*>(
       Java_ResourceManager_getNativePtr(base::android::AttachCurrentThread(),
                                         jobj));
@@ -140,7 +142,7 @@ ResourceManager::Resource* ResourceManagerImpl::GetStaticResourceWithTint(
   // alpha of the original image.
   SkPaint color_filter;
   color_filter.setColorFilter(
-      SkColorFilter::MakeModeFilter(tint_color, SkXfermode::kModulate_Mode));
+      SkColorFilter::MakeModeFilter(tint_color, SkBlendMode::kModulate));
 
   // Draw the resource and make it immutable.
   base_image->ui_resource->GetBitmap(base_image->ui_resource->id(), false)
@@ -203,7 +205,7 @@ void ResourceManagerImpl::OnResourceReady(JNIEnv* env,
 
   Resource* resource = resources_[res_type][res_id].get();
 
-  gfx::JavaBitmap jbitmap(bitmap.obj());
+  gfx::JavaBitmap jbitmap(bitmap);
   resource->size = jbitmap.size();
   resource->padding.SetRect(padding_left, padding_top,
                             padding_right - padding_left,
@@ -256,7 +258,7 @@ void ResourceManagerImpl::OnCrushedSpriteResourceReady(
       ProcessCrushedSpriteFrameRects(all_frame_rects_vector);
 
   SkBitmap skbitmap =
-      gfx::CreateSkBitmapFromJavaBitmap(gfx::JavaBitmap(bitmap.obj()));
+      gfx::CreateSkBitmapFromJavaBitmap(gfx::JavaBitmap(bitmap));
 
   std::unique_ptr<CrushedSpriteResource> resource =
       base::MakeUnique<CrushedSpriteResource>(
@@ -300,31 +302,18 @@ ResourceManagerImpl::ProcessCrushedSpriteFrameRects(
 bool ResourceManagerImpl::OnMemoryDump(
     const base::trace_event::MemoryDumpArgs& args,
     base::trace_event::ProcessMemoryDump* pmd) {
-  size_t size = 0;
-  for (const auto& resource_map : resources_) {
-    for (const auto& id_and_resource : resource_map) {
-      if (id_and_resource.second && id_and_resource.second->ui_resource)
-        size += id_and_resource.second->ui_resource->GetAllocatedSizeInBytes();
-    }
-  }
-  for (const auto& id_and_resource : crushed_sprite_resources_) {
-    if (id_and_resource.second)
-      size += id_and_resource.second->GetAllocatedSizeInBytes();
-  }
-  for (const auto& color_and_resources : tinted_resources_) {
-    for (const auto& id_and_resource : *color_and_resources.second) {
-      if (id_and_resource.second && id_and_resource.second->ui_resource)
-        size += id_and_resource.second->ui_resource->GetAllocatedSizeInBytes();
-    }
-  }
+  size_t memory_usage =
+      base::trace_event::EstimateMemoryUsage(resources_) +
+      base::trace_event::EstimateMemoryUsage(crushed_sprite_resources_) +
+      base::trace_event::EstimateMemoryUsage(tinted_resources_);
 
   base::trace_event::MemoryAllocatorDump* dump = pmd->CreateAllocatorDump(
       base::StringPrintf("ui/resource_manager_0x%" PRIXPTR,
                          reinterpret_cast<uintptr_t>(this)));
   dump->AddScalar(base::trace_event::MemoryAllocatorDump::kNameSize,
-                  base::trace_event::MemoryAllocatorDump::kUnitsBytes, size);
+                  base::trace_event::MemoryAllocatorDump::kUnitsBytes,
+                  memory_usage);
 
-  // Bitmaps are allocated from malloc.
   const char* system_allocator_name =
       base::trace_event::MemoryDumpManager::GetInstance()
           ->system_allocator_pool_name();
@@ -347,7 +336,7 @@ void ResourceManagerImpl::OnCrushedSpriteResourceReloaded(
     return;
   }
   SkBitmap skbitmap =
-      gfx::CreateSkBitmapFromJavaBitmap(gfx::JavaBitmap(bitmap.obj()));
+      gfx::CreateSkBitmapFromJavaBitmap(gfx::JavaBitmap(bitmap));
   item->second->SetBitmap(skbitmap);
 }
 

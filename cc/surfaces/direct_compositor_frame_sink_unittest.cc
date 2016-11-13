@@ -52,12 +52,13 @@ class DirectCompositorFrameSinkTest : public testing::Test {
 
     display_.reset(new Display(
         &bitmap_manager_, &gpu_memory_buffer_manager_, RendererSettings(),
-        std::move(begin_frame_source), std::move(display_output_surface),
-        std::move(scheduler),
+        kArbitraryFrameSinkId, std::move(begin_frame_source),
+        std::move(display_output_surface), std::move(scheduler),
         base::MakeUnique<TextureMailboxDeleter>(task_runner_.get())));
     compositor_frame_sink_.reset(new DirectCompositorFrameSink(
         kArbitraryFrameSinkId, &surface_manager_, display_.get(),
-        context_provider_, nullptr));
+        context_provider_, nullptr, &gpu_memory_buffer_manager_,
+        &bitmap_manager_));
 
     compositor_frame_sink_->BindToClient(&compositor_frame_sink_client_);
     display_->Resize(display_size_);
@@ -76,11 +77,8 @@ class DirectCompositorFrameSinkTest : public testing::Test {
     render_pass->SetNew(RenderPassId(1, 1), display_rect_, damage_rect,
                         gfx::Transform());
 
-    auto frame_data = base::MakeUnique<DelegatedFrameData>();
-    frame_data->render_pass_list.push_back(std::move(render_pass));
-
     CompositorFrame frame;
-    frame.delegated_frame_data = std::move(frame_data);
+    frame.render_pass_list.push_back(std::move(render_pass));
 
     compositor_frame_sink_->SubmitCompositorFrame(std::move(frame));
   }

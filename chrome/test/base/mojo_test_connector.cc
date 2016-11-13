@@ -28,12 +28,9 @@
 #include "services/service_manager/service_manager.h"
 #include "services/service_manager/switches.h"
 
-using service_manager::mojom::Service;
-using service_manager::mojom::ServicePtr;
-
 namespace {
 
-const char kTestRunnerName[] = "exe:mash_browser_tests";
+const char kTestRunnerName[] = "service:mash_browser_tests";
 const char kTestName[] = "service:content_browser";
 
 // BackgroundTestState maintains all the state necessary to bind the test to

@@ -33,14 +33,10 @@
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/transform.h"
 
-class SkCanvas;
-
 namespace cc {
-class ContentLayer;
 class CopyOutputRequest;
 class Layer;
 class NinePatchLayer;
-class ResourceUpdateQueue;
 class SolidColorLayer;
 class SurfaceLayer;
 class TextureLayer;
@@ -75,6 +71,16 @@ class COMPOSITOR_EXPORT Layer
   Layer();
   explicit Layer(LayerType type);
   ~Layer() override;
+
+  // Note that only solid color and surface content is copied.
+  std::unique_ptr<Layer> Clone() const;
+
+  // Returns a new layer that mirrors this layer and is optionally synchronized
+  // with the bounds thereof. Note that children are not mirrored, and that the
+  // content is only mirrored if painted by a delegate or backed by a surface.
+  std::unique_ptr<Layer> Mirror();
+
+  void set_sync_bounds(bool sync_bounds) { sync_bounds_ = sync_bounds; }
 
   // Retrieves the Layer's compositor. The Layer will walk up its parent chain
   // to locate it. Returns NULL if the Layer is not attached to a compositor.
@@ -303,7 +309,7 @@ class COMPOSITOR_EXPORT Layer
 
   // Sets the layer's fill color.  May only be called for LAYER_SOLID_COLOR.
   void SetColor(SkColor color);
-  SkColor GetTargetColor();
+  SkColor GetTargetColor() const;
   SkColor background_color() const;
 
   // Updates the nine patch layer's image, aperture and border. May only be
@@ -373,6 +379,7 @@ class COMPOSITOR_EXPORT Layer
   std::unique_ptr<base::trace_event::ConvertableToTraceFormat> TakeDebugInfo(
       cc::Layer* layer) override;
   void didUpdateMainThreadScrollingReasons() override;
+  void didChangeScrollbarsHidden(bool) override;
 
   // Triggers a call to SwitchToLayer.
   void SwitchCCLayerForTest();
@@ -383,6 +390,7 @@ class COMPOSITOR_EXPORT Layer
 
  private:
   friend class LayerOwner;
+  class LayerMirror;
 
   void CollectAnimators(std::vector<scoped_refptr<LayerAnimator> >* animators);
 
@@ -433,6 +441,8 @@ class COMPOSITOR_EXPORT Layer
   void SetCompositorForAnimatorsInTree(Compositor* compositor);
   void ResetCompositorForAnimatorsInTree(Compositor* compositor);
 
+  void OnMirrorDestroyed(LayerMirror* mirror);
+
   const LayerType type_;
 
   Compositor* compositor_;
@@ -441,6 +451,11 @@ class COMPOSITOR_EXPORT Layer
 
   // This layer's children, in bottom-to-top stacking order.
   std::vector<Layer*> children_;
+
+  std::vector<std::unique_ptr<LayerMirror>> mirrors_;
+
+  // If true, changes to the bounds of this layer are propagated to mirrors.
+  bool sync_bounds_ = false;
 
   gfx::Rect bounds_;
   gfx::Vector2dF subpixel_position_offset_;

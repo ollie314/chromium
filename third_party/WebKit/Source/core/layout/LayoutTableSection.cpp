@@ -838,9 +838,8 @@ int LayoutTableSection::calcRowLogicalHeight() {
   LayoutTableCell* cell;
 
   // We may have to forcefully lay out cells here, in which case we need a
-  // layout state. Technically, we should also push state for the row, but since
-  // rows don't push a coordinate transform, that's not necessary.
-  LayoutState state(*this, locationOffset());
+  // layout state.
+  LayoutState state(*this);
 
   m_rowPos.resize(m_grid.size() + 1);
 
@@ -960,7 +959,7 @@ void LayoutTableSection::layout() {
   // it now ensures we have a stable-enough structure.
   m_grid.shrinkToFit();
 
-  LayoutState state(*this, locationOffset());
+  LayoutState state(*this);
 
   const Vector<int>& columnPos = table()->effectiveColumnPositions();
   LayoutUnit rowLogicalTop;
@@ -991,14 +990,14 @@ void LayoutTableSection::layout() {
     }
 
     if (LayoutTableRow* rowLayoutObject = m_grid[r].rowLayoutObject) {
-      if (state.isPaginated()) {
+      if (state.isPaginated())
         rowLayoutObject->setLogicalTop(rowLogicalTop);
-        if (!rowLayoutObject->needsLayout())
-          markChildForPaginationRelayoutIfNeeded(*rowLayoutObject, layouter);
-      }
+      if (!rowLayoutObject->needsLayout())
+        markChildForPaginationRelayoutIfNeeded(*rowLayoutObject, layouter);
       rowLayoutObject->layoutIfNeeded();
       if (state.isPaginated()) {
         adjustRowForPagination(*rowLayoutObject, layouter);
+        updateFragmentationInfoForChild(*rowLayoutObject);
         rowLogicalTop = rowLayoutObject->logicalBottom();
         rowLogicalTop += LayoutUnit(table()->vBorderSpacing());
       }
@@ -1115,7 +1114,9 @@ int LayoutTableSection::distributeExtraLogicalHeightToRows(
 static bool shouldFlexCellChild(LayoutObject* cellDescendant) {
   return cellDescendant->isAtomicInlineLevel() ||
          (cellDescendant->isBox() &&
-          toLayoutBox(cellDescendant)->scrollsOverflow());
+          toLayoutBox(cellDescendant)->style()->overflowY() !=
+              OverflowVisible &&
+          toLayoutBox(cellDescendant)->style()->overflowY() != OverflowHidden);
 }
 
 void LayoutTableSection::layoutRows() {
@@ -1137,7 +1138,7 @@ void LayoutTableSection::layoutRows() {
 
   int vspacing = table()->vBorderSpacing();
   unsigned nEffCols = table()->numEffectiveColumns();
-  LayoutState state(*this, locationOffset());
+  LayoutState state(*this);
 
   // Set the rows' location and size.
   for (unsigned r = 0; r < totalRows; r++) {
@@ -1205,9 +1206,6 @@ void LayoutTableSection::layoutRows() {
 
       setLogicalPositionForCell(cell, c);
 
-      if (!cell->needsLayout())
-        markChildForPaginationRelayoutIfNeeded(*cell, layouter);
-
       cell->layoutIfNeeded();
 
       LayoutSize childOffset(cell->location() - oldCellRect.location());
@@ -1246,14 +1244,6 @@ int LayoutTableSection::paginationStrutForRow(LayoutTableRow* row,
 
   LayoutUnit remainingLogicalHeight = pageRemainingLogicalHeightForOffset(
       logicalOffset, LayoutBlock::AssociateWithLatterPage);
-  LayoutUnit offsetForBorderSpacing =
-      pageLogicalHeight - (remainingLogicalHeight + table()->vBorderSpacing());
-  // Border spacing from the previous row has pushed this row just past the top
-  // of the page, so we must reposition it to the top of the page and avoid any
-  // repeating header.
-  if (offsetForBorderSpacing < 0)
-    return offsetForBorderSpacing.toInt();
-
   if (remainingLogicalHeight >= rowLogicalHeight)
     return 0;  // It fits fine where it is. No need to break.
   LayoutUnit paginationStrut = calculatePaginationStrutToFitContent(
@@ -1905,7 +1895,7 @@ void LayoutTableSection::relayoutCellIfFlexed(LayoutTableCell& cell,
   // can't hope to match the behavior perfectly, but we'll continue to refine it
   // as we discover new bugs. :)
   bool cellChildrenFlex = false;
-  bool flexAllChildren = cell.style()->logicalHeight().isFixed() ||
+  bool flexAllChildren = cell.style()->logicalHeight().isSpecified() ||
                          (!table()->style()->logicalHeight().isAuto() &&
                           rowHeight != cell.logicalHeight());
 
@@ -1998,12 +1988,18 @@ void LayoutTableSection::adjustRowForPagination(LayoutTableRow& rowObject,
   rowObject.setLogicalHeight(LayoutUnit(logicalHeightForRow(rowObject)));
   int paginationStrut =
       paginationStrutForRow(&rowObject, rowObject.logicalTop());
+  bool rowIsAtTopOfColumn = false;
+  LayoutUnit offsetFromTopOfPage;
   if (!paginationStrut) {
-    bool rowIsAtTopOfColumn =
-        state.heightOffsetForTableHeaders() &&
-        pageLogicalHeightForOffset(rowObject.logicalTop()) ==
-            pageRemainingLogicalHeightForOffset(rowObject.logicalTop(),
-                                                AssociateWithLatterPage);
+    if (state.heightOffsetForTableHeaders()) {
+      offsetFromTopOfPage =
+          pageLogicalHeightForOffset(rowObject.logicalTop()) -
+          pageRemainingLogicalHeightForOffset(rowObject.logicalTop(),
+                                              AssociateWithLatterPage);
+      rowIsAtTopOfColumn = !offsetFromTopOfPage ||
+                           offsetFromTopOfPage <= table()->vBorderSpacing();
+    }
+
     if (!rowIsAtTopOfColumn)
       return;
   }
@@ -2021,6 +2017,12 @@ void LayoutTableSection::adjustRowForPagination(LayoutTableRow& rowObject,
     state.setHeightOffsetForTableHeaders(state.heightOffsetForTableHeaders() -
                                          header->logicalHeight());
   }
+  // Border spacing from the previous row has pushed this row just past the top
+  // of the page, so we must reposition it to the top of the page and avoid any
+  // repeating header.
+  if (rowIsAtTopOfColumn && offsetFromTopOfPage)
+    paginationStrut -= offsetFromTopOfPage.toInt();
+
   // If we have a header group we will paint it at the top of each page,
   // move the rows down to accomodate it.
   paginationStrut += state.heightOffsetForTableHeaders().toInt();

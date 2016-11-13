@@ -10,6 +10,7 @@
 #include "base/memory/ptr_util.h"
 #include "base/process/process.h"
 #include "base/run_loop.h"
+#include "mojo/public/cpp/bindings/binding.h"
 #include "services/service_manager/public/cpp/identity.h"
 #include "services/service_manager/public/cpp/service_test.h"
 #include "services/service_manager/public/interfaces/service_manager.mojom.h"
@@ -22,7 +23,7 @@ namespace {
 
 const char kTestAppName[] = "service:lifecycle_unittest_app";
 const char kTestParentName[] = "service:lifecycle_unittest_parent";
-const char kTestExeName[] = "exe:lifecycle_unittest_exe";
+const char kTestExeName[] = "service:lifecycle_unittest_exe";
 const char kTestPackageName[] = "service:lifecycle_unittest_package";
 const char kTestPackageAppNameA[] = "service:lifecycle_unittest_package_app_a";
 const char kTestPackageAppNameB[] = "service:lifecycle_unittest_package_app_b";
@@ -69,7 +70,7 @@ class InstanceState : public mojom::ServiceManagerListener {
 
  private:
   // mojom::ServiceManagerListener:
-  void OnInit(std::vector<mojom::ServiceInfoPtr> instances) override {
+  void OnInit(std::vector<mojom::RunningServiceInfoPtr> instances) override {
     for (const auto& instance : instances) {
       Instance i(instance->identity, instance->pid);
       initial_instances_[i.identity.name()] = i;
@@ -77,7 +78,7 @@ class InstanceState : public mojom::ServiceManagerListener {
     }
     loop_->Quit();
   }
-  void OnServiceCreated(mojom::ServiceInfoPtr instance) override {
+  void OnServiceCreated(mojom::RunningServiceInfoPtr instance) override {
     instances_[instance->identity.name()] =
         Instance(instance->identity, instance->pid);
   }
@@ -89,6 +90,9 @@ class InstanceState : public mojom::ServiceManagerListener {
         break;
       }
     }
+  }
+  void OnServiceFailedToStart(
+      const service_manager::Identity& identity) override {
   }
   void OnServiceStopped(const service_manager::Identity& identity) override {
     for (auto it = instances_.begin(); it != instances_.end(); ++it) {

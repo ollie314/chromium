@@ -148,9 +148,9 @@ bool TextFieldInputType::canSetSuggestedValue() {
 void TextFieldInputType::setValue(const String& sanitizedValue,
                                   bool valueChanged,
                                   TextFieldEventBehavior eventBehavior) {
-  // We don't ask InputType::setValue to dispatch events because
-  // TextFieldInputType dispatches events different way from InputType.
-  InputType::setValue(sanitizedValue, valueChanged, DispatchNoEvent);
+  // We don't use InputType::setValue.  TextFieldInputType dispatches events
+  // different way from InputType::setValue.
+  element().setNonAttributeValue(sanitizedValue);
 
   if (valueChanged)
     element().updateView();
@@ -179,12 +179,13 @@ void TextFieldInputType::setValue(const String& sanitizedValue,
     }
 
     case DispatchNoEvent:
+      // We need to update textAsOfLastFormControlChangeEvent for |value| IDL
+      // setter without focus because input-assist features use setValue("...",
+      // DispatchChangeEvent) without setting focus.
+      if (!element().isFocused())
+        element().setTextAsOfLastFormControlChangeEvent(element().value());
       break;
   }
-
-  if (!element().isFocused())
-    element().setTextAsOfLastFormControlChangeEvent(
-        sanitizedValue.isNull() ? element().defaultValue() : sanitizedValue);
 }
 
 void TextFieldInputType::handleKeydownEvent(KeyboardEvent* event) {

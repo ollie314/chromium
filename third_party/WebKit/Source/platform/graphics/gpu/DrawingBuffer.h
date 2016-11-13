@@ -62,11 +62,10 @@ class ArrayBufferContents;
 
 namespace blink {
 class Extensions3DUtil;
-class ImageBuffer;
 class StaticBitmapImage;
-class WebExternalBitmap;
 class WebExternalTextureLayer;
 class WebGraphicsContext3DProvider;
+class WebGraphicsContext3DProviderWrapper;
 class WebLayer;
 
 // Manages a rendering target (framebuffer + attachment) for a canvas.  Can
@@ -270,6 +269,8 @@ class PLATFORM_EXPORT DrawingBuffer
 
    private:
     RefPtr<DrawingBuffer> m_drawingBuffer;
+    // The previous state restorer, in case restorers are nested.
+    ScopedStateRestorer* m_previousStateRestorer = nullptr;
     bool m_clearStateDirty = false;
     bool m_pixelPackAlignmentDirty = false;
     bool m_textureBindingDirty = false;
@@ -424,7 +425,7 @@ class PLATFORM_EXPORT DrawingBuffer
   const PreserveDrawingBuffer m_preserveDrawingBuffer;
   const WebGLVersion m_webGLVersion;
 
-  std::unique_ptr<WebGraphicsContext3DProvider> m_contextProvider;
+  std::unique_ptr<WebGraphicsContext3DProviderWrapper> m_contextProvider;
   // Lifetime is tied to the m_contextProvider.
   gpu::gles2::GLES2Interface* m_gl;
   std::unique_ptr<Extensions3DUtil> m_extensionsUtil;

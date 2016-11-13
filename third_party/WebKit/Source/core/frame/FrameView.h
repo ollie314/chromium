@@ -36,6 +36,7 @@
 #include "core/paint/ObjectPaintProperties.h"
 #include "core/paint/PaintInvalidationCapableScrollableArea.h"
 #include "core/paint/PaintPhase.h"
+#include "core/paint/ScrollbarManager.h"
 #include "platform/RuntimeEnabledFeatures.h"
 #include "platform/Widget.h"
 #include "platform/geometry/IntRect.h"
@@ -57,13 +58,12 @@
 namespace blink {
 
 class AXObjectCache;
-class CancellableTaskFactory;
 class ComputedStyle;
 class DocumentLifecycle;
 class Cursor;
 class Element;
+class ElementVisibilityObserver;
 class FloatSize;
-class HTMLFrameOwnerElement;
 class JSONArray;
 class JSONObject;
 class LayoutItem;
@@ -406,12 +406,12 @@ class CORE_EXPORT FrameView final
 
   void invalidatePaintForTickmarks();
 
-  // Since the compositor can resize the viewport due to top controls and
+  // Since the compositor can resize the viewport due to browser controls and
   // commit scroll offsets before a WebView::resize occurs, we need to adjust
   // our scroll extents to prevent clamping the scroll offsets.
-  void setTopControlsViewportAdjustment(float);
-  IntSize topControlsSize() const {
-    return IntSize(0, ceilf(m_topControlsViewportAdjustment));
+  void setBrowserControlsViewportAdjustment(float);
+  IntSize browserControlsSize() const {
+    return IntSize(0, ceilf(m_browserControlsViewportAdjustment));
   }
 
   IntSize maximumScrollOffsetInt() const override;
@@ -433,6 +433,9 @@ class CORE_EXPORT FrameView final
   Widget* getWidget() override;
   CompositorAnimationTimeline* compositorAnimationTimeline() const override;
   LayoutBox* layoutBox() const override;
+  FloatQuad localToVisibleContentQuad(const FloatQuad&,
+                                      const LayoutObject*,
+                                      unsigned = 0) const final;
 
   LayoutRect scrollIntoView(const LayoutRect& rectInContent,
                             const ScrollAlignment& alignX,
@@ -455,12 +458,14 @@ class CORE_EXPORT FrameView final
   // cross-platform Scrollbars. These functions can be used to obtain those
   // scrollbars.
   Scrollbar* horizontalScrollbar() const override {
-    return m_horizontalScrollbar.get();
+    return m_scrollbarManager.horizontalScrollbar();
   }
   Scrollbar* verticalScrollbar() const override {
-    return m_verticalScrollbar.get();
+    return m_scrollbarManager.verticalScrollbar();
   }
   LayoutScrollbarPart* scrollCorner() const override { return m_scrollCorner; }
+
+  void updateScrollbars() override;
 
   void positionScrollbarLayers();
 
@@ -675,10 +680,13 @@ class CORE_EXPORT FrameView final
   // scheduling visual updates.
   bool canThrottleRendering() const;
   bool isHiddenForThrottling() const { return m_hiddenForThrottling; }
+  void setupRenderThrottling();
 
   // For testing, run pending intersection observer notifications for this
   // frame.
-  void notifyRenderThrottlingObserversForTesting();
+  void updateRenderThrottlingStatusForTesting();
+
+  void beginLifecycleUpdates();
 
   // Paint properties for SPv2 Only.
   void setPreTranslation(
@@ -718,6 +726,18 @@ class CORE_EXPORT FrameView final
     return m_totalPropertyTreeStateForContents.get();
   }
 
+  // Paint properties (e.g., m_preTranslation, etc.) are built from the
+  // FrameView's state (e.g., x(), y(), etc.) as well as inherited context.
+  // When these inputs change, setNeedsPaintPropertyUpdate will cause a property
+  // tree update during the next document lifecycle update.
+  // TODO(pdr): Add additional granularity such as the ability to signal that
+  // only a local paint property update is needed.
+  void setNeedsPaintPropertyUpdate() { m_needsPaintPropertyUpdate = true; }
+  void clearNeedsPaintPropertyUpdate() {
+    DCHECK_EQ(lifecycle().state(), DocumentLifecycle::InPrePaint);
+    m_needsPaintPropertyUpdate = false;
+  }
+  bool needsPaintPropertyUpdate() const { return m_needsPaintPropertyUpdate; }
   // TODO(ojan): Merge this with IntersectionObserver once it lands.
   IntRect computeVisibleArea();
 
@@ -727,6 +747,8 @@ class CORE_EXPORT FrameView final
   ScrollAnchor* scrollAnchor() override { return &m_scrollAnchor; }
   void clearScrollAnchor();
   bool shouldPerformScrollAnchoring() const override;
+  void enqueueScrollAnchoringAdjustment(ScrollableArea*);
+  void performScrollAnchoringAdjustments();
 
   // For PaintInvalidator temporarily. TODO(wangxianzhu): Move into
   // PaintInvalidator.
@@ -742,10 +764,6 @@ class CORE_EXPORT FrameView final
   // Scroll the content by invalidating everything.
   void scrollContentsSlowPath();
 
-  // These functions are used to create/destroy scrollbars.
-  void setHasHorizontalScrollbar(bool);
-  void setHasVerticalScrollbar(bool);
-
   ScrollBehavior scrollBehaviorStyle() const override;
 
   void scrollContentsIfNeeded();
@@ -756,11 +774,7 @@ class CORE_EXPORT FrameView final
       bool& newHasVerticalScrollbar,
       const IntSize& docSize,
       ComputeScrollbarExistenceOption = FirstPass) const;
-  void updateScrollbarGeometry();
 
-  // Called to update the scrollbars to accurately reflect the state of the
-  // view.
-  void updateScrollbars();
   void updateScrollbarsIfNeeded();
 
   class InUpdateScrollbarsScope {
@@ -779,6 +793,28 @@ class CORE_EXPORT FrameView final
 
  private:
   explicit FrameView(LocalFrame*);
+  class ScrollbarManager : public blink::ScrollbarManager {
+    DISALLOW_NEW();
+
+    // Helper class to manage the life cycle of Scrollbar objects.
+   public:
+    ScrollbarManager(FrameView& scroller) : blink::ScrollbarManager(scroller) {}
+
+    void setHasHorizontalScrollbar(bool hasScrollbar) override;
+    void setHasVerticalScrollbar(bool hasScrollbar) override;
+
+    // TODO(ymalik): This should be hidden and all calls should go through
+    // setHas*Scrollbar functions above.
+    Scrollbar* createScrollbar(ScrollbarOrientation) override;
+
+    // Updates the scrollbar geometry given the size of the frame view rect.
+    void updateScrollbarGeometry(IntSize viewSize);
+
+    ScrollableArea* scrollableArea() const;
+
+   protected:
+    void destroyScrollbar(ScrollbarOrientation) override;
+  };
 
   void updateScrollOffset(const ScrollOffset&, ScrollType) override;
 
@@ -819,6 +855,8 @@ class CORE_EXPORT FrameView final
   void scheduleOrPerformPostLayoutTasks();
   void performPostLayoutTasks();
 
+  void maybeRecordLoadReason();
+
   DocumentLifecycle& lifecycle() const;
 
   void contentsResized() override;
@@ -836,7 +874,7 @@ class CORE_EXPORT FrameView final
   bool wasViewportResized();
   void sendResizeEventIfNeeded();
 
-  void updateScrollableAreaSet();
+  void updateParentScrollableAreaSet();
 
   void scheduleUpdateWidgetsIfNecessary();
   void updateWidgetsTimerFired(TimerBase*);
@@ -852,10 +890,6 @@ class CORE_EXPORT FrameView final
 
   static bool computeCompositedSelection(LocalFrame&, CompositedSelection&);
   void updateCompositedSelectionIfNeeded();
-
-  // Returns true if the FrameView's own scrollbars overlay its content when
-  // visible.
-  bool hasOverlayScrollbars() const;
 
   // Returns true if the frame should use custom scrollbars. If true, one of
   // either |customScrollbarElement| or |customScrollbarFrame| will be set to
@@ -902,9 +936,7 @@ class CORE_EXPORT FrameView final
   void setNeedsUpdateViewportIntersection();
   void updateViewportIntersectionsForSubtree(
       DocumentLifecycle::LifecycleState targetState);
-  void updateViewportIntersectionIfNeeded();
-  void notifyRenderThrottlingObservers();
-  void updateThrottlingStatus();
+  void updateRenderThrottlingStatus(bool hidden, bool subtreeThrottled);
   void notifyResizeObservers();
 
   // PaintInvalidationCapableScrollableArea
@@ -946,8 +978,6 @@ class CORE_EXPORT FrameView final
   unsigned m_nestedLayoutCount;
   Timer<FrameView> m_postLayoutTasksTimer;
   Timer<FrameView> m_updateWidgetsTimer;
-  std::unique_ptr<CancellableTaskFactory>
-      m_renderThrottlingObserverNotificationFactory;
 
   bool m_firstLayout;
   bool m_isTransparent;
@@ -989,7 +1019,7 @@ class CORE_EXPORT FrameView final
 
   Vector<IntRect> m_tickmarks;
 
-  float m_topControlsViewportAdjustment;
+  float m_browserControlsViewportAdjustment;
 
   bool m_needsUpdateWidgetGeometries;
   bool m_needsUpdateViewportIntersection;
@@ -1000,8 +1030,6 @@ class CORE_EXPORT FrameView final
   bool m_hasBeenDisposed;
 #endif
 
-  Member<Scrollbar> m_horizontalScrollbar;
-  Member<Scrollbar> m_verticalScrollbar;
   ScrollbarMode m_horizontalScrollbarMode;
   ScrollbarMode m_verticalScrollbarMode;
 
@@ -1029,17 +1057,12 @@ class CORE_EXPORT FrameView final
   // main frame.
   Member<RootFrameViewport> m_viewportScrollableArea;
 
-  // This frame's bounds in the root frame's content coordinates, clipped
-  // recursively through every ancestor view.
-  IntRect m_viewportIntersection;
-  bool m_viewportIntersectionValid;
-
   // The following members control rendering pipeline throttling for this
   // frame. They are only updated in response to intersection observer
   // notifications, i.e., not in the middle of the lifecycle.
   bool m_hiddenForThrottling;
-  bool m_crossOriginForThrottling;
   bool m_subtreeThrottled;
+  bool m_lifecycleUpdatesThrottled;
 
   // Paint properties for SPv2 Only.
   // The hierarchy of transform subtree created by a FrameView.
@@ -1059,15 +1082,26 @@ class CORE_EXPORT FrameView final
   // properties are either created by this FrameView or are inherited from
   // an ancestor.
   std::unique_ptr<PropertyTreeState> m_totalPropertyTreeStateForContents;
+  // Whether the paint properties need to be updated. For more details, see
+  // FrameView::needsPaintPropertyUpdate().
+  bool m_needsPaintPropertyUpdate;
 
   // This is set on the local root frame view only.
   DocumentLifecycle::LifecycleState m_currentUpdateLifecyclePhasesTargetState;
 
   ScrollAnchor m_scrollAnchor;
+  using AnchoringAdjustmentQueue =
+      HeapLinkedHashSet<WeakMember<ScrollableArea>>;
+  AnchoringAdjustmentQueue m_anchoringAdjustmentQueue;
+
+  // ScrollbarManager holds the Scrollbar instances.
+  ScrollbarManager m_scrollbarManager;
 
   bool m_needsScrollbarsUpdate;
   bool m_suppressAdjustViewSize;
   bool m_allowsLayoutInvalidationAfterLayoutClean;
+
+  Member<ElementVisibilityObserver> m_visibilityObserver;
 
   // For testing.
   struct ObjectPaintInvalidation {

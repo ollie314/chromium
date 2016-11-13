@@ -13,9 +13,10 @@ function test()
         console.error("completionsDone called too early!");
         UnitTest.completeTest();
     }
-    var prompt = new WebInspector.TextPrompt(completions);
+    var prompt = new UI.TextPrompt();
+    prompt.initialize(completions);
     var element = createElement("div");
-    WebInspector.inspectorView.element.appendChild(element);
+    UI.inspectorView.element.appendChild(element);
     var proxy = prompt.attachAndStartEditing(element);
     prompt.setText("testT");
     prompt.complete();
@@ -55,6 +56,12 @@ function test()
     {
         completionsDone();
         dumpTextPrompt();
+        prompt.setText("something_before test");
+        prompt.complete();
+        completionsDone();
+        dumpTextPrompt();
+        typeCharacter("T");
+        dumpTextPrompt();
         UnitTest.completeTest();
     }
 
@@ -75,9 +82,9 @@ function test()
 
     function dumpTextPrompt()
     {
-        UnitTest.addResult("");
         UnitTest.addResult("Text:" + prompt.text());
-        UnitTest.addResult("UserEnteredText:" + prompt.userEnteredText());
+        UnitTest.addResult("TextWithCurrentSuggestion:" + prompt.textWithCurrentSuggestion());
+        UnitTest.addResult("");
     }
 
     function typeCharacter(character)
@@ -90,7 +97,7 @@ function test()
 
         var selection = element.getComponentSelection();
         var range = selection.getRangeAt(0);
-        var textNode = prompt._autocompleteElement ? prompt._autocompleteElement.previousSibling : element.childTextNodes()[element.childTextNodes().length-1];
+        var textNode = prompt._ghostTextElement.parentNode ? prompt._ghostTextElement.previousSibling : element.childTextNodes()[element.childTextNodes().length - 1];
         if (!character)
             textNode.textContent = textNode.textContent.substring(0,textNode.textContent.length-1);
         else
@@ -106,6 +113,6 @@ function test()
 </script>
 </head>
 <body>
-<p>Tests that the hint displays properly on a WebInspector.TextPrompt with autocomplete.</p>
+<p>Tests that the hint displays properly on a UI.TextPrompt with autocomplete.</p>
 </body>
 </html>

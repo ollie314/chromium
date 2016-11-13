@@ -33,52 +33,6 @@ var SiteSettingsBehaviorImpl = {
   },
 
   /**
-   * A utility function to lookup a category name from its enum. Note: The
-   * category name is visible to the user as part of the URL.
-   * @param {string} category The category ID to look up.
-   * @return {string} The category found or blank string if not found.
-   * @protected
-   */
-  computeCategoryTextId: function(category) {
-    switch (category) {
-      case settings.ContentSettingsTypes.AUTOMATIC_DOWNLOADS:
-        return 'automatic-downloads';
-      case settings.ContentSettingsTypes.BACKGROUND_SYNC:
-        return 'background-sync';
-      case settings.ContentSettingsTypes.CAMERA:
-        return 'camera';
-      case settings.ContentSettingsTypes.COOKIES:
-        return 'cookies';
-      case settings.ContentSettingsTypes.GEOLOCATION:
-        return 'location';
-      case settings.ContentSettingsTypes.IMAGES:
-        return 'images';
-      case settings.ContentSettingsTypes.JAVASCRIPT:
-        return 'javascript';
-      case settings.ContentSettingsTypes.KEYGEN:
-        return 'keygen';
-      case settings.ContentSettingsTypes.MIC:
-        return 'microphone';
-      case settings.ContentSettingsTypes.NOTIFICATIONS:
-        return 'notifications';
-      case settings.ContentSettingsTypes.PLUGINS:
-        return 'plugins';
-      case settings.ContentSettingsTypes.POPUPS:
-        return 'popups';
-      case settings.ContentSettingsTypes.PROTOCOL_HANDLERS:
-        return 'handlers';
-      case settings.ContentSettingsTypes.UNSANDBOXED_PLUGINS:
-        return 'unsandboxed-plugins';
-      case settings.ContentSettingsTypes.USB_DEVICES:
-        return 'usb-devices';
-      case settings.ContentSettingsTypes.ZOOM_LEVELS:
-        return 'zoom-levels';
-      default:
-        return '';
-    }
-  },
-
-  /**
    * A utility function to lookup the route for a category name.
    * @param {string} category The category ID to look up.
    * @return {!settings.Route}
@@ -232,7 +186,7 @@ var SiteSettingsBehaviorImpl = {
    * @protected
    */
   computeCategoryDesc: function(category, setting, showRecommendation) {
-    var categoryEnabled = this.computeIsSettingEnabled(category, setting);
+    var categoryEnabled = this.computeIsSettingEnabled(setting);
     switch (category) {
       case settings.ContentSettingsTypes.JAVASCRIPT:
         // "Allowed (recommended)" vs "Blocked".
@@ -443,16 +397,12 @@ var SiteSettingsBehaviorImpl = {
 
   /**
    * Returns true if the passed content setting is considered 'enabled'.
-   * @param {string} category
    * @param {string} setting
    * @return {boolean}
    * @private
    */
-  computeIsSettingEnabled: function(category, setting) {
-    // FullScreen is Allow vs. Ask.
-    return category == settings.ContentSettingsTypes.FULLSCREEN ?
-        setting != settings.PermissionValues.ASK :
-        setting != settings.PermissionValues.BLOCK;
+  computeIsSettingEnabled: function(setting) {
+    return setting != settings.PermissionValues.BLOCK;
   },
 
   /**
@@ -483,8 +433,10 @@ var SiteSettingsBehaviorImpl = {
    */
   expandSiteException: function(exception) {
     var origin = exception.origin;
-    var url = this.toUrl(origin);
-    var originForDisplay = url ? this.sanitizePort(url.origin) : origin;
+    // TODO(dschuyler): If orginForDisplay becomes different from origin in the
+    // site settings, that filtering would happen here. If that doesn't happen
+    // then originForDisplay should be removed (it's redundant with origin).
+    // e.g. var originForDisplay = someFilter(origin);
 
     var embeddingOrigin = exception.embeddingOrigin;
     var embeddingOriginForDisplay = '';
@@ -495,7 +447,7 @@ var SiteSettingsBehaviorImpl = {
 
     return {
       origin: origin,
-      originForDisplay: originForDisplay,
+      originForDisplay: origin,
       embeddingOrigin: embeddingOrigin,
       embeddingOriginForDisplay: embeddingOriginForDisplay,
       incognito: exception.incognito,

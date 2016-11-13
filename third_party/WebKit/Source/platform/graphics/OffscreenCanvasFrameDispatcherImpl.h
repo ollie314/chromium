@@ -6,6 +6,7 @@
 #define OffscreenCanvasFrameDispatcherImpl_h
 
 #include "cc/ipc/mojo_compositor_frame_sink.mojom-blink.h"
+#include "cc/output/begin_frame_args.h"
 #include "cc/resources/shared_bitmap.h"
 #include "cc/surfaces/surface_id.h"
 #include "mojo/public/cpp/bindings/binding.h"
@@ -23,7 +24,8 @@ class PLATFORM_EXPORT OffscreenCanvasFrameDispatcherImpl final
   OffscreenCanvasFrameDispatcherImpl(uint32_t clientId,
                                      uint32_t sinkId,
                                      uint32_t localId,
-                                     uint64_t nonce,
+                                     uint64_t nonceHigh,
+                                     uint64_t nonceLow,
                                      int width,
                                      int height);
 
@@ -35,6 +37,7 @@ class PLATFORM_EXPORT OffscreenCanvasFrameDispatcherImpl final
 
   // cc::mojom::blink::MojoCompositorFrameSinkClient implementation.
   void DidReceiveCompositorFrameAck() override;
+  void OnBeginFrame(const cc::BeginFrameArgs&) override;
   void ReclaimResources(const cc::ReturnedResourceArray& resources) override;
 
   // This enum is used in histogram, so it should be append-only.
@@ -56,7 +59,7 @@ class PLATFORM_EXPORT OffscreenCanvasFrameDispatcherImpl final
   HashMap<unsigned, std::unique_ptr<cc::SharedBitmap>> m_sharedBitmaps;
   HashMap<unsigned, GLuint> m_cachedTextureIds;
 
-  bool verifyImageSize(const sk_sp<SkImage>&);
+  bool verifyImageSize(const IntSize);
 
   cc::mojom::blink::MojoCompositorFrameSinkPtr m_sink;
   mojo::Binding<cc::mojom::blink::MojoCompositorFrameSinkClient> m_binding;

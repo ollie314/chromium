@@ -36,7 +36,6 @@
 #include "platform/network/ContentSecurityPolicyParsers.h"
 #include "platform/network/HTTPParsers.h"
 #include "platform/network/ResourceRequest.h"
-#include "platform/weborigin/ReferrerPolicy.h"
 #include "public/platform/WebInsecureRequestPolicy.h"
 #include "wtf/HashSet.h"
 #include "wtf/Vector.h"
@@ -92,12 +91,10 @@ class CORE_EXPORT ContentSecurityPolicy
   static const char FormAction[];
   static const char FrameAncestors[];
   static const char PluginTypes[];
-  static const char ReflectedXSS[];
-  static const char Referrer[];
 
-  // Manifest Directives (to be merged into CSP Level 2)
-  // https://w3c.github.io/manifest/#content-security-policy
+  // CSP Level 3 Directives
   static const char ManifestSrc[];
+  static const char WorkerSrc[];
 
   // Mixed Content Directive
   // https://w3c.github.io/webappsec/specs/mixedcontent/#strict-mode
@@ -185,9 +182,9 @@ class CORE_EXPORT ContentSecurityPolicy
   bool allowObjectFromSource(const KURL&,
                              RedirectStatus = RedirectStatus::NoRedirect,
                              ReportingStatus = SendReport) const;
-  bool allowChildFrameFromSource(const KURL&,
-                                 RedirectStatus = RedirectStatus::NoRedirect,
-                                 ReportingStatus = SendReport) const;
+  bool allowFrameFromSource(const KURL&,
+                            RedirectStatus = RedirectStatus::NoRedirect,
+                            ReportingStatus = SendReport) const;
   bool allowImageFromSource(const KURL&,
                             RedirectStatus = RedirectStatus::NoRedirect,
                             ReportingStatus = SendReport) const;
@@ -277,10 +274,6 @@ class CORE_EXPORT ContentSecurityPolicy
   void usesScriptHashAlgorithms(uint8_t ContentSecurityPolicyHashAlgorithm);
   void usesStyleHashAlgorithms(uint8_t ContentSecurityPolicyHashAlgorithm);
 
-  ReflectedXSSDisposition getReflectedXSSDisposition() const;
-
-  bool didSetReferrerPolicy() const;
-
   void setOverrideAllowInlineStyle(bool);
   void setOverrideURLForSelf(const KURL&);
 
@@ -304,12 +297,10 @@ class CORE_EXPORT ContentSecurityPolicy
   void reportInvalidSandboxFlags(const String&);
   void reportInvalidSourceExpression(const String& directiveName,
                                      const String& source);
-  void reportInvalidReflectedXSS(const String&);
   void reportMissingReportURI(const String&);
   void reportUnsupportedDirective(const String&);
   void reportInvalidInReportOnly(const String&);
   void reportInvalidDirectiveInMeta(const String& directiveName);
-  void reportInvalidReferrer(const String&);
   void reportReportOnlyInMeta(const String&);
   void reportMetaOutsideHead(const String&);
   void reportValueForEmptyDirective(const String& directiveName,
@@ -413,7 +404,6 @@ class CORE_EXPORT ContentSecurityPolicy
 
   // State flags used to configure the environment after parsing a policy.
   SandboxFlags m_sandboxMask;
-  ReferrerPolicy m_referrerPolicy;
   bool m_treatAsPublicAddress;
   String m_disableEvalErrorMessage;
   WebInsecureRequestPolicy m_insecureRequestPolicy;

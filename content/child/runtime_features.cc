@@ -39,7 +39,6 @@ static void SetRuntimeFeatureDefaultsForPlatform() {
   // Android won't be able to reliably support non-persistent notifications, the
   // intended behavior for which is in flux by itself.
   WebRuntimeFeatures::enableNotificationConstructor(false);
-  WebRuntimeFeatures::enableNewMediaPlaybackUi(true);
   // Android does not yet support switching of audio output devices
   WebRuntimeFeatures::enableAudioOutputDevices(false);
 #else
@@ -53,6 +52,12 @@ static void SetRuntimeFeatureDefaultsForPlatform() {
 #if !(defined OS_ANDROID || defined OS_CHROMEOS)
     // Only Android, ChromeOS support NetInfo right now.
     WebRuntimeFeatures::enableNetworkInformation(false);
+#endif
+
+// Web Bluetooth is shipped on Android, ChromeOS & MacOS, experimental
+// otherwise.
+#if defined(OS_CHROMEOS) || defined(OS_ANDROID) || defined(OS_MACOSX)
+  WebRuntimeFeatures::enableWebBluetooth(true);
 #endif
 }
 
@@ -68,9 +73,6 @@ void SetRuntimeFeaturesDefaultsAndUpdateFromArgs(
 
   WebRuntimeFeatures::enableFeaturePolicy(
       base::FeatureList::IsEnabled(features::kFeaturePolicy));
-
-  if (command_line.HasSwitch(switches::kEnableWebBluetooth))
-    WebRuntimeFeatures::enableWebBluetooth(true);
 
   if (!base::FeatureList::IsEnabled(features::kWebUsb))
     WebRuntimeFeatures::enableWebUsb(false);
@@ -190,9 +192,6 @@ void SetRuntimeFeaturesDefaultsAndUpdateFromArgs(
   else
     WebRuntimeFeatures::enableV8IdleTasks(true);
 
-  if (command_line.HasSwitch(switches::kEnableUnsafeES3APIs))
-    WebRuntimeFeatures::enableUnsafeES3APIs(true);
-
   if (command_line.HasSwitch(switches::kEnableWebVR))
     WebRuntimeFeatures::enableWebVR(true);
 
@@ -241,11 +240,6 @@ void SetRuntimeFeaturesDefaultsAndUpdateFromArgs(
   if (command_line.HasSwitch(switches::kEnableSlimmingPaintV2))
     WebRuntimeFeatures::enableSlimmingPaintV2(true);
 
-  // Note that it might already by true for OS_ANDROID, above.  This is for
-  // non-android versions.
-  if (base::FeatureList::IsEnabled(features::kNewMediaPlaybackUi))
-    WebRuntimeFeatures::enableNewMediaPlaybackUi(true);
-
   if (base::FeatureList::IsEnabled(
           features::kNonValidatingReloadOnNormalReload)) {
     WebRuntimeFeatures::enableReloadwithoutSubResourceCacheRevalidation(true);
@@ -253,6 +247,9 @@ void SetRuntimeFeaturesDefaultsAndUpdateFromArgs(
 
   if (base::FeatureList::IsEnabled(features::kDocumentWriteEvaluator))
     WebRuntimeFeatures::enableDocumentWriteEvaluator(true);
+
+  if (base::FeatureList::IsEnabled(features::kLazyParseCSS))
+    WebRuntimeFeatures::enableLazyParseCSS(true);
 
   WebRuntimeFeatures::enableMediaDocumentDownloadButton(
       base::FeatureList::IsEnabled(features::kMediaDocumentDownloadButton));
@@ -312,12 +309,22 @@ void SetRuntimeFeaturesDefaultsAndUpdateFromArgs(
   if (base::FeatureList::IsEnabled(features::kGamepadExtensions))
     WebRuntimeFeatures::enableGamepadExtensions(true);
 
+  if (!base::FeatureList::IsEnabled(features::kCompositeOpaqueFixedPosition))
+    WebRuntimeFeatures::enableFeatureFromString("CompositeOpaqueFixedPosition",
+        false);
+
   if (!base::FeatureList::IsEnabled(features::kCompositeOpaqueScrollers))
     WebRuntimeFeatures::enableFeatureFromString("CompositeOpaqueScrollers",
         false);
 
   if (base::FeatureList::IsEnabled(features::kGenericSensor))
     WebRuntimeFeatures::enableGenericSensor(true);
+
+  // Enable features which VrShell depends on.
+  if (base::FeatureList::IsEnabled(features::kVrShell)) {
+    WebRuntimeFeatures::enableGamepadExtensions(true);
+    WebRuntimeFeatures::enableWebVR(true);
+  }
 
   // Enable explicitly enabled features, and then disable explicitly disabled
   // ones.

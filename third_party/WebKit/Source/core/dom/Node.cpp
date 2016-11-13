@@ -304,7 +304,7 @@ Node* Node::toNode() {
   return this;
 }
 
-short Node::tabIndex() const {
+int Node::tabIndex() const {
   return 0;
 }
 
@@ -388,6 +388,18 @@ Node& Node::treeRoot() const {
 Node* Node::getRootNode(const GetRootNodeOptions& options) const {
   return (options.hasComposed() && options.composed()) ? &shadowIncludingRoot()
                                                        : &treeRoot();
+}
+
+Text* Node::nextTextSibling() const {
+  for (Node* sibling = nextSibling();
+       sibling &&
+       (!sibling->isElementNode() || !toElement(sibling)->layoutObject());
+       sibling = sibling->nextSibling()) {
+    if (sibling->isTextNode()) {
+      return toText(sibling);
+    }
+  }
+  return nullptr;
 }
 
 Node* Node::insertBefore(Node* newChild,
@@ -697,6 +709,17 @@ void Node::markAncestorsWithChildNeedsStyleRecalc() {
   document().scheduleLayoutTreeUpdateIfNeeded();
 }
 
+void Node::markAncestorsWithChildNeedsReattachLayoutTree() {
+  for (ContainerNode* p = parentOrShadowHostNode();
+       p && !p->childNeedsReattachLayoutTree(); p = p->parentOrShadowHostNode())
+    p->setChildNeedsReattachLayoutTree();
+}
+
+void Node::setNeedsReattachLayoutTree() {
+  setFlag(NeedsReattachLayoutTree);
+  markAncestorsWithChildNeedsReattachLayoutTree();
+}
+
 void Node::setNeedsStyleRecalc(StyleChangeType changeType,
                                const StyleChangeReasonForTracing& reason) {
   DCHECK(changeType != NoStyleChange);
@@ -724,8 +747,6 @@ void Node::setNeedsStyleRecalc(StyleChangeType changeType,
 
 void Node::clearNeedsStyleRecalc() {
   m_nodeFlags &= ~StyleChangeMask;
-
-  clearSVGFilterNeedsLayerUpdate();
 
   if (isElementNode() && hasRareData())
     toElement(*this).setAnimationStyleChange(false);
@@ -888,6 +909,7 @@ void Node::attachLayoutTree(const AttachContext&) {
           (layoutObject()->parent() || layoutObject()->isLayoutView())));
 
   clearNeedsStyleRecalc();
+  clearNeedsReattachLayoutTree();
 
   if (AXObjectCache* cache = document().axObjectCache())
     cache->updateCacheAfterNodeIsAttached(this);
@@ -937,9 +959,6 @@ int Node::maxCharacterOffset() const {
 // FIXME: Shouldn't these functions be in the editing code?  Code that asks
 // questions about HTML in the core DOM class is obviously misplaced.
 bool Node::canStartSelection() const {
-  if (isDisabledFormControl(this))
-    return false;
-
   if (hasEditableStyle(*this))
     return true;
 
@@ -972,11 +991,13 @@ bool Node::isStyledElement() const {
 
 bool Node::canParticipateInFlatTree() const {
   // TODO(hayato): Return false for pseudo elements.
-  return !isShadowRoot() && !isSlotOrActiveInsertionPoint();
+  return !isShadowRoot() && !isActiveSlotOrActiveInsertionPoint();
 }
 
-bool Node::isSlotOrActiveInsertionPoint() const {
-  return isHTMLSlotElement(*this) || isActiveInsertionPoint(*this);
+bool Node::isActiveSlotOrActiveInsertionPoint() const {
+  return (isHTMLSlotElement(*this) &&
+          toHTMLSlotElement(*this).supportsDistribution()) ||
+         isActiveInsertionPoint(*this);
 }
 
 AtomicString Node::slotName() const {
@@ -1196,7 +1217,6 @@ const AtomicString& Node::lookupPrefix(const AtomicString& namespaceURI) const {
     case kDocumentTypeNode:
       context = nullptr;
       break;
-    // FIXME: Remove this when Attr no longer extends Node (CR305105)
     case kAttributeNode:
       context = toAttr(this)->ownerElement();
       break;
@@ -1270,6 +1290,10 @@ String Node::textContent(bool convertBRsToNewlines) const {
   if (isCharacterDataNode())
     return toCharacterData(this)->data();
 
+  // Attribute nodes have their attribute values as textContent.
+  if (isAttributeNode())
+    return toAttr(this)->value();
+
   // Documents and non-container nodes (that are not CharacterData)
   // have null textContent.
   if (isDocumentNode() || !isContainerNode())
@@ -1288,6 +1312,7 @@ String Node::textContent(bool convertBRsToNewlines) const {
 
 void Node::setTextContent(const String& text) {
   switch (getNodeType()) {
+    case kAttributeNode:
     case kTextNode:
     case kCdataSectionNode:
     case kCommentNode:
@@ -1318,7 +1343,6 @@ void Node::setTextContent(const String& text) {
       }
       return;
     }
-    case kAttributeNode:
     case kDocumentNode:
     case kDocumentTypeNode:
       // Do nothing.
@@ -1816,8 +1840,8 @@ void Node::didMoveToNewDocument(Document& oldDocument) {
     EventHandlerRegistry::didMoveBetweenFrameHosts(
         *this, oldDocument.frameHost(), document().frameHost());
 
-  if (HeapVector<TraceWrapperMember<MutationObserverRegistration>>* registry =
-          mutationObserverRegistry()) {
+  if (const HeapVector<TraceWrapperMember<MutationObserverRegistration>>*
+          registry = mutationObserverRegistry()) {
     for (size_t i = 0; i < registry->size(); ++i) {
       document().addMutationObserverTypes(registry->at(i)->mutationTypes());
     }
@@ -1889,24 +1913,24 @@ EventTargetData& Node::ensureEventTargetData() {
   return *data;
 }
 
-HeapVector<TraceWrapperMember<MutationObserverRegistration>>*
+const HeapVector<TraceWrapperMember<MutationObserverRegistration>>*
 Node::mutationObserverRegistry() {
   if (!hasRareData())
     return nullptr;
   NodeMutationObserverData* data = rareData()->mutationObserverData();
   if (!data)
     return nullptr;
-  return &data->registry;
+  return &data->registry();
 }
 
-HeapHashSet<Member<MutationObserverRegistration>>*
+const HeapHashSet<TraceWrapperMember<MutationObserverRegistration>>*
 Node::transientMutationObserverRegistry() {
   if (!hasRareData())
     return nullptr;
   NodeMutationObserverData* data = rareData()->mutationObserverData();
   if (!data)
     return nullptr;
-  return &data->transientRegistry;
+  return &data->transientRegistry();
 }
 
 template <typename Registry>
@@ -1961,8 +1985,8 @@ void Node::registerMutationObserver(
     MutationObserverOptions options,
     const HashSet<AtomicString>& attributeFilter) {
   MutationObserverRegistration* registration = nullptr;
-  HeapVector<TraceWrapperMember<MutationObserverRegistration>>& registry =
-      ensureRareData().ensureMutationObserverData().registry;
+  const HeapVector<TraceWrapperMember<MutationObserverRegistration>>& registry =
+      ensureRareData().ensureMutationObserverData().registry();
   for (size_t i = 0; i < registry.size(); ++i) {
     if (&registry[i]->observer() == &observer) {
       registration = registry[i].get();
@@ -1973,8 +1997,7 @@ void Node::registerMutationObserver(
   if (!registration) {
     registration = MutationObserverRegistration::create(observer, this, options,
                                                         attributeFilter);
-    registry.append(
-        TraceWrapperMember<MutationObserverRegistration>(this, registration));
+    ensureRareData().ensureMutationObserverData().addRegistration(registration);
   }
 
   document().addMutationObserverTypes(registration->mutationTypes());
@@ -1982,40 +2005,36 @@ void Node::registerMutationObserver(
 
 void Node::unregisterMutationObserver(
     MutationObserverRegistration* registration) {
-  HeapVector<TraceWrapperMember<MutationObserverRegistration>>* registry =
+  const HeapVector<TraceWrapperMember<MutationObserverRegistration>>* registry =
       mutationObserverRegistry();
   DCHECK(registry);
   if (!registry)
-    return;
-
-  size_t index = registry->find(registration);
-  DCHECK_NE(index, kNotFound);
-  if (index == kNotFound)
     return;
 
   // FIXME: Simplify the registration/transient registration logic to make this
   // understandable by humans.  The explicit dispose() is needed to have the
   // registration object unregister itself promptly.
   registration->dispose();
-  registry->remove(index);
+  ensureRareData().ensureMutationObserverData().removeRegistration(
+      registration);
 }
 
 void Node::registerTransientMutationObserver(
     MutationObserverRegistration* registration) {
-  ensureRareData().ensureMutationObserverData().transientRegistry.add(
+  ensureRareData().ensureMutationObserverData().addTransientRegistration(
       registration);
 }
 
 void Node::unregisterTransientMutationObserver(
     MutationObserverRegistration* registration) {
-  HeapHashSet<Member<MutationObserverRegistration>>* transientRegistry =
-      transientMutationObserverRegistry();
+  const HeapHashSet<TraceWrapperMember<MutationObserverRegistration>>*
+      transientRegistry = transientMutationObserverRegistry();
   DCHECK(transientRegistry);
   if (!transientRegistry)
     return;
 
-  DCHECK(transientRegistry->contains(registration));
-  transientRegistry->remove(registration);
+  ensureRareData().ensureMutationObserverData().removeTransientRegistration(
+      registration);
 }
 
 void Node::notifyMutationObserversNodeWillDetach() {
@@ -2024,15 +2043,15 @@ void Node::notifyMutationObserversNodeWillDetach() {
 
   ScriptForbiddenScope forbidScriptDuringRawIteration;
   for (Node* node = parentNode(); node; node = node->parentNode()) {
-    if (HeapVector<TraceWrapperMember<MutationObserverRegistration>>* registry =
-            node->mutationObserverRegistry()) {
+    if (const HeapVector<TraceWrapperMember<MutationObserverRegistration>>*
+            registry = node->mutationObserverRegistry()) {
       const size_t size = registry->size();
       for (size_t i = 0; i < size; ++i)
         registry->at(i)->observedSubtreeNodeWillDetach(*this);
     }
 
-    if (HeapHashSet<Member<MutationObserverRegistration>>* transientRegistry =
-            node->transientMutationObserverRegistry()) {
+    if (const HeapHashSet<TraceWrapperMember<MutationObserverRegistration>>*
+            transientRegistry = node->transientMutationObserverRegistry()) {
       for (auto& registration : *transientRegistry)
         registration->observedSubtreeNodeWillDetach(*this);
     }
@@ -2074,14 +2093,15 @@ void Node::dispatchSubtreeModifiedEvent() {
 }
 
 DispatchEventResult Node::dispatchDOMActivateEvent(int detail,
-                                                   Event* underlyingEvent) {
+                                                   Event& underlyingEvent) {
 #if DCHECK_IS_ON()
   DCHECK(!EventDispatchForbiddenScope::isEventDispatchForbidden());
 #endif
   UIEvent* event = UIEvent::create();
   event->initUIEvent(EventTypeNames::DOMActivate, true, true,
                      document().domWindow(), detail);
-  event->setUnderlyingEvent(underlyingEvent);
+  event->setUnderlyingEvent(&underlyingEvent);
+  event->setComposed(underlyingEvent.composed());
   dispatchScopedEvent(event);
 
   // TODO(dtapuska): Dispatching scoped events shouldn't check the return
@@ -2125,7 +2145,7 @@ void Node::defaultEventHandler(Event* event) {
   } else if (eventType == EventTypeNames::click) {
     int detail =
         event->isUIEvent() ? static_cast<UIEvent*>(event)->detail() : 0;
-    if (dispatchDOMActivateEvent(detail, event) !=
+    if (dispatchDOMActivateEvent(detail, *event) !=
         DispatchEventResult::NotCanceled)
       event->setDefaultHandled();
   } else if (eventType == EventTypeNames::contextmenu) {
@@ -2345,7 +2365,7 @@ void Node::setV0CustomElementState(V0CustomElementState newState) {
     toElement(this)->pseudoStateChanged(CSSSelector::PseudoUnresolved);
 }
 
-void Node::checkSlotChange() {
+void Node::checkSlotChange(SlotChangeType slotChangeType) {
   // Common check logic is used in both cases, "after inserted" and "before
   // removed".
   if (!isSlotable())
@@ -2362,7 +2382,7 @@ void Node::checkSlotChange() {
     // Although DOM Standard requires "assign a slot for node / run assign
     // slotables" at this timing, we skip it as an optimization.
     if (HTMLSlotElement* slot = root->ensureSlotAssignment().findSlot(*this))
-      slot->enqueueSlotChangeEvent();
+      slot->didSlotChange(slotChangeType);
   } else {
     // Relevant DOM Standard:
     // https://dom.spec.whatwg.org/#concept-node-insert
@@ -2374,9 +2394,10 @@ void Node::checkSlotChange() {
     Element* parent = parentElement();
     if (parent && isHTMLSlotElement(parent)) {
       HTMLSlotElement& parentSlot = toHTMLSlotElement(*parent);
+      // TODO(hayato): Support slotchange for slots in non-shadow trees.
       if (ShadowRoot* root = containingShadowRoot()) {
         if (root && root->isV1() && !parentSlot.hasAssignedNodesSlow())
-          parentSlot.enqueueSlotChangeEvent();
+          parentSlot.didSlotChange(slotChangeType);
       }
     }
   }
@@ -2396,9 +2417,9 @@ DEFINE_TRACE(Node) {
 }
 
 DEFINE_TRACE_WRAPPERS(Node) {
-  visitor->traceWrappers(parentOrShadowHostOrTemplateHostNode());
-  visitor->traceWrappers(m_previous);
-  visitor->traceWrappers(m_next);
+  visitor->traceWrappersWithManualWriteBarrier(m_parentOrShadowHostNode);
+  visitor->traceWrappersWithManualWriteBarrier(m_previous);
+  visitor->traceWrappersWithManualWriteBarrier(m_next);
   if (hasRareData())
     visitor->traceWrappers(rareData());
   EventTarget::traceWrappers(visitor);

@@ -7,6 +7,7 @@ package org.chromium.components.variations.firstrun;
 import android.app.IntentService;
 import android.content.Intent;
 import android.os.SystemClock;
+import android.support.v4.content.LocalBroadcastManager;
 
 import org.chromium.base.Log;
 import org.chromium.base.metrics.CachedMetrics.SparseHistogramSample;
@@ -18,6 +19,7 @@ import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.SocketTimeoutException;
 import java.net.URL;
+import java.net.UnknownHostException;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -25,6 +27,9 @@ import java.util.concurrent.TimeUnit;
  */
 public class VariationsSeedService extends IntentService {
     private static final String TAG = "VariationsSeedServ";
+
+    public static final String COMPLETE_BROADCAST = "VariationsseedService.Complete";
+
     private static final String VARIATIONS_SERVER_URL =
             "https://clientservices.googleapis.com/chrome-variations/seed?osname=android";
     private static final int BUFFER_SIZE = 4096;
@@ -34,6 +39,7 @@ public class VariationsSeedService extends IntentService {
     // Values for the "Variations.FirstRun.SeedFetchResult" sparse histogram, which also logs
     // HTTP result codes. These are negative so that they don't conflict with the HTTP codes.
     // These values should not be renumbered or re-used since they are logged to UMA.
+    private static final int SEED_FETCH_RESULT_UNKNOWN_HOST_EXCEPTION = -3;
     private static final int SEED_FETCH_RESULT_TIMEOUT = -2;
     private static final int SEED_FETCH_RESULT_IOEXCEPTION = -1;
 
@@ -51,6 +57,7 @@ public class VariationsSeedService extends IntentService {
         // or seed has been successfully stored on the C++ side.
         if (sFetchInProgress || VariationsSeedBridge.hasJavaPref(getApplicationContext())
                 || VariationsSeedBridge.hasNativePref(getApplicationContext())) {
+            broadcastCompleteIntent();
             return;
         }
         setFetchInProgressFlagValue(true);
@@ -58,7 +65,12 @@ public class VariationsSeedService extends IntentService {
             downloadContent();
         } finally {
             setFetchInProgressFlagValue(false);
+            broadcastCompleteIntent();
         }
+    }
+
+    private void broadcastCompleteIntent() {
+        LocalBroadcastManager.getInstance(this).sendBroadcast(new Intent(COMPLETE_BROADCAST));
     }
 
     // Separate function is needed to avoid FINDBUGS build error (assigning value to static variable
@@ -111,6 +123,10 @@ public class VariationsSeedService extends IntentService {
         } catch (SocketTimeoutException e) {
             recordFetchResultOrCode(SEED_FETCH_RESULT_TIMEOUT);
             Log.w(TAG, "SocketTimeoutException fetching first run seed: ", e);
+            return false;
+        } catch (UnknownHostException e) {
+            recordFetchResultOrCode(SEED_FETCH_RESULT_UNKNOWN_HOST_EXCEPTION);
+            Log.w(TAG, "UnknownHostException fetching first run seed: ", e);
             return false;
         } catch (IOException e) {
             recordFetchResultOrCode(SEED_FETCH_RESULT_IOEXCEPTION);

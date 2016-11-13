@@ -27,8 +27,8 @@
 #include <string>
 
 #include "base/bind.h"
-#include "base/command_line.h"
 #include "base/containers/hash_tables.h"
+#include "base/feature_list.h"
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
 #include "base/single_thread_task_runner.h"
@@ -87,6 +87,10 @@ std::string GetOutErrorMessage(MMRESULT result) {
 
 std::string MmversionToString(MMVERSION version) {
   return base::StringPrintf("%d.%d", HIBYTE(version), LOBYTE(version));
+}
+
+void CloseOutputPortOnTaskThread(HMIDIOUT midi_out_handle) {
+  midiOutClose(midi_out_handle);
 }
 
 class MIDIHDRDeleter {
@@ -828,8 +832,11 @@ class MidiServiceWinImpl : public MidiServiceWin,
         make_scoped_refptr(new MidiOutputDeviceState(MidiDeviceInfo(caps)));
     state->midi_handle = midi_out_handle;
     const auto& state_device_info = state->device_info;
-    if (IsUnsupportedDevice(state_device_info))
+    if (IsUnsupportedDevice(state_device_info)) {
+      task_thread_.task_runner()->PostTask(
+          FROM_HERE, base::Bind(&CloseOutputPortOnTaskThread, midi_out_handle));
       return;
+    }
     bool add_new_port = false;
     uint32_t port_number = 0;
     {
@@ -1194,8 +1201,7 @@ void MidiManagerWin::OnReceiveMidiData(uint32_t port_index,
 }
 
 MidiManager* MidiManager::Create() {
-  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kDisableWinrtMidiApi) &&
+  if (base::FeatureList::IsEnabled(features::kMidiManagerWinrt) &&
       base::win::GetVersion() >= base::win::VERSION_WIN10)
     return new MidiManagerWinrt();
   return new MidiManagerWin();

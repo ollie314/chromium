@@ -53,7 +53,7 @@
 #include "components/sync/syncable/syncable_write_transaction.h"
 #include "components/sync/syncable/write_node.h"
 #include "components/sync/syncable/write_transaction.h"
-#include "components/syncable_prefs/pref_service_syncable.h"
+#include "components/sync_preferences/pref_service_syncable.h"
 #include "components/version_info/version_info.h"
 #include "components/webdata/common/web_database.h"
 #include "components/webdata_services/web_data_service_test_util.h"
@@ -240,7 +240,7 @@ class TokenWebDataServiceFake : public TokenWebData {
       WebDataServiceConsumer* consumer) override {
     // TODO(tim): It would be nice if WebDataService was injected on
     // construction of ProfileOAuth2TokenService rather than fetched by
-    // Initialize so that this isn't necessary (we could pass a NULL service).
+    // Initialize so that this isn't necessary (we could pass a null service).
     // We currently do return it via EXPECT_CALLs, but without depending on
     // order-of-initialization (which seems way more fragile) we can't tell
     // which component is asking at what time, and some components in these
@@ -260,9 +260,9 @@ class WebDataServiceFake : public AutofillWebDataService {
       const scoped_refptr<base::SingleThreadTaskRunner>& ui_thread,
       const scoped_refptr<base::SingleThreadTaskRunner>& db_thread)
       : AutofillWebDataService(ui_thread, db_thread),
-        web_database_(NULL),
-        autocomplete_syncable_service_(NULL),
-        autofill_profile_syncable_service_(NULL),
+        web_database_(nullptr),
+        autocomplete_syncable_service_(nullptr),
+        autofill_profile_syncable_service_(nullptr),
         syncable_service_created_or_destroyed_(
             base::WaitableEvent::ResetPolicy::AUTOMATIC,
             base::WaitableEvent::InitialState::NOT_SIGNALED),
@@ -350,8 +350,8 @@ class WebDataServiceFake : public AutofillWebDataService {
 
   void DestroySyncableService() {
     ASSERT_TRUE(db_thread_->RunsTasksOnCurrentThread());
-    autocomplete_syncable_service_ = NULL;
-    autofill_profile_syncable_service_ = NULL;
+    autocomplete_syncable_service_ = nullptr;
+    autofill_profile_syncable_service_ = nullptr;
     backend_.reset();
     syncable_service_created_or_destroyed_.Signal();
   }
@@ -848,8 +848,8 @@ TEST_F(ProfileSyncServiceAutofillTest, HasNativeEntriesEmptySync) {
   std::vector<AutofillEntry> sync_entries;
   std::vector<AutofillProfile> sync_profiles;
   ASSERT_TRUE(GetAutofillEntriesFromSyncDB(&sync_entries, &sync_profiles));
-  ASSERT_EQ(1U, entries.size());
-  EXPECT_TRUE(entries[0] == sync_entries[0]);
+  ASSERT_EQ(1U, sync_entries.size());
+  EXPECT_EQ(entries[0], sync_entries[0]);
   EXPECT_EQ(0U, sync_profiles.size());
 }
 
@@ -931,7 +931,7 @@ TEST_F(ProfileSyncServiceAutofillTest, HasNativeHasSyncNoMerge) {
   std::set<AutofillEntry> new_sync_entries_set(new_sync_entries.begin(),
                                                new_sync_entries.end());
 
-  EXPECT_TRUE(expected_entries == new_sync_entries_set);
+  EXPECT_EQ(expected_entries, new_sync_entries_set);
 }
 
 TEST_F(ProfileSyncServiceAutofillTest, HasNativeHasSyncMergeEntry) {
@@ -960,7 +960,7 @@ TEST_F(ProfileSyncServiceAutofillTest, HasNativeHasSyncMergeEntry) {
   ASSERT_TRUE(
       GetAutofillEntriesFromSyncDB(&new_sync_entries, &new_sync_profiles));
   ASSERT_EQ(1U, new_sync_entries.size());
-  EXPECT_TRUE(merged_entry == new_sync_entries[0]);
+  EXPECT_EQ(merged_entry, new_sync_entries[0]);
 }
 
 TEST_F(ProfileSyncServiceAutofillTest, HasNativeHasSyncMergeProfile) {
@@ -1326,7 +1326,7 @@ TEST_F(ProfileSyncServiceAutofillTest, ProcessUserChangeAddEntry) {
   ASSERT_TRUE(
       GetAutofillEntriesFromSyncDB(&new_sync_entries, &new_sync_profiles));
   ASSERT_EQ(1U, new_sync_entries.size());
-  EXPECT_TRUE(added_entry == new_sync_entries[0]);
+  EXPECT_EQ(added_entry, new_sync_entries[0]);
 }
 
 TEST_F(ProfileSyncServiceAutofillTest, ProcessUserChangeAddProfile) {
@@ -1383,7 +1383,7 @@ TEST_F(ProfileSyncServiceAutofillTest, ProcessUserChangeUpdateEntry) {
   ASSERT_TRUE(
       GetAutofillEntriesFromSyncDB(&new_sync_entries, &new_sync_profiles));
   ASSERT_EQ(1U, new_sync_entries.size());
-  EXPECT_TRUE(updated_entry == new_sync_entries[0]);
+  EXPECT_EQ(updated_entry, new_sync_entries[0]);
 }
 
 TEST_F(ProfileSyncServiceAutofillTest, ProcessUserChangeRemoveEntry) {
@@ -1439,7 +1439,7 @@ TEST_F(ProfileSyncServiceAutofillTest, ProcessUserChangeRemoveProfile) {
   ASSERT_TRUE(add_autofill.success());
 
   AutofillProfileChange change(AutofillProfileChange::REMOVE,
-                               sync_profile.guid(), NULL);
+                               sync_profile.guid(), nullptr);
   web_data_service()->OnAutofillProfileChanged(change);
 
   std::vector<AutofillProfile> new_sync_profiles;

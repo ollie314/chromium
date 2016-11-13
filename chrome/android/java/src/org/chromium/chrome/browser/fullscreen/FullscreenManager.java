@@ -45,12 +45,12 @@ public abstract class FullscreenManager {
     }
 
     /**
-     * Trigger a temporary showing of the top controls.
+     * Trigger a temporary showing of the browser controls.
      */
     public abstract void showControlsTransient();
 
     /**
-     * Trigger a permanent showing of the top controls until requested otherwise.
+     * Trigger a permanent showing of the browser controls until requested otherwise.
      *
      * @return The token that determines whether the requester still needs persistent controls to
      *         be present on the screen.
@@ -68,7 +68,7 @@ public abstract class FullscreenManager {
     public abstract int showControlsPersistentAndClearOldToken(int oldToken);
 
     /**
-     * Notify the manager that the top controls are no longer required for the given token.
+     * Notify the manager that the browser controls are no longer required for the given token.
      *
      * @param token The fullscreen token returned from {@link #showControlsPersistent()}.
      */
@@ -100,19 +100,21 @@ public abstract class FullscreenManager {
     }
 
     /**
-     * Updates the positions of the top controls and content to the default non fullscreen
+     * Updates the positions of the browser controls and content to the default non fullscreen
      * values.
      */
     public abstract void setPositionsForTabToNonFullscreen();
 
     /**
-     * Updates the positions of the top controls and content based on the desired position of
+     * Updates the positions of the browser controls and content based on the desired position of
      * the current tab.
      *
-     * @param controlsOffset The Y offset of the top controls.
-     * @param contentOffset The Y offset for the content.
+     * @param topControlsOffset The Y offset of the top controls.
+     * @param bottomControlsOffset The Y offset of the bottom controls.
+     * @param topContentOffset The Y offset for the content.
      */
-    public abstract void setPositionsForTab(float controlsOffset, float contentOffset);
+    public abstract void setPositionsForTab(float topControlsOffset, float bottomControlsOffset,
+            float topContentOffset);
 
     /**
      * Updates the current ContentView's children and any popups with the correct offsets based on
@@ -143,7 +145,7 @@ public abstract class FullscreenManager {
     }
 
     /**
-     * Enters or exits persistent fullscreen mode.  In this mode, the top controls will be
+     * Enters or exits persistent fullscreen mode.  In this mode, the browser controls will be
      * permanently hidden until this mode is exited.
      *
      * @param enabled Whether to enable persistent fullscreen mode.

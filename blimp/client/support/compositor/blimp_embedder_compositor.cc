@@ -51,6 +51,10 @@ class DisplayOutputSurface : public cc::OutputSurface {
   ~DisplayOutputSurface() override = default;
 
   // cc::OutputSurface implementation
+  void BindToClient(cc::OutputSurfaceClient* client) override {
+    client_ = client;
+  }
+
   void EnsureBackbuffer() override {}
   void DiscardBackbuffer() override {
     context_provider()->ContextGL()->DiscardBackbufferCHROMIUM();
@@ -90,6 +94,7 @@ class DisplayOutputSurface : public cc::OutputSurface {
  private:
   void SwapBuffersCallback() { client_->DidReceiveSwapBuffersAck(); }
 
+  cc::OutputSurfaceClient* client_ = nullptr;
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
   base::WeakPtrFactory<DisplayOutputSurface> weak_ptr_factory_;
 
@@ -110,15 +115,15 @@ BlimpEmbedderCompositor::BlimpEmbedderCompositor(
   compositor_dependencies_->GetSurfaceManager()->RegisterFrameSinkId(
       frame_sink_id_);
 
+  animation_host_ = cc::AnimationHost::CreateMainInstance();
+
   cc::LayerTreeHostInProcess::InitParams params;
   params.client = this;
-  params.gpu_memory_buffer_manager =
-      compositor_dependencies_->GetGpuMemoryBufferManager();
   params.task_graph_runner = g_task_graph_runner.Pointer();
   cc::LayerTreeSettings settings;
   params.settings = &settings;
   params.main_task_runner = base::ThreadTaskRunnerHandle::Get();
-  params.animation_host = cc::AnimationHost::CreateMainInstance();
+  params.mutator_host = animation_host_.get();
   host_ = cc::LayerTreeHostInProcess::CreateSingleThreaded(this, &params);
 
   root_layer_->SetBackgroundColor(SK_ColorWHITE);
@@ -194,9 +199,11 @@ void BlimpEmbedderCompositor::HandlePendingCompositorFrameSinkRequest() {
     return;
 
   DCHECK(context_provider_);
+  context_provider_->BindToCurrentThread();
 
   gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager =
       compositor_dependencies_->GetGpuMemoryBufferManager();
+  cc::SharedBitmapManager* shared_bitmap_manager = nullptr;
 
   auto task_runner = base::ThreadTaskRunnerHandle::Get();
   auto display_output_surface =
@@ -210,9 +217,10 @@ void BlimpEmbedderCompositor::HandlePendingCompositorFrameSinkRequest() {
       display_output_surface->capabilities().max_frames_pending));
 
   display_ = base::MakeUnique<cc::Display>(
-      nullptr /*shared_bitmap_manager*/, gpu_memory_buffer_manager,
-      host_->GetSettings().renderer_settings, std::move(begin_frame_source),
-      std::move(display_output_surface), std::move(scheduler),
+      shared_bitmap_manager, gpu_memory_buffer_manager,
+      host_->GetSettings().renderer_settings, frame_sink_id_,
+      std::move(begin_frame_source), std::move(display_output_surface),
+      std::move(scheduler),
       base::MakeUnique<cc::TextureMailboxDeleter>(task_runner.get()));
   display_->SetVisible(true);
   display_->Resize(viewport_size_in_px_);
@@ -220,7 +228,8 @@ void BlimpEmbedderCompositor::HandlePendingCompositorFrameSinkRequest() {
   // The Browser compositor and display share the same context provider.
   auto compositor_frame_sink = base::MakeUnique<cc::DirectCompositorFrameSink>(
       frame_sink_id_, compositor_dependencies_->GetSurfaceManager(),
-      display_.get(), context_provider_, nullptr);
+      display_.get(), context_provider_, nullptr, gpu_memory_buffer_manager,
+      shared_bitmap_manager);
 
   host_->SetCompositorFrameSink(std::move(compositor_frame_sink));
 }

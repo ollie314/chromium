@@ -33,6 +33,7 @@
 #include "content/browser/accessibility/browser_accessibility_state_impl.h"
 #include "content/browser/bad_message.h"
 #include "content/browser/browser_plugin/browser_plugin_guest.h"
+#include "content/browser/child_process_security_policy_impl.h"
 #include "content/browser/gpu/compositor_util.h"
 #include "content/browser/renderer_host/dip_util.h"
 #include "content/browser/renderer_host/frame_metadata_util.h"
@@ -44,6 +45,8 @@
 #include "content/browser/renderer_host/input/timeout_monitor.h"
 #include "content/browser/renderer_host/input/touch_emulator.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
+#include "content/browser/renderer_host/render_view_host_delegate.h"
+#include "content/browser/renderer_host/render_view_host_delegate_view.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/renderer_host/render_widget_helper.h"
 #include "content/browser/renderer_host/render_widget_host_input_event_router.h"
@@ -53,12 +56,14 @@
 #include "content/common/content_constants_internal.h"
 #include "content/common/content_switches_internal.h"
 #include "content/common/cursors/webcursor.h"
+#include "content/common/drag_messages.h"
 #include "content/common/frame_messages.h"
 #include "content/common/host_shared_bitmap_manager.h"
 #include "content/common/input_messages.h"
 #include "content/common/resize_params.h"
 #include "content/common/text_input_state.h"
 #include "content/common/view_messages.h"
+#include "content/public/browser/browser_context.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
@@ -71,15 +76,19 @@
 #include "gpu/GLES2/gl2extchromium.h"
 #include "gpu/command_buffer/service/gpu_switches.h"
 #include "gpu/ipc/common/gpu_messages.h"
+#include "net/base/filename_util.h"
 #include "skia/ext/image_operations.h"
 #include "skia/ext/platform_canvas.h"
+#include "storage/browser/fileapi/isolated_context.h"
 #include "third_party/WebKit/public/web/WebCompositionUnderline.h"
+#include "ui/base/clipboard/clipboard.h"
 #include "ui/events/blink/web_input_event_traits.h"
 #include "ui/events/event.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 #include "ui/gfx/color_space.h"
 #include "ui/gfx/geometry/size_conversions.h"
 #include "ui/gfx/geometry/vector2d_conversions.h"
+#include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/skbitmap_operations.h"
 #include "ui/snapshot/snapshot.h"
 
@@ -91,6 +100,7 @@
 using base::Time;
 using base::TimeDelta;
 using base::TimeTicks;
+using blink::WebDragOperationsMask;
 using blink::WebGestureEvent;
 using blink::WebInputEvent;
 using blink::WebKeyboardEvent;
@@ -176,6 +186,56 @@ inline blink::WebGestureEvent CreateScrollEndForWrapping(
   return wrap_gesture_scroll_end;
 }
 
+std::vector<DropData::Metadata> DropDataToMetaData(const DropData& drop_data) {
+  std::vector<DropData::Metadata> metadata;
+  if (!drop_data.text.is_null()) {
+    metadata.push_back(DropData::Metadata::CreateForMimeType(
+        DropData::Kind::STRING,
+        base::ASCIIToUTF16(ui::Clipboard::kMimeTypeText)));
+  }
+
+  if (drop_data.url.is_valid()) {
+    metadata.push_back(DropData::Metadata::CreateForMimeType(
+        DropData::Kind::STRING,
+        base::ASCIIToUTF16(ui::Clipboard::kMimeTypeURIList)));
+  }
+
+  if (!drop_data.html.is_null()) {
+    metadata.push_back(DropData::Metadata::CreateForMimeType(
+        DropData::Kind::STRING,
+        base::ASCIIToUTF16(ui::Clipboard::kMimeTypeHTML)));
+  }
+
+  // On Aura, filenames are available before drop.
+  for (const auto& file_info : drop_data.filenames) {
+    if (!file_info.path.empty()) {
+      metadata.push_back(DropData::Metadata::CreateForFilePath(file_info.path));
+    }
+  }
+
+  // On Android, only files' mime types are available before drop.
+  for (const auto& mime_type : drop_data.file_mime_types) {
+    if (!mime_type.empty()) {
+      metadata.push_back(DropData::Metadata::CreateForMimeType(
+          DropData::Kind::FILENAME, mime_type));
+    }
+  }
+
+  for (const auto& file_system_file : drop_data.file_system_files) {
+    if (!file_system_file.url.is_empty()) {
+      metadata.push_back(
+          DropData::Metadata::CreateForFileSystemUrl(file_system_file.url));
+    }
+  }
+
+  for (const auto& custom_data_item : drop_data.custom_data) {
+    metadata.push_back(DropData::Metadata::CreateForMimeType(
+        DropData::Kind::STRING, custom_data_item.first));
+  }
+
+  return metadata;
+}
+
 }  // namespace
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -205,7 +265,7 @@ RenderWidgetHostImpl::RenderWidgetHostImpl(RenderWidgetHostDelegate* delegate,
       text_direction_updated_(false),
       text_direction_(blink::WebTextDirectionLeftToRight),
       text_direction_canceled_(false),
-      suppress_next_char_events_(false),
+      suppress_events_until_keydown_(false),
       pending_mouse_lock_request_(false),
       allow_privileged_mouse_lock_(false),
       has_touch_handler_(false),
@@ -341,12 +401,6 @@ void RenderWidgetHostImpl::SetView(RenderWidgetHostViewBase* view) {
     view_.reset();
   }
 
-  // If the renderer has not yet been initialized, then the surface ID
-  // namespace will be sent during initialization.
-  if (view_ && renderer_initialized_) {
-    Send(new ViewMsg_SetFrameSinkId(routing_id_, view_->GetFrameSinkId()));
-  }
-
   synthetic_gesture_controller_.reset();
 }
 
@@ -393,8 +447,8 @@ void RenderWidgetHostImpl::SendScreenRects() {
   waiting_for_screen_rects_ack_ = true;
 }
 
-void RenderWidgetHostImpl::SuppressNextCharEvents() {
-  suppress_next_char_events_ = true;
+void RenderWidgetHostImpl::SuppressEventsUntilKeyDown() {
+  suppress_events_until_keydown_ = true;
 }
 
 void RenderWidgetHostImpl::FlushInput() {
@@ -412,12 +466,6 @@ void RenderWidgetHostImpl::Init() {
   DCHECK(process_->HasConnection());
 
   renderer_initialized_ = true;
-
-  // If the RWHV has not yet been set, the surface ID namespace will get
-  // passed down by the call to SetView().
-  if (view_) {
-    Send(new ViewMsg_SetFrameSinkId(routing_id_, view_->GetFrameSinkId()));
-  }
 
   SendScreenRects();
   WasResized();
@@ -496,6 +544,7 @@ bool RenderWidgetHostImpl::OnMessageReceived(const IPC::Message &msg) {
     IPC_MESSAGE_HANDLER(ViewHostMsg_ForwardCompositorProto,
                         OnForwardCompositorProto)
     IPC_MESSAGE_HANDLER(ViewHostMsg_SetNeedsBeginFrames, OnSetNeedsBeginFrames)
+    IPC_MESSAGE_HANDLER(DragHostMsg_StartDragging, OnStartDragging)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
 
@@ -556,14 +605,7 @@ void RenderWidgetHostImpl::WasShown(const ui::LatencyInfo& latency_info) {
   is_hidden_ = false;
 
   SendScreenRects();
-
-  // When hidden, timeout monitoring for input events is disabled. Restore it
-  // now to ensure consistent hang detection.
-  if (in_flight_event_count_) {
-    RestartHangMonitorTimeout();
-    hang_monitor_reason_ =
-        RendererUnresponsiveType::RENDERER_UNRESPONSIVE_IN_FLIGHT_EVENTS;
-  }
+  RestartHangMonitorTimeoutIfNecessary();
 
   // Always repaint on restore.
   bool needs_repainting = true;
@@ -616,8 +658,8 @@ bool RenderWidgetHostImpl::GetResizeParams(ResizeParams* resize_params) {
     // ScaleToCeiledSize(new_size, device_scale_factor) ??
     resize_params->physical_backing_size = view_->GetPhysicalBackingSize();
     resize_params->top_controls_height = view_->GetTopControlsHeight();
-    resize_params->top_controls_shrink_blink_size =
-        view_->DoTopControlsShrinkBlinkSize();
+    resize_params->browser_controls_shrink_blink_size =
+        view_->DoBrowserControlsShrinkBlinkSize();
     resize_params->bottom_controls_height = view_->GetBottomControlsHeight();
     resize_params->visible_viewport_size = view_->GetVisibleViewportSize();
   }
@@ -627,7 +669,8 @@ bool RenderWidgetHostImpl::GetResizeParams(ResizeParams* resize_params) {
       old_resize_params_->new_size != resize_params->new_size ||
       (old_resize_params_->physical_backing_size.IsEmpty() &&
        !resize_params->physical_backing_size.IsEmpty());
-  bool dirty = size_changed ||
+  bool dirty =
+      size_changed ||
       old_resize_params_->screen_info != resize_params->screen_info ||
       old_resize_params_->physical_backing_size !=
           resize_params->physical_backing_size ||
@@ -636,8 +679,8 @@ bool RenderWidgetHostImpl::GetResizeParams(ResizeParams* resize_params) {
       old_resize_params_->display_mode != resize_params->display_mode ||
       old_resize_params_->top_controls_height !=
           resize_params->top_controls_height ||
-      old_resize_params_->top_controls_shrink_blink_size !=
-          resize_params->top_controls_shrink_blink_size ||
+      old_resize_params_->browser_controls_shrink_blink_size !=
+          resize_params->browser_controls_shrink_blink_size ||
       old_resize_params_->bottom_controls_height !=
           resize_params->bottom_controls_height ||
       old_resize_params_->visible_viewport_size !=
@@ -915,9 +958,17 @@ void RenderWidgetHostImpl::StartHangMonitorTimeout(
   hang_monitor_reason_ = hang_monitor_reason;
 }
 
-void RenderWidgetHostImpl::RestartHangMonitorTimeout() {
-  if (hang_monitor_timeout_)
+void RenderWidgetHostImpl::RestartHangMonitorTimeoutIfNecessary() {
+  if (!hang_monitor_timeout_)
+    return;
+  if (in_flight_event_count_ > 0 && !is_hidden_) {
+    if (hang_monitor_reason_ ==
+        RendererUnresponsiveType::RENDERER_UNRESPONSIVE_UNKNOWN) {
+      hang_monitor_reason_ =
+          RendererUnresponsiveType::RENDERER_UNRESPONSIVE_IN_FLIGHT_EVENTS;
+    }
     hang_monitor_timeout_->Restart(hung_renderer_delay_);
+  }
 }
 
 void RenderWidgetHostImpl::DisableHangMonitorForTesting() {
@@ -1128,10 +1179,10 @@ void RenderWidgetHostImpl::ForwardKeyboardEvent(
   // First, let keypress listeners take a shot at handling the event.  If a
   // listener handles the event, it should not be propagated to the renderer.
   if (KeyPressListenersHandleEvent(key_event)) {
-    // Some keypresses that are accepted by the listener might have follow up
-    // char events, which should be ignored.
+    // Some keypresses that are accepted by the listener may be followed by Char
+    // and KeyUp events, which should be ignored.
     if (key_event.type == WebKeyboardEvent::RawKeyDown)
-      suppress_next_char_events_ = true;
+      suppress_events_until_keydown_ = true;
     return;
   }
 
@@ -1140,27 +1191,28 @@ void RenderWidgetHostImpl::ForwardKeyboardEvent(
   if (!WebInputEvent::isKeyboardEventType(key_event.type))
     return;
 
-  if (suppress_next_char_events_) {
-    // If preceding RawKeyDown event was handled by the browser, then we need
-    // suppress all Char events generated by it. Please note that, one
-    // RawKeyDown event may generate multiple Char events, so we can't reset
-    // |suppress_next_char_events_| until we get a KeyUp or a RawKeyDown.
-    if (key_event.type == WebKeyboardEvent::Char)
+  if (suppress_events_until_keydown_) {
+    // If the preceding RawKeyDown event was handled by the browser, then we
+    // need to suppress all events generated by it until the next RawKeyDown or
+    // KeyDown event.
+    if (key_event.type == WebKeyboardEvent::KeyUp ||
+        key_event.type == WebKeyboardEvent::Char)
       return;
-    // We get a KeyUp or a RawKeyDown event.
-    suppress_next_char_events_ = false;
+    DCHECK(key_event.type == WebKeyboardEvent::RawKeyDown ||
+           key_event.type == WebKeyboardEvent::KeyDown);
+    suppress_events_until_keydown_ = false;
   }
 
   bool is_shortcut = false;
 
   // Only pre-handle the key event if it's not handled by the input method.
   if (delegate_ && !key_event.skip_in_browser) {
-    // We need to set |suppress_next_char_events_| to true if
+    // We need to set |suppress_events_until_keydown_| to true if
     // PreHandleKeyboardEvent() returns true, but |this| may already be
-    // destroyed at that time. So set |suppress_next_char_events_| true here,
-    // then revert it afterwards when necessary.
+    // destroyed at that time. So set |suppress_events_until_keydown_| true
+    // here, then revert it afterwards when necessary.
     if (key_event.type == WebKeyboardEvent::RawKeyDown)
-      suppress_next_char_events_ = true;
+      suppress_events_until_keydown_ = true;
 
     // Tab switching/closing accelerators aren't sent to the renderer to avoid
     // a hung/malicious renderer from interfering.
@@ -1168,7 +1220,7 @@ void RenderWidgetHostImpl::ForwardKeyboardEvent(
       return;
 
     if (key_event.type == WebKeyboardEvent::RawKeyDown)
-      suppress_next_char_events_ = false;
+      suppress_events_until_keydown_ = false;
   }
 
   if (touch_emulator_ && touch_emulator_->HandleKeyboardEvent(key_event))
@@ -1280,6 +1332,61 @@ void RenderWidgetHostImpl::HandleCompositorProto(
   Send(new ViewMsg_HandleCompositorProto(GetRoutingID(), proto));
 }
 
+void RenderWidgetHostImpl::DragTargetDragEnter(
+    const DropData& drop_data,
+    const gfx::Point& client_pt,
+    const gfx::Point& screen_pt,
+    WebDragOperationsMask operations_allowed,
+    int key_modifiers) {
+  DragTargetDragEnterWithMetaData(DropDataToMetaData(drop_data), client_pt,
+                                  screen_pt, operations_allowed, key_modifiers);
+}
+
+void RenderWidgetHostImpl::DragTargetDragEnterWithMetaData(
+    const std::vector<DropData::Metadata>& metadata,
+    const gfx::Point& client_pt,
+    const gfx::Point& screen_pt,
+    WebDragOperationsMask operations_allowed,
+    int key_modifiers) {
+  Send(new DragMsg_TargetDragEnter(GetRoutingID(), metadata, client_pt,
+                                   screen_pt, operations_allowed,
+                                   key_modifiers));
+}
+
+void RenderWidgetHostImpl::DragTargetDragOver(
+    const gfx::Point& client_pt,
+    const gfx::Point& screen_pt,
+    WebDragOperationsMask operations_allowed,
+    int key_modifiers) {
+  Send(new DragMsg_TargetDragOver(GetRoutingID(), client_pt, screen_pt,
+                                  operations_allowed, key_modifiers));
+}
+
+void RenderWidgetHostImpl::DragTargetDragLeave() {
+  Send(new DragMsg_TargetDragLeave(GetRoutingID()));
+}
+
+void RenderWidgetHostImpl::DragTargetDrop(const DropData& drop_data,
+                                          const gfx::Point& client_pt,
+                                          const gfx::Point& screen_pt,
+                                          int key_modifiers) {
+  DropData drop_data_with_permissions(drop_data);
+  GrantFileAccessFromDropData(&drop_data_with_permissions);
+  Send(new DragMsg_TargetDrop(GetRoutingID(), drop_data_with_permissions,
+                              client_pt, screen_pt, key_modifiers));
+}
+
+void RenderWidgetHostImpl::FilterDropData(DropData* drop_data) {
+#if DCHECK_IS_ON()
+  drop_data->view_id = GetRoutingID();
+#endif  // DCHECK_IS_ON()
+
+  GetProcess()->FilterURL(true, &drop_data->url);
+  if (drop_data->did_originate_from_renderer) {
+    drop_data->filenames.clear();
+  }
+}
+
 void RenderWidgetHostImpl::NotifyScreenInfoChanged() {
   if (delegate_)
     delegate_->ScreenInfoChanged();
@@ -1348,6 +1455,65 @@ void RenderWidgetHostImpl::OnSetNeedsBeginFrames(bool needs_begin_frames) {
     view_->SetNeedsBeginFrames(needs_begin_frames);
 }
 
+void RenderWidgetHostImpl::OnStartDragging(
+    const DropData& drop_data,
+    blink::WebDragOperationsMask drag_operations_mask,
+    const SkBitmap& bitmap,
+    const gfx::Vector2d& bitmap_offset_in_dip,
+    const DragEventSourceInfo& event_info) {
+  // TODO(paulmeyer): Stop relying on RenderViewHost once
+  // DragSourceSystemDragEnded is moved into RenderWidgetHost. See
+  // crbug.com/647249.
+  RenderViewHost* rvh = RenderViewHost::From(this);
+  if (!rvh)
+    return;
+
+  RenderViewHostDelegateView* view = delegate_->GetDelegateView();
+  if (!view) {
+    // Need to clear drag and drop state in blink.
+    rvh->DragSourceSystemDragEnded();
+    return;
+  }
+
+  DropData filtered_data(drop_data);
+  RenderProcessHost* process = GetProcess();
+  ChildProcessSecurityPolicyImpl* policy =
+      ChildProcessSecurityPolicyImpl::GetInstance();
+
+  // Allow drag of Javascript URLs to enable bookmarklet drag to bookmark bar.
+  if (!filtered_data.url.SchemeIs(url::kJavaScriptScheme))
+    process->FilterURL(true, &filtered_data.url);
+  process->FilterURL(false, &filtered_data.html_base_url);
+  // Filter out any paths that the renderer didn't have access to. This prevents
+  // the following attack on a malicious renderer:
+  // 1. StartDragging IPC sent with renderer-specified filesystem paths that it
+  //    doesn't have read permissions for.
+  // 2. We initiate a native DnD operation.
+  // 3. DnD operation immediately ends since mouse is not held down. DnD events
+  //    still fire though, which causes read permissions to be granted to the
+  //    renderer for any file paths in the drop.
+  filtered_data.filenames.clear();
+  for (const auto& file_info : drop_data.filenames) {
+    if (policy->CanReadFile(GetProcess()->GetID(), file_info.path))
+      filtered_data.filenames.push_back(file_info);
+  }
+
+  storage::FileSystemContext* file_system_context =
+      GetProcess()->GetStoragePartition()->GetFileSystemContext();
+  filtered_data.file_system_files.clear();
+  for (size_t i = 0; i < drop_data.file_system_files.size(); ++i) {
+    storage::FileSystemURL file_system_url =
+        file_system_context->CrackURL(drop_data.file_system_files[i].url);
+    if (policy->CanReadFileSystemFile(GetProcess()->GetID(), file_system_url))
+      filtered_data.file_system_files.push_back(drop_data.file_system_files[i]);
+  }
+
+  float scale = GetScaleFactorForView(GetView());
+  gfx::ImageSkia image(gfx::ImageSkiaRep(bitmap, scale));
+  view->StartDragging(filtered_data, drag_operations_mask, image,
+                      bitmap_offset_in_dip, event_info);
+}
+
 void RenderWidgetHostImpl::RendererExited(base::TerminationStatus status,
                                           int exit_code) {
   if (!renderer_initialized_)
@@ -1360,7 +1526,7 @@ void RenderWidgetHostImpl::RendererExited(base::TerminationStatus status,
   waiting_for_screen_rects_ack_ = false;
 
   // Must reset these to ensure that keyboard events work with a new renderer.
-  suppress_next_char_events_ = false;
+  suppress_events_until_keydown_ = false;
 
   // Reset some fields in preparation for recovering from a crash.
   ResetSizeAndRepaintPendingFlags();
@@ -1634,10 +1800,7 @@ bool RenderWidgetHostImpl::OnSwapCompositorFrame(
     view_->DidReceiveRendererFrame();
   } else {
     cc::ReturnedResourceArray resources;
-    if (frame.delegated_frame_data) {
-      cc::TransferableResource::ReturnResources(
-          frame.delegated_frame_data->resource_list, &resources);
-    }
+    cc::TransferableResource::ReturnResources(frame.resource_list, &resources);
     SendReclaimCompositorResources(routing_id_, compositor_frame_sink_id,
                                    process_->GetID(), true /* is_swap_ack */,
                                    resources);
@@ -1907,18 +2070,16 @@ void RenderWidgetHostImpl::IncrementInFlightEventCount(
   }
 }
 
-void RenderWidgetHostImpl::DecrementInFlightEventCount() {
+void RenderWidgetHostImpl::DecrementInFlightEventCount(
+    InputEventAckSource ack_source) {
   if (decrement_in_flight_event_count() <= 0) {
     // Cancel pending hung renderer checks since the renderer is responsive.
     StopHangMonitorTimeout();
   } else {
-    // The renderer is responsive, but there are in-flight events to wait for.
-    if (!is_hidden_) {
-      RestartHangMonitorTimeout();
-      hang_monitor_event_type_ = blink::WebInputEvent::Undefined;
-      hang_monitor_reason_ =
-          RendererUnresponsiveType::RENDERER_UNRESPONSIVE_IN_FLIGHT_EVENTS;
-    }
+    // Only restart the hang monitor timer if we got a response from the
+    // main thread.
+    if (ack_source == InputEventAckSource::MAIN_THREAD)
+      RestartHangMonitorTimeoutIfNecessary();
   }
 }
 
@@ -2018,7 +2179,7 @@ void RenderWidgetHostImpl::OnUnexpectedEventAck(UnexpectedEventAckType type) {
   if (type == BAD_ACK_MESSAGE) {
     bad_message::ReceivedBadMessage(process_, bad_message::RWH_BAD_ACK_MESSAGE);
   } else if (type == UNEXPECTED_EVENT_TYPE) {
-    suppress_next_char_events_ = false;
+    suppress_events_until_keydown_ = false;
   }
 }
 
@@ -2226,6 +2387,88 @@ BrowserAccessibilityManager*
     RenderWidgetHostImpl::GetOrCreateRootBrowserAccessibilityManager() {
   return delegate_ ?
       delegate_->GetOrCreateRootBrowserAccessibilityManager() : NULL;
+}
+
+void RenderWidgetHostImpl::GrantFileAccessFromDropData(DropData* drop_data) {
+  DCHECK_EQ(GetRoutingID(), drop_data->view_id);
+  const int renderer_id = GetProcess()->GetID();
+  ChildProcessSecurityPolicyImpl* policy =
+      ChildProcessSecurityPolicyImpl::GetInstance();
+
+#if defined(OS_CHROMEOS)
+  // The externalfile:// scheme is used in Chrome OS to open external files in a
+  // browser tab.
+  if (drop_data->url.SchemeIs(content::kExternalFileScheme))
+    policy->GrantRequestURL(renderer_id, drop_data->url);
+#endif
+
+  // The filenames vector represents a capability to access the given files.
+  storage::IsolatedContext::FileInfoSet files;
+  for (auto& filename : drop_data->filenames) {
+    // Make sure we have the same display_name as the one we register.
+    if (filename.display_name.empty()) {
+      std::string name;
+      files.AddPath(filename.path, &name);
+      filename.display_name = base::FilePath::FromUTF8Unsafe(name);
+    } else {
+      files.AddPathWithName(filename.path,
+                            filename.display_name.AsUTF8Unsafe());
+    }
+    // A dragged file may wind up as the value of an input element, or it
+    // may be used as the target of a navigation instead.  We don't know
+    // which will happen at this point, so generously grant both access
+    // and request permissions to the specific file to cover both cases.
+    // We do not give it the permission to request all file:// URLs.
+    policy->GrantRequestSpecificFileURL(renderer_id,
+                                        net::FilePathToFileURL(filename.path));
+
+    // If the renderer already has permission to read these paths, we don't need
+    // to re-grant them. This prevents problems with DnD for files in the CrOS
+    // file manager--the file manager already had read/write access to those
+    // directories, but dragging a file would cause the read/write access to be
+    // overwritten with read-only access, making them impossible to delete or
+    // rename until the renderer was killed.
+    if (!policy->CanReadFile(renderer_id, filename.path))
+      policy->GrantReadFile(renderer_id, filename.path);
+  }
+
+  storage::IsolatedContext* isolated_context =
+      storage::IsolatedContext::GetInstance();
+  DCHECK(isolated_context);
+
+  if (!files.fileset().empty()) {
+    std::string filesystem_id =
+        isolated_context->RegisterDraggedFileSystem(files);
+    if (!filesystem_id.empty()) {
+      // Grant the permission iff the ID is valid.
+      policy->GrantReadFileSystem(renderer_id, filesystem_id);
+    }
+    drop_data->filesystem_id = base::UTF8ToUTF16(filesystem_id);
+  }
+
+  storage::FileSystemContext* file_system_context =
+      GetProcess()->GetStoragePartition()->GetFileSystemContext();
+  for (auto& file_system_file : drop_data->file_system_files) {
+    storage::FileSystemURL file_system_url =
+        file_system_context->CrackURL(file_system_file.url);
+
+    std::string register_name;
+    std::string filesystem_id = isolated_context->RegisterFileSystemForPath(
+        file_system_url.type(), file_system_url.filesystem_id(),
+        file_system_url.path(), &register_name);
+
+    if (!filesystem_id.empty()) {
+      // Grant the permission iff the ID is valid.
+      policy->GrantReadFileSystem(renderer_id, filesystem_id);
+    }
+
+    // Note: We are using the origin URL provided by the sender here. It may be
+    // different from the receiver's.
+    file_system_file.url =
+        GURL(storage::GetIsolatedFileSystemRootURIString(
+                 file_system_url.origin(), filesystem_id, std::string())
+                 .append(register_name));
+  }
 }
 
 }  // namespace content

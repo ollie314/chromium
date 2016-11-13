@@ -41,12 +41,7 @@ class ASH_EXPORT TrayBackgroundView : public ActionableView,
 
     void SetAlignment(ShelfAlignment alignment);
 
-    void set_size(const gfx::Size& size) { size_ = size; }
-
     void SetMargin(int main_axis_margin, int cross_axis_margin);
-
-    // views::View:
-    gfx::Size GetPreferredSize() const override;
 
    protected:
     // views::View:
@@ -59,7 +54,6 @@ class ASH_EXPORT TrayBackgroundView : public ActionableView,
     void UpdateLayout();
 
     ShelfAlignment alignment_;
-    gfx::Size size_;
     int main_axis_margin_ = 0;
     int cross_axis_margin_ = 0;
 
@@ -79,7 +73,7 @@ class ASH_EXPORT TrayBackgroundView : public ActionableView,
   void SetVisible(bool visible) override;
   const char* GetClassName() const override;
   void ChildPreferredSizeChanged(views::View* child) override;
-  void GetAccessibleState(ui::AXViewState* state) override;
+  void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
   void AboutToRequestFocusFromTabTraversal(bool reverse) override;
   void OnPaint(gfx::Canvas* canvas) override;
 
@@ -94,7 +88,7 @@ class ASH_EXPORT TrayBackgroundView : public ActionableView,
   // Called when the anchor (tray or bubble) may have moved or changed.
   virtual void AnchorUpdated() {}
 
-  // Called from GetAccessibleState, must return a valid accessible name.
+  // Called from GetAccessibleNodeData, must return a valid accessible name.
   virtual base::string16 GetAccessibleNameForTray() = 0;
 
   // Called when the bubble is resized.

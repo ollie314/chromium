@@ -10,6 +10,8 @@
 #include "mash/login/public/interfaces/login.mojom.h"
 #include "services/service_manager/public/cpp/connection.h"
 #include "services/service_manager/public/cpp/connector.h"
+#include "services/service_manager/public/cpp/interface_registry.h"
+#include "services/service_manager/public/cpp/service_context.h"
 
 namespace {
 
@@ -27,15 +29,15 @@ namespace session {
 Session::Session() : screen_locked_(false) {}
 Session::~Session() {}
 
-void Session::OnStart(const service_manager::Identity& identity) {
-  StartAppDriver();
+void Session::OnStart() {
   StartWindowManager();
   StartQuickLaunch();
+
   // Launch a chrome window for dev convience; don't do this in the long term.
-  connector()->Connect("service:content_browser");
+  context()->connector()->Connect("service:content_browser");
 }
 
-bool Session::OnConnect(const service_manager::Identity& remote_identity,
+bool Session::OnConnect(const service_manager::ServiceInfo& remote_info,
                         service_manager::InterfaceRegistry* registry) {
   registry->AddInterface<mojom::Session>(this);
   return true;
@@ -45,7 +47,7 @@ void Session::Logout() {
   // TODO(beng): Notify connected listeners that login is happening, potentially
   // give them the option to stop it.
   mash::login::mojom::LoginPtr login;
-  connector()->ConnectToInterface("service:login", &login);
+  context()->connector()->ConnectToInterface("service:login", &login);
   login->ShowLoginUI();
   // This kills the user environment.
   base::MessageLoop::current()->QuitWhenIdle();
@@ -53,7 +55,7 @@ void Session::Logout() {
 
 void Session::SwitchUser() {
   mash::login::mojom::LoginPtr login;
-  connector()->ConnectToInterface("service:login", &login);
+  context()->connector()->ConnectToInterface("service:login", &login);
   login->SwitchUser();
 }
 
@@ -96,12 +98,6 @@ void Session::StartWindowManager() {
                  base::Unretained(this)));
 }
 
-void Session::StartAppDriver() {
-  StartRestartableService(
-      "service:app_driver",
-      base::Bind(&Session::StartAppDriver, base::Unretained(this)));
-}
-
 void Session::StartQuickLaunch() {
   StartRestartableService(
       "service:quick_launch",
@@ -128,7 +124,7 @@ void Session::StartRestartableService(
   // TODO(beng): This would be the place to insert logic that counted restarts
   //             to avoid infinite crash-restart loops.
   std::unique_ptr<service_manager::Connection> connection =
-      connector()->Connect(url);
+      context()->connector()->Connect(url);
   // Note: |connection| may be null if we've lost our connection to the service
   // manager.
   if (connection) {

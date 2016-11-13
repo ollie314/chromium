@@ -78,6 +78,15 @@ cr.define('downloads', function() {
       this.content = this.$.content;
     },
 
+    /**
+     * @param {string} url
+     * @return {string} A reasonably long URL.
+     * @private
+     */
+    chopUrl_: function(url) {
+      return url.slice(0, 300);
+    },
+
     /** @private */
     computeClass_: function() {
       var classes = [];
@@ -112,19 +121,7 @@ cr.define('downloads', function() {
 
     /** @private */
     computeDangerIcon_: function() {
-      if (!this.isDangerous_)
-        return '';
-
-      switch (this.data.danger_type) {
-        case downloads.DangerType.DANGEROUS_CONTENT:
-        case downloads.DangerType.DANGEROUS_HOST:
-        case downloads.DangerType.DANGEROUS_URL:
-        case downloads.DangerType.POTENTIALLY_UNWANTED:
-        case downloads.DangerType.UNCOMMON_CONTENT:
-          return 'downloads:remove-circle';
-        default:
-          return 'cr:warning';
-      }
+      return this.isDangerous_ ? 'cr:warning' : '';
     },
 
     /** @private */

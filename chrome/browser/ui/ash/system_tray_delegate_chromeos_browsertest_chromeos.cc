@@ -6,9 +6,13 @@
 
 #include <string>
 
+#include "ash/common/material_design/material_design_controller.h"
 #include "ash/common/system/date/date_default_view.h"
 #include "ash/common/system/date/date_view.h"
+#include "ash/common/system/date/system_info_default_view.h"
 #include "ash/common/system/date/tray_date.h"
+#include "ash/common/system/date/tray_system_info.h"
+#include "ash/common/system/tray/system_tray.h"
 #include "ash/shell.h"
 #include "base/macros.h"
 #include "chrome/browser/chromeos/login/login_manager_test.h"
@@ -34,6 +38,17 @@ const char kUser1[] = "user1@gmail.com";
 const char kUser2[] = "user2@gmail.com";
 
 base::HourClockType GetHourType() {
+  if (ash::MaterialDesignController::IsSystemTrayMenuMaterial()) {
+    const ash::TraySystemInfo* tray_system_info =
+        ash::Shell::GetInstance()
+            ->GetPrimarySystemTray()
+            ->GetTraySystemInfoForTesting();
+    const ash::SystemInfoDefaultView* system_info_default_view =
+        tray_system_info->GetDefaultViewForTesting();
+
+    return system_info_default_view->GetDateView()->GetHourTypeForTesting();
+  }
+
   const ash::TrayDate* tray_date = ash::Shell::GetInstance()
                                        ->GetPrimarySystemTray()
                                        ->GetTrayDateForTesting();
@@ -44,10 +59,18 @@ base::HourClockType GetHourType() {
 }
 
 void CreateDefaultView() {
-  ash::TrayDate* tray_date = ash::Shell::GetInstance()
-                                 ->GetPrimarySystemTray()
-                                 ->GetTrayDateForTesting();
-  tray_date->CreateDefaultViewForTesting(ash::LoginStatus::NOT_LOGGED_IN);
+  if (ash::MaterialDesignController::IsSystemTrayMenuMaterial()) {
+    ash::TraySystemInfo* tray_system_info = ash::Shell::GetInstance()
+                                                ->GetPrimarySystemTray()
+                                                ->GetTraySystemInfoForTesting();
+    tray_system_info->CreateDefaultViewForTesting(
+        ash::LoginStatus::NOT_LOGGED_IN);
+  } else {
+    ash::TrayDate* tray_date = ash::Shell::GetInstance()
+                                   ->GetPrimarySystemTray()
+                                   ->GetTrayDateForTesting();
+    tray_date->CreateDefaultViewForTesting(ash::LoginStatus::NOT_LOGGED_IN);
+  }
 }
 
 }  // namespace

@@ -30,9 +30,7 @@ class GpuService;
 }
 
 namespace views {
-class ClipboardMus;
 class NativeWidget;
-class PointerWatcher;
 class PointerWatcherEventRouter;
 class ScreenMus;
 class SurfaceContextFactory;
@@ -94,6 +92,9 @@ class VIEWS_MUS_EXPORT WindowManagerConnection
       const service_manager::Identity& identity,
       scoped_refptr<base::SingleThreadTaskRunner> task_runner);
 
+  // Exposed for tests.
+  ui::Window* GetUiWindowAtScreenPoint(const gfx::Point& point);
+
   // ui::WindowTreeClientDelegate:
   void OnEmbed(ui::Window* root) override;
   void OnLostConnection(ui::WindowTreeClient* client) override;
@@ -104,7 +105,7 @@ class VIEWS_MUS_EXPORT WindowManagerConnection
   // ScreenMusDelegate:
   void OnWindowManagerFrameValuesChanged() override;
   gfx::Point GetCursorScreenPoint() override;
-  ui::Window* GetWindowAtScreenPoint(const gfx::Point& point) override;
+  aura::Window* GetWindowAtScreenPoint(const gfx::Point& point) override;
 
   // ui:OSExchangeDataProviderFactory::Factory:
   std::unique_ptr<OSExchangeData::Provider> BuildProvider() override;

@@ -38,13 +38,13 @@
 #include "platform/graphics/AcceleratedStaticBitmapImage.h"
 #include "platform/graphics/GraphicsLayer.h"
 #include "platform/graphics/ImageBuffer.h"
+#include "platform/graphics/WebGraphicsContext3DProviderWrapper.h"
 #include "platform/graphics/gpu/Extensions3DUtil.h"
 #include "platform/tracing/TraceEvent.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebCompositorSupport.h"
 #include "public/platform/WebExternalBitmap.h"
 #include "public/platform/WebExternalTextureLayer.h"
-#include "public/platform/WebGraphicsContext3DProvider.h"
 #include "skia/ext/texture_handle.h"
 #include "third_party/skia/include/gpu/GrContext.h"
 #include "third_party/skia/include/gpu/gl/GrGLTypes.h"
@@ -142,13 +142,14 @@ DrawingBuffer::DrawingBuffer(
     : m_client(client),
       m_preserveDrawingBuffer(preserve),
       m_webGLVersion(webGLVersion),
-      m_contextProvider(std::move(contextProvider)),
-      m_gl(m_contextProvider->contextGL()),
+      m_contextProvider(wrapUnique(
+          new WebGraphicsContext3DProviderWrapper(std::move(contextProvider)))),
+      m_gl(this->contextProvider()->contextGL()),
       m_extensionsUtil(std::move(extensionsUtil)),
       m_discardFramebufferSupported(discardFramebufferSupported),
       m_wantAlphaChannel(wantAlphaChannel),
       m_premultipliedAlpha(premultipliedAlpha),
-      m_softwareRendering(m_contextProvider->isSoftwareRendering()),
+      m_softwareRendering(this->contextProvider()->isSoftwareRendering()),
       m_wantDepth(wantDepth),
       m_wantStencil(wantStencil),
       m_chromiumImageUsage(chromiumImageUsage) {
@@ -185,7 +186,7 @@ gpu::gles2::GLES2Interface* DrawingBuffer::contextGL() {
 }
 
 WebGraphicsContext3DProvider* DrawingBuffer::contextProvider() {
-  return m_contextProvider.get();
+  return m_contextProvider->contextProvider();
 }
 
 void DrawingBuffer::setIsHidden(bool hidden) {
@@ -230,7 +231,7 @@ std::unique_ptr<cc::SharedBitmap> DrawingBuffer::createOrRecycleBitmap() {
 
   if (!m_recycledBitmaps.isEmpty()) {
     RecycledBitmap recycled = std::move(m_recycledBitmaps.last());
-    m_recycledBitmaps.removeLast();
+    m_recycledBitmaps.pop_back();
     DCHECK(recycled.size == m_size);
     return std::move(recycled.bitmap);
   }
@@ -251,6 +252,7 @@ bool DrawingBuffer::prepareTextureMailboxInternal(
     cc::TextureMailbox* outMailbox,
     std::unique_ptr<cc::SingleReleaseCallback>* outReleaseCallback,
     bool forceGpuResult) {
+  DCHECK(m_stateRestorer);
   if (m_destructionInProgress) {
     // It can be hit in the following sequence.
     // 1. WebGL draws something.
@@ -320,6 +322,7 @@ bool DrawingBuffer::finishPrepareTextureMailboxSoftware(
 bool DrawingBuffer::finishPrepareTextureMailboxGpu(
     cc::TextureMailbox* outMailbox,
     std::unique_ptr<cc::SingleReleaseCallback>* outReleaseCallback) {
+  DCHECK(m_stateRestorer);
   if (m_webGLVersion > WebGL1) {
     m_stateRestorer->setPixelUnpackBufferBindingDirty();
     m_gl->BindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
@@ -440,7 +443,7 @@ PassRefPtr<StaticBitmapImage> DrawingBuffer::transferToStaticBitmapImage() {
 
   // This can be null if the context is lost before the first call to
   // grContext().
-  GrContext* grContext = m_contextProvider->grContext();
+  GrContext* grContext = contextProvider()->grContext();
 
   cc::TextureMailbox textureMailbox;
   std::unique_ptr<cc::SingleReleaseCallback> releaseCallback;
@@ -479,20 +482,6 @@ PassRefPtr<StaticBitmapImage> DrawingBuffer::transferToStaticBitmapImage() {
   // reference to the backing via our |textureId|.
   releaseCallback->Run(gpu::SyncToken(), true /* lostResource */);
 
-  // Store that texture id as the backing for an SkImage.
-  GrGLTextureInfo textureInfo;
-  textureInfo.fTarget = GL_TEXTURE_2D;
-  textureInfo.fID = textureId;
-  GrBackendTextureDesc backendTexture;
-  backendTexture.fOrigin = kBottomLeft_GrSurfaceOrigin;
-  backendTexture.fWidth = m_size.width();
-  backendTexture.fHeight = m_size.height();
-  backendTexture.fConfig = kSkia8888_GrPixelConfig;
-  backendTexture.fTextureHandle =
-      skia::GrGLTextureInfoToGrBackendObject(textureInfo);
-  sk_sp<SkImage> skImage =
-      SkImage::MakeFromAdoptedTexture(grContext, backendTexture);
-
   // We reuse the same mailbox name from above since our texture id was consumed
   // from it.
   const auto& skImageMailbox = textureMailbox.mailbox();
@@ -507,7 +496,8 @@ PassRefPtr<StaticBitmapImage> DrawingBuffer::transferToStaticBitmapImage() {
   // ImageBitmapRenderingContext's transferFromImageBitmap, and try to use them
   // in DrawingBuffer.
   return AcceleratedStaticBitmapImage::createFromWebGLContextImage(
-      std::move(skImage), skImageMailbox, skImageSyncToken);
+      skImageMailbox, skImageSyncToken, textureId,
+      m_contextProvider->createWeakPtr(), m_size);
 }
 
 DrawingBuffer::ColorBufferParameters
@@ -567,6 +557,7 @@ DrawingBuffer::textureColorBufferParameters() {
 
 PassRefPtr<DrawingBuffer::ColorBuffer>
 DrawingBuffer::createOrRecycleColorBuffer() {
+  DCHECK(m_stateRestorer);
   if (!m_recycledColorBufferQueue.isEmpty()) {
     RefPtr<ColorBuffer> recycled = m_recycledColorBufferQueue.takeLast();
     if (recycled->receiveSyncToken.HasData())
@@ -802,6 +793,7 @@ void DrawingBuffer::beginDestruction() {
 }
 
 bool DrawingBuffer::resizeDefaultFramebuffer(const IntSize& size) {
+  DCHECK(m_stateRestorer);
   // Recreate m_backColorBuffer.
   m_backColorBuffer = createColorBuffer(size);
 
@@ -870,6 +862,7 @@ void DrawingBuffer::clearFramebuffers(GLbitfield clearMask) {
 }
 
 void DrawingBuffer::clearFramebuffersInternal(GLbitfield clearMask) {
+  DCHECK(m_stateRestorer);
   m_stateRestorer->setFramebufferBindingDirty();
   // We will clear the multisample FBO, but we also need to clear the
   // non-multisampled buffer.
@@ -905,7 +898,8 @@ bool DrawingBuffer::resize(const IntSize& newSize) {
 }
 
 bool DrawingBuffer::resizeFramebufferInternal(const IntSize& newSize) {
-  CHECK(!newSize.isEmpty());
+  DCHECK(m_stateRestorer);
+  DCHECK(!newSize.isEmpty());
   IntSize adjustedSize = adjustSize(newSize, m_size, m_maxTextureSize);
   if (adjustedSize.isEmpty())
     return false;
@@ -960,6 +954,7 @@ void DrawingBuffer::resolveAndBindForReadAndDraw() {
 }
 
 void DrawingBuffer::resolveMultisampleFramebufferInternal() {
+  DCHECK(m_stateRestorer);
   m_stateRestorer->setFramebufferBindingDirty();
   if (wantExplicitResolve() && !m_contentsChangeCommitted) {
     m_stateRestorer->setClearStateDirty();
@@ -1068,6 +1063,7 @@ void DrawingBuffer::readBackFramebuffer(unsigned char* pixels,
                                         int height,
                                         ReadbackOrder readbackOrder,
                                         WebGLImageConversion::AlphaOp op) {
+  DCHECK(m_stateRestorer);
   m_stateRestorer->setPixelPackAlignmentDirty();
   m_gl->PixelStorei(GL_PACK_ALIGNMENT, 1);
   m_gl->ReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
@@ -1112,6 +1108,7 @@ void DrawingBuffer::flipVertically(uint8_t* framebuffer,
 
 RefPtr<DrawingBuffer::ColorBuffer> DrawingBuffer::createColorBuffer(
     const IntSize& size) {
+  DCHECK(m_stateRestorer);
   m_stateRestorer->setFramebufferBindingDirty();
   m_stateRestorer->setTextureBindingDirty();
 
@@ -1185,6 +1182,7 @@ RefPtr<DrawingBuffer::ColorBuffer> DrawingBuffer::createColorBuffer(
 }
 
 void DrawingBuffer::attachColorBufferToReadFramebuffer() {
+  DCHECK(m_stateRestorer);
   m_stateRestorer->setFramebufferBindingDirty();
   m_stateRestorer->setTextureBindingDirty();
 
@@ -1228,12 +1226,14 @@ GLenum DrawingBuffer::getMultisampledRenderbufferFormat() {
 DrawingBuffer::ScopedStateRestorer::ScopedStateRestorer(
     DrawingBuffer* drawingBuffer)
     : m_drawingBuffer(drawingBuffer) {
-  DCHECK(!m_drawingBuffer->m_stateRestorer);
+  // If this is a nested restorer, save the previous restorer.
+  m_previousStateRestorer = drawingBuffer->m_stateRestorer;
   m_drawingBuffer->m_stateRestorer = this;
 }
 
 DrawingBuffer::ScopedStateRestorer::~ScopedStateRestorer() {
-  m_drawingBuffer->m_stateRestorer = nullptr;
+  DCHECK_EQ(m_drawingBuffer->m_stateRestorer, this);
+  m_drawingBuffer->m_stateRestorer = m_previousStateRestorer;
   Client* client = m_drawingBuffer->m_client;
   if (!client)
     return;

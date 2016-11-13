@@ -28,6 +28,7 @@ class PersonalDataManagerAndroid
   class Delegate {
    public:
     virtual void OnRulesSuccessfullyLoaded() = 0;
+    virtual ~Delegate() {}
   };
 
   PersonalDataManagerAndroid(JNIEnv* env, jobject obj);
@@ -84,7 +85,9 @@ class PersonalDataManagerAndroid
   base::android::ScopedJavaLocalRef<jobjectArray> GetProfileLabelsToSuggest(
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& unused_obj,
-      jboolean include_name_in_label);
+      jboolean include_name_in_label,
+      jboolean include_organization_in_label,
+      jboolean include_country_in_label);
 
   // Returns the label of the given profile for PaymentRequest. This label does
   // not contain the full name or the email address. All other fields are
@@ -141,11 +144,12 @@ class PersonalDataManagerAndroid
       const base::android::JavaParamRef<jstring>& jbilling_address_id);
 
   // Returns the card type according to PaymentRequest spec, or an empty string
-  // if the given card number is not valid.
-  base::android::ScopedJavaLocalRef<jstring> GetBasicCardPaymentTypeIfValid(
+  // if the given card number is not valid and |jempty_if_invalid| is true.
+  base::android::ScopedJavaLocalRef<jstring> GetBasicCardPaymentType(
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& unused_obj,
-      const base::android::JavaParamRef<jstring>& jcard_number);
+      const base::android::JavaParamRef<jstring>& jcard_number,
+      const jboolean jempty_if_invalid);
 
   // Adds a server credit card. Used only in tests.
   void AddServerCreditCardForTest(
@@ -298,7 +302,7 @@ class PersonalDataManagerAndroid
       JNIEnv* env);
 
   // Cancels the pending address normalization task.
-  void CancelPendingAddressNormalization(
+  void CancelPendingAddressNormalizations(
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& unused_obj);
 
@@ -329,6 +333,8 @@ class PersonalDataManagerAndroid
       JNIEnv* env,
       bool address_only,
       bool include_name_in_label,
+      bool include_organization_in_label,
+      bool include_country_in_label,
       std::vector<AutofillProfile*> profiles);
 
   // Pointer to the java counterpart.
@@ -340,8 +346,9 @@ class PersonalDataManagerAndroid
   // The address validator used to normalize addresses.
   AddressValidator address_validator_;
 
-  // Map associating a region code to a pending normalization.
-  std::map<std::string, Delegate*> pending_normalization_;
+  // Map associating a region code to pending normalizations.
+  std::map<std::string, std::vector<std::unique_ptr<Delegate>>>
+      pending_normalization_;
 
   DISALLOW_COPY_AND_ASSIGN(PersonalDataManagerAndroid);
 };

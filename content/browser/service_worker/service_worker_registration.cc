@@ -48,11 +48,6 @@ ServiceWorkerRegistration::ServiceWorkerRegistration(
 }
 
 ServiceWorkerRegistration::~ServiceWorkerRegistration() {
-  // Can be false during shutdown, in which case the DCHECK_CURRENTLY_ON below
-  // would cry.
-  if (!BrowserThread::IsThreadInitialized(BrowserThread::IO))
-    return;
-
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   DCHECK(!listeners_.might_have_observers());
   if (context_)
@@ -120,8 +115,10 @@ void ServiceWorkerRegistration::SetActiveVersion(
   if (active_version_)
     active_version_->RemoveListener(this);
   active_version_ = version;
-  if (active_version_)
+  if (active_version_) {
     active_version_->AddListener(this);
+    active_version_->SetNavigationPreloadState(navigation_preload_state_);
+  }
   mask.add(ChangedVersionAttributesMask::ACTIVE_VERSION);
 
   NotifyVersionAttributesChanged(mask);
@@ -392,6 +389,23 @@ void ServiceWorkerRegistration::NotifyRegistrationFinished() {
 void ServiceWorkerRegistration::SetTaskRunnerForTest(
     scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
   task_runner_ = task_runner;
+}
+
+void ServiceWorkerRegistration::EnableNavigationPreload(bool enable) {
+  if (navigation_preload_state_.enabled == enable)
+    return;
+  navigation_preload_state_.enabled = enable;
+  if (active_version_)
+    active_version_->SetNavigationPreloadState(navigation_preload_state_);
+}
+
+void ServiceWorkerRegistration::SetNavigationPreloadHeader(
+    const std::string& header) {
+  if (navigation_preload_state_.header == header)
+    return;
+  navigation_preload_state_.header = header;
+  if (active_version_)
+    active_version_->SetNavigationPreloadState(navigation_preload_state_);
 }
 
 void ServiceWorkerRegistration::RegisterRegistrationFinishedCallback(

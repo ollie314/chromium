@@ -134,6 +134,17 @@ static EphemeralRange expandRangeToSentenceBoundary(
       range.endPosition()));
 }
 
+SelectionInDOMTree selectWord(const VisiblePosition& position) {
+  // TODO(yosin): We should fix |startOfWord()| and |endOfWord()| not to return
+  // null position.
+  const VisiblePosition& start = startOfWord(position, LeftWordIfOnBoundary);
+  const VisiblePosition& end = endOfWord(position, RightWordIfOnBoundary);
+  return SelectionInDOMTree::Builder()
+      .setBaseAndExtentDeprecated(start.deepEquivalent(), end.deepEquivalent())
+      .setAffinity(start.affinity())
+      .build();
+}
+
 }  // namespace
 
 SpellChecker* SpellChecker::create(LocalFrame& frame) {
@@ -213,13 +224,13 @@ void SpellChecker::didBeginEditing(Element* element) {
   }
 
   if (isTextField || !parent->isAlreadySpellChecked()) {
-    if (EditingStrategy::editingIgnoresContent(element))
+    if (editingIgnoresContent(*element))
       return;
     // We always recheck textfields because markers are removed from them on
     // blur.
     const VisibleSelection selection = createVisibleSelection(
         SelectionInDOMTree::Builder().selectAllChildren(*element).build());
-    markMisspellingsAndBadGrammar(selection);
+    markMisspellingsInternal(selection);
     if (!isTextField)
       parent->setAlreadySpellChecked(true);
   }
@@ -354,12 +365,12 @@ void SpellChecker::showSpellingGuessPanel() {
   spellCheckerClient().showSpellingUI(true);
 }
 
-void SpellChecker::clearMisspellingsAndBadGrammarForMovingParagraphs(
+void SpellChecker::clearMisspellingsForMovingParagraphs(
     const VisibleSelection& movingSelection) {
   removeMarkers(movingSelection, DocumentMarker::MisspellingMarkers());
 }
 
-void SpellChecker::markMisspellingsAndBadGrammarForMovingParagraphs(
+void SpellChecker::markMisspellingsForMovingParagraphs(
     const VisibleSelection& movingSelection) {
   // TODO(xiaochengh): The use of updateStyleAndLayoutIgnorePendingStylesheets
   // needs to be audited.  See http://crbug.com/590369 for more details.
@@ -370,11 +381,10 @@ void SpellChecker::markMisspellingsAndBadGrammarForMovingParagraphs(
   DocumentLifecycle::DisallowTransitionScope disallowTransition(
       frame().document()->lifecycle());
 
-  markMisspellingsAndBadGrammar(movingSelection);
+  markMisspellingsInternal(movingSelection);
 }
 
-void SpellChecker::markMisspellingsAndBadGrammar(
-    const VisibleSelection& selection) {
+void SpellChecker::markMisspellingsInternal(const VisibleSelection& selection) {
   if (!isSpellCheckingEnabled() || !isSpellCheckingEnabledFor(selection))
     return;
 
@@ -389,7 +399,7 @@ void SpellChecker::markMisspellingsAndBadGrammar(
 
   TextCheckingParagraph fullParagraphToCheck(
       expandRangeToSentenceBoundary(range));
-  chunkAndMarkAllMisspellingsAndBadGrammar(fullParagraphToCheck);
+  chunkAndMarkAllMisspellings(fullParagraphToCheck);
 }
 
 void SpellChecker::markMisspellingsAfterApplyingCommand(
@@ -444,8 +454,13 @@ void SpellChecker::markMisspellingsAfterTypingCommand(
   if (cmd.commandTypeOfOpenCommand() ==
       TypingCommand::InsertParagraphSeparator) {
     VisiblePosition nextWord = nextWordPosition(start);
-    VisibleSelection words =
-        createVisibleSelection(wordStartOfPrevious, endOfWord(nextWord));
+    // TODO(yosin): We should make |endOfWord()| not to return null position.
+    VisibleSelection words = createVisibleSelection(
+        SelectionInDOMTree::Builder()
+            .setBaseAndExtentDeprecated(wordStartOfPrevious.deepEquivalent(),
+                                        endOfWord(nextWord).deepEquivalent())
+            .setAffinity(wordStartOfPrevious.affinity())
+            .build());
     markMisspellingsAfterLineBreak(words);
     return;
   }
@@ -462,7 +477,7 @@ void SpellChecker::markMisspellingsAfterLineBreak(
     const VisibleSelection& wordSelection) {
   TRACE_EVENT0("blink", "SpellChecker::markMisspellingsAfterLineBreak");
 
-  markMisspellingsAndBadGrammar(wordSelection);
+  markMisspellingsInternal(wordSelection);
 }
 
 void SpellChecker::markMisspellingsAfterTypingToWord(
@@ -470,9 +485,8 @@ void SpellChecker::markMisspellingsAfterTypingToWord(
   TRACE_EVENT0("blink", "SpellChecker::markMisspellingsAfterTypingToWord");
 
   VisibleSelection adjacentWords =
-      createVisibleSelection(startOfWord(wordStart, LeftWordIfOnBoundary),
-                             endOfWord(wordStart, RightWordIfOnBoundary));
-  markMisspellingsAndBadGrammar(adjacentWords);
+      createVisibleSelection(selectWord(wordStart));
+  markMisspellingsInternal(adjacentWords);
 }
 
 bool SpellChecker::isSpellCheckingEnabledInFocusedNode() const {
@@ -503,10 +517,10 @@ void SpellChecker::markMisspellingsAfterReplaceSelectionCommand(
   EphemeralRange paragraphRange(Position::firstPositionInNode(node),
                                 Position::lastPositionInNode(node));
   TextCheckingParagraph textToCheck(insertedRange, paragraphRange);
-  chunkAndMarkAllMisspellingsAndBadGrammar(textToCheck);
+  chunkAndMarkAllMisspellings(textToCheck);
 }
 
-void SpellChecker::chunkAndMarkAllMisspellingsAndBadGrammar(
+void SpellChecker::chunkAndMarkAllMisspellings(
     const TextCheckingParagraph& fullParagraphToCheck) {
   if (fullParagraphToCheck.isEmpty())
     return;
@@ -868,10 +882,8 @@ void SpellChecker::respondToChangedSelection(
         HTMLTextFormControlElement::endOfWord(newStart));
   } else {
     if (newSelection.isContentEditable()) {
-      const VisiblePosition newStart(newSelection.visibleStart());
       newAdjacentWords =
-          createVisibleSelection(startOfWord(newStart, LeftWordIfOnBoundary),
-                                 endOfWord(newStart, RightWordIfOnBoundary));
+          createVisibleSelection(selectWord(newSelection.visibleStart()));
     }
   }
 
@@ -929,11 +941,10 @@ void SpellChecker::spellCheckOldSelection(
 
   VisiblePosition oldStart = createVisiblePosition(oldSelectionStart);
   VisibleSelection oldAdjacentWords =
-      createVisibleSelection(startOfWord(oldStart, LeftWordIfOnBoundary),
-                             endOfWord(oldStart, RightWordIfOnBoundary));
+      createVisibleSelection(selectWord(oldStart));
   if (oldAdjacentWords == newAdjacentWords)
     return;
-  markMisspellingsAndBadGrammar(oldAdjacentWords);
+  markMisspellingsInternal(oldAdjacentWords);
 }
 
 static Node* findFirstMarkable(Node* node) {

@@ -10,7 +10,6 @@
 #include "bindings/core/v8/V8DOMWrapper.h"
 #include "bindings/core/v8/V8PrivateProperty.h"
 #include "bindings/modules/v8/IDBObserverCallback.h"
-#include "bindings/modules/v8/V8IDBObserverInit.h"
 
 namespace blink {
 
@@ -39,17 +38,14 @@ void V8IDBObserver::constructorCustom(
     return;
   }
 
-  IDBObserverInit idbObserverInit;
-  V8IDBObserverInit::toImpl(info.GetIsolate(), info[1], idbObserverInit,
-                            exceptionState);
   if (exceptionState.hadException())
     return;
 
+  ScriptState* scriptState = ScriptState::forReceiverObject(info);
   v8::Local<v8::Function> v8Callback = v8::Local<v8::Function>::Cast(info[0]);
   IDBObserverCallback* callback =
-      IDBObserverCallback::create(info.GetIsolate(), v8Callback);
-  IDBObserver* observer = IDBObserver::create(
-      ScriptState::forReceiverObject(info), callback, idbObserverInit);
+      IDBObserverCallback::create(scriptState, v8Callback);
+  IDBObserver* observer = IDBObserver::create(callback);
   if (exceptionState.hadException())
     return;
   DCHECK(observer);

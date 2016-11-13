@@ -22,6 +22,7 @@
 #include "third_party/WebKit/public/platform/WebString.h"
 #include "third_party/WebKit/public/platform/WebVector.h"
 #include "url/gurl.h"
+#include "url/origin.h"
 
 namespace media {
 
@@ -401,12 +402,9 @@ bool KeySystemConfigSelector::GetSupportedCapabilities(
     ConfigState proposed_config_state = *config_state;
     if (!base::IsStringASCII(capability.mimeType) ||
         !base::IsStringASCII(capability.codecs) ||
-        !IsSupportedContentType(key_system, media_type,
-                                base::UTF16ToASCII(
-                                    base::StringPiece16(capability.mimeType)),
-                                base::UTF16ToASCII(
-                                    base::StringPiece16(capability.codecs)),
-                                &proposed_config_state)) {
+        !IsSupportedContentType(
+            key_system, media_type, capability.mimeType.ascii(),
+            capability.codecs.ascii(), &proposed_config_state)) {
       continue;
     }
     // 3.12. If robustness is not the empty string, run the following steps:
@@ -417,8 +415,7 @@ bool KeySystemConfigSelector::GetSupportedCapabilities(
       if (!base::IsStringASCII(capability.robustness))
         continue;
       EmeConfigRule robustness_rule = key_systems_->GetRobustnessConfigRule(
-          key_system, media_type, base::UTF16ToASCII(
-              base::StringPiece16(capability.robustness)));
+          key_system, media_type, capability.robustness.ascii());
       if (!proposed_config_state.IsRuleSupported(robustness_rule))
         continue;
       proposed_config_state.AddRule(robustness_rule);
@@ -837,13 +834,12 @@ void KeySystemConfigSelector::SelectConfig(
   // 6.1 If keySystem is not one of the Key Systems supported by the user
   //     agent, reject promise with a NotSupportedError. String comparison
   //     is case-sensitive.
-  if (!base::IsStringASCII(key_system)) {
+  if (!key_system.containsOnlyASCII()) {
     not_supported_cb.Run("Only ASCII keySystems are supported");
     return;
   }
 
-  std::string key_system_ascii =
-      base::UTF16ToASCII(base::StringPiece16(key_system));
+  std::string key_system_ascii = key_system.ascii();
   if (!key_systems_->IsSupportedKeySystem(key_system_ascii)) {
     not_supported_cb.Run("Unsupported keySystem");
     return;
@@ -899,8 +895,7 @@ void KeySystemConfigSelector::SelectConfigInternal(
         {
           // Note: the GURL must not be constructed inline because
           // base::Passed(&request) sets |request| to null.
-          GURL security_origin(
-              blink::WebStringToGURL(request->security_origin.toString()));
+          GURL security_origin(url::Origin(request->security_origin).GetURL());
           media_permission_->RequestPermission(
               MediaPermission::PROTECTED_MEDIA_IDENTIFIER, security_origin,
               base::Bind(&KeySystemConfigSelector::OnPermissionResult,

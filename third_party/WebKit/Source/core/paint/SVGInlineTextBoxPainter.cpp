@@ -9,7 +9,6 @@
 #include "core/editing/markers/RenderedDocumentMarker.h"
 #include "core/frame/LocalFrame.h"
 #include "core/layout/LayoutTheme.h"
-#include "core/layout/LayoutView.h"
 #include "core/layout/api/LineLayoutAPIShim.h"
 #include "core/layout/api/SelectionState.h"
 #include "core/layout/line/InlineFlowBox.h"
@@ -83,9 +82,9 @@ LayoutSVGInlineText& SVGInlineTextBoxPainter::inlineText() const {
 
 void SVGInlineTextBoxPainter::paint(const PaintInfo& paintInfo,
                                     const LayoutPoint& paintOffset) {
-  ASSERT(paintInfo.phase == PaintPhaseForeground ||
+  DCHECK(paintInfo.phase == PaintPhaseForeground ||
          paintInfo.phase == PaintPhaseSelection);
-  ASSERT(m_svgInlineTextBox.truncation() == cNoTruncation);
+  DCHECK(m_svgInlineTextBox.truncation() == cNoTruncation);
 
   if (m_svgInlineTextBox.getLineLayoutItem().style()->visibility() !=
           EVisibility::Visible ||
@@ -216,7 +215,7 @@ void SVGInlineTextBoxPainter::paintSelectionBackground(
       EVisibility::Visible)
     return;
 
-  ASSERT(!paintInfo.isPrinting());
+  DCHECK(!paintInfo.isPrinting());
 
   if (paintInfo.phase == PaintPhaseSelection ||
       !shouldPaintSelection(paintInfo))
@@ -269,7 +268,7 @@ static inline LayoutObject* findLayoutObjectDefininingTextDecoration(
     parentBox = parentBox->parent();
   }
 
-  ASSERT(layoutObject);
+  DCHECK(layoutObject);
   return layoutObject;
 }
 
@@ -323,7 +322,7 @@ void SVGInlineTextBoxPainter::paintDecoration(const PaintInfo& paintInfo,
   Font scaledFont;
   LayoutSVGInlineText::computeNewScaledFontForStyle(decorationLayoutObject,
                                                     scalingFactor, scaledFont);
-  ASSERT(scalingFactor);
+  DCHECK(scalingFactor);
 
   float thickness = thicknessForDecoration(decoration, scaledFont);
   if (thickness <= 0)
@@ -390,7 +389,7 @@ bool SVGInlineTextBoxPainter::setupTextPaint(const PaintInfo& paintInfo,
   LayoutSVGInlineText& textLayoutObject = inlineText();
 
   float scalingFactor = textLayoutObject.scalingFactor();
-  ASSERT(scalingFactor);
+  DCHECK(scalingFactor);
 
   AffineTransform paintServerTransform;
   const AffineTransform* additionalPaintServerTransform = nullptr;
@@ -436,7 +435,7 @@ void SVGInlineTextBoxPainter::paintText(const PaintInfo& paintInfo,
   const Font& scaledFont = textLayoutObject.scaledFont();
 
   float scalingFactor = textLayoutObject.scalingFactor();
-  ASSERT(scalingFactor);
+  DCHECK(scalingFactor);
 
   FloatPoint textOrigin(fragment.x, fragment.y);
   FloatSize textSize(fragment.width, fragment.height);

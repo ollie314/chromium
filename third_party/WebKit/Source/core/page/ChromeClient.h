@@ -57,17 +57,16 @@ class Element;
 class FileChooser;
 class FloatPoint;
 class Frame;
-class GraphicsContext;
 class GraphicsLayer;
 class HTMLFormControlElement;
 class HTMLInputElement;
 class HTMLSelectElement;
 class HitTestResult;
 class IntRect;
+class KeyboardEvent;
 class LocalFrame;
 class Node;
 class Page;
-class PaintArtifact;
 class PopupOpeningObserver;
 class WebDragData;
 class WebFrameScheduler;
@@ -203,7 +202,7 @@ class CORE_EXPORT ChromeClient : public HostWindow {
   virtual void setToolTip(LocalFrame&, const String&, TextDirection) = 0;
   void clearToolTip(LocalFrame&);
 
-  void print(LocalFrame*);
+  bool print(LocalFrame*);
 
   virtual void annotatedRegionsChanged() = 0;
 
@@ -247,7 +246,7 @@ class CORE_EXPORT ChromeClient : public HostWindow {
                                                  LocalFrame* localRoot) {}
 
   virtual void enterFullscreenForElement(Element*) {}
-  virtual void exitFullscreenForElement(Element*) {}
+  virtual void exitFullscreen(LocalFrame*) {}
 
   virtual void clearCompositedSelection(LocalFrame*) {}
   virtual void updateCompositedSelection(LocalFrame*,
@@ -313,7 +312,7 @@ class CORE_EXPORT ChromeClient : public HostWindow {
 
   virtual void onMouseDown(Node*) {}
 
-  virtual void didUpdateTopControls() const {}
+  virtual void didUpdateBrowserControls() const {}
 
   virtual void registerPopupOpeningObserver(PopupOpeningObserver*) = 0;
   virtual void unregisterPopupOpeningObserver(PopupOpeningObserver*) = 0;

@@ -26,6 +26,7 @@
 #include "bindings/core/v8/ActiveScriptWrappable.h"
 #include "bindings/core/v8/ScriptString.h"
 #include "bindings/core/v8/ScriptWrappable.h"
+#include "bindings/core/v8/TraceWrapperMember.h"
 #include "core/dom/ActiveDOMObject.h"
 #include "core/dom/DocumentParserClient.h"
 #include "core/loader/ThreadableLoaderClient.h"
@@ -59,7 +60,6 @@ class ExecutionContext;
 class FormData;
 class ScriptState;
 class SharedBuffer;
-class Stream;
 class TextResourceDecoder;
 class ThreadableLoader;
 class WebDataConsumerHandle;
@@ -96,7 +96,6 @@ class XMLHttpRequest final : public XMLHttpRequestEventTarget,
     ResponseTypeDocument,
     ResponseTypeBlob,
     ResponseTypeArrayBuffer,
-    ResponseTypeLegacyStream,
   };
 
   // ActiveDOMObject
@@ -144,7 +143,6 @@ class XMLHttpRequest final : public XMLHttpRequestEventTarget,
   Document* responseXML(ExceptionState&);
   Blob* responseBlob();
   DOMArrayBuffer* responseArrayBuffer();
-  Stream* responseLegacyStream();
   unsigned timeout() const { return m_timeoutMilliseconds; }
   void setTimeout(unsigned timeout, ExceptionState&);
   ResponseTypeCode getResponseTypeCode() const { return m_responseTypeCode; }
@@ -282,8 +280,7 @@ class XMLHttpRequest final : public XMLHttpRequestEventTarget,
   // using case insensitive comparison functions if needed.
   AtomicString m_mimeTypeOverride;
   unsigned long m_timeoutMilliseconds;
-  Member<Blob> m_responseBlob;
-  Member<Stream> m_responseLegacyStream;
+  TraceWrapperMember<Blob> m_responseBlob;
 
   Member<ThreadableLoader> m_loader;
   State m_state;
@@ -294,13 +291,13 @@ class XMLHttpRequest final : public XMLHttpRequestEventTarget,
   std::unique_ptr<TextResourceDecoder> m_decoder;
 
   ScriptString m_responseText;
-  Member<Document> m_responseDocument;
+  TraceWrapperMember<Document> m_responseDocument;
   Member<DocumentParser> m_responseDocumentParser;
 
   RefPtr<SharedBuffer> m_binaryResponseBuilder;
   long long m_lengthDownloadedToFile;
 
-  Member<DOMArrayBuffer> m_responseArrayBuffer;
+  TraceWrapperMember<DOMArrayBuffer> m_responseArrayBuffer;
 
   // Used for onprogress tracking
   long long m_receivedLength;

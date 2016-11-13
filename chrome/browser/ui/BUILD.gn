@@ -8,7 +8,9 @@ import("//build/config/features.gni")
 import("//build/config/ui.gni")
 import("//build/split_static_library.gni")
 import("//chrome/common/features.gni")
+import("//extensions/features/features.gni")
 import("//media/media_options.gni")
+import("//printing/features/features.gni")
 
 config("ui_warnings") {
   if (is_clang) {
@@ -193,6 +195,7 @@ split_static_library("ui") {
     "views/platform_keys_certificate_selector_chromeos.cc",
     "views/platform_keys_certificate_selector_chromeos.h",
     "web_contents_sizer.h",
+    "website_settings/permission_prompt.h",
     "website_settings/website_settings.cc",
     "website_settings/website_settings.h",
     "website_settings/website_settings_ui.cc",
@@ -229,6 +232,8 @@ split_static_library("ui") {
     "webui/chromeos/keyboard_overlay_ui.h",
     "webui/chromeos/login/app_launch_splash_screen_handler.cc",
     "webui/chromeos/login/app_launch_splash_screen_handler.h",
+    "webui/chromeos/login/arc_terms_of_service_screen_handler.cc",
+    "webui/chromeos/login/arc_terms_of_service_screen_handler.h",
     "webui/chromeos/login/authenticated_user_email_retriever.cc",
     "webui/chromeos/login/authenticated_user_email_retriever.h",
     "webui/chromeos/login/auto_enrollment_check_screen_handler.cc",
@@ -434,7 +439,6 @@ split_static_library("ui") {
     ":ui_warnings",
     "//build/config:precompiled_headers",
     "//build/config/compiler:wexit_time_destructors",
-    "//third_party/WebKit/public:debug_devtools",
   ]
 
   # Since browser and browser_ui actually depend on each other,
@@ -540,8 +544,8 @@ split_static_library("ui") {
     "//components/suggestions/proto",
     "//components/supervised_user_error_page",
     "//components/sync",
+    "//components/sync_preferences",
     "//components/sync_sessions",
-    "//components/syncable_prefs",
     "//components/toolbar",
     "//components/tracing:startup_tracing",
     "//components/undo",
@@ -562,12 +566,15 @@ split_static_library("ui") {
     "//device/base",
     "//device/bluetooth/public/interfaces:experimental_interfaces",
     "//device/usb",
+    "//extensions/features",
     "//media",
     "//net:net_with_v8",
+    "//printing/features",
     "//services/service_manager/runner/common",
     "//skia",
     "//storage/browser",
     "//storage/common",
+    "//third_party/WebKit/public:features",
     "//third_party/WebKit/public:resources",
     "//third_party/adobe/flash:flapper_version_h",
     "//third_party/brotli",
@@ -725,6 +732,7 @@ split_static_library("ui") {
       "global_error/global_error_service_factory.h",
       "infobar_container_delegate.cc",
       "infobar_container_delegate.h",
+      "javascript_dialogs/javascript_dialog.h",
       "javascript_dialogs/javascript_dialog_tab_helper.cc",
       "javascript_dialogs/javascript_dialog_tab_helper.h",
       "javascript_dialogs/javascript_dialog_views.cc",
@@ -874,7 +882,6 @@ split_static_library("ui") {
       "website_settings/chooser_bubble_delegate.h",
       "website_settings/permission_menu_model.cc",
       "website_settings/permission_menu_model.h",
-      "website_settings/permission_prompt.h",
       "website_settings/website_settings_infobar_delegate.cc",
       "website_settings/website_settings_infobar_delegate.h",
       "webui/app_launcher_login_handler.cc",
@@ -915,6 +922,8 @@ split_static_library("ui") {
       "webui/identity_internals_ui.h",
       "webui/inspect_ui.cc",
       "webui/inspect_ui.h",
+      "webui/md_bookmarks/md_bookmarks_ui.cc",
+      "webui/md_bookmarks/md_bookmarks_ui.h",
       "webui/md_downloads/downloads_list_tracker.cc",
       "webui/md_downloads/downloads_list_tracker.h",
       "webui/md_downloads/md_downloads_dom_handler.cc",
@@ -999,6 +1008,7 @@ split_static_library("ui") {
       "webui/options/easy_unlock_handler.h",
       "webui/options/font_settings_handler.cc",
       "webui/options/font_settings_handler.h",
+      "webui/options/font_settings_utils.cc",
       "webui/options/font_settings_utils.h",
       "webui/options/font_settings_utils_linux.cc",
       "webui/options/font_settings_utils_mac.mm",
@@ -1107,6 +1117,8 @@ split_static_library("ui") {
       "webui/settings/settings_clear_browsing_data_handler.h",
       "webui/settings/settings_cookies_view_handler.cc",
       "webui/settings/settings_cookies_view_handler.h",
+      "webui/settings/settings_import_data_handler.cc",
+      "webui/settings/settings_import_data_handler.h",
       "webui/settings/settings_manage_profile_handler.cc",
       "webui/settings/settings_manage_profile_handler.h",
       "webui/settings/settings_media_devices_selection_handler.cc",
@@ -1268,16 +1280,14 @@ split_static_library("ui") {
       "ash/ash_init.h",
       "ash/ash_util.cc",
       "ash/ash_util.h",
-      "ash/cast_config_delegate_chromeos.cc",
-      "ash/cast_config_delegate_chromeos.h",
       "ash/cast_config_delegate_media_router.cc",
       "ash/cast_config_delegate_media_router.h",
       "ash/chrome_keyboard_ui.cc",
       "ash/chrome_keyboard_ui.h",
       "ash/chrome_launcher_prefs.cc",
       "ash/chrome_launcher_prefs.h",
-      "ash/chrome_new_window_delegate.cc",
-      "ash/chrome_new_window_delegate.h",
+      "ash/chrome_new_window_client.cc",
+      "ash/chrome_new_window_client.h",
       "ash/chrome_screenshot_grabber.cc",
       "ash/chrome_screenshot_grabber.h",
       "ash/chrome_shell_content_state.cc",
@@ -1383,8 +1393,6 @@ split_static_library("ui") {
       "ash/volume_controller_chromeos.h",
       "ash/vpn_delegate_chromeos.cc",
       "ash/vpn_delegate_chromeos.h",
-      "ash/web_dialog_util.cc",
-      "ash/web_dialog_util.h",
       "views/ash/chrome_browser_main_extra_parts_ash.cc",
       "views/ash/chrome_browser_main_extra_parts_ash.h",
       "views/ash/tab_scrubber.cc",
@@ -1398,6 +1406,7 @@ split_static_library("ui") {
       "//ash/common/strings",
       "//ash/public/cpp",
       "//ash/public/interfaces",
+      "//components/session_manager/core",
       "//components/user_manager",
       "//services/ui/public/cpp",
       "//ui/app_list/presenter",
@@ -1517,8 +1526,6 @@ split_static_library("ui") {
       sources += [
         "external_protocol_dialog_delegate.cc",
         "external_protocol_dialog_delegate.h",
-        "views/chrome_browser_main_extra_parts_views_linux.cc",
-        "views/chrome_browser_main_extra_parts_views_linux.h",
         "views/external_protocol_dialog.cc",
         "views/external_protocol_dialog.h",
         "views/frame/opaque_browser_frame_view.cc",
@@ -1537,6 +1544,18 @@ split_static_library("ui") {
         "views/sync/one_click_signin_dialog_view.h",
         "views/sync/profile_signin_confirmation_dialog_views.cc",
         "views/sync/profile_signin_confirmation_dialog_views.h",
+      ]
+    }
+
+    # These files do Gtk+-based theming, but Gtk+ is not available on
+    # Ozone builds, or on common environments where Ozone will be used.
+    #
+    # TODO(tonikitoo): It seems sensible to make it possible to opt-in
+    # the use of these files in case Gtk is available with its Wayland.
+    if (use_aura && !use_ozone && is_desktop_linux) {
+      sources += [
+        "views/chrome_browser_main_extra_parts_views_linux.cc",
+        "views/chrome_browser_main_extra_parts_views_linux.h",
       ]
     }
     if (enable_extensions && (!is_mac || mac_views_browser)) {
@@ -1571,6 +1590,8 @@ split_static_library("ui") {
     }
     if (!is_mac || mac_views_browser) {
       sources += [
+        "javascript_dialogs/javascript_dialog.cc",
+
         # This test header is included because it contains forward declarations
         # needed for "friend" statements for use in tests.
         "translate/translate_bubble_test_utils.h",
@@ -1630,8 +1651,6 @@ split_static_library("ui") {
         "views/dropdown_bar_host.cc",
         "views/dropdown_bar_host.h",
         "views/dropdown_bar_host_delegate.h",
-        "views/dropdown_bar_view.cc",
-        "views/dropdown_bar_view.h",
         "views/elevation_icon_setter.cc",
         "views/elevation_icon_setter.h",
         "views/find_bar_host.cc",
@@ -1891,11 +1910,12 @@ split_static_library("ui") {
     deps += [ "//build/linux/libgio" ]
   }
   if (use_aura && !use_ozone && is_desktop_linux) {
-    deps += [
-      # gtk2 is the only component that can interact with gtk2 in our new
-      # world.
-      "//chrome/browser/ui/libgtk2ui",
-    ]
+    # These are the only components that can interact with gtk.
+    if (use_gtk3) {
+      deps += [ "//chrome/browser/ui/libgtkui:libgtk3ui" ]
+    } else {
+      deps += [ "//chrome/browser/ui/libgtkui:libgtk2ui" ]
+    }
   }
   if (is_win || is_mac || is_desktop_linux) {
     sources += [
@@ -1951,8 +1971,6 @@ split_static_library("ui") {
       "webui/signin/sync_confirmation_ui.h",
       "webui/signin/user_manager_screen_handler.cc",
       "webui/signin/user_manager_screen_handler.h",
-      "webui/signin/user_manager_ui.cc",
-      "webui/signin/user_manager_ui.h",
       "webui/welcome_handler.cc",
       "webui/welcome_handler.h",
       "webui/welcome_ui.cc",
@@ -2073,6 +2091,7 @@ split_static_library("ui") {
       "webui/theme_source.cc",
       "webui/theme_source.h",
     ]
+    deps += [ "//chrome/browser:theme_properties" ]
   }
   if (enable_print_preview) {
     sources += [
@@ -2082,11 +2101,20 @@ split_static_library("ui") {
       "webui/print_preview/print_preview_handler.h",
       "webui/print_preview/print_preview_ui.cc",
       "webui/print_preview/print_preview_ui.h",
+      "webui/print_preview/printer_backend_proxy.h",
+      "webui/print_preview/printer_capabilities.cc",
+      "webui/print_preview/printer_capabilities.h",
       "webui/print_preview/printer_handler.cc",
       "webui/print_preview/printer_handler.h",
       "webui/print_preview/sticky_settings.cc",
       "webui/print_preview/sticky_settings.h",
     ]
+
+    if (is_chromeos) {
+      sources += [ "webui/print_preview/printer_backend_proxy_chromeos.cc" ]
+    } else {
+      sources += [ "webui/print_preview/printer_backend_proxy.cc" ]
+    }
   }
 
   if (is_android) {
@@ -2133,8 +2161,8 @@ split_static_library("ui") {
         "android/infobars/confirm_infobar.h",
         "android/infobars/data_reduction_promo_infobar.cc",
         "android/infobars/data_reduction_promo_infobar.h",
-        "android/infobars/download_overwrite_infobar.cc",
-        "android/infobars/download_overwrite_infobar.h",
+        "android/infobars/duplicate_download_infobar.cc",
+        "android/infobars/duplicate_download_infobar.h",
         "android/infobars/generated_password_saved_infobar.cc",
         "android/infobars/generated_password_saved_infobar.h",
         "android/infobars/grouped_permission_infobar.cc",
@@ -2147,8 +2175,8 @@ split_static_library("ui") {
         "android/infobars/instant_apps_infobar.h",
         "android/infobars/permission_infobar.cc",
         "android/infobars/permission_infobar.h",
-        "android/infobars/save_password_infobar.cc",
-        "android/infobars/save_password_infobar.h",
+        "android/infobars/search_geolocation_disclosure_infobar.cc",
+        "android/infobars/search_geolocation_disclosure_infobar.h",
         "android/infobars/simple_confirm_infobar_builder.cc",
         "android/infobars/simple_confirm_infobar_builder.h",
         "android/infobars/subresource_filter_infobar.cc",
@@ -2198,8 +2226,6 @@ split_static_library("ui") {
         "webui/offline/offline_internals_ui.h",
         "webui/offline/offline_internals_ui_message_handler.cc",
         "webui/offline/offline_internals_ui_message_handler.h",
-        "webui/popular_sites_internals_message_handler.cc",
-        "webui/popular_sites_internals_message_handler.h",
         "webui/popular_sites_internals_ui.cc",
         "webui/popular_sites_internals_ui.h",
         "webui/snippets_internals_message_handler.cc",
@@ -2643,6 +2669,14 @@ split_static_library("ui") {
         "cocoa/full_size_content_window.mm",
         "cocoa/fullscreen/fullscreen_menubar_tracker.h",
         "cocoa/fullscreen/fullscreen_menubar_tracker.mm",
+        "cocoa/fullscreen/fullscreen_toolbar_animation_controller.h",
+        "cocoa/fullscreen/fullscreen_toolbar_animation_controller.mm",
+        "cocoa/fullscreen/fullscreen_toolbar_mouse_tracker.h",
+        "cocoa/fullscreen/fullscreen_toolbar_mouse_tracker.mm",
+        "cocoa/fullscreen/fullscreen_toolbar_visibility_lock_controller.h",
+        "cocoa/fullscreen/fullscreen_toolbar_visibility_lock_controller.mm",
+        "cocoa/fullscreen/immersive_fullscreen_controller.h",
+        "cocoa/fullscreen/immersive_fullscreen_controller.mm",
         "cocoa/fullscreen_low_power_coordinator.h",
         "cocoa/fullscreen_low_power_coordinator.mm",
         "cocoa/fullscreen_toolbar_controller.h",
@@ -2913,6 +2947,9 @@ split_static_library("ui") {
         # See crbug.com/590850
         "content_settings/content_setting_media_menu_model.cc",
         "content_settings/content_setting_media_menu_model.h",
+        "javascript_dialogs/javascript_dialog_cocoa.h",
+        "javascript_dialogs/javascript_dialog_cocoa.mm",
+        "javascript_dialogs/javascript_dialog_mac.cc",
         "proximity_auth/proximity_auth_error_bubble_stub.cc",
       ]
     }
@@ -2952,6 +2989,10 @@ split_static_library("ui") {
       "webui/cast/cast_ui.h",
       "webui/conflicts_ui.cc",
       "webui/conflicts_ui.h",
+      "webui/welcome_win10_handler.cc",
+      "webui/welcome_win10_handler.h",
+      "webui/welcome_win10_ui.cc",
+      "webui/welcome_win10_ui.h",
     ]
     public_deps += [
       "//ui/views",
@@ -2997,9 +3038,6 @@ split_static_library("ui") {
       "views/first_run_dialog.cc",
       "views/first_run_dialog.h",
       "views/frame/browser_desktop_window_tree_host.h",
-      "views/frame/desktop_browser_frame_auralinux.cc",
-      "views/frame/desktop_browser_frame_auralinux.h",
-      "views/frame/native_browser_frame_factory_auralinux.cc",
       "views/status_icons/status_icon_linux_wrapper.cc",
       "views/status_icons/status_icon_linux_wrapper.h",
       "webui/help/version_updater_basic.cc",
@@ -3014,12 +3052,21 @@ split_static_library("ui") {
       sources += [
         "views/frame/browser_desktop_window_tree_host_x11.cc",
         "views/frame/browser_desktop_window_tree_host_x11.h",
+        "views/frame/desktop_browser_frame_aurax11.cc",
+        "views/frame/desktop_browser_frame_aurax11.h",
         "views/frame/global_menu_bar_registrar_x11.cc",
         "views/frame/global_menu_bar_registrar_x11.h",
         "views/frame/global_menu_bar_x11.cc",
         "views/frame/global_menu_bar_x11.h",
+        "views/frame/native_browser_frame_factory_aurax11.cc",
         "views/javascript_app_modal_dialog_views_x11.cc",
         "views/javascript_app_modal_dialog_views_x11.h",
+      ]
+    }
+    if (use_ozone) {
+      sources += [
+        "views/frame/browser_desktop_window_tree_host_ozone.cc",
+        "views/frame/native_browser_frame_factory_ozone.cc",
       ]
     }
   }
@@ -3042,16 +3089,18 @@ split_static_library("ui") {
       sources += [
         "views/javascript_app_modal_event_blocker_x11.cc",
         "views/javascript_app_modal_event_blocker_x11.h",
-        "views/tabs/window_finder_x11.cc",
       ]
       configs += [ "//build/config/linux:x11" ]
       deps += [
         "//ui/events/devices",
         "//ui/events/devices/x11",
       ]
-      if (is_chromeos) {
-        sources -= [ "views/tabs/window_finder_x11.cc" ]
+      if (is_desktop_linux) {
+        sources += [ "views/tabs/window_finder_x11.cc" ]
       }
+    }
+    if (use_ozone) {
+      sources += [ "views/tabs/window_finder_ozone.cc" ]
     }
   }
 

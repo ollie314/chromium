@@ -883,8 +883,11 @@ WebInputEventResult MouseEventManager::dispatchDragEvent(
   if (!view)
     return WebInputEventResult::NotHandled;
 
+  const bool cancelable = eventType != EventTypeNames::dragleave &&
+                          eventType != EventTypeNames::dragend;
+
   DragEvent* me = DragEvent::create(
-      eventType, true, true, m_frame->document()->domWindow(), 0,
+      eventType, true, cancelable, m_frame->document()->domWindow(), 0,
       event.globalPosition().x(), event.globalPosition().y(),
       event.position().x(), event.position().y(), event.movementDelta().x(),
       event.movementDelta().y(), event.getModifiers(), 0,
@@ -904,11 +907,6 @@ void MouseEventManager::clearDragDataTransfer() {
 
 void MouseEventManager::dragSourceEndedAt(const PlatformMouseEvent& event,
                                           DragOperation operation) {
-  // Send a hit test request so that Layer gets a chance to update the :hover
-  // and :active pseudoclasses..
-  HitTestRequest request(HitTestRequest::Release);
-  EventHandlingUtil::performMouseEventHitTest(m_frame, request, event);
-
   if (dragState().m_dragSrc) {
     dragState().m_dragDataTransfer->setDestinationOperation(operation);
     // For now we don't care if event handler cancels default behavior, since

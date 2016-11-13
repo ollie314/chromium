@@ -15,8 +15,6 @@
 #include "ui/ozone/platform/drm/host/gpu_thread_adapter.h"
 #include "ui/ozone/public/gpu_platform_support_host.h"
 
-class SkBitmap;
-
 namespace gfx {
 class Point;
 }
@@ -36,10 +34,11 @@ class DrmGpuPlatformSupportHost : public GpuPlatformSupportHost,
   ~DrmGpuPlatformSupportHost() override;
 
   // GpuPlatformSupportHost:
-  void OnChannelEstablished(
+  void OnGpuProcessLaunched(
       int host_id,
       scoped_refptr<base::SingleThreadTaskRunner> send_runner,
       const base::Callback<void(IPC::Message*)>& send_callback) override;
+  void OnChannelEstablished() override;
   void OnChannelDestroyed(int host_id) override;
 
   // IPC::Listener:
@@ -110,6 +109,7 @@ class DrmGpuPlatformSupportHost : public GpuPlatformSupportHost,
                        const std::vector<OverlayCheck_Params>& params);
 
   int host_id_ = -1;
+  bool channel_established_ = false;
 
   scoped_refptr<base::SingleThreadTaskRunner> send_runner_;
   base::Callback<void(IPC::Message*)> send_callback_;

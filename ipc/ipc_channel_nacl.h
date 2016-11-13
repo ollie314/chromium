@@ -42,12 +42,9 @@ class ChannelNacl : public Channel,
   ~ChannelNacl() override;
 
   // Channel implementation.
-  base::ProcessId GetPeerPID() const override;
-  base::ProcessId GetSelfPID() const override;
   bool Connect() override;
   void Close() override;
   bool Send(Message* message) override;
-  AttachmentBroker* GetAttachmentBroker() override;
 
   // Posted to the main thread by ReaderThreadRunner.
   void DidRecvMsg(std::unique_ptr<MessageContents> contents);
@@ -68,8 +65,6 @@ class ChannelNacl : public Channel,
   bool GetNonBrokeredAttachments(Message* msg) override;
   bool DidEmptyInputBuffers() override;
   void HandleInternalMessage(const Message& msg) override;
-  base::ProcessId GetSenderPID() override;
-  bool IsAttachmentBrokerEndpoint() override;
 
   Mode mode_;
   bool waiting_connect_;

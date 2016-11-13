@@ -46,10 +46,10 @@
 
 #include "core/CoreExport.h"
 #include "core/layout/ScrollAnchor.h"
-#include "core/layout/ScrollEnums.h"
 #include "core/page/scrolling/StickyPositionScrollingConstraints.h"
 #include "core/paint/PaintInvalidationCapableScrollableArea.h"
 #include "core/paint/PaintLayerFragment.h"
+#include "core/paint/ScrollbarManager.h"
 #include "platform/heap/Handle.h"
 #include "wtf/PtrUtil.h"
 #include <memory>
@@ -122,7 +122,7 @@ class CORE_EXPORT PaintLayerScrollableArea final
   friend class Internals;
 
  private:
-  class ScrollbarManager {
+  class ScrollbarManager : public blink::ScrollbarManager {
     DISALLOW_NEW();
 
     // Helper class to manage the life cycle of Scrollbar objects.  Some layout
@@ -138,38 +138,19 @@ class CORE_EXPORT PaintLayerScrollableArea final
     // previously "deleted" scrollbar will be restored, rather than constructing
     // a new one.
    public:
-    ScrollbarManager(PaintLayerScrollableArea&);
+    ScrollbarManager(PaintLayerScrollableArea& scroller)
+        : blink::ScrollbarManager(scroller) {}
 
-    void dispose();
+    void setHasHorizontalScrollbar(bool hasScrollbar) override;
+    void setHasVerticalScrollbar(bool hasScrollbar) override;
 
-    Scrollbar* horizontalScrollbar() const {
-      return m_hBarIsAttached ? m_hBar.get() : nullptr;
-    }
-    Scrollbar* verticalScrollbar() const {
-      return m_vBarIsAttached ? m_vBar.get() : nullptr;
-    }
-    bool hasHorizontalScrollbar() const { return horizontalScrollbar(); }
-    bool hasVerticalScrollbar() const { return verticalScrollbar(); }
-
-    void setHasHorizontalScrollbar(bool hasScrollbar);
-    void setHasVerticalScrollbar(bool hasScrollbar);
     void destroyDetachedScrollbars();
 
-    DECLARE_TRACE();
+   protected:
+    Scrollbar* createScrollbar(ScrollbarOrientation) override;
+    void destroyScrollbar(ScrollbarOrientation) override;
 
-   private:
-    Scrollbar* createScrollbar(ScrollbarOrientation);
-    void destroyScrollbar(ScrollbarOrientation);
-
-   private:
-    Member<PaintLayerScrollableArea> m_scrollableArea;
-
-    // The scrollbars associated with m_scrollableArea. Both can nullptr.
-    Member<Scrollbar> m_hBar;
-    Member<Scrollbar> m_vBar;
-
-    unsigned m_hBarIsAttached : 1;
-    unsigned m_vBarIsAttached : 1;
+    PaintLayerScrollableArea* scrollableArea();
   };
 
  public:
@@ -312,6 +293,9 @@ class CORE_EXPORT PaintLayerScrollableArea final
   int pageStep(ScrollbarOrientation) const override;
   ScrollBehavior scrollBehaviorStyle() const override;
   CompositorAnimationTimeline* compositorAnimationTimeline() const override;
+  void getTickmarks(Vector<IntRect>& rects) const override;
+
+  void visibleSizeChanged();
 
   // FIXME: We shouldn't allow access to m_overflowRect outside this class.
   LayoutRect overflowRect() const { return m_overflowRect; }
@@ -369,9 +353,9 @@ class CORE_EXPORT PaintLayerScrollableArea final
   int pixelSnappedScrollHeight() const;
 
   int verticalScrollbarWidth(
-      OverlayScrollbarClipBehavior = IgnoreOverlayScrollbarSize) const;
+      OverlayScrollbarClipBehavior = IgnoreOverlayScrollbarSize) const override;
   int horizontalScrollbarHeight(
-      OverlayScrollbarClipBehavior = IgnoreOverlayScrollbarSize) const;
+      OverlayScrollbarClipBehavior = IgnoreOverlayScrollbarSize) const override;
 
   DoubleSize adjustedScrollOffset() const {
     return toDoubleSize(DoublePoint(scrollOrigin()) + m_scrollOffset);
@@ -414,7 +398,7 @@ class CORE_EXPORT PaintLayerScrollableArea final
   // controls need to be repositioned in the GraphicsLayer tree.
   void setTopmostScrollChild(PaintLayer*);
   PaintLayer* topmostScrollChild() const {
-    ASSERT(!m_nextTopmostScrollChild);
+    DCHECK(!m_nextTopmostScrollChild);
     return m_topmostScrollChild;
   }
 
@@ -442,6 +426,10 @@ class CORE_EXPORT PaintLayerScrollableArea final
   bool isPaintLayerScrollableArea() const override { return true; }
 
   LayoutBox* layoutBox() const override { return &box(); }
+
+  FloatQuad localToVisibleContentQuad(const FloatQuad&,
+                                      const LayoutObject*,
+                                      unsigned = 0) const final;
 
   bool shouldRebuildHorizontalScrollbarLayer() const {
     return m_rebuildHorizontalScrollbarLayer;

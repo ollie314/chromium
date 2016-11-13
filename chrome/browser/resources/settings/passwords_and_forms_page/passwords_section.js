@@ -20,7 +20,7 @@ var ExceptionPairEntryEvent;
 Polymer({
   is: 'passwords-section',
 
-  behaviors: [CrScrollableBehavior],
+  behaviors: [settings.GlobalScrollTargetBehavior],
 
   properties: {
     /** Preferences state. */
@@ -72,16 +72,6 @@ Polymer({
     },
   },
 
-  observers: ['passwordListChanged_(savedPasswords, filter)'],
-
-  /**
-   * Updates the scrollable contents when the list of passwords has changed.
-   * @private
-   */
-  passwordListChanged_: function() {
-    this.updateScrollableContents();
-  },
-
   /**
    * Sets the password in the current password dialog if the loginPair matches.
    * @param {!chrome.passwordsPrivate.LoginPair} loginPair
@@ -100,7 +90,7 @@ Polymer({
    * @private
    */
   onMenuEditPasswordTap_: function() {
-    /** @type {SettingsActionMenuElement} */(this.$.menu).close();
+    /** @type {CrActionMenuElement} */(this.$.menu).close();
     this.showPasswordEditDialog_ = true;
   },
 
@@ -142,7 +132,7 @@ Polymer({
    */
   onMenuRemovePasswordTap_: function() {
     this.fire('remove-saved-password', this.activePassword.loginPair);
-    /** @type {SettingsActionMenuElement} */(this.$.menu).close();
+    /** @type {CrActionMenuElement} */(this.$.menu).close();
   },
 
   /**
@@ -167,7 +157,7 @@ Polymer({
    * @private
    */
   onPasswordMenuTap_: function(e) {
-    var menu = /** @type {!SettingsActionMenuElement} */(this.$.menu);
+    var menu = /** @type {!CrActionMenuElement} */(this.$.menu);
     var target = /** @type {!Element} */(Polymer.dom(e).localTarget);
     var passwordUiEntryEvent = /** @type {!PasswordUiEntryEvent} */(e);
 

@@ -23,11 +23,13 @@ class WindowCompositorFrameSinkBinding;
 
 class WindowCompositorFrameSink
     : public cc::CompositorFrameSink,
-      public cc::mojom::MojoCompositorFrameSinkClient {
+      public cc::mojom::MojoCompositorFrameSinkClient,
+      public cc::ExternalBeginFrameSourceClient {
  public:
   // static
   static std::unique_ptr<WindowCompositorFrameSink> Create(
       scoped_refptr<cc::ContextProvider> context_provider,
+      gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
       std::unique_ptr<WindowCompositorFrameSinkBinding>*
           compositor_frame_sink_binding);
 
@@ -43,15 +45,20 @@ class WindowCompositorFrameSink
 
   WindowCompositorFrameSink(
       scoped_refptr<cc::ContextProvider> context_provider,
+      gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
       mojo::InterfacePtrInfo<cc::mojom::MojoCompositorFrameSink>
           compositor_frame_sink_info,
       cc::mojom::MojoCompositorFrameSinkClientRequest client_request);
 
   // cc::mojom::MojoCompositorFrameSinkClient implementation:
   void DidReceiveCompositorFrameAck() override;
+  void OnBeginFrame(const cc::BeginFrameArgs& begin_frame_args) override;
   void ReclaimResources(const cc::ReturnedResourceArray& resources) override;
 
-  std::unique_ptr<cc::BeginFrameSource> begin_frame_source_;
+  // cc::ExternalBeginFrameSourceClient implementation.
+  void OnNeedsBeginFrames(bool needs_begin_frames) override;
+
+  std::unique_ptr<cc::ExternalBeginFrameSource> begin_frame_source_;
   mojo::InterfacePtrInfo<cc::mojom::MojoCompositorFrameSink>
       compositor_frame_sink_info_;
   mojo::InterfaceRequest<cc::mojom::MojoCompositorFrameSinkClient>

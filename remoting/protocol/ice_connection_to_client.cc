@@ -32,11 +32,17 @@ namespace {
 
 std::unique_ptr<AudioEncoder> CreateAudioEncoder(
     const protocol::SessionConfig& config) {
+#if defined(OS_IOS)
+  // TODO(nicholss): iOS should not use Opus. This is to prevent us from
+  // depending on //media. In the future we will use webrtc for conneciton
+  // and this will be a non-issue.
+  return nullptr;
+#else
   const protocol::ChannelConfig& audio_config = config.audio_config();
-
   if (audio_config.codec == protocol::ChannelConfig::CODEC_OPUS) {
     return base::WrapUnique(new AudioEncoderOpus());
   }
+#endif
 
   NOTREACHED();
   return nullptr;
@@ -51,8 +57,8 @@ IceConnectionToClient::IceConnectionToClient(
     scoped_refptr<base::SingleThreadTaskRunner> audio_task_runner)
     : event_handler_(nullptr),
       session_(std::move(session)),
-      video_encode_task_runner_(video_encode_task_runner),
-      audio_task_runner_(audio_task_runner),
+      video_encode_task_runner_(std::move(video_encode_task_runner)),
+      audio_task_runner_(std::move(audio_task_runner)),
       transport_(transport_context, this),
       control_dispatcher_(new HostControlDispatcher()),
       event_dispatcher_(new HostEventDispatcher()),

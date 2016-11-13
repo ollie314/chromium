@@ -13,6 +13,7 @@
 #include "ash/common/system/tray/system_tray_notifier.h"
 #include "ash/common/system/tray/tray_constants.h"
 #include "ash/common/system/tray/tray_popup_item_style.h"
+#include "ash/common/system/tray/tray_popup_utils.h"
 #include "ash/common/wm_shell.h"
 #include "grit/ash_resources.h"
 #include "grit/ash_strings.h"
@@ -44,11 +45,13 @@ class DefaultTracingView : public ActionableView {
     }
     AddChildView(image_);
 
-    label_ = new views::Label();
+    label_ = TrayPopupUtils::CreateDefaultLabel();
     label_->SetMultiLine(true);
-    label_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
     label_->SetText(bundle.GetLocalizedString(IDS_ASH_STATUS_TRAY_TRACING));
     AddChildView(label_);
+
+    if (MaterialDesignController::IsSystemTrayMenuMaterial())
+      SetInkDropMode(InkDropHostView::InkDropMode::ON);
   }
 
   ~DefaultTracingView() override {}
@@ -68,7 +71,7 @@ class DefaultTracingView : public ActionableView {
     // TODO(tdanderson): Update the icon used for tracing or remove it from
     // the system menu. See crbug.com/625691.
     image_->SetImage(CreateVectorIcon(gfx::VectorIconId::CODE, kMenuIconSize,
-                                      style.GetForegroundColor()));
+                                      style.GetIconColor()));
   }
 
   bool PerformAction(const ui::Event& event) override {

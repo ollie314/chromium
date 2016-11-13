@@ -34,6 +34,7 @@
 
 #include "net/http/http_response_headers.h"
 #include "net/http/http_util.h"
+#include "platform/json/JSONParser.h"
 #include "platform/network/ResourceResponse.h"
 #include "platform/weborigin/Suborigin.h"
 #include "public/platform/WebString.h"
@@ -125,8 +126,13 @@ inline bool skipValue(const String& str, unsigned& pos) {
 }
 
 template <typename CharType>
+inline bool isASCIILowerAlphaOrDigit(CharType c) {
+  return isASCIILower(c) || isASCIIDigit(c);
+}
+
+template <typename CharType>
 inline bool isASCIILowerAlphaOrDigitOrHyphen(CharType c) {
-  return isASCIILower(c) || isASCIIDigit(c) || c == '-';
+  return isASCIILowerAlphaOrDigit(c) || c == '-';
 }
 
 Suborigin::SuboriginPolicyOptions getSuboriginPolicyOptionFromString(
@@ -140,15 +146,20 @@ Suborigin::SuboriginPolicyOptions getSuboriginPolicyOptionFromString(
   if (policyOptionName == "'unsafe-cookies'")
     return Suborigin::SuboriginPolicyOptions::UnsafeCookies;
 
+  if (policyOptionName == "'unsafe-credentials'")
+    return Suborigin::SuboriginPolicyOptions::UnsafeCredentials;
+
   return Suborigin::SuboriginPolicyOptions::None;
 }
 
+// suborigin-name = LOWERALPHA *( LOWERALPHA / DIGIT )
+//
+// Does not trim whitespace before or after the suborigin-name.
 const UChar* parseSuboriginName(const UChar* begin,
                                 const UChar* end,
                                 String& name,
                                 WTF::Vector<String>& messages) {
   // Parse the name of the suborigin (no spaces, single string)
-  skipWhile<UChar, isASCIISpace>(begin, end);
   if (begin == end) {
     messages.append(String("No Suborigin name specified."));
     return nullptr;
@@ -156,15 +167,21 @@ const UChar* parseSuboriginName(const UChar* begin,
 
   const UChar* position = begin;
 
-  skipWhile<UChar, isASCIILowerAlphaOrDigitOrHyphen>(position, end);
+  if (!skipExactly<UChar, isASCIILower>(position, end)) {
+    messages.append("Invalid character \'" + String(position, 1) +
+                    "\' in suborigin. First character must be a lower case "
+                    "alphabetic character.");
+    return nullptr;
+  }
+
+  skipWhile<UChar, isASCIILowerAlphaOrDigit>(position, end);
   if (position != end && !isASCIISpace(*position)) {
     messages.append("Invalid character \'" + String(position, 1) +
                     "\' in suborigin.");
     return nullptr;
   }
-  size_t length = position - begin;
-  skipWhile<UChar, isASCIISpace>(position, end);
 
+  size_t length = position - begin;
   name = String(begin, length).lower();
   return position;
 }
@@ -800,7 +817,10 @@ bool parseSuboriginHeader(const String& header,
 
   String name;
   position = parseSuboriginName(position, end, name, messages);
-  if (!position)
+  // For now it is appropriate to simply return false if the name is empty and
+  // act as if the header doesn't exist. If suborigin policy options are created
+  // that can apply to the empty suborigin, than this will have to change.
+  if (!position || name.isEmpty())
     return false;
 
   suborigin->setName(name);
@@ -875,6 +895,16 @@ bool parseMultipartHeadersFromBody(const char* bytes,
     }
   }
   return true;
+}
+
+// See https://tools.ietf.org/html/draft-ietf-httpbis-jfv-01, Section 4.
+std::unique_ptr<JSONArray> parseJSONHeader(const String& header) {
+  StringBuilder sb;
+  sb.append("[");
+  sb.append(header);
+  sb.append("]");
+  std::unique_ptr<JSONValue> headerValue = parseJSON(sb.toString());
+  return JSONArray::from(std::move(headerValue));
 }
 
 }  // namespace blink

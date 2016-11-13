@@ -70,7 +70,6 @@ class InterfaceProvider;
 class InterfaceRegistry;
 class WebApplicationCacheHost;
 class WebApplicationCacheHostClient;
-class WebAppBannerClient;
 class WebBluetooth;
 class WebColorChooser;
 class WebColorChooserClient;
@@ -335,8 +334,7 @@ class BLINK_EXPORT WebFrameClient {
   virtual void didCreateDataSource(WebLocalFrame*, WebDataSource*) {}
 
   // A new provisional load has been started.
-  virtual void didStartProvisionalLoad(WebLocalFrame* localFrame,
-                                       double triggeringEventTime) {}
+  virtual void didStartProvisionalLoad(WebLocalFrame* localFrame) {}
 
   // The provisional load was redirected via a HTTP 3xx response.
   virtual void didReceiveServerRedirectForProvisionalLoad(WebLocalFrame*) {}
@@ -701,9 +699,6 @@ class BLINK_EXPORT WebFrameClient {
   virtual void suddenTerminationDisablerChanged(bool present,
                                                 SuddenTerminationDisablerType) {
   }
-
-  // App Banners ---------------------------------------------------------
-  virtual WebAppBannerClient* appBannerClient() { return 0; }
 
   // Navigator Content Utils  --------------------------------------------
 

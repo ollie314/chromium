@@ -6,6 +6,7 @@
 
 #include <utility>
 
+#include "content/browser/child_process_security_policy_impl.h"
 #include "content/browser/devtools/render_frame_devtools_agent_host.h"
 #include "content/browser/frame_host/frame_tree.h"
 #include "content/browser/frame_host/frame_tree_node.h"
@@ -15,6 +16,7 @@
 #include "content/browser/frame_host/navigator.h"
 #include "content/browser/frame_host/navigator_impl.h"
 #include "content/browser/loader/navigation_url_loader.h"
+#include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/service_worker/service_worker_context_wrapper.h"
 #include "content/browser/service_worker/service_worker_navigation_handle.h"
 #include "content/browser/site_instance_impl.h"
@@ -57,10 +59,11 @@ void UpdateLoadFlagsWithCacheFlags(
       *load_flags |= net::LOAD_BYPASS_CACHE;
       break;
     case FrameMsg_Navigate_Type::RESTORE:
-      *load_flags |= net::LOAD_PREFERRING_CACHE;
+      *load_flags |= net::LOAD_SKIP_CACHE_VALIDATION;
       break;
     case FrameMsg_Navigate_Type::RESTORE_WITH_POST:
-      *load_flags |= net::LOAD_ONLY_FROM_CACHE;
+      *load_flags |=
+          net::LOAD_ONLY_FROM_CACHE | net::LOAD_SKIP_CACHE_VALIDATION;
       break;
     case FrameMsg_Navigate_Type::NORMAL:
       if (is_post)
@@ -184,7 +187,6 @@ std::unique_ptr<NavigationRequest> NavigationRequest::CreateRendererInitiated(
       false,                   // is_overriding_user_agent
       std::vector<GURL>(),     // redirects
       false,                   // can_load_local_resources
-      base::Time::Now(),       // request_time
       PageState(),             // page_state
       0,                       // nav_entry_id
       false,                   // is_same_document_history_load
@@ -297,10 +299,10 @@ void NavigationRequest::BeginNavigation() {
 
 void NavigationRequest::CreateNavigationHandle(int pending_nav_entry_id) {
   // TODO(nasko): Update the NavigationHandle creation to ensure that the
-  // proper values are specified for is_synchronous and is_srcdoc.
+  // proper values are specified for is_same_page and is_srcdoc.
   navigation_handle_ = NavigationHandleImpl::Create(
       common_params_.url, frame_tree_node_, !browser_initiated_,
-      false,  // is_synchronous
+      false,  // is_same_page
       false,  // is_srcdoc
       common_params_.navigation_start, pending_nav_entry_id,
       false);  // started_in_context_menu
@@ -333,15 +335,26 @@ void NavigationRequest::OnRequestRedirected(
   common_params_.method = redirect_info.new_method;
   common_params_.referrer.url = GURL(redirect_info.new_referrer);
 
-  // TODO(clamy): Have CSP + security upgrade checks here.
+  // For non browser initiated navigations we need to check if the source has
+  // access to the URL. We always allow browser initiated requests.
   // TODO(clamy): Kill the renderer if FilterURL fails?
+  GURL url = common_params_.url;
+  if (!browser_initiated_ && source_site_instance()) {
+    source_site_instance()->GetProcess()->FilterURL(false, &url);
+    // FilterURL sets the URL to about:blank if the CSP checks prevent the
+    // renderer from accessing it.
+    if ((url == url::kAboutBlankURL) && (url != common_params_.url)) {
+      frame_tree_node_->ResetNavigationRequest(false);
+      return;
+    }
+  }
 
   // It's safe to use base::Unretained because this NavigationRequest owns the
   // NavigationHandle where the callback will be stored.
   // TODO(clamy): pass the real value for |is_external_protocol| if needed.
   navigation_handle_->WillRedirectRequest(
       common_params_.url, common_params_.method, common_params_.referrer.url,
-      false, response->head.headers,
+      false, response->head.headers, response->head.connection_info,
       base::Bind(&NavigationRequest::OnRedirectChecksComplete,
                  base::Unretained(this)));
 }
@@ -411,9 +424,10 @@ void NavigationRequest::OnResponseStarted(
   // TODO(clamy): pass the right values for request_id, is_download and
   // is_stream.
   navigation_handle_->WillProcessResponse(
-      render_frame_host, response->head.headers.get(), ssl_status,
-      GlobalRequestID(), common_params_.should_replace_current_entry, false,
-      false, base::Closure(),
+      render_frame_host, response->head.headers.get(),
+      response->head.connection_info, ssl_status, GlobalRequestID(),
+      common_params_.should_replace_current_entry, false, false,
+      base::Closure(),
       base::Bind(&NavigationRequest::OnWillProcessResponseChecksComplete,
                  base::Unretained(this)));
 }
@@ -507,13 +521,17 @@ void NavigationRequest::OnStartChecksComplete(
       navigation_handle_->GetStartingSiteInstance()->GetSiteURL().
           SchemeIs(kGuestScheme);
 
+  bool report_raw_headers =
+      RenderFrameDevToolsAgentHost::IsNetworkHandlerEnabled(frame_tree_node_);
+
   loader_ = NavigationURLLoader::Create(
       frame_tree_node_->navigator()->GetController()->GetBrowserContext(),
       base::MakeUnique<NavigationRequestInfo>(
           common_params_, begin_params_, first_party_for_cookies,
           frame_tree_node_->current_origin(), frame_tree_node_->IsMainFrame(),
           parent_is_main_frame, IsSecureFrame(frame_tree_node_->parent()),
-          frame_tree_node_->frame_tree_node_id(), is_for_guests_only),
+          frame_tree_node_->frame_tree_node_id(), is_for_guests_only,
+          report_raw_headers),
       std::move(navigation_ui_data),
       navigation_handle_->service_worker_handle(), this);
 }

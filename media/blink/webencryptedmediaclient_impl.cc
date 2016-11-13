@@ -22,6 +22,8 @@
 #include "third_party/WebKit/public/platform/WebMediaKeySystemConfiguration.h"
 #include "third_party/WebKit/public/platform/WebSecurityOrigin.h"
 #include "third_party/WebKit/public/platform/WebString.h"
+#include "url/gurl.h"
+#include "url/origin.h"
 
 namespace media {
 
@@ -102,8 +104,7 @@ void WebEncryptedMediaClientImpl::requestMediaKeySystemAccess(
   GetReporter(request.keySystem())->ReportRequested();
 
   if (GetMediaClient()) {
-    GURL security_origin(
-        blink::WebStringToGURL(request.getSecurityOrigin().toString()));
+    GURL security_origin(url::Origin(request.getSecurityOrigin()).GetURL());
 
     GetMediaClient()->RecordRapporURL("Media.OriginUrl.EME", security_origin);
 
@@ -166,8 +167,8 @@ WebEncryptedMediaClientImpl::Reporter* WebEncryptedMediaClientImpl::GetReporter(
   // Assumes that empty will not be found by GetKeySystemNameForUMA().
   // TODO(sandersd): Avoid doing ASCII conversion more than once.
   std::string key_system_ascii;
-  if (base::IsStringASCII(key_system))
-    key_system_ascii = base::UTF16ToASCII(base::StringPiece16(key_system));
+  if (key_system.containsOnlyASCII())
+    key_system_ascii = key_system.ascii();
 
   // Return a per-frame singleton so that UMA reports will be once-per-frame.
   std::string uma_name = GetKeySystemNameForUMA(key_system_ascii);

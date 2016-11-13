@@ -17,17 +17,16 @@
 #include "base/memory/weak_ptr.h"
 #include "services/ui/public/cpp/input_event_handler.h"
 #include "services/ui/public/interfaces/window_tree.mojom.h"
+#include "ui/aura/client/drag_drop_delegate.h"
 #include "ui/aura/window_delegate.h"
 #include "ui/aura/window_tree_host_observer.h"
 #include "ui/platform_window/platform_window_delegate.h"
 #include "ui/views/mus/mus_export.h"
 #include "ui/views/mus/window_tree_host_mus.h"
 #include "ui/views/widget/native_widget_private.h"
-#include "ui/wm/public/drag_drop_delegate.h"
 
 namespace aura {
 namespace client {
-class DefaultCaptureClient;
 class DragDropClient;
 class ScreenPositionClient;
 class WindowParentingClient;
@@ -61,7 +60,6 @@ class DropHelper;
 class DropTargetMus;
 class InputMethodMus;
 class TooltipManagerAura;
-class WidgetDelegate;
 
 // An implementation of NativeWidget that binds to a ui::Window. Because Aura
 // is used extensively within Views code, this code uses aura and binds to the

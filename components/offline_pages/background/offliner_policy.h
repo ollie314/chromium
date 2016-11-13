@@ -6,12 +6,32 @@
 #define COMPONENTS_OFFLINE_PAGES_BACKGROUND_OFFLINER_POLICY_H_
 
 namespace {
+// The max number of started tries is to guard against pages that make the
+// prerenderer crash.  It should be greater than or equal to the max number of
+// completed tries.
 const int kMaxStartedTries = 4;
-const int kMaxCompletedTries = 1;
-const int kDefaultBackgroundProcessingTimeBudgetSeconds = 170;
-const int kSinglePageTimeLimitWhenBackgroundScheduledSeconds = 120;
-const int kSinglePageTimeLimitForImmediateLoadSeconds = 300;
+// The number of max completed tries is based on Gin2G-poor testing showing that
+// we often need about 4 tries with a 2 minute window, or 3 retries with a 3
+// minute window.
+const int kMaxCompletedTries = 3;
+// By the time we get to a week, the user has forgotten asking for a page.
 const int kRequestExpirationTimeInSeconds = 60 * 60 * 24 * 7;
+
+// Scheduled background processing time limits.
+const int kDozeModeBackgroundServiceWindowSeconds = 60 * 3;
+const int kDefaultBackgroundProcessingTimeBudgetSeconds =
+    kDozeModeBackgroundServiceWindowSeconds - 10;
+const int kSinglePageTimeLimitWhenBackgroundScheduledSeconds =
+    kDozeModeBackgroundServiceWindowSeconds - 10;
+
+// Immediate processing time limits.
+// Note: experiments on GIN-2g-poor show many page requests took 3 or 4
+// attempts in background scheduled mode with timeout of 2 minutes. So for
+// immediate processing mode, give page requests 4 times that limit (8 min).
+// Then budget up to 5 of those requests in processing window.
+const int kSinglePageTimeLimitForImmediateLoadSeconds = 60 * 8;
+const int kImmediateLoadProcessingTimeBudgetSeconds =
+    kSinglePageTimeLimitForImmediateLoadSeconds * 5;
 }  // namespace
 
 namespace offline_pages {
@@ -21,12 +41,12 @@ namespace offline_pages {
 class OfflinerPolicy {
  public:
   OfflinerPolicy()
-      : prefer_untried_requests_(false),
+      : prefer_untried_requests_(true),
         prefer_earlier_requests_(true),
-        retry_count_is_more_important_than_recency_(false),
+        retry_count_is_more_important_than_recency_(true),
         max_started_tries_(kMaxStartedTries),
         max_completed_tries_(kMaxCompletedTries),
-        background_processing_time_budget_(
+        background_scheduled_processing_time_budget_(
             kDefaultBackgroundProcessingTimeBudgetSeconds) {}
 
   // Constructor for unit tests.
@@ -41,7 +61,8 @@ class OfflinerPolicy {
         retry_count_is_more_important_than_recency_(prefer_retry_count),
         max_started_tries_(max_started_tries),
         max_completed_tries_(max_completed_tries),
-        background_processing_time_budget_(background_processing_time_budget) {}
+        background_scheduled_processing_time_budget_(
+            background_processing_time_budget) {}
 
   // TODO(petewil): Numbers here are chosen arbitrarily, do the proper studies
   // to get good policy numbers. Eventually this should get data from a finch
@@ -85,10 +106,18 @@ class OfflinerPolicy {
     return 25;
   }
 
-  // How many seconds to keep trying new pages for, before we give up,  and
+  // How many seconds to keep trying new pages for, before we give up, and
   // return to the scheduler.
-  int GetBackgroundProcessingTimeBudgetSeconds() const {
-    return background_processing_time_budget_;
+  // TODO(dougarnett): Consider parameterizing these time limit/budget
+  // calls with processing mode.
+  int GetProcessingTimeBudgetWhenBackgroundScheduledInSeconds() const {
+    return background_scheduled_processing_time_budget_;
+  }
+
+  // How many seconds to keep trying new pages for, before we give up, when
+  // processing started immediately (without scheduler).
+  int GetProcessingTimeBudgetForImmediateLoadInSeconds() const {
+    return kImmediateLoadProcessingTimeBudgetSeconds;
   }
 
   // How long do we allow a page to load before giving up on it when
@@ -114,7 +143,7 @@ class OfflinerPolicy {
   bool retry_count_is_more_important_than_recency_;
   int max_started_tries_;
   int max_completed_tries_;
-  int background_processing_time_budget_;
+  int background_scheduled_processing_time_budget_;
 };
 }  // namespace offline_pages
 

@@ -127,8 +127,6 @@ class CONTENT_EXPORT MainThreadEventQueue
   void EventHandled(blink::WebInputEvent::Type type,
                     InputEventAckState ack_result);
 
-  void set_is_flinging(bool is_flinging) { is_flinging_ = is_flinging; }
-
  private:
   friend class base::RefCountedThreadSafe<MainThreadEventQueue>;
   ~MainThreadEventQueue();
@@ -142,14 +140,17 @@ class CONTENT_EXPORT MainThreadEventQueue
                              const ui::LatencyInfo& latency,
                              InputEventDispatchType original_dispatch_type);
 
+  bool IsRafAlignedInputDisabled();
+  bool IsRafAlignedEvent(const std::unique_ptr<EventWithDispatchType>& event);
+
   friend class MainThreadEventQueueTest;
   int routing_id_;
   MainThreadEventQueueClient* client_;
   std::unique_ptr<EventWithDispatchType> in_flight_event_;
-  bool is_flinging_;
   bool last_touch_start_forced_nonblocking_due_to_fling_;
   bool enable_fling_passive_listener_flag_;
-  bool handle_raf_aligned_input_;
+  bool handle_raf_aligned_touch_input_;
+  bool handle_raf_aligned_mouse_input_;
 
   // Contains data to be shared between main thread and compositor thread.
   struct SharedState {

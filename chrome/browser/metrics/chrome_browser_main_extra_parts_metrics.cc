@@ -28,6 +28,10 @@
 #include "ui/display/screen.h"
 #include "ui/events/event_switches.h"
 
+#if !defined(OS_ANDROID)
+#include "chrome/browser/metrics/first_web_contents_profiler.h"
+#endif  // !defined(OS_ANDROID)
+
 #if defined(OS_ANDROID) && defined(__arm__)
 #include <cpu-features.h>
 #endif  // defined(OS_ANDROID) && defined(__arm__)
@@ -88,6 +92,8 @@ enum UMALinuxWindowManager {
   UMA_LINUX_WINDOW_MANAGER_STUMPWM,
   UMA_LINUX_WINDOW_MANAGER_WMII,
   UMA_LINUX_WINDOW_MANAGER_FLUXBOX,
+  UMA_LINUX_WINDOW_MANAGER_XMONAD,
+  UMA_LINUX_WINDOW_MANAGER_UNNAMED,
   // NOTE: Append new window managers to the list above this line (i.e. don't
   // renumber) and update LinuxWindowManagerName in
   // tools/metrics/histograms/histograms.xml accordingly.
@@ -196,8 +202,10 @@ void RecordLinuxGlibcVersion() {
 #if defined(USE_X11) && !defined(OS_CHROMEOS)
 UMALinuxWindowManager GetLinuxWindowManager() {
   switch (ui::GuessWindowManager()) {
-    case ui::WM_UNKNOWN:
+    case ui::WM_OTHER:
       return UMA_LINUX_WINDOW_MANAGER_OTHER;
+    case ui::WM_UNNAMED:
+      return UMA_LINUX_WINDOW_MANAGER_UNNAMED;
     case ui::WM_AWESOME:
       return UMA_LINUX_WINDOW_MANAGER_AWESOME;
     case ui::WM_BLACKBOX:
@@ -238,7 +246,10 @@ UMALinuxWindowManager GetLinuxWindowManager() {
       return UMA_LINUX_WINDOW_MANAGER_WMII;
     case ui::WM_XFWM4:
       return UMA_LINUX_WINDOW_MANAGER_XFWM4;
+    case ui::WM_XMONAD:
+      return UMA_LINUX_WINDOW_MANAGER_XMONAD;
   }
+  NOTREACHED();
   return UMA_LINUX_WINDOW_MANAGER_OTHER;
 }
 #endif
@@ -368,6 +379,7 @@ void ChromeBrowserMainExtraPartsMetrics::PostBrowserStart() {
   is_screen_observer_ = true;
 
 #if !defined(OS_ANDROID)
+  FirstWebContentsProfiler::Start();
   metrics::TabUsageRecorder::Initialize();
 #endif  // !defined(OS_ANDROID)
 }

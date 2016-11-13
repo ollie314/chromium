@@ -12,6 +12,7 @@
 #include "base/files/file_util.h"
 #include "base/i18n/icu_util.h"
 #include "base/logging.h"
+#include "base/metrics/field_trial.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/process/launch.h"
 #include "base/process/process.h"
@@ -66,10 +67,10 @@ namespace {
 typedef base::Callback<void(ZygoteHandle,
 #if defined(OS_ANDROID)
                             base::ScopedFD,
-                            base::ScopedFD,
 #endif
                             base::Process,
-                            int)> NotifyCallback;
+                            int)>
+    NotifyCallback;
 
 void RecordHistogramsOnLauncherThread(base::TimeDelta launch_time) {
   DCHECK_CURRENTLY_ON(BrowserThread::PROCESS_LAUNCHER);
@@ -90,7 +91,6 @@ void RecordHistogramsOnLauncherThread(base::TimeDelta launch_time) {
 void OnChildProcessStartedAndroid(const NotifyCallback& callback,
                                   BrowserThread::ID client_thread_id,
                                   const base::TimeTicks begin_launch_time,
-                                  base::ScopedFD ipcfd,
                                   base::ScopedFD mojo_fd,
                                   base::ProcessHandle handle) {
   int launch_result = (handle == base::kNullProcessHandle)
@@ -102,9 +102,9 @@ void OnChildProcessStartedAndroid(const NotifyCallback& callback,
       BrowserThread::PROCESS_LAUNCHER, FROM_HERE,
       base::Bind(&RecordHistogramsOnLauncherThread, launch_time));
 
-  base::Closure callback_on_client_thread(base::Bind(
-      callback, nullptr, base::Passed(&ipcfd), base::Passed(&mojo_fd),
-      base::Passed(base::Process(handle)), launch_result));
+  base::Closure callback_on_client_thread(
+      base::Bind(callback, nullptr, base::Passed(&mojo_fd),
+                 base::Passed(base::Process(handle)), launch_result));
   if (BrowserThread::CurrentlyOn(client_thread_id)) {
     callback_on_client_thread.Run();
   } else {
@@ -118,10 +118,6 @@ void LaunchOnLauncherThread(const NotifyCallback& callback,
                             BrowserThread::ID client_thread_id,
                             int child_process_id,
                             SandboxedProcessLauncherDelegate* delegate,
-#if defined(OS_ANDROID)
-                            base::ScopedFD ipcfd,
-#endif
-                            const base::SharedMemory* field_trial_state,
                             mojo::edk::ScopedPlatformHandle client_handle,
                             base::CommandLine* cmd_line) {
   DCHECK_CURRENTLY_ON(BrowserThread::PROCESS_LAUNCHER);
@@ -134,10 +130,8 @@ void LaunchOnLauncherThread(const NotifyCallback& callback,
   bool launch_elevated = delegate->ShouldLaunchElevated();
 #elif defined(OS_MACOSX)
   base::EnvironmentMap env = delegate->GetEnvironment();
-  base::ScopedFD ipcfd = delegate->TakeIpcFd();
 #elif defined(OS_POSIX) && !defined(OS_ANDROID)
   base::EnvironmentMap env = delegate->GetEnvironment();
-  base::ScopedFD ipcfd = delegate->TakeIpcFd();
 #endif
   std::unique_ptr<base::CommandLine> cmd_line_deleter(cmd_line);
   base::TimeTicks begin_launch_time = base::TimeTicks::Now();
@@ -153,8 +147,7 @@ void LaunchOnLauncherThread(const NotifyCallback& callback,
   } else {
     base::HandlesToInheritVector handles;
     handles.push_back(client_handle.get().handle);
-    if (field_trial_state)
-      handles.push_back(field_trial_state->handle().GetHandle());
+    base::FieldTrialList::AppendFieldTrialHandleIfNeeded(&handles);
     cmd_line->AppendSwitchASCII(
         mojo::edk::PlatformChannelPair::kMojoPlatformChannelHandleSwitch,
         base::UintToString(base::win::HandleToUint32(handles[0])));
@@ -171,12 +164,8 @@ void LaunchOnLauncherThread(const NotifyCallback& callback,
   DCHECK(mojo_fd.is_valid());
 
 #if defined(OS_ANDROID)
-  if (ipcfd.get() != -1)
-    files_to_register->Share(kPrimaryIPCChannel, ipcfd.get());
   files_to_register->Share(kMojoIPCChannel, mojo_fd.get());
 #else
-  if (ipcfd.get() != -1)
-    files_to_register->Transfer(kPrimaryIPCChannel, std::move(ipcfd));
   files_to_register->Transfer(kMojoIPCChannel, std::move(mojo_fd));
 #endif
 #endif
@@ -254,8 +243,7 @@ void LaunchOnLauncherThread(const NotifyCallback& callback,
   StartChildProcess(
       cmd_line->argv(), child_process_id, std::move(files_to_register), regions,
       base::Bind(&OnChildProcessStartedAndroid, callback, client_thread_id,
-                 begin_launch_time, base::Passed(&ipcfd),
-                 base::Passed(&mojo_fd)));
+                 begin_launch_time, base::Passed(&mojo_fd)));
 
 #elif defined(OS_POSIX)
   // We need to close the client end of the IPC channel to reliably detect
@@ -386,7 +374,11 @@ void SetProcessBackgroundedOnLauncherThread(base::Process process,
                                             bool background) {
   DCHECK_CURRENTLY_ON(BrowserThread::PROCESS_LAUNCHER);
   if (process.CanBackgroundProcesses()) {
+#if defined(OS_MACOSX)
+    process.SetProcessBackgrounded(MachBroker::GetInstance(), background);
+#else
     process.SetProcessBackgrounded(background);
+#endif  // defined(OS_MACOSX)
   }
 #if defined(OS_ANDROID)
   SetChildProcessInForeground(process.Handle(), !background);
@@ -400,7 +392,6 @@ ChildProcessLauncher::ChildProcessLauncher(
     base::CommandLine* cmd_line,
     int child_process_id,
     Client* client,
-    const base::SharedMemory* field_trial_state,
     const std::string& mojo_child_token,
     const mojo::edk::ProcessErrorCallback& process_error_callback,
     bool terminate_on_shutdown)
@@ -421,7 +412,7 @@ ChildProcessLauncher::ChildProcessLauncher(
       weak_factory_(this) {
   DCHECK(CalledOnValidThread());
   CHECK(BrowserThread::GetCurrentThreadIdentifier(&client_thread_id_));
-  Launch(delegate, cmd_line, child_process_id, field_trial_state);
+  Launch(delegate, cmd_line, child_process_id);
 }
 
 ChildProcessLauncher::~ChildProcessLauncher() {
@@ -437,8 +428,7 @@ ChildProcessLauncher::~ChildProcessLauncher() {
 
 void ChildProcessLauncher::Launch(SandboxedProcessLauncherDelegate* delegate,
                                   base::CommandLine* cmd_line,
-                                  int child_process_id,
-                                  const base::SharedMemory* field_trial_state) {
+                                  int child_process_id) {
   DCHECK(CalledOnValidThread());
 
 #if defined(OS_ANDROID)
@@ -457,10 +447,6 @@ void ChildProcessLauncher::Launch(SandboxedProcessLauncherDelegate* delegate,
   DCHECK(process_type == switches::kGpuProcess ||
          !cmd_line->HasSwitch(switches::kNoSandbox));
 
-  // We need to close the client end of the IPC channel to reliably detect
-  // child termination. We will close this fd after we create the child
-  // process which is asynchronous on Android.
-  base::ScopedFD ipcfd(delegate->TakeIpcFd().release());
 #endif
   mojo::edk::ScopedPlatformHandle server_handle;
   mojo::edk::ScopedPlatformHandle client_handle;
@@ -484,10 +470,7 @@ void ChildProcessLauncher::Launch(SandboxedProcessLauncherDelegate* delegate,
       BrowserThread::PROCESS_LAUNCHER, FROM_HERE,
       base::Bind(&LaunchOnLauncherThread, reply_callback, client_thread_id_,
                  child_process_id, delegate,
-#if defined(OS_ANDROID)
-                 base::Passed(&ipcfd),
-#endif
-                 field_trial_state, base::Passed(&client_handle), cmd_line));
+                 base::Passed(&client_handle), cmd_line));
 }
 
 void ChildProcessLauncher::UpdateTerminationStatus(bool known_dead) {
@@ -531,7 +514,6 @@ void ChildProcessLauncher::DidLaunch(
     mojo::edk::ScopedPlatformHandle server_handle,
     ZygoteHandle zygote,
 #if defined(OS_ANDROID)
-    base::ScopedFD ipcfd,
     base::ScopedFD mojo_fd,
 #endif
     base::Process process,
@@ -541,9 +523,6 @@ void ChildProcessLauncher::DidLaunch(
 
   if (instance.get()) {
     instance->Notify(zygote, std::move(server_handle),
-#if defined(OS_ANDROID)
-                     std::move(ipcfd),
-#endif
                      std::move(process), error_code);
   } else {
     if (process.IsValid() && terminate_on_shutdown) {
@@ -558,9 +537,6 @@ void ChildProcessLauncher::DidLaunch(
 
 void ChildProcessLauncher::Notify(ZygoteHandle zygote,
                                   mojo::edk::ScopedPlatformHandle server_handle,
-#if defined(OS_ANDROID)
-                                  base::ScopedFD ipcfd,
-#endif
                                   base::Process process,
                                   int error_code) {
   DCHECK(CalledOnValidThread());

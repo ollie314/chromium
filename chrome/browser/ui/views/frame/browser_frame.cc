@@ -28,13 +28,13 @@
 #include "ui/base/hit_test.h"
 #include "ui/events/event_handler.h"
 #include "ui/gfx/font_list.h"
+#include "ui/native_theme/native_theme_dark_aura.h"
 #include "ui/views/controls/menu/menu_runner.h"
 #include "ui/views/widget/native_widget.h"
 
 #if defined(OS_CHROMEOS)
 #include "ash/common/session/session_state_delegate.h"  // nogncheck
 #include "ash/common/wm_shell.h"  // nogncheck
-#include "ui/native_theme/native_theme_dark_aura.h"  // nogncheck
 #endif
 
 #if defined(OS_LINUX)
@@ -43,11 +43,6 @@
 
 #if defined(OS_LINUX) && !defined(OS_CHROMEOS)
 #include "ui/views/widget/desktop_aura/x11_desktop_handler.h"
-#endif
-
-#if defined(OS_WIN)
-#include "base/win/windows_version.h"
-#include "ui/native_theme/native_theme_dark_win.h"
 #endif
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -146,16 +141,6 @@ bool BrowserFrame::UseCustomFrame() const {
   return native_browser_frame_->UseCustomFrame();
 }
 
-bool BrowserFrame::CustomDrawSystemTitlebar() const {
-#if defined(OS_WIN)
-  return base::CommandLine::ForCurrentProcess()->HasSwitch(
-             switches::kWindows10CustomTitlebar) &&
-         base::win::GetVersion() >= base::win::VERSION_WIN10;
-#else
-  return false;
-#endif
-}
-
 bool BrowserFrame::ShouldSaveWindowPlacement() const {
   return native_browser_frame_->ShouldSaveWindowPlacement();
 }
@@ -194,16 +179,14 @@ const ui::ThemeProvider* BrowserFrame::GetThemeProvider() const {
 }
 
 const ui::NativeTheme* BrowserFrame::GetNativeTheme() const {
+#if defined(OS_WIN) || defined(OS_CHROMEOS)
   if (browser_view_->browser()->profile()->GetProfileType() ==
           Profile::INCOGNITO_PROFILE &&
       ThemeServiceFactory::GetForProfile(browser_view_->browser()->profile())
           ->UsingDefaultTheme()) {
-#if defined(OS_WIN)
-    return ui::NativeThemeDarkWin::instance();
-#elif defined(OS_CHROMEOS)
     return ui::NativeThemeDarkAura::instance();
-#endif
   }
+#endif
   return views::Widget::GetNativeTheme();
 }
 
@@ -238,7 +221,7 @@ void BrowserFrame::OnNativeWidgetActivationChanged(bool active) {
 
 void BrowserFrame::OnNativeWidgetWorkspaceChanged() {
   chrome::SaveWindowWorkspace(browser_view_->browser(), GetWorkspace());
-#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
+#if !defined(OS_CHROMEOS) && defined(USE_X11)
   BrowserList::MoveBrowsersInWorkspaceToFront(
       views::X11DesktopHandler::get()->GetWorkspace());
 #endif

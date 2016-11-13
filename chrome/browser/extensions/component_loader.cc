@@ -21,6 +21,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search/hotword_service.h"
 #include "chrome/browser/search/hotword_service_factory.h"
+#include "chrome/browser/ui/webui/md_bookmarks/md_bookmarks_ui.h"
 #include "chrome/common/channel_info.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -39,6 +40,7 @@
 #include "extensions/common/extension_l10n_util.h"
 #include "extensions/common/file_util.h"
 #include "extensions/common/manifest_constants.h"
+#include "printing/features/features.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 
@@ -361,10 +363,10 @@ void ComponentLoader::AddHotwordHelperExtension() {
 }
 
 void ComponentLoader::AddImageLoaderExtension() {
-#if defined(IMAGE_LOADER_EXTENSION)
+#if defined(OS_CHROMEOS)
   Add(IDR_IMAGE_LOADER_MANIFEST,
       base::FilePath(FILE_PATH_LITERAL("image_loader")));
-#endif  // defined(IMAGE_LOADER_EXTENSION)
+#endif  // defined(OS_CHROMEOS)
 }
 
 void ComponentLoader::AddNetworkSpeechSynthesisExtension() {
@@ -471,22 +473,26 @@ void ComponentLoader::AddDefaultComponentExtensions(
   if (!skip_session_components) {
     const base::CommandLine* command_line =
         base::CommandLine::ForCurrentProcess();
-    if (!command_line->HasSwitch(chromeos::switches::kGuestSession))
+    if (!command_line->HasSwitch(chromeos::switches::kGuestSession) &&
+        !MdBookmarksUI::IsEnabled()) {
       Add(IDR_BOOKMARKS_MANIFEST,
           base::FilePath(FILE_PATH_LITERAL("bookmark_manager")));
+    }
 
     Add(IDR_CROSH_BUILTIN_MANIFEST, base::FilePath(FILE_PATH_LITERAL(
         "/usr/share/chromeos-assets/crosh_builtin")));
   }
 #else  // defined(OS_CHROMEOS)
   DCHECK(!skip_session_components);
-  Add(IDR_BOOKMARKS_MANIFEST,
-      base::FilePath(FILE_PATH_LITERAL("bookmark_manager")));
-#if defined(ENABLE_PRINTING)
+  if (!MdBookmarksUI::IsEnabled()) {
+    Add(IDR_BOOKMARKS_MANIFEST,
+        base::FilePath(FILE_PATH_LITERAL("bookmark_manager")));
+  }
+#if BUILDFLAG(ENABLE_PRINTING)
   // Cloud Print component app. Not required on Chrome OS.
   Add(IDR_CLOUDPRINT_MANIFEST,
       base::FilePath(FILE_PATH_LITERAL("cloud_print")));
-#endif  // defined(ENABLE_PRINTING)
+#endif  // BUILDFLAG(ENABLE_PRINTING)
 #endif  // defined(OS_CHROMEOS)
 
   if (!skip_session_components) {

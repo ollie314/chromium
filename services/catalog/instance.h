@@ -37,15 +37,15 @@ class Instance : public service_manager::mojom::Resolver,
 
  private:
   // service_manager::mojom::Resolver:
-  void ResolveMojoName(const std::string& mojo_name,
+  void ResolveMojoName(const std::string& service_name,
                        const ResolveMojoNameCallback& callback) override;
 
   // mojom::Catalog:
   void GetEntries(const base::Optional<std::vector<std::string>>& names,
                   const GetEntriesCallback& callback) override;
-  void GetEntriesProvidingClass(
-      const std::string& clazz,
-      const GetEntriesProvidingClassCallback& callback) override;
+  void GetEntriesProvidingCapability(
+      const std::string& capability,
+      const GetEntriesProvidingCapabilityCallback& callback) override;
   void GetEntriesConsumingMIMEType(
       const std::string& mime_type,
       const GetEntriesConsumingMIMETypeCallback& callback) override;
@@ -60,7 +60,7 @@ class Instance : public service_manager::mojom::Resolver,
   // Receives the result of manifest parsing, may be received after the
   // catalog object that issued the request is destroyed.
   static void OnReadManifest(base::WeakPtr<Instance> instance,
-                             const std::string& mojo_name,
+                             const std::string& service_name,
                              const ResolveMojoNameCallback& callback,
                              service_manager::mojom::ResolveResultPtr result);
 

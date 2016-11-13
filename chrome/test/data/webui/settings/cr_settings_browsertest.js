@@ -424,7 +424,6 @@ TEST_F('CrSettingsResetPageTest', 'ResetPage', function() {
 });
 
 /**
- * Test fixture for chrome/browser/resources/settings/appearance_page/.
  * @constructor
  * @extends {CrSettingsBrowserTest}
  */
@@ -444,8 +443,32 @@ CrSettingsAppearancePageTest.prototype = {
   ]),
 };
 
-TEST_F('CrSettingsAppearancePageTest', 'AppearancePage', function() {
-  settings_appearance.registerTests();
+TEST_F('CrSettingsAppearancePageTest', 'All', function() {
+  mocha.run();
+});
+
+/**
+ * @constructor
+ * @extends {CrSettingsBrowserTest}
+ */
+function CrSettingsAppearanceFontsPageTest() {}
+
+CrSettingsAppearanceFontsPageTest.prototype = {
+  __proto__: CrSettingsBrowserTest.prototype,
+
+  /** @override */
+  browsePreload:
+      'chrome://md-settings/appearance_page/appearance_fonts_page.html',
+
+  /** @override */
+  extraLibraries: CrSettingsBrowserTest.prototype.extraLibraries.concat([
+    ROOT_PATH + 'ui/webui/resources/js/promise_resolver.js',
+    'test_browser_proxy.js',
+    'appearance_fonts_page_test.js',
+  ]),
+};
+
+TEST_F('CrSettingsAppearanceFontsPageTest', 'All', function() {
   mocha.run();
 });
 
@@ -609,6 +632,7 @@ CrSettingsSiteSettingsTest.prototype = {
     'test_browser_proxy.js',
     'test_site_settings_prefs_browser_proxy.js',
     'zoom_levels_tests.js',
+    'usb_devices_tests.js'
   ]),
 };
 
@@ -618,6 +642,7 @@ TEST_F('CrSettingsSiteSettingsTest', 'SiteSettings', function() {
   site_list.registerTests();
   site_settings_category.registerTests();
   zoom_levels.registerTests();
+  usb_devices.registerTests();
 
   mocha.run();
 });
@@ -815,6 +840,9 @@ CrSettingsNonExistentRouteTest.prototype = {
 
   /** @override */
   browsePreload: 'chrome://md-settings/non/existent/route',
+
+  /** @override */
+  runAccessibilityChecks: false,
 };
 
 TEST_F('CrSettingsNonExistentRouteTest', 'All', function() {
@@ -845,6 +873,9 @@ CrSettingsRouteDynamicParametersTest.prototype = {
 
   /** @override */
   browsePreload: 'chrome://md-settings/people?guid=a%2Fb&foo=42',
+
+  /** @override */
+  runAccessibilityChecks: false,
 };
 
 TEST_F('CrSettingsRouteDynamicParametersTest', 'MAYBE_All', function() {
@@ -877,7 +908,7 @@ TEST_F('CrSettingsRouteDynamicParametersTest', 'MAYBE_All', function() {
 });
 
 // Times out on Windows Tests (dbg). See https://crbug.com/651296.
-GEN('#if defined(OS_WIN)');
+GEN('#if defined(OS_WIN) || defined(OS_CHROMEOS)');
 GEN('#define MAYBE_MainPage_All DISABLED_All');
 GEN('#else');
 GEN('#define MAYBE_MainPage_All All');
@@ -898,12 +929,36 @@ CrSettingsMainPageTest.prototype = {
 
   /** @override */
   extraLibraries: CrSettingsBrowserTest.prototype.extraLibraries.concat([
+    'test_browser_proxy.js',
     'settings_main_test.js',
   ]),
 };
 
 TEST_F('CrSettingsMainPageTest', 'MAYBE_MainPage_All', function() {
   settings_main_page.registerTests();
+  mocha.run();
+});
+
+/**
+ * Test fixture for chrome/browser/resources/settings/search_settings.js.
+ * @constructor
+ * @extends {CrSettingsBrowserTest}
+ */
+function CrSettingsSearchTest() {}
+
+CrSettingsSearchTest.prototype = {
+  __proto__: CrSettingsBrowserTest.prototype,
+
+  /** @override */
+  browsePreload: 'chrome://md-settings/settings_page/settings_section.html',
+
+  /** @override */
+  extraLibraries: CrSettingsBrowserTest.prototype.extraLibraries.concat([
+    'search_settings_test.js',
+  ]),
+};
+
+TEST_F('CrSettingsSearchTest', 'All', function() {
   mocha.run();
 });
 
@@ -971,20 +1026,29 @@ TEST_F('CrSettingsMetricsReportingTest', 'All', function() {
 });
 
 GEN('#endif');
+GEN('#if defined(OS_CHROMEOS)');
 
-function CrSettingsActionMenuTest() {}
+/**
+ * Test fixture for the Date and Time page.
+ * @constructor
+ * @extends {CrSettingsBrowserTest}
+ */
+function CrSettingsDateTimePageTest() {}
 
-CrSettingsActionMenuTest.prototype = {
+CrSettingsDateTimePageTest.prototype = {
   __proto__: CrSettingsBrowserTest.prototype,
 
   /** @override */
-  browsePreload: 'chrome://md-settings/settings_action_menu.html',
+  browsePreload: 'chrome://md-settings/date_time_page/date_time_page.html',
 
+  /** @override */
   extraLibraries: CrSettingsBrowserTest.prototype.extraLibraries.concat([
-    'settings_action_menu_test.js',
+    'date_time_page_tests.js',
   ]),
 };
 
-TEST_F('CrSettingsActionMenuTest', 'All', function() {
+TEST_F('CrSettingsDateTimePageTest', 'DateTimePageTest', function() {
   mocha.run();
 });
+
+GEN('#endif');

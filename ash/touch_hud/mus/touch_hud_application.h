@@ -10,6 +10,7 @@
 #include "base/macros.h"
 #include "mash/public/interfaces/launchable.mojom.h"
 #include "mojo/public/cpp/bindings/binding.h"
+#include "services/service_manager/public/cpp/interface_factory.h"
 #include "services/service_manager/public/cpp/service.h"
 
 namespace views {
@@ -31,8 +32,8 @@ class TouchHudApplication
 
  private:
   // service_manager::Service:
-  void OnStart(const service_manager::Identity& identity) override;
-  bool OnConnect(const service_manager::Identity& remote_identity,
+  void OnStart() override;
+  bool OnConnect(const service_manager::ServiceInfo& remote_info,
                  service_manager::InterfaceRegistry* registry) override;
 
   // mojom::Launchable:

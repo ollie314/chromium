@@ -198,6 +198,11 @@ def interface_context(interface, interfaces):
     is_global = ('PrimaryGlobal' in extended_attributes or
                  'Global' in extended_attributes)
 
+    # [ImmutablePrototype]
+    # TODO(littledan): Is it possible to deduce this based on inheritance,
+    # as in the WebIDL spec?
+    is_immutable_prototype = is_global or 'ImmutablePrototype' in extended_attributes
+
     # [SetWrapperReferenceFrom]
     set_wrapper_reference_from = extended_attributes.get('SetWrapperReferenceFrom')
     if set_wrapper_reference_from:
@@ -258,6 +263,7 @@ def interface_context(interface, interfaces):
         'is_event_target': is_event_target,
         'is_exception': interface.is_exception,
         'is_global': is_global,
+        'is_immutable_prototype': is_immutable_prototype,
         'is_node': inherits_interface(interface.name, 'Node'),
         'is_partial': interface.is_partial,
         'is_typed_array_type': is_typed_array_type,
@@ -299,11 +305,12 @@ def interface_context(interface, interfaces):
             raise Exception('[Constructor] and [NoInterfaceObject] MUST NOT be'
                             ' specified with [HTMLConstructor]: '
                             '%s' % interface.name)
+        includes.add('bindings/core/v8/V8HTMLConstructor.h')
 
     # [NamedConstructor]
     named_constructor = named_constructor_context(interface)
 
-    if constructors or custom_constructors or has_html_constructor or named_constructor:
+    if constructors or custom_constructors or named_constructor:
         if interface.is_partial:
             raise Exception('[Constructor] and [NamedConstructor] MUST NOT be'
                             ' specified on partial interface definitions: '
@@ -399,6 +406,7 @@ def interface_context(interface, interfaces):
     })
 
     context.update({
+        'legacy_caller': legacy_caller(interface.legacy_caller, interface),
         'indexed_property_getter': property_getter(interface.indexed_property_getter, ['index']),
         'indexed_property_setter': property_setter(interface.indexed_property_setter, interface),
         'indexed_property_deleter': property_deleter(interface.indexed_property_deleter),
@@ -446,7 +454,7 @@ def methods_context(interface):
     compute_method_overloads_context(interface, methods)
 
     def generated_method(return_type, name, arguments=None, extended_attributes=None, implemented_as=None):
-        operation = IdlOperation(interface.idl_name)
+        operation = IdlOperation()
         operation.idl_type = return_type
         operation.name = name
         if arguments:
@@ -459,7 +467,7 @@ def methods_context(interface):
         return v8_methods.method_context(interface, operation)
 
     def generated_argument(idl_type, name, is_optional=False, extended_attributes=None):
-        argument = IdlArgument(interface.idl_name)
+        argument = IdlArgument()
         argument.idl_type = idl_type
         argument.name = name
         argument.is_optional = is_optional
@@ -1353,6 +1361,12 @@ def interface_length(constructors):
 # Special operations (methods)
 # http://heycam.github.io/webidl/#idl-special-operations
 ################################################################################
+
+def legacy_caller(caller, interface):
+    if not caller:
+        return None
+
+    return v8_methods.method_context(interface, caller)
 
 def property_getter(getter, cpp_arguments):
     if not getter:

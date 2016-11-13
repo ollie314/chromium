@@ -5,7 +5,7 @@
 #include "content/browser/media/session/media_session_service_impl.h"
 
 #include "content/browser/media/session/media_metadata_sanitizer.h"
-#include "content/browser/media/session/media_session.h"
+#include "content/browser/media/session/media_session_impl.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_contents.h"
@@ -14,9 +14,17 @@ namespace content {
 
 MediaSessionServiceImpl::MediaSessionServiceImpl(
     RenderFrameHost* render_frame_host)
-    : render_frame_host_(render_frame_host) {}
+    : render_frame_host_(render_frame_host) {
+  MediaSessionImpl* session = GetMediaSession();
+  if (session)
+    session->SetMediaSessionService(this);
+}
 
-MediaSessionServiceImpl::~MediaSessionServiceImpl() = default;
+MediaSessionServiceImpl::~MediaSessionServiceImpl() {
+  MediaSessionImpl* session = GetMediaSession();
+  if (session && session->GetMediaSessionService() == this)
+    session->SetMediaSessionService(nullptr);
+}
 
 // static
 void MediaSessionServiceImpl::Create(
@@ -43,22 +51,33 @@ void MediaSessionServiceImpl::SetMetadata(
     return;
   }
 
-  WebContentsImpl* contents = static_cast<WebContentsImpl*>(
-      WebContentsImpl::FromRenderFrameHost(render_frame_host_));
-  if (contents)
-    MediaSession::Get(contents)->SetMetadata(metadata);
+  MediaSessionImpl* session = GetMediaSession();
+  if (session)
+    session->SetMetadata(metadata);
 }
 
 void MediaSessionServiceImpl::EnableAction(
     blink::mojom::MediaSessionAction action) {
-  // TODO(zqzhang): Plumb this signal to Java. See https://crbug.com/656563
-  NOTIMPLEMENTED();
+  MediaSessionImpl* session = GetMediaSession();
+  if (session)
+    session->OnMediaSessionEnabledAction(action);
 }
 
 void MediaSessionServiceImpl::DisableAction(
     blink::mojom::MediaSessionAction action) {
-  // TODO(zqzhang): Plumb this signal to Java. See https://crbug.com/656563
-  NOTIMPLEMENTED();
+  MediaSessionImpl* session = GetMediaSession();
+  if (session)
+    session->OnMediaSessionDisabledAction(action);
+}
+
+MediaSessionImpl* MediaSessionServiceImpl::GetMediaSession() {
+  WebContentsImpl* contents = static_cast<WebContentsImpl*>(
+      WebContentsImpl::FromRenderFrameHost(render_frame_host_));
+  if (!contents)
+    return nullptr;
+  if (render_frame_host_ != contents->GetMainFrame())
+    return nullptr;
+  return MediaSessionImpl::Get(contents);
 }
 
 void MediaSessionServiceImpl::Bind(

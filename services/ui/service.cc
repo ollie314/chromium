@@ -18,6 +18,8 @@
 #include "services/service_manager/public/c/main.h"
 #include "services/service_manager/public/cpp/connection.h"
 #include "services/service_manager/public/cpp/connector.h"
+#include "services/service_manager/public/cpp/interface_registry.h"
+#include "services/service_manager/public/cpp/service_context.h"
 #include "services/tracing/public/cpp/provider.h"
 #include "services/ui/clipboard/clipboard_impl.h"
 #include "services/ui/common/switches.h"
@@ -135,9 +137,9 @@ void Service::AddUserIfNecessary(
   window_server_->user_id_tracker()->AddUserId(remote_identity.user_id());
 }
 
-void Service::OnStart(const service_manager::Identity& identity) {
+void Service::OnStart() {
   base::PlatformThread::SetName("mus");
-  tracing_.Initialize(connector(), identity.name());
+  tracing_.Initialize(context()->connector(), context()->identity().name());
   TRACE_EVENT0("mus", "Service::Initialize started");
 
   test_config_ = base::CommandLine::ForCurrentProcess()->HasSwitch(
@@ -148,7 +150,7 @@ void Service::OnStart(const service_manager::Identity& identity) {
     ui::test::SetUseOverrideRedirectWindowByDefault(true);
 #endif
 
-  InitializeResources(connector());
+  InitializeResources(context()->connector());
 
 #if defined(USE_OZONE)
   // The ozone platform can provide its own event source. So initialize the
@@ -156,7 +158,7 @@ void Service::OnStart(const service_manager::Identity& identity) {
   // Because GL libraries need to be initialized before entering the sandbox,
   // in MUS, |InitializeForUI| will load the GL libraries.
   ui::OzonePlatform::InitParams params;
-  params.connector = connector();
+  params.connector = context()->connector();
   params.single_process = false;
   ui::OzonePlatform::InitializeForUI(params);
 
@@ -191,10 +193,12 @@ void Service::OnStart(const service_manager::Identity& identity) {
     touch_controller_.reset(
         new ws::TouchController(window_server_->display_manager()));
 
-  ime_server_.Init(connector());
+  platform_screen_->Init(window_server_->display_manager());
+
+  ime_server_.Init(context()->connector());
 }
 
-bool Service::OnConnect(const service_manager::Identity& remote_identity,
+bool Service::OnConnect(const service_manager::ServiceInfo& remote_info,
                         service_manager::InterfaceRegistry* registry) {
   registry->AddInterface<mojom::AccessibilityManager>(this);
   registry->AddInterface<mojom::Clipboard>(this);
@@ -250,12 +254,6 @@ bool Service::IsTestConfig() const {
 void Service::UpdateTouchTransforms() {
   if (touch_controller_)
     touch_controller_->UpdateTouchTransforms();
-}
-
-void Service::CreateDefaultDisplays() {
-  // The display manager will create Displays once hardware or virtual displays
-  // are ready.
-  platform_screen_->Init(window_server_->display_manager());
 }
 
 void Service::Create(const service_manager::Identity& remote_identity,

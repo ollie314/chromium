@@ -26,6 +26,7 @@
 #include "components/image_fetcher/image_fetcher.h"
 #include "components/image_fetcher/image_fetcher_delegate.h"
 #include "components/ntp_snippets/category_factory.h"
+#include "components/ntp_snippets/category_info.h"
 #include "components/ntp_snippets/ntp_snippets_constants.h"
 #include "components/ntp_snippets/remote/ntp_snippet.h"
 #include "components/ntp_snippets/remote/ntp_snippets_database.h"
@@ -54,6 +55,7 @@ using testing::IsEmpty;
 using testing::Mock;
 using testing::MockFunction;
 using testing::NiceMock;
+using testing::Not;
 using testing::SaveArg;
 using testing::SizeIs;
 using testing::StartsWith;
@@ -68,8 +70,16 @@ MATCHER_P(IdEq, value, "") {
   return arg->id() == value;
 }
 
+MATCHER_P(IdWithinCategoryEq, expected_id, "") {
+  return arg.id().id_within_category() == expected_id;
+}
+
 MATCHER_P(IsCategory, id, "") {
   return arg.id() == static_cast<int>(id);
+}
+
+MATCHER_P(HasCode, code, "") {
+  return arg.status == code;
 }
 
 const base::Time::Exploded kDefaultCreationTime = {2015, 11, 4, 25, 13, 46, 45};
@@ -122,10 +132,10 @@ std::string GetTestJson(const std::vector<std::string>& snippets) {
   return GetTestJson(snippets, kTestJsonDefaultCategoryTitle);
 }
 
-std::string GetTestJsonWithoutTitle(const std::vector<std::string>& snippets) {
-  return GetTestJson(snippets, std::string());
-}
-
+// TODO(tschumann): Remove the default parameter other_id. It makes the tests
+// less explicit and hard to read. Also get rid of the convenience
+// other_category() and unknown_category() helpers -- tests can just define
+// their own.
 std::string GetMultiCategoryJson(const std::vector<std::string>& articles,
                                  const std::vector<std::string>& others,
                                  int other_id = 2) {
@@ -251,6 +261,22 @@ void ServeOneByOneImage(
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE, base::Bind(callback, id, gfx::test::CreateImage(1, 1)));
   notify->OnImageDataFetched(id, "1-by-1-image-data");
+}
+
+gfx::Image FetchImage(NTPSnippetsService* service,
+                      const ContentSuggestion::ID& suggestion_id) {
+  gfx::Image result;
+  base::RunLoop run_loop;
+  service->FetchSuggestionImage(suggestion_id,
+                                base::Bind(
+                                    [](base::Closure signal, gfx::Image* output,
+                                       const gfx::Image& loaded) {
+                                      *output = loaded;
+                                      signal.Run();
+                                    },
+                                    run_loop.QuitClosure(), &result));
+  run_loop.Run();
+  return result;
 }
 
 void ParseJson(
@@ -446,14 +472,14 @@ class NTPSnippetsServiceTest : public ::testing::Test {
                                                    utils_.pref_service()));
   }
 
-  void WaitForSnippetsServiceInitialization(bool set_empty_response = true) {
+  void WaitForSnippetsServiceInitialization(bool set_empty_response) {
     EXPECT_TRUE(observer_);
     EXPECT_FALSE(observer_->Loaded());
 
     // Add an initial fetch response, as the service tries to fetch when there
     // is nothing in the DB.
     if (set_empty_response)
-      SetUpFetchResponse(GetTestJsonWithoutTitle(std::vector<std::string>()));
+      SetUpFetchResponse(GetTestJson(std::vector<std::string>()));
 
     base::RunLoop().RunUntilIdle();
     observer_->WaitForLoad();
@@ -500,6 +526,16 @@ class NTPSnippetsServiceTest : public ::testing::Test {
                           const std::string& json) {
     SetUpFetchResponse(json);
     service->FetchSnippets(true);
+    base::RunLoop().RunUntilIdle();
+  }
+
+  void LoadMoreFromJSONString(NTPSnippetsService* service,
+                              const Category& category,
+                              const std::string& json,
+                              const std::set<std::string>& known_ids,
+                              FetchDoneCallback callback) {
+    SetUpFetchResponse(json);
+    service->Fetch(category, known_ids, callback);
     base::RunLoop().RunUntilIdle();
   }
 
@@ -586,7 +622,7 @@ TEST_F(NTPSnippetsServiceTest, IgnoreRescheduleBeforeInit) {
   EXPECT_CALL(mock_scheduler(), Unschedule()).Times(0);
   auto service = MakeSnippetsServiceWithoutInitialization();
   service->RescheduleFetching(false);
-  WaitForSnippetsServiceInitialization();
+  WaitForSnippetsServiceInitialization(/*set_empty_response=*/true);
 }
 
 TEST_F(NTPSnippetsServiceTest, HandleForcedRescheduleBeforeInit) {
@@ -602,7 +638,7 @@ TEST_F(NTPSnippetsServiceTest, HandleForcedRescheduleBeforeInit) {
   }
   auto service = MakeSnippetsServiceWithoutInitialization();
   service->RescheduleFetching(true);
-  WaitForSnippetsServiceInitialization();
+  WaitForSnippetsServiceInitialization(/*set_empty_response=*/true);
 }
 
 TEST_F(NTPSnippetsServiceTest, RescheduleOnStateChange) {
@@ -663,27 +699,21 @@ TEST_F(NTPSnippetsServiceTest, Full) {
 }
 
 TEST_F(NTPSnippetsServiceTest, CategoryTitle) {
-  const base::string16 response_title =
+  const base::string16 test_default_title =
       base::UTF8ToUTF16(kTestJsonDefaultCategoryTitle);
 
-  auto service = MakeSnippetsService();
+  // Don't send an initial response -- we want to test what happens without any
+  // server status.
+  auto service = MakeSnippetsService(/*set_empty_response=*/false);
 
   // The articles category should be there by default, and have a title.
   CategoryInfo info_before = service->GetCategoryInfo(articles_category());
-  ASSERT_FALSE(info_before.title().empty());
-  ASSERT_NE(info_before.title(), response_title);
-
-  std::string json_str_no_title(GetTestJsonWithoutTitle({GetSnippet()}));
-  LoadFromJSONString(service.get(), json_str_no_title);
-
-  ASSERT_THAT(observer().SuggestionsForCategory(articles_category()),
-              SizeIs(1));
-  ASSERT_THAT(service->GetSnippetsForTesting(articles_category()), SizeIs(1));
-
-  // The response didn't contain a category title. Make sure we didn't touch
-  // the existing one.
-  CategoryInfo info_no_title = service->GetCategoryInfo(articles_category());
-  EXPECT_EQ(info_before.title(), info_no_title.title());
+  ASSERT_THAT(info_before.title(), Not(IsEmpty()));
+  ASSERT_THAT(info_before.title(), Not(Eq(test_default_title)));
+  EXPECT_THAT(info_before.has_more_action(), Eq(true));
+  EXPECT_THAT(info_before.has_reload_action(), Eq(true));
+  EXPECT_THAT(info_before.has_view_all_action(), Eq(false));
+  EXPECT_THAT(info_before.show_if_empty(), Eq(true));
 
   std::string json_str_with_title(GetTestJson({GetSnippet()}));
   LoadFromJSONString(service.get(), json_str_with_title);
@@ -692,11 +722,15 @@ TEST_F(NTPSnippetsServiceTest, CategoryTitle) {
               SizeIs(1));
   ASSERT_THAT(service->GetSnippetsForTesting(articles_category()), SizeIs(1));
 
-  // This time, the response contained a title, |kTestJsonDefaultCategoryTitle|.
+  // The response contained a title, |kTestJsonDefaultCategoryTitle|.
   // Make sure we updated the title in the CategoryInfo.
   CategoryInfo info_with_title = service->GetCategoryInfo(articles_category());
-  EXPECT_NE(info_before.title(), info_with_title.title());
-  EXPECT_EQ(response_title, info_with_title.title());
+  EXPECT_THAT(info_before.title(), Not(Eq(info_with_title.title())));
+  EXPECT_THAT(test_default_title, Eq(info_with_title.title()));
+  EXPECT_THAT(info_before.has_more_action(), Eq(true));
+  EXPECT_THAT(info_before.has_reload_action(), Eq(true));
+  EXPECT_THAT(info_before.has_view_all_action(), Eq(false));
+  EXPECT_THAT(info_before.show_if_empty(), Eq(true));
 }
 
 TEST_F(NTPSnippetsServiceTest, MultipleCategories) {
@@ -744,6 +778,30 @@ TEST_F(NTPSnippetsServiceTest, MultipleCategories) {
               base::UTF16ToUTF8(suggestion.publisher_name()));
     EXPECT_EQ(GURL(kSnippetAmpUrl), suggestion.amp_url());
   }
+}
+
+TEST_F(NTPSnippetsServiceTest, ArticleCategoryInfo) {
+  auto service = MakeSnippetsService();
+  CategoryInfo article_info = service->GetCategoryInfo(articles_category());
+  EXPECT_THAT(article_info.has_more_action(), Eq(true));
+  EXPECT_THAT(article_info.has_reload_action(), Eq(true));
+  EXPECT_THAT(article_info.has_view_all_action(), Eq(false));
+  EXPECT_THAT(article_info.show_if_empty(), Eq(true));
+}
+
+TEST_F(NTPSnippetsServiceTest, ExperimentalCategoryInfo) {
+  auto service = MakeSnippetsService();
+
+  // Load data with multiple categories so that a new experimental category gets
+  // registered.
+  LoadFromJSONString(service.get(),
+                     GetMultiCategoryJson({GetSnippetN(0)}, {GetSnippetN(1)},
+                                          kUnknownRemoteCategoryId));
+  CategoryInfo info = service->GetCategoryInfo(unknown_category());
+  EXPECT_THAT(info.has_more_action(), Eq(false));
+  EXPECT_THAT(info.has_reload_action(), Eq(false));
+  EXPECT_THAT(info.has_view_all_action(), Eq(false));
+  EXPECT_THAT(info.show_if_empty(), Eq(false));
 }
 
 TEST_F(NTPSnippetsServiceTest, PersistCategoryInfos) {
@@ -830,6 +888,206 @@ TEST_F(NTPSnippetsServiceTest, ReplaceSnippets) {
   // The snippets loaded last replace all that was loaded previously.
   EXPECT_THAT(service->GetSnippetsForTesting(articles_category()),
               ElementsAre(IdEq(second)));
+}
+
+TEST_F(NTPSnippetsServiceTest, LoadsAdditionalSnippets) {
+  auto service = MakeSnippetsService();
+
+  LoadFromJSONString(service.get(),
+                     GetTestJson({GetSnippetWithUrl("http://first")}));
+  EXPECT_THAT(service->GetSnippetsForTesting(articles_category()),
+              ElementsAre(IdEq("http://first")));
+
+  auto expect_only_second_suggestion_received =
+      base::Bind([](Status status, std::vector<ContentSuggestion> suggestions) {
+        EXPECT_THAT(suggestions, SizeIs(1));
+        EXPECT_THAT(suggestions[0].id().id_within_category(),
+                    Eq("http://second"));
+      });
+  LoadMoreFromJSONString(service.get(), articles_category(),
+                         GetTestJson({GetSnippetWithUrl("http://second")}),
+                         /*known_ids=*/std::set<std::string>(),
+                         expect_only_second_suggestion_received);
+
+  // Verify we can resolve the image of the new snippets.
+  ServeImageCallback cb = base::Bind(&ServeOneByOneImage, service.get());
+  EXPECT_CALL(*image_fetcher(), StartOrQueueNetworkRequest(_, _, _))
+      .Times(2)
+      .WillRepeatedly(WithArgs<0, 2>(Invoke(&cb, &ServeImageCallback::Run)));
+  image_decoder()->SetDecodedImage(gfx::test::CreateImage(1, 1));
+  gfx::Image image = FetchImage(service.get(), MakeArticleID("http://first"));
+  EXPECT_FALSE(image.IsEmpty());
+  EXPECT_EQ(1, image.Width());
+
+  image = FetchImage(service.get(), MakeArticleID("http://second"));
+  EXPECT_FALSE(image.IsEmpty());
+  EXPECT_EQ(1, image.Width());
+
+  // Verify that the observer received the update as well. We should see the
+  // newly-fetched items filled up with existing ones.
+  EXPECT_THAT(observer().SuggestionsForCategory(articles_category()),
+              ElementsAre(IdWithinCategoryEq("http://first"),
+                          IdWithinCategoryEq("http://second")));
+}
+
+// The tests TestMergingFetchedMoreSnippetsFillup and
+// TestMergingFetchedMoreSnippetsReplaceAll simulate the following user story:
+// 1) fetch suggestions in NTP A
+// 2) fetch more suggestions in NTP A.
+// 3) open new NTP B: See the last 10 results visible in step 2).
+// 4) fetch more suggestions in NTP B. Make sure no results from step 1) which
+//    were superseded in step 2) get merged back in again.
+// TODO(tschumann): Test step 4) on a higher level instead of peeking into the
+// internal 'dismissed' data. The proper check is to make sure we tell the
+// backend to exclude these snippets.
+TEST_F(NTPSnippetsServiceTest, TestMergingFetchedMoreSnippetsFillup) {
+  auto service = MakeSnippetsService(/*set_empty_response=*/false);
+  LoadFromJSONString(
+      service.get(),
+      GetTestJson(
+          {GetSnippetWithUrl("http://id-1"), GetSnippetWithUrl("http://id-2"),
+           GetSnippetWithUrl("http://id-3"), GetSnippetWithUrl("http://id-4"),
+           GetSnippetWithUrl("http://id-5"), GetSnippetWithUrl("http://id-6"),
+           GetSnippetWithUrl("http://id-7"), GetSnippetWithUrl("http://id-8"),
+           GetSnippetWithUrl("http://id-9"),
+           GetSnippetWithUrl("http://id-10")}));
+  EXPECT_THAT(
+      observer().SuggestionsForCategory(articles_category()),
+      ElementsAre(
+          IdWithinCategoryEq("http://id-1"), IdWithinCategoryEq("http://id-2"),
+          IdWithinCategoryEq("http://id-3"), IdWithinCategoryEq("http://id-4"),
+          IdWithinCategoryEq("http://id-5"), IdWithinCategoryEq("http://id-6"),
+          IdWithinCategoryEq("http://id-7"), IdWithinCategoryEq("http://id-8"),
+          IdWithinCategoryEq("http://id-9"),
+          IdWithinCategoryEq("http://id-10")));
+
+  auto expect_receiving_two_new_snippets =
+      base::Bind([](Status status, std::vector<ContentSuggestion> suggestions) {
+        ASSERT_THAT(suggestions, SizeIs(2));
+        EXPECT_THAT(suggestions[0], IdWithinCategoryEq("http://more-id-1"));
+        EXPECT_THAT(suggestions[1], IdWithinCategoryEq("http://more-id-2"));
+      });
+  LoadMoreFromJSONString(
+      service.get(), articles_category(),
+      GetTestJson({GetSnippetWithUrl("http://more-id-1"),
+                   GetSnippetWithUrl("http://more-id-2")}),
+      /*known_ids=*/{"http://id-1", "http://id-2", "http://id-3", "http://id-4",
+                     "http://id-5", "http://id-6", "http://id-7", "http://id-8",
+                     "http://id-9", "http://id-10"},
+      expect_receiving_two_new_snippets);
+
+  // Verify that the observer received the update as well. We should see the
+  // newly-fetched items filled up with existing ones. The merging is done
+  // mimicking a scrolling behavior.
+  EXPECT_THAT(
+      observer().SuggestionsForCategory(articles_category()),
+      ElementsAre(
+          IdWithinCategoryEq("http://id-3"), IdWithinCategoryEq("http://id-4"),
+          IdWithinCategoryEq("http://id-5"), IdWithinCategoryEq("http://id-6"),
+          IdWithinCategoryEq("http://id-7"), IdWithinCategoryEq("http://id-8"),
+          IdWithinCategoryEq("http://id-9"), IdWithinCategoryEq("http://id-10"),
+          IdWithinCategoryEq("http://more-id-1"),
+          IdWithinCategoryEq("http://more-id-2")));
+  // Verify the superseded suggestions got marked as dismissed.
+  EXPECT_THAT(service->GetDismissedSnippetsForTesting(articles_category()),
+              ElementsAre(IdEq("http://id-1"), IdEq("http://id-2")));
+}
+
+TEST_F(NTPSnippetsServiceTest, TestMergingFetchedMoreSnippetsReplaceAll) {
+  auto service = MakeSnippetsService(/*set_empty_response=*/false);
+  LoadFromJSONString(
+      service.get(),
+      GetTestJson(
+          {GetSnippetWithUrl("http://id-1"), GetSnippetWithUrl("http://id-2"),
+           GetSnippetWithUrl("http://id-3"), GetSnippetWithUrl("http://id-4"),
+           GetSnippetWithUrl("http://id-5"), GetSnippetWithUrl("http://id-6"),
+           GetSnippetWithUrl("http://id-7"), GetSnippetWithUrl("http://id-8"),
+           GetSnippetWithUrl("http://id-9"),
+           GetSnippetWithUrl("http://id-10")}));
+  EXPECT_THAT(
+      observer().SuggestionsForCategory(articles_category()),
+      ElementsAre(
+          IdWithinCategoryEq("http://id-1"), IdWithinCategoryEq("http://id-2"),
+          IdWithinCategoryEq("http://id-3"), IdWithinCategoryEq("http://id-4"),
+          IdWithinCategoryEq("http://id-5"), IdWithinCategoryEq("http://id-6"),
+          IdWithinCategoryEq("http://id-7"), IdWithinCategoryEq("http://id-8"),
+          IdWithinCategoryEq("http://id-9"),
+          IdWithinCategoryEq("http://id-10")));
+
+  auto expect_receiving_ten_new_snippets =
+      base::Bind([](Status status, std::vector<ContentSuggestion> suggestions) {
+        EXPECT_THAT(suggestions, ElementsAre(
+            IdWithinCategoryEq("http://more-id-1"),
+            IdWithinCategoryEq("http://more-id-2"),
+            IdWithinCategoryEq("http://more-id-3"),
+            IdWithinCategoryEq("http://more-id-4"),
+            IdWithinCategoryEq("http://more-id-5"),
+            IdWithinCategoryEq("http://more-id-6"),
+            IdWithinCategoryEq("http://more-id-7"),
+            IdWithinCategoryEq("http://more-id-8"),
+            IdWithinCategoryEq("http://more-id-9"),
+            IdWithinCategoryEq("http://more-id-10")));
+      });
+  LoadMoreFromJSONString(
+      service.get(), articles_category(),
+      GetTestJson({GetSnippetWithUrl("http://more-id-1"),
+                   GetSnippetWithUrl("http://more-id-2"),
+                   GetSnippetWithUrl("http://more-id-3"),
+                   GetSnippetWithUrl("http://more-id-4"),
+                   GetSnippetWithUrl("http://more-id-5"),
+                   GetSnippetWithUrl("http://more-id-6"),
+                   GetSnippetWithUrl("http://more-id-7"),
+                   GetSnippetWithUrl("http://more-id-8"),
+                   GetSnippetWithUrl("http://more-id-9"),
+                   GetSnippetWithUrl("http://more-id-10")}),
+      /*known_ids=*/{"http://id-1", "http://id-2", "http://id-3", "http://id-4",
+                     "http://id-5", "http://id-6", "http://id-7", "http://id-8",
+                     "http://id-9", "http://id-10"},
+      expect_receiving_ten_new_snippets);
+  EXPECT_THAT(observer().SuggestionsForCategory(articles_category()),
+              ElementsAre(IdWithinCategoryEq("http://more-id-1"),
+                          IdWithinCategoryEq("http://more-id-2"),
+                          IdWithinCategoryEq("http://more-id-3"),
+                          IdWithinCategoryEq("http://more-id-4"),
+                          IdWithinCategoryEq("http://more-id-5"),
+                          IdWithinCategoryEq("http://more-id-6"),
+                          IdWithinCategoryEq("http://more-id-7"),
+                          IdWithinCategoryEq("http://more-id-8"),
+                          IdWithinCategoryEq("http://more-id-9"),
+                          IdWithinCategoryEq("http://more-id-10")));
+  // Verify the superseded suggestions got marked as dismissed.
+  EXPECT_THAT(
+      service->GetDismissedSnippetsForTesting(articles_category()),
+      ElementsAre(IdEq("http://id-1"), IdEq("http://id-2"), IdEq("http://id-3"),
+                  IdEq("http://id-4"), IdEq("http://id-5"), IdEq("http://id-6"),
+                  IdEq("http://id-7"), IdEq("http://id-8"), IdEq("http://id-9"),
+                  IdEq("http://id-10")));
+}
+
+// TODO(tschumann): We don't have test making sure the NTPSnippetsFetcher
+// actually gets the proper parameters. Add tests with an injected
+// NTPSnippetsFetcher to verify the parameters, including proper handling of
+// dismissed and known_ids.
+
+namespace {
+
+// Workaround for gMock's lack of support for movable types.
+void SuggestionsLoaded(
+    MockFunction<void(Status, const std::vector<ContentSuggestion>&)>* loaded,
+    Status status,
+    std::vector<ContentSuggestion> suggestions) {
+  loaded->Call(status, suggestions);
+}
+
+}  // namespace
+
+TEST_F(NTPSnippetsServiceTest, ReturnFetchRequestEmptyBeforeInit) {
+  auto service = MakeSnippetsServiceWithoutInitialization();
+  MockFunction<void(Status, const std::vector<ContentSuggestion>&)> loaded;
+  EXPECT_CALL(loaded, Call(HasCode(StatusCode::TEMPORARY_ERROR), SizeIs(0)));
+  service->Fetch(articles_category(), std::set<std::string>(),
+                 base::Bind(&SuggestionsLoaded, &loaded));
+  base::RunLoop().RunUntilIdle();
 }
 
 TEST_F(NTPSnippetsServiceTest, LoadInvalidJson) {
@@ -1241,26 +1499,6 @@ TEST_F(NTPSnippetsServiceTest, SuggestionsFetchedOnSignInAndSignOut) {
   base::RunLoop().RunUntilIdle();
   EXPECT_THAT(service->GetSnippetsForTesting(articles_category()), SizeIs(2));
 }
-
-namespace {
-
-gfx::Image FetchImage(NTPSnippetsService* service,
-                      const ContentSuggestion::ID& suggestion_id) {
-  gfx::Image result;
-  base::RunLoop run_loop;
-  service->FetchSuggestionImage(suggestion_id,
-                                base::Bind(
-                                    [](base::Closure signal, gfx::Image* output,
-                                       const gfx::Image& loaded) {
-                                      *output = loaded;
-                                      signal.Run();
-                                    },
-                                    run_loop.QuitClosure(), &result));
-  run_loop.Run();
-  return result;
-}
-
-}  // namespace
 
 TEST_F(NTPSnippetsServiceTest, ShouldClearOrphanedImagesOnRestart) {
   auto service = MakeSnippetsService();

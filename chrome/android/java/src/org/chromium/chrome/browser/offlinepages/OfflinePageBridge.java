@@ -118,18 +118,6 @@ public class OfflinePageBridge {
     }
 
     /**
-     * @return True if saving offline pages in the background is enabled.
-     */
-    @VisibleForTesting
-    public static boolean isBackgroundLoadingEnabled() {
-        ThreadUtils.assertOnUiThread();
-        if (sBackgroundLoadingEnabled == null) {
-            sBackgroundLoadingEnabled = nativeIsBackgroundLoadingEnabled();
-        }
-        return sBackgroundLoadingEnabled;
-    }
-
-    /**
      * @return True if offline pages sharing is enabled.
      */
     @VisibleForTesting
@@ -403,6 +391,14 @@ public class OfflinePageBridge {
         return nativeGetOfflinePageHeaderForReload(mNativeOfflinePageBridge, webContents);
     }
 
+    /**
+     * @return True if an offline preview is being shown.
+     * @param webContents Contents of the page to check.
+     */
+    public boolean isShowingOfflinePreview(WebContents webContents) {
+        return nativeIsShowingOfflinePreview(mNativeOfflinePageBridge, webContents);
+    }
+
     private static class CheckPagesExistOfflineCallbackInternal {
         private Callback<Set<String>> mCallback;
 
@@ -495,7 +491,6 @@ public class OfflinePageBridge {
     }
 
     private static native boolean nativeIsOfflineBookmarksEnabled();
-    private static native boolean nativeIsBackgroundLoadingEnabled();
     private static native boolean nativeIsPageSharingEnabled();
     private static native boolean nativeCanSavePage(String url);
     private static native OfflinePageBridge nativeGetOfflinePageBridgeForProfile(Profile profile);
@@ -528,5 +523,7 @@ public class OfflinePageBridge {
     private native void nativeSavePageLater(long nativeOfflinePageBridge, String url,
             String clientNamespace, String clientId, boolean userRequested);
     private native String nativeGetOfflinePageHeaderForReload(
+            long nativeOfflinePageBridge, WebContents webContents);
+    private native boolean nativeIsShowingOfflinePreview(
             long nativeOfflinePageBridge, WebContents webContents);
 }

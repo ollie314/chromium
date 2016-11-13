@@ -17,9 +17,11 @@
 #include "base/memory/ref_counted.h"
 #include "components/favicon_base/favicon_callback.h"
 
+class AppDistributionProvider;
 class AutocompleteProvider;
 class GURL;
 class InfoBarViewDelegate;
+class OmahaServiceProvider;
 class PrefRegistrySimple;
 class PrefService;
 class VoiceSearchProvider;
@@ -47,9 +49,12 @@ class PrefRegistrySyncable;
 
 @protocol AppRatingPrompt;
 @protocol InfoBarViewProtocol;
+@protocol LogoVendor;
 @protocol TextFieldStyling;
+@protocol NativeAppWhitelistManager;
 @class UITextField;
 @class UIView;
+@protocol UrlLoader;
 typedef UIView<InfoBarViewProtocol>* InfoBarViewPlaceholder;
 
 namespace ios {
@@ -61,7 +66,6 @@ class GeolocationUpdaterProvider;
 class SigninErrorProvider;
 class SigninResourcesProvider;
 class LiveTabContextProvider;
-class UpdatableResourceProvider;
 
 // Setter and getter for the provider. The provider should be set early, before
 // any browser code is called.
@@ -80,8 +84,6 @@ class ChromeBrowserProvider {
   // Registers all prefs that will be used via a PrefService attached to a
   // Profile.
   virtual void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
-  // Returns an UpdatableResourceProvider instance.
-  virtual UpdatableResourceProvider* GetUpdatableResourceProvider();
   // Returns an infobar view conforming to the InfoBarViewProtocol. The returned
   // object is retained.
   virtual InfoBarViewPlaceholder CreateInfoBarView(
@@ -151,9 +153,28 @@ class ChromeBrowserProvider {
   // Returns an instance of the voice search provider, if one exists.
   virtual VoiceSearchProvider* GetVoiceSearchProvider() const;
 
+  // Returns an instance of the app distribution provider.
+  virtual AppDistributionProvider* GetAppDistributionProvider() const;
+
+  // Creates and returns an object that can fetch and vend search engine logos.
+  // The caller assumes ownership of the returned object.
+  virtual id<LogoVendor> CreateLogoVendor(
+      ios::ChromeBrowserState* browser_state,
+      id<UrlLoader> loader) const NS_RETURNS_RETAINED;
+
+  // Returns an instance of the omaha service provider.
+  virtual OmahaServiceProvider* GetOmahaServiceProvider() const;
+
   // Returns the SyncedWindowDelegatesGetter implementation.
   virtual std::unique_ptr<sync_sessions::SyncedWindowDelegatesGetter>
   CreateSyncedWindowDelegatesGetter(ios::ChromeBrowserState* browser_state);
+
+  // TODO(rohitrao): This is a temporary method, used to prevent the tree from
+  // breaking due to duplicate prefs registration.
+  virtual bool ShouldEmbedderRegisterVoiceSearchPrefs() const;
+
+  // Returns the NativeAppWhitelistManager implementation.
+  virtual id<NativeAppWhitelistManager> GetNativeAppWhitelistManager() const;
 };
 
 }  // namespace ios

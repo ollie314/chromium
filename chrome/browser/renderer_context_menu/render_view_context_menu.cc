@@ -104,7 +104,10 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/menu_item.h"
 #include "content/public/common/url_utils.h"
+#include "extensions/features/features.h"
 #include "net/base/escape.h"
+#include "printing/features/features.h"
+#include "third_party/WebKit/public/public_features.h"
 #include "third_party/WebKit/public/web/WebContextMenuData.h"
 #include "third_party/WebKit/public/web/WebMediaPlayerAction.h"
 #include "third_party/WebKit/public/web/WebPluginAction.h"
@@ -122,7 +125,7 @@
 #include "chrome/browser/renderer_context_menu/spelling_options_submenu_observer.h"
 #endif
 
-#if defined(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
 #include "chrome/browser/extensions/devtools_util.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "extensions/browser/extension_host.h"
@@ -133,15 +136,15 @@
 #include "extensions/common/extension.h"
 #endif
 
-#if defined(ENABLE_PRINTING)
+#if BUILDFLAG(ENABLE_PRINTING)
 #include "chrome/browser/printing/print_view_manager_common.h"
 #include "components/printing/common/print_messages.h"
 
-#if defined(ENABLE_PRINT_PREVIEW)
+#if BUILDFLAG(ENABLE_PRINT_PREVIEW)
 #include "chrome/browser/printing/print_preview_context_menu_observer.h"
 #include "chrome/browser/printing/print_preview_dialog_controller.h"
-#endif  // defined(ENABLE_PRINT_PREVIEW)
-#endif  // defined(ENABLE_PRINTING)
+#endif  // BUILDFLAG(ENABLE_PRINT_PREVIEW)
+#endif  // BUILDFLAG(ENABLE_PRINTING)
 
 #if defined(ENABLE_MEDIA_ROUTER)
 #include "chrome/browser/media/router/media_router_dialog_controller.h"
@@ -405,7 +408,7 @@ content::Referrer CreateReferrer(const GURL& url,
 }
 
 content::WebContents* GetWebContentsToUse(content::WebContents* web_contents) {
-#if defined(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
   // If we're viewing in a MimeHandlerViewGuest, use its embedder WebContents.
   if (extensions::MimeHandlerViewGuest::FromWebContents(web_contents)) {
     WebContents* top_level_web_contents =
@@ -500,7 +503,7 @@ void OnProfileCreated(const GURL& link_url,
 gfx::Vector2d RenderViewContextMenu::GetOffset(
     RenderFrameHost* render_frame_host) {
   gfx::Vector2d offset;
-#if defined(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
   // When --use-cross-process-frames-for-guests is enabled, the position is
   // transformed in the browser process hittesting code.
   WebContents* web_contents =
@@ -518,7 +521,7 @@ gfx::Vector2d RenderViewContextMenu::GetOffset(
       offset = bounds.origin() - top_level_bounds.origin();
     }
   }
-#endif  // defined(ENABLE_EXTENSIONS)
+#endif  // BUILDFLAG(ENABLE_EXTENSIONS)
   return offset;
 }
 
@@ -588,7 +591,7 @@ RenderViewContextMenu::~RenderViewContextMenu() {
 
 // Menu construction functions -------------------------------------------------
 
-#if defined(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
 // static
 bool RenderViewContextMenu::ExtensionContextAndPatternMatch(
     const content::ContextMenuParams& params,
@@ -736,7 +739,7 @@ void RenderViewContextMenu::AppendCurrentExtensionItems() {
   extension_items_.AppendExtensionItems(key, PrintableSelectionText(), &index,
                                         false /* is_action_menu */);
 }
-#endif  // defined(ENABLE_EXTENSIONS)
+#endif  // BUILDFLAG(ENABLE_EXTENSIONS)
 
 void RenderViewContextMenu::InitMenu() {
   RenderViewContextMenuBase::InitMenu();
@@ -914,7 +917,7 @@ void RenderViewContextMenu::HandleAuthorizeAllPlugins() {
 #endif
 
 void RenderViewContextMenu::AppendPrintPreviewItems() {
-#if defined(ENABLE_PRINT_PREVIEW)
+#if BUILDFLAG(ENABLE_PRINT_PREVIEW)
   if (!print_preview_menu_observer_.get()) {
     print_preview_menu_observer_.reset(
         new PrintPreviewContextMenuObserver(source_web_contents_));
@@ -934,7 +937,7 @@ void RenderViewContextMenu::AppendDeveloperItems() {
   // devtools build.
   bool show_developer_items = !IsDevToolsURL(params_.page_url);
 
-#if defined(DEBUG_DEVTOOLS)
+#if BUILDFLAG(DEBUG_DEVTOOLS)
   show_developer_items = true;
 #endif
 
@@ -1598,7 +1601,8 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
       return IsSavePageEnabled();
 
     case IDC_CONTENT_CONTEXT_RELOADFRAME:
-      return params_.frame_url.is_valid();
+      return params_.frame_url.is_valid() &&
+             params_.frame_url.GetOrigin() != chrome::kChromeUIPrintURL;
 
     case IDC_CONTENT_CONTEXT_UNDO:
       return !!(params_.edit_flags & WebContextMenuData::CanUndo);
@@ -2079,7 +2083,7 @@ bool RenderViewContextMenu::IsSaveAsEnabled() const {
   bool can_save =
       (params_.media_flags & WebContextMenuData::MediaCanSave) &&
       url.is_valid() && ProfileIOData::IsHandledProtocol(url.scheme());
-#if defined(ENABLE_PRINT_PREVIEW)
+#if BUILDFLAG(ENABLE_PRINT_PREVIEW)
       // Do not save the preview PDF on the print preview page.
   can_save = can_save &&
       !(printing::PrintPreviewDialogController::IsPrintPreviewURL(url));
@@ -2402,7 +2406,7 @@ void RenderViewContextMenu::ExecRestartPackagedApp() {
 }
 
 void RenderViewContextMenu::ExecPrint() {
-#if defined(ENABLE_PRINTING)
+#if BUILDFLAG(ENABLE_PRINTING)
   if (params_.media_type != WebContextMenuData::MediaTypeNone) {
     RenderFrameHost* render_frame_host = GetRenderFrameHost();
     if (render_frame_host) {
@@ -2416,7 +2420,7 @@ void RenderViewContextMenu::ExecPrint() {
       source_web_contents_,
       GetPrefs(browser_context_)->GetBoolean(prefs::kPrintPreviewDisabled),
       !params_.selection_text.empty());
-#endif  // defined(ENABLE_PRINTING)
+#endif  // BUILDFLAG(ENABLE_PRINTING)
 }
 
 void RenderViewContextMenu::ExecRouteMedia() {

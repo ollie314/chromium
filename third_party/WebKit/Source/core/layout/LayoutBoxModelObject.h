@@ -35,7 +35,6 @@
 
 namespace blink {
 
-class LineLayoutBoxModel;
 class PaintLayer;
 class PaintLayerScrollableArea;
 
@@ -322,6 +321,15 @@ class CORE_EXPORT LayoutBoxModelObject : public LayoutObject {
     return paddingBefore() + paddingAfter();
   }
 
+  LayoutUnit collapsedBorderAndCSSPaddingLogicalWidth() const {
+    return computedCSSPaddingStart() + computedCSSPaddingEnd() + borderStart() +
+           borderEnd();
+  }
+  LayoutUnit collapsedBorderAndCSSPaddingLogicalHeight() const {
+    return computedCSSPaddingBefore() + computedCSSPaddingAfter() +
+           borderBefore() + borderAfter();
+  }
+
   virtual LayoutRectOutsets marginBoxOutsets() const = 0;
   virtual LayoutUnit marginTop() const = 0;
   virtual LayoutUnit marginBottom() const = 0;
@@ -360,10 +368,6 @@ class CORE_EXPORT LayoutBoxModelObject : public LayoutObject {
   virtual LayoutUnit containingBlockLogicalWidthForContent() const;
 
   virtual void childBecameNonInline(LayoutObject* /*child*/) {}
-
-  virtual bool boxShadowShouldBeAppliedToBackground(
-      BackgroundBleedAvoidance,
-      const InlineFlowBox* = nullptr) const;
 
   // Overridden by subclasses to determine line height and baseline position.
   virtual LayoutUnit lineHeight(
@@ -510,9 +514,6 @@ class CORE_EXPORT LayoutBoxModelObject : public LayoutObject {
       m_rareData = wrapUnique(new LayoutBoxModelObjectRareData());
     return *m_rareData.get();
   }
-
-  bool hasAutoHeightOrContainingBlockWithAutoHeight(
-      bool checkingContainingBlock) const;
 
   // The PaintLayer associated with this object. |m_layer| can be nullptr
   // depending on the return value of layerTypeRequired().

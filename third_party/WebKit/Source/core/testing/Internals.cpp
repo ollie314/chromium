@@ -144,6 +144,7 @@
 #include "public/platform/WebConnectionType.h"
 #include "public/platform/WebGraphicsContext3DProvider.h"
 #include "public/platform/WebLayer.h"
+#include "public/platform/modules/remoteplayback/WebRemotePlaybackAvailability.h"
 #include "wtf/InstanceCounter.h"
 #include "wtf/PtrUtil.h"
 #include "wtf/dtoa.h"
@@ -991,6 +992,10 @@ void Internals::addTextMatchMarker(const Range* range, bool isActive) {
   range->ownerDocument().updateStyleAndLayoutIgnorePendingStylesheets();
   range->ownerDocument().markers().addTextMatchMarker(EphemeralRange(range),
                                                       isActive);
+
+  // This simulates what the production code does after
+  // DocumentMarkerController::addTextMatchMarker().
+  range->ownerDocument().view()->invalidatePaintForTickmarks();
 }
 
 static bool parseColor(const String& value,
@@ -1761,9 +1766,9 @@ StaticNodeList* Internals::nodesFromRect(Document* document,
     return nullptr;
 
   float zoomFactor = frame->pageZoomFactor();
-  LayoutPoint point = roundedLayoutPoint(
-      FloatPoint(centerX * zoomFactor + frameView->scrollX(),
-                 centerY * zoomFactor + frameView->scrollY()));
+  LayoutPoint point =
+      LayoutPoint(FloatPoint(centerX * zoomFactor + frameView->scrollX(),
+                             centerY * zoomFactor + frameView->scrollY()));
 
   HitTestRequest::HitTestRequestType hitType = HitTestRequest::ReadOnly |
                                                HitTestRequest::Active |
@@ -1791,19 +1796,30 @@ StaticNodeList* Internals::nodesFromRect(Document* document,
   return StaticNodeList::adopt(matches);
 }
 
-bool Internals::hasSpellingMarker(Document* document, int from, int length) {
-  ASSERT(document);
-  if (!document->frame())
+bool Internals::hasSpellingMarker(Document* document,
+                                  int from,
+                                  int length,
+                                  ExceptionState& exceptionState) {
+  if (!document || !document->frame()) {
+    exceptionState.throwDOMException(
+        InvalidAccessError,
+        "No frame can be obtained from the provided document.");
     return false;
+  }
 
   document->updateStyleAndLayoutIgnorePendingStylesheets();
   return document->frame()->spellChecker().selectionStartHasMarkerFor(
       DocumentMarker::Spelling, from, length);
 }
 
-void Internals::setSpellCheckingEnabled(bool enabled) {
-  if (!contextDocument() || !contextDocument()->frame())
+void Internals::setSpellCheckingEnabled(bool enabled,
+                                        ExceptionState& exceptionState) {
+  if (!contextDocument() || !contextDocument()->frame()) {
+    exceptionState.throwDOMException(
+        InvalidAccessError,
+        "No frame can be obtained from the provided document.");
     return;
+  }
 
   if (enabled !=
       contextDocument()->frame()->spellChecker().isSpellCheckingEnabled())
@@ -1847,22 +1863,16 @@ String Internals::dumpRefCountedInstanceCounts() const {
   return WTF::dumpRefCountedInstanceCounts();
 }
 
-Vector<unsigned long> Internals::setMemoryCacheCapacities(
-    unsigned long minDeadBytes,
-    unsigned long maxDeadBytes,
-    unsigned long totalBytes) {
-  Vector<unsigned long> result;
-  result.append(memoryCache()->minDeadCapacity());
-  result.append(memoryCache()->maxDeadCapacity());
-  result.append(memoryCache()->capacity());
-  memoryCache()->setCapacities(minDeadBytes, maxDeadBytes, totalBytes);
-  return result;
-}
-
-bool Internals::hasGrammarMarker(Document* document, int from, int length) {
-  ASSERT(document);
-  if (!document->frame())
+bool Internals::hasGrammarMarker(Document* document,
+                                 int from,
+                                 int length,
+                                 ExceptionState& exceptionState) {
+  if (!document || !document->frame()) {
+    exceptionState.throwDOMException(
+        InvalidAccessError,
+        "No frame can be obtained from the provided document.");
     return false;
+  }
 
   document->updateStyleAndLayoutIgnorePendingStylesheets();
   return document->frame()->spellChecker().selectionStartHasMarkerFor(
@@ -2202,7 +2212,9 @@ void Internals::mediaPlayerRemoteRouteAvailabilityChanged(
     HTMLMediaElement* mediaElement,
     bool available) {
   ASSERT(mediaElement);
-  mediaElement->remoteRouteAvailabilityChanged(available);
+  mediaElement->remoteRouteAvailabilityChanged(
+      available ? WebRemotePlaybackAvailability::DeviceAvailable
+                : WebRemotePlaybackAvailability::SourceNotSupported);
 }
 
 void Internals::mediaPlayerPlayingRemotelyChanged(
@@ -2213,12 +2225,6 @@ void Internals::mediaPlayerPlayingRemotelyChanged(
     mediaElement->connectedToRemoteDevice();
   else
     mediaElement->disconnectedFromRemoteDevice();
-}
-
-void Internals::setAllowHiddenVolumeControls(HTMLMediaElement* mediaElement,
-                                             bool allow) {
-  ASSERT(mediaElement);
-  mediaElement->setAllowHiddenVolumeControls(allow);
 }
 
 void Internals::registerURLSchemeAsBypassingContentSecurityPolicy(
@@ -2311,14 +2317,16 @@ void Internals::stopTrackingRepaints(Document* document,
 void Internals::updateLayoutIgnorePendingStylesheetsAndRunPostLayoutTasks(
     Node* node,
     ExceptionState& exceptionState) {
-  Document* document;
+  Document* document = nullptr;
   if (!node) {
     document = contextDocument();
   } else if (node->isDocumentNode()) {
     document = toDocument(node);
   } else if (isHTMLIFrameElement(*node)) {
     document = toHTMLIFrameElement(*node).contentDocument();
-  } else {
+  }
+
+  if (!document) {
     exceptionState.throwTypeError(
         "The node provided is neither a document nor an IFrame.");
     return;

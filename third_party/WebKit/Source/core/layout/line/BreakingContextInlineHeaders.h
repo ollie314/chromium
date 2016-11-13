@@ -496,7 +496,7 @@ inline void BreakingContext::handleFloat() {
       m_width.fitsOnLine(
           m_block.logicalWidthForFloat(*floatingObject).toFloat(),
           ExcludeWhitespace)) {
-    m_block.positionNewFloats(&m_width);
+    m_block.positionNewFloats(m_block.logicalHeight(), &m_width);
     if (m_lineBreak.getLineLayoutItem() == m_current.getLineLayoutItem()) {
       ASSERT(!m_lineBreak.offset());
       m_lineBreak.increment();
@@ -1440,7 +1440,7 @@ inline void BreakingContext::commitAndUpdateLineBreakIfNeeded() {
     }
   }
 
-  ASSERT_WITH_SECURITY_IMPLICATION(m_currentStyle->refCount() > 0);
+  SECURITY_DCHECK(m_currentStyle->refCount() > 0);
   if (checkForBreak && !m_width.fitsOnLine()) {
     // if we have floats, try to get below them.
     if (m_currentCharacterIsSpace && !m_ignoringSpaces &&

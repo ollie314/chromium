@@ -46,10 +46,7 @@ def CopyPagesWithNewBrowserArgsAndPrefix(pages, browser_args, prefix):
     p.CopyWithNewBrowserArgsAndPrefix(browser_args, prefix) for p in pages]
 
 
-# Pages that should be run both with and without --enable-unsafe-es3-apis.
-# TODO(kbr): eliminate the "ES3" versions of these tests once WebGL 2.0
-# is enabled by default. crbug.com/295792
-def ES2AndES3Pages(base_name):
+def DefaultPages(base_name):
   return [
     PixelTestPage(
       'pixel_canvas2d.html',
@@ -120,7 +117,7 @@ def ES2AndES3Pages(base_name):
       'pixel_canvas2d_webgl.html',
       base_name + '_2DCanvasWebGL',
       test_rect=[0, 0, 300, 300],
-      revision=2),
+      revision=3),
 
     PixelTestPage(
       'pixel_background.html',
@@ -212,16 +209,37 @@ def ExperimentalCanvasFeaturesPages(base_name):
       'pixel_offscreenCanvas_2d_commit_main.html',
       base_name + '_OffscreenCanvasUnaccelerated2DGPUCompositing',
       test_rect=[0, 0, 300, 300],
-      revision=3,
+      revision=4,
       browser_args=browser_args + ['--disable-accelerated-2d-canvas']),
 
     PixelTestPage(
       'pixel_offscreenCanvas_2d_commit_worker.html',
       base_name + '_OffscreenCanvasUnaccelerated2DGPUCompositingWorker',
       test_rect=[0, 0, 300, 300],
-      revision=3,
+      revision=4,
       browser_args=browser_args + ['--disable-accelerated-2d-canvas']),
-  ]
+
+    PixelTestPage(
+      'pixel_canvas_display_linear-rgb.html',
+      base_name + '_CanvasDisplayLinearRGBAccelerated2D',
+      test_rect=[0, 0, 140, 140],
+      revision=1,
+      browser_args=browser_args),
+
+    PixelTestPage(
+      'pixel_canvas_display_linear-rgb.html',
+      base_name + '_CanvasDisplayLinearRGBUnaccelerated2D',
+      test_rect=[0, 0, 140, 140],
+      revision=1,
+      browser_args=browser_args + unaccelerated_args),
+
+    PixelTestPage(
+      'pixel_canvas_display_linear-rgb.html',
+      base_name + '_CanvasDisplayLinearRGBUnaccelerated2DGPUCompositing',
+      test_rect=[0, 0, 140, 140],
+      revision=1,
+      browser_args=browser_args + ['--disable-accelerated-2d-canvas']),
+]
 
 
 # Pages that should be run with various macOS specific command line
@@ -279,12 +297,12 @@ def MacSpecificPages(base_name):
       'filter_effects.html',
       base_name + '_CSSFilterEffects',
       test_rect=[0, 0, 300, 300],
-      revision=2),
+      revision=3),
     PixelTestPage(
       'filter_effects.html',
       base_name + '_CSSFilterEffects_NoOverlays',
       test_rect=[0, 0, 300, 300],
-      revision=2,
+      revision=3,
       tolerance=10,
       browser_args=['--disable-mac-overlays']),
   ]

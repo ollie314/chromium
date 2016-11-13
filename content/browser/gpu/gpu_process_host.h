@@ -32,8 +32,6 @@
 #include "ui/gfx/gpu_memory_buffer.h"
 #include "url/gurl.h"
 
-struct GPUCreateCommandBufferConfig;
-
 namespace base {
 class Thread;
 }
@@ -55,7 +53,6 @@ namespace content {
 class BrowserChildProcessHostImpl;
 class GpuMainThread;
 class InProcessChildThreadParams;
-class RenderWidgetHostViewFrameSubscriber;
 class ShaderDiskCache;
 
 typedef base::Thread* (*GpuMainThreadFactoryFunction)(
@@ -291,12 +288,6 @@ class GpuProcessHost : public BrowserChildProcessHostDelegate,
   ClientIdToShaderCacheMap client_id_to_shader_cache_;
 
   std::string shader_prefix_key_;
-
-  // Anonymous shared memory segment to share with subprocess containing list of
-  // field trials (represented as a string).
-  // TODO(crbug.com/653874): Eventually remove this and use single shared memory
-  // object across processes.
-  std::unique_ptr<base::SharedMemory> field_trial_state_;
 
   DISALLOW_COPY_AND_ASSIGN(GpuProcessHost);
 };

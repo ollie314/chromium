@@ -95,11 +95,11 @@ class VideoFrameReceiverOnIOThread : public media::VideoFrameReceiver {
 
   void OnIncomingCapturedVideoFrame(
       std::unique_ptr<media::VideoCaptureDevice::Client::Buffer> buffer,
-      const scoped_refptr<media::VideoFrame>& frame) override {
+      scoped_refptr<media::VideoFrame> frame) override {
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
         base::Bind(&VideoFrameReceiver::OnIncomingCapturedVideoFrame, receiver_,
-                   base::Passed(&buffer), frame));
+                   base::Passed(&buffer), std::move(frame)));
   }
 
   void OnError() override {
@@ -213,7 +213,8 @@ void VideoCaptureController::AddClient(
   // Check that requested VideoCaptureParams are valid and supported.  If not,
   // report an error immediately and punt.
   if (!params.IsValid() ||
-      params.requested_format.pixel_format != media::PIXEL_FORMAT_I420 ||
+      !(params.requested_format.pixel_format == media::PIXEL_FORMAT_I420 ||
+        params.requested_format.pixel_format == media::PIXEL_FORMAT_Y16) ||
       params.requested_format.pixel_storage != media::PIXEL_STORAGE_CPU) {
     // Crash in debug builds since the renderer should not have asked for
     // invalid or unsupported parameters.
@@ -401,7 +402,7 @@ VideoCaptureController::~VideoCaptureController() {
 
 void VideoCaptureController::OnIncomingCapturedVideoFrame(
     std::unique_ptr<media::VideoCaptureDevice::Client::Buffer> buffer,
-    const scoped_refptr<VideoFrame>& frame) {
+    scoped_refptr<VideoFrame> frame) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   const int buffer_id = buffer->id();
   DCHECK_NE(buffer_id, media::VideoCaptureBufferPool::kInvalidId);
@@ -416,8 +417,9 @@ void VideoCaptureController::OnIncomingCapturedVideoFrame(
         new base::DictionaryValue());
     frame->metadata()->MergeInternalValuesInto(metadata.get());
 
-    // Only I420 pixel format is currently supported.
-    DCHECK_EQ(frame->format(), media::PIXEL_FORMAT_I420)
+    // Only I420 and Y16 pixel formats are currently supported.
+    DCHECK(frame->format() == media::PIXEL_FORMAT_I420 ||
+           frame->format() == media::PIXEL_FORMAT_Y16)
         << "Unsupported pixel format: "
         << media::VideoPixelFormatToString(frame->format());
 

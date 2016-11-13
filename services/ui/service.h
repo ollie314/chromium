@@ -22,7 +22,7 @@
 #include "services/ui/input_devices/input_device_server.h"
 #include "services/ui/public/interfaces/accessibility_manager.mojom.h"
 #include "services/ui/public/interfaces/clipboard.mojom.h"
-#include "services/ui/public/interfaces/display.mojom.h"
+#include "services/ui/public/interfaces/display_manager.mojom.h"
 #include "services/ui/public/interfaces/gpu_service.mojom.h"
 #include "services/ui/public/interfaces/ime.mojom.h"
 #include "services/ui/public/interfaces/user_access_manager.mojom.h"
@@ -100,15 +100,14 @@ class Service
   void AddUserIfNecessary(const service_manager::Identity& remote_identity);
 
   // service_manager::Service:
-  void OnStart(const service_manager::Identity& identity) override;
-  bool OnConnect(const service_manager::Identity& remote_identity,
+  void OnStart() override;
+  bool OnConnect(const service_manager::ServiceInfo& remote_info,
                  service_manager::InterfaceRegistry* registry) override;
 
   // WindowServerDelegate:
   void OnFirstDisplayReady() override;
   void OnNoMoreDisplays() override;
   bool IsTestConfig() const override;
-  void CreateDefaultDisplays() override;
   void UpdateTouchTransforms() override;
 
   // service_manager::InterfaceFactory<mojom::AccessibilityManager>

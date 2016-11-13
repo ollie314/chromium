@@ -10,6 +10,7 @@
 #include "base/message_loop/message_loop.h"
 #include "services/service_manager/public/cpp/connection.h"
 #include "services/service_manager/public/cpp/connector.h"
+#include "services/service_manager/public/cpp/interface_registry.h"
 
 namespace content {
 
@@ -21,9 +22,9 @@ TestService::TestService() : service_binding_(this) {
 TestService::~TestService() {
 }
 
-bool TestService::OnConnect(const service_manager::Identity& remote_identity,
+bool TestService::OnConnect(const service_manager::ServiceInfo& remote_info,
                             service_manager::InterfaceRegistry* registry) {
-  requestor_name_ = remote_identity.name();
+  requestor_name_ = remote_info.identity.name();
   registry->AddInterface<mojom::TestService>(this);
   return true;
 }

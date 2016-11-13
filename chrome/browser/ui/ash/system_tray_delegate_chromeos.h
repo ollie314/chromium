@@ -14,7 +14,6 @@
 #include "ash/common/session/session_state_observer.h"
 #include "ash/common/system/chromeos/supervised/custodian_info_tray_observer.h"
 #include "ash/common/system/tray/ime_info.h"
-#include "ash/common/system/tray/system_tray.h"
 #include "ash/common/system/tray/system_tray_delegate.h"
 #include "base/callback_forward.h"
 #include "base/callback_list.h"
@@ -28,7 +27,6 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/supervised_user/supervised_user_service_observer.h"
 #include "chrome/browser/ui/browser_list_observer.h"
-#include "chromeos/audio/cras_audio_handler.h"
 #include "chromeos/dbus/session_manager_client.h"
 #include "components/policy/core/common/cloud/cloud_policy_store.h"
 #include "components/prefs/pref_change_registrar.h"
@@ -39,6 +37,7 @@
 #include "device/bluetooth/bluetooth_adapter.h"
 #include "device/bluetooth/bluetooth_discovery_session.h"
 #include "extensions/browser/app_window/app_window_registry.h"
+#include "ui/base/ime/chromeos/ime_keyboard.h"
 #include "ui/base/ime/chromeos/input_method_manager.h"
 #include "ui/chromeos/ime/input_method_menu_manager.h"
 
@@ -59,7 +58,6 @@ class SystemTrayDelegateChromeOS
       public SessionManagerClient::Observer,
       public content::NotificationObserver,
       public input_method::InputMethodManager::Observer,
-      public chromeos::CrasAudioHandler::AudioObserver,
       public device::BluetoothAdapter::Observer,
       public policy::CloudPolicyStore::Observer,
       public ash::SessionStateObserver,
@@ -81,6 +79,7 @@ class SystemTrayDelegateChromeOS
   void Initialize() override;
   ash::LoginStatus GetUserLoginStatus() const override;
   std::string GetEnterpriseDomain() const override;
+  std::string GetEnterpriseRealm() const override;
   base::string16 GetEnterpriseMessage() const override;
   std::string GetSupervisedUserManager() const override;
   base::string16 GetSupervisedUserManagerName() const override;
@@ -89,12 +88,10 @@ class SystemTrayDelegateChromeOS
   bool IsUserChild() const override;
   void GetSystemUpdateInfo(ash::UpdateInfo* info) const override;
   bool ShouldShowSettings() override;
-  void ShowSetTimeDialog() override;
   void ShowEnterpriseInfo() override;
   void ShowUserLogin() override;
   void SignOut() override;
   void RequestRestartForUpdate() override;
-  void RequestShutdown() override;
   void GetAvailableBluetoothDevices(ash::BluetoothDeviceList* list) override;
   void BluetoothStartDiscovering() override;
   void BluetoothStopDiscovering() override;
@@ -107,7 +104,6 @@ class SystemTrayDelegateChromeOS
   void ActivateIMEProperty(const std::string& key) override;
   void ManageBluetoothDevices() override;
   void ToggleBluetooth() override;
-  void ShowOtherNetworkDialog(const std::string& type) override;
   bool GetBluetoothAvailable() override;
   bool GetBluetoothEnabled() override;
   bool GetBluetoothDiscovering() override;
@@ -139,8 +135,6 @@ class SystemTrayDelegateChromeOS
   void UserChangedChildStatus(user_manager::User* user) override;
 
  private:
-  ash::SystemTray* GetPrimarySystemTray();
-
   ash::SystemTrayNotifier* GetSystemTrayNotifier();
 
   void SetProfile(Profile* profile);
@@ -167,8 +161,6 @@ class SystemTrayDelegateChromeOS
   void ScreenIsLocked() override;
   void ScreenIsUnlocked() override;
 
-  gfx::NativeWindow GetNativeWindow() const;
-
   // content::NotificationObserver implementation.
   void Observe(int type,
                const content::NotificationSource& source,
@@ -189,15 +181,6 @@ class SystemTrayDelegateChromeOS
   // Overridden from InputMethodMenuManager::Observer.
   void InputMethodMenuItemChanged(
       ui::ime::InputMethodMenuManager* manager) override;
-
-  // Overridden from CrasAudioHandler::AudioObserver.
-  void OnOutputNodeVolumeChanged(uint64_t node_id, int volume) override;
-  void OnOutputMuteChanged(bool mute_on, bool system_adjust) override;
-  void OnInputNodeGainChanged(uint64_t node_id, int gain) override;
-  void OnInputMuteChanged(bool mute_on) override;
-  void OnAudioNodesChanged() override;
-  void OnActiveOutputNodeChanged() override;
-  void OnActiveInputNodeChanged() override;
 
   // Overridden from BluetoothAdapter::Observer.
   void AdapterPresentChanged(device::BluetoothAdapter* adapter,
@@ -256,15 +239,16 @@ class SystemTrayDelegateChromeOS
   std::unique_ptr<content::NotificationRegistrar> registrar_;
   std::unique_ptr<PrefChangeRegistrar> local_state_registrar_;
   std::unique_ptr<PrefChangeRegistrar> user_pref_registrar_;
-  Profile* user_profile_;
-  int search_key_mapped_to_;
-  bool have_session_start_time_;
+  Profile* user_profile_ = nullptr;
+  int search_key_mapped_to_ = input_method::kSearchKey;
+  bool have_session_start_time_ = false;
   base::TimeTicks session_start_time_;
-  bool have_session_length_limit_;
+  bool have_session_length_limit_ = false;
   base::TimeDelta session_length_limit_;
   std::string enterprise_domain_;
-  bool should_run_bluetooth_discovery_;
-  bool session_started_;
+  std::string enterprise_realm_;
+  bool should_run_bluetooth_discovery_ = false;
+  bool session_started_ = false;
 
   scoped_refptr<device::BluetoothAdapter> bluetooth_adapter_;
   std::unique_ptr<device::BluetoothDiscoverySession>

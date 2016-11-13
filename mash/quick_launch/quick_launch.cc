@@ -5,6 +5,7 @@
 #include "mash/quick_launch/quick_launch.h"
 
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_util.h"
@@ -13,7 +14,9 @@
 #include "services/catalog/public/interfaces/catalog.mojom.h"
 #include "services/service_manager/public/c/main.h"
 #include "services/service_manager/public/cpp/connector.h"
+#include "services/service_manager/public/cpp/interface_registry.h"
 #include "services/service_manager/public/cpp/service.h"
+#include "services/service_manager/public/cpp/service_context.h"
 #include "services/service_manager/public/cpp/service_runner.h"
 #include "services/tracing/public/cpp/provider.h"
 #include "ui/views/background.h"
@@ -119,7 +122,7 @@ class QuickLaunchUI : public views::WidgetDelegateView,
   }
 
   void UpdateEntries() {
-    catalog_->GetEntriesProvidingClass(
+    catalog_->GetEntriesProvidingCapability(
         "mash:launchable",
         base::Bind(&QuickLaunchUI::OnGotCatalogEntries,
                    base::Unretained(this)));
@@ -163,18 +166,18 @@ void QuickLaunch::RemoveWindow(views::Widget* window) {
     base::MessageLoop::current()->QuitWhenIdle();
 }
 
-void QuickLaunch::OnStart(const service_manager::Identity& identity) {
-  tracing_.Initialize(connector(), identity.name());
+void QuickLaunch::OnStart() {
+  tracing_.Initialize(context()->connector(), context()->identity().name());
 
-  aura_init_.reset(
-      new views::AuraInit(connector(), "views_mus_resources.pak"));
-  window_manager_connection_ =
-      views::WindowManagerConnection::Create(connector(), identity);
+  aura_init_ = base::MakeUnique<views::AuraInit>(
+      context()->connector(), context()->identity(), "views_mus_resources.pak");
+  window_manager_connection_ = views::WindowManagerConnection::Create(
+      context()->connector(), context()->identity());
 
   Launch(mojom::kWindow, mojom::LaunchMode::MAKE_NEW);
 }
 
-bool QuickLaunch::OnConnect(const service_manager::Identity& remote_identity,
+bool QuickLaunch::OnConnect(const service_manager::ServiceInfo& remote_info,
                             service_manager::InterfaceRegistry* registry) {
   registry->AddInterface<mojom::Launchable>(this);
   return true;
@@ -188,10 +191,10 @@ void QuickLaunch::Launch(uint32_t what, mojom::LaunchMode how) {
     return;
   }
   catalog::mojom::CatalogPtr catalog;
-  connector()->ConnectToInterface("service:catalog", &catalog);
+  context()->connector()->ConnectToInterface("service:catalog", &catalog);
 
   views::Widget* window = views::Widget::CreateWindowWithContextAndBounds(
-      new QuickLaunchUI(this, connector(), std::move(catalog)),
+      new QuickLaunchUI(this, context()->connector(), std::move(catalog)),
       nullptr, gfx::Rect(10, 640, 0, 0));
   window->Show();
   windows_.push_back(window);

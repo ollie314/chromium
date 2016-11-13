@@ -19,13 +19,12 @@
 #include "components/content_settings/core/common/content_settings_pattern.h"
 #include "components/content_settings/core/common/content_settings_types.h"
 #include "components/omnibox/common/omnibox_focus_state.h"
-#include "content/public/common/top_controls_state.h"
+#include "content/public/common/browser_controls_state.h"
 #include "content/public/common/webplugininfo.h"
 #include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_message_macros.h"
 #include "ipc/ipc_platform_file.h"
 #include "ppapi/features/features.h"
-#include "third_party/WebKit/public/platform/modules/app_banner/WebAppBannerPromptReply.h"
 #include "third_party/WebKit/public/web/WebConsoleMessage.h"
 #include "third_party/WebKit/public/web/WebWindowFeatures.h"
 #include "ui/base/window_open_disposition.h"
@@ -82,8 +81,8 @@ IPC_ENUM_TRAITS_MAX_VALUE(ThemeBackgroundImageAlignment,
 IPC_ENUM_TRAITS_MAX_VALUE(ThemeBackgroundImageTiling, THEME_BKGRND_IMAGE_LAST)
 IPC_ENUM_TRAITS_MAX_VALUE(blink::WebConsoleMessage::Level,
                           blink::WebConsoleMessage::LevelLast)
-IPC_ENUM_TRAITS_MAX_VALUE(content::TopControlsState,
-                          content::TOP_CONTROLS_STATE_LAST)
+IPC_ENUM_TRAITS_MAX_VALUE(content::BrowserControlsState,
+                          content::BROWSER_CONTROLS_STATE_LAST)
 
 // Output parameters for ChromeViewHostMsg_GetPluginInfo message.
 IPC_STRUCT_BEGIN(ChromeViewHostMsg_GetPluginInfo_Output)
@@ -189,9 +188,6 @@ IPC_STRUCT_TRAITS_BEGIN(WebApplicationInfo)
   IPC_STRUCT_TRAITS_MEMBER(mobile_capable)
 IPC_STRUCT_TRAITS_END()
 
-IPC_ENUM_TRAITS_MAX_VALUE(blink::WebAppBannerPromptReply,
-                          blink::WebAppBannerPromptReply::Cancel)
-
 //-----------------------------------------------------------------------------
 // RenderView messages
 // These are messages sent from the browser to the renderer process.
@@ -284,14 +280,13 @@ IPC_MESSAGE_ROUTED3(ChromeViewMsg_RequestThumbnailForContextNode,
                     gfx::Size /* thumbnail_max_size_pixels */,
                     int /* ID of the callback */)
 
-// Notifies the renderer whether hiding/showing the top controls is enabled,
+// Notifies the renderer whether hiding/showing the browser controls is enabled,
 // what the current state should be, and whether or not to animate to the
 // proper state.
-IPC_MESSAGE_ROUTED3(ChromeViewMsg_UpdateTopControlsState,
-                    content::TopControlsState /* constraints */,
-                    content::TopControlsState /* current */,
+IPC_MESSAGE_ROUTED3(ChromeViewMsg_UpdateBrowserControlsState,
+                    content::BrowserControlsState /* constraints */,
+                    content::BrowserControlsState /* current */,
                     bool /* animate */)
-
 
 // Updates the window features of the render view.
 IPC_MESSAGE_ROUTED1(ChromeViewMsg_SetWindowFeatures,
@@ -332,13 +327,6 @@ IPC_MESSAGE_ROUTED0(ChromeViewMsg_SetAsInterstitial)
 IPC_MESSAGE_ROUTED1(ChromeViewMsg_NetErrorInfo,
                     int /* DNS probe status */)
 
-#if defined(OS_ANDROID)
-// Tells the renderer whether or not offline pages exist. This is used to
-// decide if offline related button will be provided on certain error page.
-IPC_MESSAGE_ROUTED1(ChromeViewMsg_SetHasOfflinePages,
-                    bool /* has_offline_pages */)
-#endif  // defined(OS_ANDROID)
-
 // Provides the information needed by the renderer process to contact a
 // navigation correction service.  Handled by the NetErrorHelper.
 IPC_MESSAGE_ROUTED5(ChromeViewMsg_SetNavigationCorrectionInfo,
@@ -349,9 +337,9 @@ IPC_MESSAGE_ROUTED5(ChromeViewMsg_SetNavigationCorrectionInfo,
                     GURL /* Google Search URL to use */)
 
 #if defined(OS_ANDROID)
-// Message sent from the renderer to the browser to show the UI for offline
-// pages.
-IPC_MESSAGE_ROUTED0(ChromeViewHostMsg_ShowOfflinePages)
+// Message sent from the renderer to the browser to schedule to download the
+// page at a later time.
+IPC_MESSAGE_ROUTED0(ChromeViewHostMsg_DownloadPageLater)
 #endif  // defined(OS_ANDROID)
 
 //-----------------------------------------------------------------------------
@@ -502,21 +490,6 @@ IPC_MESSAGE_ROUTED0(ChromeViewHostMsg_ShowFlashPermissionBubble)
 IPC_MESSAGE_ROUTED1(ChromeViewHostMsg_CouldNotLoadPlugin,
                     base::FilePath /* plugin_path */)
 
-// Asks the renderer whether an app banner should be shown. It will reply with
-// ChromeViewHostMsg_AppBannerPromptReply.
-IPC_MESSAGE_ROUTED2(ChromeViewMsg_AppBannerPromptRequest,
-                    int /* request_id */,
-                    std::string /* platform */)
-
-// Tells the renderer that a banner has been accepted.
-IPC_MESSAGE_ROUTED2(ChromeViewMsg_AppBannerAccepted,
-                    int32_t /* request_id */,
-                    std::string /* platform */)
-
-// Tells the renderer that a banner has been dismissed.
-IPC_MESSAGE_ROUTED1(ChromeViewMsg_AppBannerDismissed,
-                    int32_t /* request_id */)
-
 // Notification that the page has an OpenSearch description document
 // associated with it.
 IPC_MESSAGE_ROUTED2(ChromeViewHostMsg_PageHasOSDD,
@@ -624,17 +597,6 @@ IPC_MESSAGE_CONTROL2(ChromeViewMsg_SetSearchURLs,
 IPC_SYNC_MESSAGE_CONTROL0_1(ChromeViewHostMsg_IsCrashReportingEnabled,
                             bool /* enabled */)
 #endif
-
-// Tells the browser process whether the web page wants the banner to be shown.
-// This is a reply from ChromeViewMsg_AppBannerPromptRequest.
-IPC_MESSAGE_ROUTED3(ChromeViewHostMsg_AppBannerPromptReply,
-                    int /* request_id */,
-                    blink::WebAppBannerPromptReply /* reply */,
-                    std::string /* referrer */)
-
-// Tells the browser to restart the app banner display pipeline.
-IPC_MESSAGE_ROUTED1(ChromeViewHostMsg_RequestShowAppBanner,
-                    int32_t /* request_id */)
 
 // Sent by the renderer to indicate that a fields trial has been activated.
 IPC_MESSAGE_CONTROL1(ChromeViewHostMsg_FieldTrialActivated,

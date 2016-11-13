@@ -4,16 +4,16 @@
 package org.chromium.chrome.browser.ntp.snippets;
 
 import android.graphics.Bitmap;
+import android.text.TextUtils;
 
-import org.chromium.chrome.browser.ntp.cards.ItemViewType;
-import org.chromium.chrome.browser.ntp.cards.Leaf;
-import org.chromium.chrome.browser.ntp.cards.NewTabPageViewHolder;
 import org.chromium.chrome.browser.ntp.snippets.ContentSuggestionsCardLayout.ContentSuggestionsCardLayoutEnum;
+
+import java.io.File;
 
 /**
  * Represents the data for an article card on the NTP.
  */
-public class SnippetArticle extends Leaf {
+public class SnippetArticle {
     /** The category of this article. */
     public final int mCategory;
 
@@ -44,7 +44,7 @@ public class SnippetArticle extends Leaf {
     /** The position of this article within its section. */
     public final int mPosition;
 
-    /** The position of this article in the complete list. Populated by NewTabPageAdapter.*/
+    /** The position of this article in the complete list. Populated by NewTabPageAdapter. */
     public int mGlobalPosition = -1;
 
     /** The layout that should be used to display the snippet. */
@@ -56,6 +56,24 @@ public class SnippetArticle extends Leaf {
 
     /** Stores whether impression of this article has been tracked already. */
     private boolean mImpressionTracked;
+
+    /** To be run when the offline status of the article or AMP article changes. */
+    private Runnable mOfflineStatusChangeRunnable;
+
+    /** Whether the linked article represents a downloaded asset. */
+    public boolean mIsDownloadedAsset;
+
+    /** The path to the downloaded asset (only for download asset articles). */
+    private String mDownloadAssetPath;
+
+    /** The downloaded asset (only for download asset articles). */
+    private File mFile;
+
+    /** The mime type of the downloaded asset (only for download asset articles). */
+    private String mDownloadAssetMimeType;
+
+    /** The path to the offline page, if any. */
+    private String mOfflinePagePath;
 
     /**
      * Creates a SnippetArticleListItem object that will hold the data.
@@ -88,25 +106,6 @@ public class SnippetArticle extends Leaf {
         return mCategory ^ mIdWithinCategory.hashCode();
     }
 
-    @Override
-    @ItemViewType
-    public int getItemViewType() {
-        return ItemViewType.SNIPPET;
-    }
-
-    @Override
-    protected void onBindViewHolder(NewTabPageViewHolder holder) {
-        assert holder instanceof SnippetArticleViewHolder;
-        ((SnippetArticleViewHolder) holder).onBindViewHolder(this);
-    }
-
-    @Override
-    public SnippetArticle getSuggestionAt(int position) {
-        if (position != 0) throw new IndexOutOfBoundsException();
-
-        return this;
-    }
-
     /**
      * Returns this article's thumbnail as a {@link Bitmap}. Can return {@code null} as it is
      * initially unset.
@@ -126,6 +125,55 @@ public class SnippetArticle extends Leaf {
         if (mImpressionTracked) return false;
         mImpressionTracked = true;
         return true;
+    }
+
+    /**
+     * Sets the {@link Runnable} to be run when the article's offline status changes.
+     * Pass null to wipe.
+     */
+    public void setOfflineStatusChangeRunnable(Runnable runnable) {
+        mOfflineStatusChangeRunnable = runnable;
+    }
+
+    /**
+     * @return the downloaded asset. May only be called if mIsDownloadedAsset is {@code true}.
+     */
+    public File getDownloadAssetFile() {
+        assert mIsDownloadedAsset;
+        if (mFile == null) mFile = new File(mDownloadAssetPath);
+        return mFile;
+    }
+
+    /** Returns the mime type of the download asset. May only be called if mIsDownloadAsset is true.
+     */
+    public String getDownloadAssetMimeType() {
+        assert mIsDownloadedAsset;
+        return mDownloadAssetMimeType;
+    }
+
+    /** Marks the article suggestion as a download asset with the given path and mime type. */
+    public void setDownloadAsset(String filePath, String mimeType) {
+        mIsDownloadedAsset = true;
+        mDownloadAssetPath = filePath;
+        mDownloadAssetMimeType = mimeType;
+    }
+
+    /** Sets OfflinePageDownloads guid for the offline version of the snippet. Null to clear.*/
+    public void setOfflinePageDownloadGuid(String path) {
+        String previous = mOfflinePagePath;
+        mOfflinePagePath = path;
+
+        if (mOfflineStatusChangeRunnable != null && !TextUtils.equals(previous, mOfflinePagePath)) {
+            mOfflineStatusChangeRunnable.run();
+        }
+    }
+
+    /**
+     * Gets the OfflinePageDownloads guid for the offline version of the snippet.
+     * Null if page is not available offline.
+     */
+    public String getOfflinePageDownloadGuid() {
+        return mOfflinePagePath;
     }
 
     @Override

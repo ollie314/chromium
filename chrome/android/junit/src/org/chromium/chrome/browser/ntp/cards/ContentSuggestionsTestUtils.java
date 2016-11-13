@@ -4,9 +4,11 @@
 
 package org.chromium.chrome.browser.ntp.cards;
 
+import org.chromium.chrome.browser.ntp.NewTabPageView.NewTabPageManager;
 import org.chromium.chrome.browser.ntp.snippets.CategoryInt;
 import org.chromium.chrome.browser.ntp.snippets.ContentSuggestionsCardLayout;
 import org.chromium.chrome.browser.ntp.snippets.SnippetArticle;
+import org.chromium.chrome.browser.offlinepages.downloads.OfflinePageDownloadBridge;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -26,15 +28,23 @@ public final class ContentSuggestionsTestUtils {
         return suggestions;
     }
 
+    @Deprecated
     public static SuggestionsCategoryInfo createInfo(
             @CategoryInt int category, boolean moreButton, boolean showIfEmpty) {
-        return new SuggestionsCategoryInfo(
-                category, "", ContentSuggestionsCardLayout.FULL_CARD, moreButton, showIfEmpty);
+        return createInfo(category, false, true, moreButton, showIfEmpty);
     }
 
-    public static SuggestionsSection createSection(
-            boolean moreButton, boolean showIfEmpty, NodeParent parent) {
-        SuggestionsCategoryInfo info = createInfo(42, moreButton, showIfEmpty);
-        return new SuggestionsSection(parent, info);
+    public static SuggestionsCategoryInfo createInfo(@CategoryInt int category, boolean moreAction,
+            boolean reloadAction, boolean viewAllAction, boolean showIfEmpty) {
+        return new SuggestionsCategoryInfo(category, "", ContentSuggestionsCardLayout.FULL_CARD,
+                moreAction, reloadAction, viewAllAction, showIfEmpty, "");
+    }
+
+    public static SuggestionsSection createSection(boolean hasReloadAction, NodeParent parent,
+            NewTabPageManager manager, OfflinePageDownloadBridge bridge) {
+        return new SuggestionsSection(parent,
+                createInfo(42, /*hasMoreAction=*/false, /*hasReloadAction=*/hasReloadAction,
+                        /*hasViewAllAction=*/false, /*showIfEmpty=*/true),
+                manager, bridge);
     }
 }

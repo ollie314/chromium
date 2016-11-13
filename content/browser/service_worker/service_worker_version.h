@@ -54,7 +54,6 @@ class HttpResponseInfo;
 
 namespace content {
 
-class EmbeddedWorkerRegistry;
 class ServiceWorkerContextCore;
 class ServiceWorkerProviderHost;
 class ServiceWorkerRegistration;
@@ -170,12 +169,16 @@ class CONTENT_EXPORT ServiceWorkerVersion
     foreign_fetch_origins_ = origins;
   }
 
-  bool navigation_preload_enabled() const {
-    return navigation_preload_enabled_;
+  // Meaningful only if this version is active.
+  const NavigationPreloadState& navigation_preload_state() const {
+    DCHECK(status_ == ACTIVATING || status_ == ACTIVATED) << status_;
+    return navigation_preload_state_;
   }
-  void set_navigation_preload_enabled(bool enabled) {
-    navigation_preload_enabled_ = enabled;
-  }
+  // Only intended for use by ServiceWorkerRegistration. Generally use
+  // ServiceWorkerRegistration::EnableNavigationPreload or
+  // ServiceWorkerRegistration::SetNavigationPreloadHeader instead of this
+  // function.
+  void SetNavigationPreloadState(const NavigationPreloadState& state);
 
   ServiceWorkerMetrics::Site site_for_uma() const { return site_for_uma_; }
 
@@ -730,7 +733,11 @@ class CONTENT_EXPORT ServiceWorkerVersion
   std::vector<GURL> foreign_fetch_scopes_;
   std::vector<url::Origin> foreign_fetch_origins_;
   FetchHandlerExistence fetch_handler_existence_;
-  bool navigation_preload_enabled_ = false;
+  // The source of truth for navigation preload state is the
+  // ServiceWorkerRegistration. |navigation_preload_state_| is essentially a
+  // cached value because it must be looked up quickly and a live registration
+  // doesn't necessarily exist whenever there is a live version.
+  NavigationPreloadState navigation_preload_state_;
   ServiceWorkerMetrics::Site site_for_uma_;
 
   Status status_ = NEW;

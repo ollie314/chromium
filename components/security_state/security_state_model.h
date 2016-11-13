@@ -94,14 +94,23 @@ class SecurityStateModel {
     CONTENT_STATUS_DISPLAYED_AND_RAN,
   };
 
+  // Describes whether the page contains malicious resources such as
+  // malware or phishing attacks.
+  enum MaliciousContentStatus {
+    MALICIOUS_CONTENT_STATUS_NONE,
+    MALICIOUS_CONTENT_STATUS_MALWARE,
+    MALICIOUS_CONTENT_STATUS_UNWANTED_SOFTWARE,
+    MALICIOUS_CONTENT_STATUS_SOCIAL_ENGINEERING,
+  };
+
   // Describes the security status of a page or request. This is the
   // main data structure provided by this class.
   struct SecurityInfo {
     SecurityInfo();
     ~SecurityInfo();
     SecurityLevel security_level;
-    // True if the page fails the browser's malware or phishing checks.
-    bool fails_malware_check;
+    // Describes the nature of the page's malicious content, if any.
+    MaliciousContentStatus malicious_content_status;
     SHA1DeprecationStatus sha1_deprecation_status;
     // |mixed_content_status| describes the presence of content that was
     // loaded over a nonsecure (HTTP) connection.
@@ -137,9 +146,11 @@ class SecurityStateModel {
     // True if pinning was bypassed due to a local trust anchor.
     bool pkp_bypassed;
 
-    // True if the page displayed sensitive user data inputs (like a
-    // password or credit card) on an HTTP page.
-    bool displayed_private_user_data_input_on_http;
+    // True if the page displayed password field on an HTTP page.
+    bool displayed_password_field_on_http;
+
+    // True if the page displayed credit card field on an HTTP page.
+    bool displayed_credit_card_field_on_http;
   };
 
   // Contains the security state relevant to computing the SecurityInfo
@@ -151,8 +162,7 @@ class SecurityStateModel {
     bool operator==(const VisibleSecurityState& other) const;
     GURL url;
 
-    // True if the page fails the browser's malware or phishing checks.
-    bool fails_malware_check;
+    MaliciousContentStatus malicious_content_status;
 
     // CONNECTION SECURITY FIELDS
     // Whether the connection security fields are initialized.

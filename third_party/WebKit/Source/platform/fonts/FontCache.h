@@ -99,6 +99,7 @@ class PLATFORM_EXPORT FontCache {
                                                        ShouldRetain = Retain);
   SimpleFontData* getNonRetainedLastResortFallbackFont(const FontDescription&);
   bool isPlatformFontAvailable(const FontDescription&, const AtomicString&);
+  static String firstAvailableOrFirst(const String&);
 
   // Returns the ShapeCache instance associated with the given cache key.
   // Creates a new instance as needed and as such is guaranteed not to return
@@ -120,8 +121,8 @@ class PLATFORM_EXPORT FontCache {
 #else
   static const AtomicString& legacySystemFontFamily();
 #endif
-#if OS(LINUX)
-  static void setSystemFontFamily(const char*);
+#if OS(LINUX) || OS(ANDROID)
+  static void setSystemFontFamily(const AtomicString&);
 #endif
 
 #if OS(WIN)

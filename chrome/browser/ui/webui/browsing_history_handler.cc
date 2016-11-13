@@ -58,14 +58,15 @@
 #include "components/url_formatter/url_formatter.h"
 #include "content/public/browser/url_data_source.h"
 #include "content/public/browser/web_ui.h"
+#include "extensions/features/features.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/time_format.h"
 
-#if defined(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
 #include "chrome/browser/extensions/activity_log/activity_log.h"
 #endif
 
-#if defined(ENABLE_SUPERVISED_USERS)
+#if BUILDFLAG(ENABLE_SUPERVISED_USERS)
 #include "chrome/browser/supervised_user/supervised_user_navigation_observer.h"
 #include "chrome/browser/supervised_user/supervised_user_service.h"
 #include "chrome/browser/supervised_user/supervised_user_service_factory.h"
@@ -300,7 +301,7 @@ BrowsingHistoryHandler::HistoryEntry::ToValue(
   result->SetString("deviceName", device_name);
   result->SetString("deviceType", device_type);
 
-#if defined(ENABLE_SUPERVISED_USERS)
+#if BUILDFLAG(ENABLE_SUPERVISED_USERS)
   if (supervised_user_service) {
     const SupervisedUserURLFilter* url_filter =
         supervised_user_service->GetURLFilterForUIThread();
@@ -628,7 +629,7 @@ void BrowsingHistoryHandler::HandleRemoveVisits(const base::ListValue* args) {
                    weak_factory_.GetWeakPtr()));
   }
 
-#if defined(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
   // If the profile has activity logging enabled also clean up any URLs from
   // the extension activity log. The extension activity log contains URLS
   // which websites an extension has activity on so it will indirectly
@@ -762,7 +763,7 @@ void BrowsingHistoryHandler::ReturnResultsToFrontEnd() {
   BookmarkModel* bookmark_model =
       BookmarkModelFactory::GetForBrowserContext(profile);
   SupervisedUserService* supervised_user_service = NULL;
-#if defined(ENABLE_SUPERVISED_USERS)
+#if BUILDFLAG(ENABLE_SUPERVISED_USERS)
   if (profile->IsSupervised())
     supervised_user_service =
         SupervisedUserServiceFactory::GetForProfile(profile);
@@ -1010,5 +1011,6 @@ void BrowsingHistoryHandler::OnURLsDeleted(
 }
 
 void BrowsingHistoryHandler::OnWebHistoryDeleted() {
-  web_ui()->CallJavascriptFunctionUnsafe("historyDeleted");
+  if (!has_pending_delete_request_)
+    web_ui()->CallJavascriptFunctionUnsafe("historyDeleted");
 }

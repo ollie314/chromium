@@ -40,25 +40,16 @@ const AtomicString& remotePlaybackStateToString(WebRemotePlaybackState state) {
 }  // anonymous namespace
 
 // static
-RemotePlayback* RemotePlayback::create(ScriptState* scriptState,
-                                       HTMLMediaElement& element) {
-  DCHECK(element.document().frame());
-  DCHECK(scriptState);
-
-  RemotePlayback* remotePlayback = new RemotePlayback(scriptState, element);
-  element.setRemotePlaybackClient(remotePlayback);
-
-  return remotePlayback;
+RemotePlayback* RemotePlayback::create(HTMLMediaElement& element) {
+  return new RemotePlayback(element);
 }
 
-RemotePlayback::RemotePlayback(ScriptState* scriptState,
-                               HTMLMediaElement& element)
+RemotePlayback::RemotePlayback(HTMLMediaElement& element)
     : ActiveScriptWrappable(this),
-      m_scriptState(scriptState),
       m_state(element.isPlayingRemotely()
                   ? WebRemotePlaybackState::Connected
                   : WebRemotePlaybackState::Disconnected),
-      m_availability(element.hasRemoteRoutes()),
+      m_availability(WebRemotePlaybackAvailability::Unknown),
       m_mediaElement(&element) {}
 
 const AtomicString& RemotePlayback::interfaceName() const {
@@ -70,9 +61,9 @@ ExecutionContext* RemotePlayback::getExecutionContext() const {
 }
 
 ScriptPromise RemotePlayback::watchAvailability(
+    ScriptState* scriptState,
     RemotePlaybackAvailabilityCallback* callback) {
-  ScriptPromiseResolver* resolver =
-      ScriptPromiseResolver::create(m_scriptState.get());
+  ScriptPromiseResolver* resolver = ScriptPromiseResolver::create(scriptState);
   ScriptPromise promise = resolver->promise();
 
   if (m_mediaElement->fastHasAttribute(HTMLNames::disableremoteplaybackAttr)) {
@@ -86,7 +77,10 @@ ScriptPromise RemotePlayback::watchAvailability(
   int id;
   do {
     id = getExecutionContext()->circularSequentialID();
-  } while (!m_availabilityCallbacks.add(id, callback).isNewEntry);
+  } while (!m_availabilityCallbacks
+                .add(id, TraceWrapperMember<RemotePlaybackAvailabilityCallback>(
+                             this, callback))
+                .isNewEntry);
 
   // Report the current availability via the callback.
   getExecutionContext()->postTask(
@@ -105,9 +99,9 @@ ScriptPromise RemotePlayback::watchAvailability(
   return promise;
 }
 
-ScriptPromise RemotePlayback::cancelWatchAvailability(int id) {
-  ScriptPromiseResolver* resolver =
-      ScriptPromiseResolver::create(m_scriptState.get());
+ScriptPromise RemotePlayback::cancelWatchAvailability(ScriptState* scriptState,
+                                                      int id) {
+  ScriptPromiseResolver* resolver = ScriptPromiseResolver::create(scriptState);
   ScriptPromise promise = resolver->promise();
 
   if (m_mediaElement->fastHasAttribute(HTMLNames::disableremoteplaybackAttr)) {
@@ -129,9 +123,9 @@ ScriptPromise RemotePlayback::cancelWatchAvailability(int id) {
   return promise;
 }
 
-ScriptPromise RemotePlayback::cancelWatchAvailability() {
-  ScriptPromiseResolver* resolver =
-      ScriptPromiseResolver::create(m_scriptState.get());
+ScriptPromise RemotePlayback::cancelWatchAvailability(
+    ScriptState* scriptState) {
+  ScriptPromiseResolver* resolver = ScriptPromiseResolver::create(scriptState);
   ScriptPromise promise = resolver->promise();
 
   if (m_mediaElement->fastHasAttribute(HTMLNames::disableremoteplaybackAttr)) {
@@ -146,11 +140,8 @@ ScriptPromise RemotePlayback::cancelWatchAvailability() {
   return promise;
 }
 
-ScriptPromise RemotePlayback::prompt() {
-  // TODO(avayvod): implement steps 5, 8, 9 of the algorithm.
-  // https://crbug.com/647441
-  ScriptPromiseResolver* resolver =
-      ScriptPromiseResolver::create(m_scriptState.get());
+ScriptPromise RemotePlayback::prompt(ScriptState* scriptState) {
+  ScriptPromiseResolver* resolver = ScriptPromiseResolver::create(scriptState);
   ScriptPromise promise = resolver->promise();
 
   if (m_mediaElement->fastHasAttribute(HTMLNames::disableremoteplaybackAttr)) {
@@ -172,16 +163,28 @@ ScriptPromise RemotePlayback::prompt() {
     return promise;
   }
 
+  // TODO(avayvod): don't do this check on low-end devices - merge with
+  // https://codereview.chromium.org/2475293003
+  if (m_availability == WebRemotePlaybackAvailability::DeviceNotAvailable) {
+    resolver->reject(DOMException::create(NotFoundError,
+                                          "No remote playback devices found."));
+    return promise;
+  }
+
+  if (m_availability == WebRemotePlaybackAvailability::SourceNotSupported ||
+      m_availability == WebRemotePlaybackAvailability::SourceNotCompatible) {
+    resolver->reject(DOMException::create(
+        NotSupportedError,
+        "The currentSrc is not compatible with remote playback"));
+    return promise;
+  }
+
   if (m_state == WebRemotePlaybackState::Disconnected) {
     m_promptPromiseResolver = resolver;
     m_mediaElement->requestRemotePlayback();
   } else {
+    m_promptPromiseResolver = resolver;
     m_mediaElement->requestRemotePlaybackControl();
-    // TODO(avayvod): Need to keep the resolver until user chooses to stop
-    // the remote playback (resolve) or dismisses the UI (reject).
-    // Steps 11 and 12 of the prompt() algorithm.
-    // https://crbug.com/647441
-    resolver->resolve();
   }
 
   return promise;
@@ -202,26 +205,31 @@ void RemotePlayback::notifyInitialAvailability(int callbackId) {
   if (iter == m_availabilityCallbacks.end())
     return;
 
-  iter->value->call(m_scriptState.get(), this, m_availability);
+  iter->value->call(this, remotePlaybackAvailable());
 }
 
 void RemotePlayback::stateChanged(WebRemotePlaybackState state) {
-  // We may get a "disconnected" state change while in the "disconnected"
-  // state if initiated connection fails. So cleanup the promise resolvers
-  // before checking if anything changed.
-  // TODO(avayvod): cleanup this logic when we implementing the "connecting"
-  // state.
-  if (m_promptPromiseResolver) {
-    if (state != WebRemotePlaybackState::Disconnected)
-      m_promptPromiseResolver->resolve();
-    else
-      m_promptPromiseResolver->reject(DOMException::create(
-          AbortError, "Failed to connect to the remote device."));
-    m_promptPromiseResolver = nullptr;
-  }
-
   if (m_state == state)
     return;
+
+  if (m_promptPromiseResolver) {
+    // Changing state to Disconnected from "disconnected" or "connecting" means
+    // that establishing connection with remote playback device failed.
+    // Changing state to anything else means the state change intended by
+    // prompt() succeeded.
+    if (m_state != WebRemotePlaybackState::Connected &&
+        state == WebRemotePlaybackState::Disconnected) {
+      m_promptPromiseResolver->reject(DOMException::create(
+          AbortError, "Failed to connect to the remote device."));
+    } else {
+      DCHECK((m_state == WebRemotePlaybackState::Disconnected &&
+              state == WebRemotePlaybackState::Connecting) ||
+             (m_state == WebRemotePlaybackState::Connected &&
+              state == WebRemotePlaybackState::Disconnected));
+      m_promptPromiseResolver->resolve();
+    }
+    m_promptPromiseResolver = nullptr;
+  }
 
   m_state = state;
   switch (m_state) {
@@ -237,13 +245,19 @@ void RemotePlayback::stateChanged(WebRemotePlaybackState state) {
   }
 }
 
-void RemotePlayback::availabilityChanged(bool available) {
-  if (m_availability == available)
+void RemotePlayback::availabilityChanged(
+    WebRemotePlaybackAvailability availability) {
+  if (m_availability == availability)
     return;
 
-  m_availability = available;
+  bool oldAvailability = remotePlaybackAvailable();
+  m_availability = availability;
+  bool newAvailability = remotePlaybackAvailable();
+  if (newAvailability == oldAvailability)
+    return;
+
   for (auto& callback : m_availabilityCallbacks.values())
-    callback->call(m_scriptState.get(), this, m_availability);
+    callback->call(this, newAvailability);
 }
 
 void RemotePlayback::promptCancelled() {
@@ -255,6 +269,10 @@ void RemotePlayback::promptCancelled() {
   m_promptPromiseResolver = nullptr;
 }
 
+bool RemotePlayback::remotePlaybackAvailable() const {
+  return m_availability == WebRemotePlaybackAvailability::DeviceAvailable;
+}
+
 void RemotePlayback::remotePlaybackDisabled() {
   if (m_promptPromiseResolver) {
     m_promptPromiseResolver->reject(DOMException::create(
@@ -264,7 +282,8 @@ void RemotePlayback::remotePlaybackDisabled() {
 
   m_availabilityCallbacks.clear();
 
-  // TODO(avayvod): stop remote playback too. https://crbug.com/657566.
+  if (m_state != WebRemotePlaybackState::Disconnected)
+    m_mediaElement->requestRemotePlaybackStop();
 }
 
 void RemotePlayback::setV8ReferencesForCallbacks(

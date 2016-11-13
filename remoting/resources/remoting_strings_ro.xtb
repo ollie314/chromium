@@ -27,6 +27,9 @@ Pentru informații privind confidențialitatea, accesați Politica de confidenț
 <translation id="1654128982815600832">Se activează conexiunile la distanță pentru acest computer…</translation>
 <translation id="170207782578677537">Înregistrarea acestui computer nu a reușit.</translation>
 <translation id="1704090719919187045">Preferințe gazdă Chromoting</translation>
+<translation id="1730409684442507495">• S-au îmbunătățit calitatea imaginii pe desktop, viteza de răspuns și autonomia bateriei
+• S-a îmbunătățit viteza de răspuns a operațiilor de tipul „dă clic-trage”;
+• S-au îmbunătățit mai multe efecte de animație pentru interfața de utilizare.</translation>
 <translation id="174018511426417793">Nu aveți niciun computer înregistrat. Pentru a activa conexiunile la distanță pentru un alt computer, instalați Desktop la distanță Chrome pe acesta și dați clic pe „<ph name="BUTTON_NAME" />”.</translation>
 <translation id="1742469581923031760">Se conectează…</translation>
 <translation id="1770394049404108959">Nu pot deschide aplicația.</translation>
@@ -73,7 +76,6 @@ Pentru informații privind confidențialitatea, accesați Politica de confidenț
 <translation id="2699970397166997657">Chromoting</translation>
 <translation id="2747641796667576127">Actualizările de software au loc de obicei în mod automat, dar în anumite cazuri pot să nu reușească. Actualizarea software-ului nu trebuie să dureze mai mult de câteva minute și poate fi realizată cât timp sunteți conectat(ă) la computer de la distanță.</translation>
 <translation id="2841013758207633010">Oră</translation>
-<translation id="2851674870054673688">După ce persoana respectivă introduce codul, sesiunea de permitere a accesului va începe.</translation>
 <translation id="2851754573186462851">Chromium App Streaming</translation>
 <translation id="2855866366045322178">offline</translation>
 <translation id="2888969873284818612">A apărut o eroare de rețea. Vom reporni aplicația când dispozitivul va fi online din nou.</translation>
@@ -126,6 +128,7 @@ Chromoting</translation>
 <translation id="409800995205263688">NOTĂ: setările politicii permit conexiuni numai între computerele din rețeaua dvs.</translation>
 <translation id="4155497795971509630">Unele componente necesare lipsesc. Asigură-te că ai instalată cea mai recentă versiune a software-ului și încearcă din nou.</translation>
 <translation id="4156740505453712750">Pentru a proteja accesul la acest computer, alegeți un cod PIN format din <ph name="BOLD_START" />cel puțin șase cifre<ph name="BOLD_END" />. Acest cod PIN va fi necesar când vă conectați din altă locație.</translation>
+<translation id="4156741816461781891">Conectat(ă) ca <ph name="EMAIL_ADDRESS" />.</translation>
 <translation id="4176825807642096119">Cod de acces</translation>
 <translation id="4207623512727273241">Rulați programul de instalare înainte de a continua.</translation>
 <translation id="4227991223508142681">Utilitarul de configurare a gazdei</translation>
@@ -208,10 +211,6 @@ la distanță Chrome</translation>
 <translation id="6304318647555713317">Client</translation>
 <translation id="6381670701864002291">Altă problemă.</translation>
 <translation id="6398765197997659313">Ieși din ecranul complet</translation>
-<translation id="6408143143164565232">• Ascultă conținut audio de pe computerele Windows sau Linux.
-• Elimină conexiunile nedorite apăsând lung pe numele computerului.
-• Gestul „ciupește pentru zoom” și derularea cu două degete sunt mai fine.
-• Un nou ecran pentru Ajutor și feedback.</translation>
 <translation id="6441316101718669559">Integrarea desktop nu este compatibilă cu această platformă. Poți să folosești în continuare această aplicație, însă experiența de utilizare va fi inferioară.</translation>
 <translation id="652218476070540101">Se actualizează codul PIN pentru acest computer…</translation>
 <translation id="6527303717912515753">Trimite</translation>

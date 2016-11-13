@@ -267,6 +267,7 @@ class SSLClientSocketImpl::SSLContext {
     SSL_CTX_set_session_cache_mode(
         ssl_ctx_.get(), SSL_SESS_CACHE_CLIENT | SSL_SESS_CACHE_NO_INTERNAL);
     SSL_CTX_sess_set_new_cb(ssl_ctx_.get(), NewSessionCallback);
+    SSL_CTX_set_timeout(ssl_ctx_.get(), 1 * 60 * 60 /* one hour */);
 
     SSL_CTX_set_grease_enabled(ssl_ctx_.get(), 1);
 
@@ -1555,6 +1556,8 @@ int SSLClientSocketImpl::VerifyCT() {
 
   if (ct_verify_result_.cert_policy_compliance !=
           ct::CertPolicyCompliance::CERT_POLICY_COMPLIES_VIA_SCTS &&
+      ct_verify_result_.cert_policy_compliance !=
+          ct::CertPolicyCompliance::CERT_POLICY_BUILD_NOT_TIMELY &&
       transport_security_state_->ShouldRequireCT(
           host_and_port_.host(), server_cert_verify_result_.verified_cert.get(),
           server_cert_verify_result_.public_key_hashes)) {

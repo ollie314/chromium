@@ -10,22 +10,23 @@
 #include "chrome/browser/android/vr_shell/ui_scene.h"
 #include "chrome/browser/android/vr_shell/vr_compositor.h"
 #include "chrome/browser/android/vr_shell/vr_controller.h"
-#include "chrome/browser/android/vr_shell/vr_gesture.h"
 #include "chrome/browser/android/vr_shell/vr_gl_util.h"
 #include "chrome/browser/android/vr_shell/vr_input_manager.h"
 #include "chrome/browser/android/vr_shell/vr_shell_delegate.h"
 #include "chrome/browser/android/vr_shell/vr_shell_renderer.h"
+#include "chrome/browser/android/vr_shell/vr_web_contents_observer.h"
 #include "content/public/browser/navigation_controller.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/referrer.h"
-#include "content/public/common/screen_info.h"
 #include "jni/VrShellImpl_jni.h"
-#include "third_party/WebKit/public/web/WebInputEvent.h"
 #include "ui/android/view_android.h"
 #include "ui/android/window_android.h"
 #include "ui/base/page_transition_types.h"
+#include "ui/display/display.h"
+#include "ui/display/screen.h"
 #include "ui/gl/gl_bindings.h"
 #include "ui/gl/init/gl_factory.h"
 
@@ -38,14 +39,8 @@ static constexpr long kPredictionTimeWithoutVsyncNanos = 50000000;
 static constexpr float kZNear = 0.1f;
 static constexpr float kZFar = 1000.0f;
 
-static constexpr gvr::Vec3f kDesktopPositionDefault = {0.0f, 0.0f, -2.0f};
-static constexpr float kDesktopHeightDefault = 1.6f;
-
 // Screen angle in degrees. 0 = vertical, positive = top closer.
 static constexpr float kDesktopScreenTiltDefault = 0;
-
-static constexpr float kScreenHeightRatio = 1.0f;
-static constexpr float kScreenWidthRatio = 16.0f / 9.0f;
 
 static constexpr float kReticleWidth = 0.025f;
 static constexpr float kReticleHeight = 0.025f;
@@ -61,6 +56,10 @@ static constexpr gvr::Vec3f kOrigin = {0.0f, 0.0f, 0.0f};
 // TODO(mthiesse): Handedness options.
 static constexpr gvr::Vec3f kHandPosition = {0.2f, -0.5f, -0.2f};
 
+// If there is no content quad, and the reticle isn't hitting another element,
+// draw the reticle at this distance.
+static constexpr float kDefaultReticleDistance = 2.0f;
+
 // Fraction of the distance to the object the cursor is drawn at to avoid
 // rounding errors drawing the cursor behind the object.
 static constexpr float kReticleOffset = 0.99f;
@@ -69,26 +68,6 @@ static constexpr float kReticleOffset = 0.99f;
 // the content quad, times this value. This lets the rendering distance
 // adjust according to content quad placement.
 static constexpr float kReticleDistanceMultiplier = 1.5f;
-
-// UI element 0 is the browser content rectangle.
-static constexpr int kBrowserUiElementId = 0;
-
-// Positions and sizes of statically placed UI elements in the UI texture.
-// TODO(klausw): replace the hardcoded positions with JS position/offset
-// retrieval once the infrastructure for that is hooked up.
-//
-// UI is designed with 1 pixel = 1mm at 1m distance. It's rescaled to
-// maintain the same angular resolution if placed closer or further.
-// The warning overlays should be fairly close since they cut holes
-// into geometry (they ignore the Z buffer), leading to odd effects
-// if they are far away.
-static constexpr vr_shell::Recti kWebVrWarningTransientRect = {
-  0, 128, 512, 250};
-static constexpr vr_shell::Recti kWebVrWarningPermanentRect = {0, 0, 512, 128};
-static constexpr float kWebVrWarningDistance = 0.7f;  // meters
-static constexpr float kWebVrWarningPermanentAngle = 16.3f;  // degrees up
-// How long the transient warning needs to be displayed.
-static constexpr int64_t kWebVrWarningSeconds = 30;
 
 static constexpr int kFramePrimaryBuffer = 0;
 static constexpr int kFrameHeadlockedBuffer = 1;
@@ -128,6 +107,24 @@ gvr::Quatf GetRotationFromZAxis(gvr::Vec3f vec) {
   return quat;
 }
 
+blink::WebMouseEvent MakeMouseEvent(WebInputEvent::Type type,
+                                    double timestamp,
+                                    float x,
+                                    float y) {
+  blink::WebMouseEvent mouse_event;
+  mouse_event.type = type;
+  mouse_event.pointerType = blink::WebPointerProperties::PointerType::Mouse;
+  mouse_event.x = x;
+  mouse_event.y = y;
+  mouse_event.windowX = x;
+  mouse_event.windowY = y;
+  mouse_event.timeStampSeconds = timestamp;
+  mouse_event.clickCount = 1;
+  mouse_event.modifiers = 0;
+
+  return mouse_event;
+}
+
 }  // namespace
 
 namespace vr_shell {
@@ -137,8 +134,7 @@ VrShell::VrShell(JNIEnv* env, jobject obj,
                  ui::WindowAndroid* content_window,
                  content::WebContents* ui_contents,
                  ui::WindowAndroid* ui_window)
-    : desktop_screen_tilt_(kDesktopScreenTiltDefault),
-      desktop_height_(kDesktopHeightDefault),
+    : WebContentsObserver(ui_contents),
       main_contents_(main_contents),
       ui_contents_(ui_contents),
       weak_ptr_factory_(this) {
@@ -149,14 +145,8 @@ VrShell::VrShell(JNIEnv* env, jobject obj,
   html_interface_.reset(new UiInterface);
   content_compositor_.reset(new VrCompositor(content_window, false));
   ui_compositor_.reset(new VrCompositor(ui_window, true));
-
-  float screen_width = kScreenWidthRatio * desktop_height_;
-  float screen_height = kScreenHeightRatio * desktop_height_;
-  std::unique_ptr<ContentRectangle> rect(new ContentRectangle());
-  rect->id = kBrowserUiElementId;
-  rect->size = {screen_width, screen_height, 1.0f};
-  rect->translation = kDesktopPositionDefault;
-  scene_->AddUiElement(rect);
+  vr_web_contents_observer_.reset(
+      new VrWebContentsObserver(main_contents, html_interface_.get()));
 
   LoadUIContent();
 
@@ -281,16 +271,7 @@ void VrShell::InitializeGl(JNIEnv* env,
 
 void VrShell::UpdateController(const gvr::Vec3f& forward_vector) {
   controller_->UpdateState();
-  std::unique_ptr<VrGesture> gesture = controller_->DetectGesture();
 
-  // TODO(asimjour) for now, scroll is sent to the main content.
-  if (gesture->type == WebInputEvent::GestureScrollBegin ||
-      gesture->type == WebInputEvent::GestureScrollUpdate ||
-      gesture->type == WebInputEvent::GestureScrollEnd) {
-    content_input_manager_->ProcessUpdatedGesture(*gesture.get());
-  }
-
-  WebInputEvent::Type original_type = gesture->type;
   gvr::Vec3f ergo_neutral_pose;
   if (!controller_->IsConnected()) {
     // No controller detected, set up a gaze cursor that tracks the
@@ -305,13 +286,6 @@ void VrShell::UpdateController(const gvr::Vec3f& forward_vector) {
   gvr::Mat4f mat = QuatToMatrix(controller_quat_);
   gvr::Vec3f forward = MatrixVectorMul(mat, ergo_neutral_pose);
   gvr::Vec3f origin = kHandPosition;
-
-  target_element_ = nullptr;
-
-  ContentRectangle* content_plane =
-      scene_->GetUiElementById(kBrowserUiElementId);
-
-  float distance = content_plane->GetRayDistance(origin, forward);
 
   // If we place the reticle based on elements intersecting the controller beam,
   // we can end up with the reticle hiding behind elements, or jumping laterally
@@ -330,12 +304,18 @@ void VrShell::UpdateController(const gvr::Vec3f& forward_vector) {
   // in other directions. Note that this approach uses distance from controller,
   // rather than eye, for simplicity. This will make the sphere slightly
   // off-center.
-  gvr::Vec3f corner = {0.5f, 0.5f, 0.0f};
-  corner = MatrixVectorMul(content_plane->transform.to_world, corner);
-  float max_distance = Distance(origin, corner) * kReticleDistanceMultiplier;
-  if (distance > max_distance || distance <= 0.0f) {
-    distance = max_distance;
+  float distance = kDefaultReticleDistance;
+  ContentRectangle* content_plane = scene_->GetContentQuad();
+  if (content_plane) {
+    distance = content_plane->GetRayDistance(origin, forward);
+    gvr::Vec3f corner = {0.5f, 0.5f, 0.0f};
+    corner = MatrixVectorMul(content_plane->transform.to_world, corner);
+    float max_distance = Distance(origin, corner) * kReticleDistanceMultiplier;
+    if (distance > max_distance || distance <= 0.0f) {
+      distance = max_distance;
+    }
   }
+
   target_point_ = GetRayPoint(origin, forward, distance);
   gvr::Vec3f eye_to_target = target_point_;
   NormalizeVector(eye_to_target);
@@ -345,10 +325,10 @@ void VrShell::UpdateController(const gvr::Vec3f& forward_vector) {
   float closest_element_distance = std::numeric_limits<float>::infinity();
   int pixel_x = 0;
   int pixel_y = 0;
+  target_element_ = nullptr;
   VrInputManager* input_target = nullptr;
 
-  for (std::size_t i = 0; i < scene_->GetUiElements().size(); ++i) {
-    const ContentRectangle* plane = scene_->GetUiElements()[i].get();
+  for (const auto& plane : scene_->GetUiElements()) {
     if (!plane->visible || !plane->hit_testable) {
       continue;
     }
@@ -362,44 +342,79 @@ void VrShell::UpdateController(const gvr::Vec3f& forward_vector) {
       float x = rect_2d_point.x + 0.5f;
       float y = 0.5f - rect_2d_point.y;
       bool is_inside = x >= 0.0f && x < 1.0f && y >= 0.0f && y < 1.0f;
-      if (is_inside) {
-        closest_element_distance = distance_to_plane;
-        pixel_x =
-            static_cast<int>(plane->copy_rect.width * x + plane->copy_rect.x);
-        pixel_y =
-            static_cast<int>(plane->copy_rect.height * y + plane->copy_rect.y);
+      if (!is_inside)
+        continue;
 
-        target_point_ = plane_intersection_point;
-        target_element_ = plane;
-        input_target = (plane->id == kBrowserUiElementId)
-            ? content_input_manager_.get() : ui_input_manager_.get();
+      closest_element_distance = distance_to_plane;
+      Rectf pixel_rect;
+      if (plane->content_quad) {
+        pixel_rect = {0, 0, content_tex_width_, content_tex_height_};
+      } else {
+        pixel_rect = {plane->copy_rect.x, plane->copy_rect.y,
+                      plane->copy_rect.width, plane->copy_rect.height};
       }
+      pixel_x = pixel_rect.width * x + pixel_rect.x;
+      pixel_y = pixel_rect.height * y + pixel_rect.y;
+
+      target_point_ = plane_intersection_point;
+      target_element_ = plane.get();
+      input_target = plane->content_quad ? content_input_manager_.get()
+                                         : ui_input_manager_.get();
     }
   }
+  SendEventsToTarget(input_target, pixel_x, pixel_y);
+}
+
+void VrShell::SendEventsToTarget(VrInputManager* input_target,
+                                 int pixel_x,
+                                 int pixel_y) {
+  std::vector<std::unique_ptr<WebGestureEvent>> gesture_list =
+      controller_->DetectGestures();
+  std::unique_ptr<WebGestureEvent> gesture = std::move(gesture_list.front());
+
+  // TODO(asimjour) for now, scroll is sent to the main content.
+  if (gesture->type == WebInputEvent::GestureScrollBegin ||
+      gesture->type == WebInputEvent::GestureScrollUpdate ||
+      gesture->type == WebInputEvent::GestureScrollEnd) {
+    content_input_manager_->ProcessUpdatedGesture(*gesture.get());
+  }
+
+  if (gesture->type == WebInputEvent::GestureScrollEnd) {
+    CHECK(gesture_list.size() == 2);
+    std::unique_ptr<WebGestureEvent> fling_gesture =
+        std::move(gesture_list.back());
+    content_input_manager_->ProcessUpdatedGesture(*fling_gesture.get());
+  }
+
+  WebInputEvent::Type original_type = gesture->type;
+
   bool new_target = input_target != current_input_target_;
   if (new_target && current_input_target_ != nullptr) {
     // Send a move event indicating that the pointer moved off of an element.
-    gesture->type = WebInputEvent::MouseLeave;
-    gesture->details.move.delta.x = 0;
-    gesture->details.move.delta.y = 0;
-    current_input_target_->ProcessUpdatedGesture(*gesture.get());
+    blink::WebMouseEvent mouse_event = MakeMouseEvent(
+        WebInputEvent::MouseLeave, gesture->timeStampSeconds, 0, 0);
+    current_input_target_->ProcessUpdatedGesture(mouse_event);
   }
   current_input_target_ = input_target;
   if (current_input_target_ == nullptr) {
     return;
   }
+  WebInputEvent::Type type =
+      new_target ? WebInputEvent::MouseEnter : WebInputEvent::MouseMove;
+  blink::WebMouseEvent mouse_event =
+      MakeMouseEvent(type, gesture->timeStampSeconds, pixel_x, pixel_y);
+  current_input_target_->ProcessUpdatedGesture(mouse_event);
 
-  gesture->type = new_target ? WebInputEvent::MouseEnter
-                             : WebInputEvent::MouseMove;
-  gesture->details.move.delta.x = pixel_x;
-  gesture->details.move.delta.y = pixel_y;
-  current_input_target_->ProcessUpdatedGesture(*gesture.get());
-
-  if (original_type == WebInputEvent::GestureTap || touch_pending_) {
-    touch_pending_ = false;
-    gesture->type = WebInputEvent::GestureTap;
-    gesture->details.buttons.pos.x = pixel_x;
-    gesture->details.buttons.pos.y = pixel_y;
+  if (original_type == WebInputEvent::GestureTapDown || touch_pending_) {
+    if (touch_pending_) {
+      touch_pending_ = false;
+      gesture->sourceDevice = blink::WebGestureDeviceTouchpad;
+      gesture->timeStampSeconds =
+          (base::TimeTicks::Now() - base::TimeTicks()).InSecondsF();
+    }
+    gesture->type = WebInputEvent::GestureTapDown;
+    gesture->data.tapDown.width = pixel_x;
+    gesture->data.tapDown.height = pixel_y;
     current_input_target_->ProcessUpdatedGesture(*gesture.get());
   }
 }
@@ -444,21 +459,16 @@ void VrShell::DrawFrame(JNIEnv* env, const JavaParamRef<jobject>& obj) {
   // Bind the primary framebuffer.
   frame.BindBuffer(kFramePrimaryBuffer);
 
+  HandleQueuedTasks();
+
+  // Update the render position of all UI elements (including desktop).
+  const float screen_tilt = kDesktopScreenTiltDefault * M_PI / 180.0f;
+  scene_->UpdateTransforms(screen_tilt, UiScene::TimeInMicroseconds());
+
+  UpdateController(GetForwardVector(head_pose));
+
   if (webvr_mode_) {
     DrawWebVr();
-    // Wait for the DOM contents to be loaded before rendering to avoid drawing
-    // white rectangles with no content.
-    if (!webvr_secure_origin_ && IsUiTextureReady()) {
-      size_t last_viewport = buffer_viewport_list_->GetSize();
-      buffer_viewport_list_->SetBufferViewport(last_viewport++,
-          *headlocked_left_viewport_);
-      buffer_viewport_list_->SetBufferViewport(last_viewport++,
-          *headlocked_right_viewport_);
-
-      // Bind the headlocked framebuffer.
-      frame.BindBuffer(kFrameHeadlockedBuffer);
-      DrawWebVrOverlay(target_time.monotonic_system_time_nanos);
-    }
 
     // When using async reprojection, we need to know which pose was used in
     // the WebVR app for drawing this frame. Due to unknown amounts of
@@ -471,93 +481,98 @@ void VrShell::DrawFrame(JNIEnv* env, const JavaParamRef<jobject>& obj) {
       uint32_t webvr_pose_frame = GetPixelEncodedPoseIndex();
       head_pose = webvr_head_pose_[webvr_pose_frame % kPoseRingBufferSize];
     }
-  } else {
-    DrawVrShell(head_pose);
   }
+
+  DrawVrShell(head_pose, frame);
 
   frame.Unbind();
   frame.Submit(*buffer_viewport_list_, head_pose);
 }
 
-void VrShell::DrawVrShell(const gvr::Mat4f& head_pose) {
-  float screen_tilt = desktop_screen_tilt_ * M_PI / 180.0f;
-
-  HandleQueuedTasks();
-
-  // Update the render position of all UI elements (including desktop).
-  scene_->UpdateTransforms(screen_tilt, UiScene::TimeInMicroseconds());
-
-  UpdateController(GetForwardVector(head_pose));
-
-  // Use culling to remove back faces.
-  glEnable(GL_CULL_FACE);
-
-  // Enable depth testing.
-  glEnable(GL_DEPTH_TEST);
-  glEnable(GL_SCISSOR_TEST);
-
-  glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
-
-  buffer_viewport_list_->GetBufferViewport(GVR_LEFT_EYE,
-                                           buffer_viewport_.get());
-  DrawEye(GVR_LEFT_EYE, head_pose, *buffer_viewport_);
-  buffer_viewport_list_->GetBufferViewport(GVR_RIGHT_EYE,
-                                           buffer_viewport_.get());
-  DrawEye(GVR_RIGHT_EYE, head_pose, *buffer_viewport_);
-}
-
-void VrShell::DrawEye(gvr::Eye eye,
-                      const gvr::Mat4f& head_pose,
-                      const gvr::BufferViewport& params) {
-  gvr::Mat4f eye_matrix = gvr_api_->GetEyeFromHeadMatrix(eye);
-  gvr::Mat4f view_matrix = MatrixMul(eye_matrix, head_pose);
-
-  gvr::Recti pixel_rect =
-      CalculatePixelSpaceRect(render_size_, params.GetSourceUv());
-  glViewport(pixel_rect.left, pixel_rect.bottom,
-             pixel_rect.right - pixel_rect.left,
-             pixel_rect.top - pixel_rect.bottom);
-  glScissor(pixel_rect.left, pixel_rect.bottom,
-            pixel_rect.right - pixel_rect.left,
-            pixel_rect.top - pixel_rect.bottom);
-
-  const gvr::Mat4f fov_render_matrix = MatrixMul(
-      PerspectiveMatrixFromView(params.GetSourceFov(), kZNear, kZFar),
-      eye_matrix);
-  const gvr::Mat4f world_render_matrix = MatrixMul(
-      PerspectiveMatrixFromView(params.GetSourceFov(), kZNear, kZFar),
-      view_matrix);
-
-  glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-  // TODO(mthiesse): Draw order for transparency.
-  DrawUI(world_render_matrix, fov_render_matrix);
-  DrawCursor(world_render_matrix);
-}
-
-bool VrShell::IsUiTextureReady() {
-  return ui_tex_width_ > 0 && ui_tex_height_ > 0 && dom_contents_loaded_;
-}
-
-Rectf VrShell::MakeUiGlCopyRect(Recti pixel_rect) {
-  CHECK(IsUiTextureReady());
-  return Rectf({
-      static_cast<float>(pixel_rect.x) / ui_tex_width_,
-      static_cast<float>(pixel_rect.y) / ui_tex_height_,
-      static_cast<float>(pixel_rect.width) / ui_tex_width_,
-      static_cast<float>(pixel_rect.height) / ui_tex_height_});
-}
-
-void VrShell::DrawUI(const gvr::Mat4f& world_matrix,
-                     const gvr::Mat4f& fov_matrix) {
+void VrShell::DrawVrShell(const gvr::Mat4f& head_pose,
+                          gvr::Frame &frame) {
+  std::vector<const ContentRectangle*> head_locked_elements;
+  std::vector<const ContentRectangle*> world_elements;
   for (const auto& rect : scene_->GetUiElements()) {
     if (!rect->visible) {
       continue;
     }
+    if (rect->lock_to_fov) {
+      head_locked_elements.push_back(rect.get());
+    } else {
+      world_elements.push_back(rect.get());
+    }
+  }
 
+  if (!webvr_mode_) {
+    glEnable(GL_CULL_FACE);
+    glEnable(GL_DEPTH_TEST);
+    glEnable(GL_SCISSOR_TEST);
+    glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
+  }
+
+  if (!world_elements.empty()) {
+    DrawUiView(&head_pose, world_elements);
+  }
+
+  if (!head_locked_elements.empty()) {
+    // Switch to head-locked viewports.
+    size_t last_viewport = buffer_viewport_list_->GetSize();
+    buffer_viewport_list_->SetBufferViewport(last_viewport++,
+        *headlocked_left_viewport_);
+    buffer_viewport_list_->SetBufferViewport(last_viewport++,
+        *headlocked_right_viewport_);
+
+    // Bind the headlocked framebuffer.
+    frame.BindBuffer(kFrameHeadlockedBuffer);
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    DrawUiView(nullptr, head_locked_elements);
+  }
+}
+
+void VrShell::DrawUiView(const gvr::Mat4f* head_pose,
+                         const std::vector<const ContentRectangle*>& elements) {
+  for (auto eye : {GVR_LEFT_EYE, GVR_RIGHT_EYE}) {
+    buffer_viewport_list_->GetBufferViewport(eye, buffer_viewport_.get());
+
+    gvr::Mat4f view_matrix = gvr_api_->GetEyeFromHeadMatrix(eye);
+    if (head_pose != nullptr) {
+      view_matrix = MatrixMul(view_matrix, *head_pose);
+    }
+
+    gvr::Recti pixel_rect =
+        CalculatePixelSpaceRect(render_size_, buffer_viewport_->GetSourceUv());
+    glViewport(pixel_rect.left, pixel_rect.bottom,
+               pixel_rect.right - pixel_rect.left,
+               pixel_rect.top - pixel_rect.bottom);
+    glScissor(pixel_rect.left, pixel_rect.bottom,
+              pixel_rect.right - pixel_rect.left,
+              pixel_rect.top - pixel_rect.bottom);
+
+    if (!webvr_mode_) {
+      glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    }
+
+    const gvr::Mat4f render_matrix = MatrixMul(
+        PerspectiveMatrixFromView(
+            buffer_viewport_->GetSourceFov(), kZNear, kZFar),
+        view_matrix);
+
+    DrawElements(render_matrix, elements);
+    if (head_pose != nullptr) {
+      DrawCursor(render_matrix);
+    }
+  }
+}
+
+void VrShell::DrawElements(
+    const gvr::Mat4f& render_matrix,
+    const std::vector<const ContentRectangle*>& elements) {
+  for (const auto& rect : elements) {
     Rectf copy_rect;
     jint texture_handle;
-    if (rect->id == kBrowserUiElementId) {
+    if (rect->content_quad) {
       copy_rect = {0, 0, 1, 1};
       texture_handle = content_texture_id_;
     } else {
@@ -569,10 +584,7 @@ void VrShell::DrawUI(const gvr::Mat4f& world_matrix,
           ui_tex_height_;
       texture_handle = ui_texture_id_;
     }
-
-    const gvr::Mat4f& view_matrix =
-        rect->lock_to_fov ? fov_matrix : world_matrix;
-    gvr::Mat4f transform = MatrixMul(view_matrix, rect->transform.to_world);
+    gvr::Mat4f transform = MatrixMul(render_matrix, rect->transform.to_world);
     vr_shell_renderer_->GetTexturedQuadRenderer()->Draw(
         texture_handle, transform, copy_rect);
   }
@@ -668,88 +680,6 @@ void VrShell::DrawWebVr() {
   vr_shell_renderer_->GetWebVrRenderer()->Draw(content_texture_id_);
 }
 
-void VrShell::DrawWebVrOverlay(int64_t present_time_nanos) {
-  // Draw WebVR security warning overlays for each eye. This uses the
-  // eye-from-head matrices but not the pose, goal is to place the icons in an
-  // eye-relative position so that they follow along with head rotations.
-
-  gvr::Mat4f left_eye_view_matrix =
-      gvr_api_->GetEyeFromHeadMatrix(GVR_LEFT_EYE);
-  gvr::Mat4f right_eye_view_matrix =
-      gvr_api_->GetEyeFromHeadMatrix(GVR_RIGHT_EYE);
-
-  glClear(GL_COLOR_BUFFER_BIT);
-
-  buffer_viewport_list_->GetBufferViewport(GVR_LEFT_EYE,
-                                           buffer_viewport_.get());
-  DrawWebVrEye(left_eye_view_matrix, *buffer_viewport_, present_time_nanos);
-  buffer_viewport_list_->GetBufferViewport(GVR_RIGHT_EYE,
-                                           buffer_viewport_.get());
-  DrawWebVrEye(right_eye_view_matrix, *buffer_viewport_, present_time_nanos);
-}
-
-void VrShell::DrawWebVrEye(const gvr::Mat4f& view_matrix,
-                           const gvr::BufferViewport& params,
-                           int64_t present_time_nanos) {
-  gvr::Recti pixel_rect =
-      CalculatePixelSpaceRect(render_size_, params.GetSourceUv());
-  glViewport(pixel_rect.left, pixel_rect.bottom,
-             pixel_rect.right - pixel_rect.left,
-             pixel_rect.top - pixel_rect.bottom);
-  glScissor(pixel_rect.left, pixel_rect.bottom,
-            pixel_rect.right - pixel_rect.left,
-            pixel_rect.top - pixel_rect.bottom);
-
-  gvr::Mat4f projection_matrix =
-      PerspectiveMatrixFromView(params.GetSourceFov(), kZNear, kZFar);
-
-  if (!IsUiTextureReady()) {
-    // If the UI texture hasn't been initialized yet, we can't draw the overlay.
-    return;
-  }
-
-  // Show IDS_WEBSITE_SETTINGS_INSECURE_WEBVR_CONTENT_PERMANENT text.
-  gvr::Mat4f icon_pos;
-  SetIdentityM(icon_pos);
-  // The UI is designed in pixels with the assumption that 1px = 1mm at 1m
-  // distance. Scale mm-to-m and adjust to keep the same angular size if the
-  // distance changes.
-  const float small_icon_width =
-      kWebVrWarningPermanentRect.width / 1000.f * kWebVrWarningDistance;
-  const float small_icon_height =
-      kWebVrWarningPermanentRect.height / 1000.f * kWebVrWarningDistance;
-  const float small_icon_angle =
-      kWebVrWarningPermanentAngle * M_PI / 180.f;  // Degrees to radians.
-  ScaleM(icon_pos, icon_pos, small_icon_width, small_icon_height, 1.0f);
-  TranslateM(icon_pos, icon_pos, 0.0f, 0.0f, -kWebVrWarningDistance);
-  icon_pos = MatrixMul(
-      QuatToMatrix(QuatFromAxisAngle({1.f, 0.f, 0.f}, small_icon_angle)),
-      icon_pos);
-  gvr::Mat4f combined = MatrixMul(projection_matrix,
-                                  MatrixMul(view_matrix, icon_pos));
-  vr_shell_renderer_->GetTexturedQuadRenderer()->Draw(
-      ui_texture_id_, combined, MakeUiGlCopyRect(kWebVrWarningPermanentRect));
-
-  // Check if we also need to show the transient warning.
-  if (present_time_nanos > webvr_warning_end_nanos_) {
-    return;
-  }
-
-  // Show IDS_WEBSITE_SETTINGS_INSECURE_WEBVR_CONTENT_TRANSIENT text.
-  SetIdentityM(icon_pos);
-  const float large_icon_width =
-      kWebVrWarningTransientRect.width / 1000.f * kWebVrWarningDistance;
-  const float large_icon_height =
-      kWebVrWarningTransientRect.height / 1000.f * kWebVrWarningDistance;
-  ScaleM(icon_pos, icon_pos, large_icon_width, large_icon_height, 1.0f);
-  TranslateM(icon_pos, icon_pos, 0.0f, 0.0f, -kWebVrWarningDistance);
-  combined = MatrixMul(projection_matrix,
-                       MatrixMul(view_matrix, icon_pos));
-  vr_shell_renderer_->GetTexturedQuadRenderer()->Draw(
-      ui_texture_id_, combined, MakeUiGlCopyRect(kWebVrWarningTransientRect));
-
-}
-
 void VrShell::OnTriggerEvent(JNIEnv* env, const JavaParamRef<jobject>& obj) {
   // Set a flag to handle this on the render thread at the next frame.
   touch_pending_ = true;
@@ -781,17 +711,9 @@ base::WeakPtr<VrShell> VrShell::GetWeakPtr(
 }
 
 void VrShell::OnDomContentsLoaded() {
-  // TODO(mthiesse): Setting the background to transparent after the DOM content
-  // has loaded is a hack to work around the background not updating when we set
-  // it to transparent unless we perform a very specific sequence of events.
-  // First the page background must load as not transparent, then we set the
-  // background of the renderer to transparent, then we update the page
-  // background to be transparent. This is probably a bug in blink that we
-  // should fix.
-  ui_contents_->GetRenderWidgetHostView()->SetBackgroundColor(
-      SK_ColorTRANSPARENT);
+  html_interface_->SetURL(main_contents_->GetVisibleURL());
+  html_interface_->SetLoading(main_contents_->IsLoading());
   html_interface_->OnDomContentsLoaded();
-  dom_contents_loaded_ = true;
 }
 
 void VrShell::SetWebVrMode(JNIEnv* env,
@@ -799,18 +721,14 @@ void VrShell::SetWebVrMode(JNIEnv* env,
                            bool enabled) {
   webvr_mode_ = enabled;
   if (enabled) {
-    int64_t now = gvr::GvrApi::GetTimePointNow().monotonic_system_time_nanos;
-    constexpr int64_t seconds_to_nanos = 1000 * 1000 * 1000;
-    webvr_warning_end_nanos_ = now + kWebVrWarningSeconds * seconds_to_nanos;
     html_interface_->SetMode(UiInterface::Mode::WEB_VR);
   } else {
-    webvr_warning_end_nanos_ = 0;
     html_interface_->SetMode(UiInterface::Mode::STANDARD);
   }
 }
 
 void VrShell::SetWebVRSecureOrigin(bool secure_origin) {
-  webvr_secure_origin_ = secure_origin;
+  html_interface_->SetSecureOrigin(secure_origin);
 }
 
 void VrShell::SubmitWebVRFrame() {
@@ -832,12 +750,10 @@ void VrShell::ContentSurfaceChanged(JNIEnv* env,
                                     jint height,
                                     const JavaParamRef<jobject>& surface) {
   content_compositor_->SurfaceChanged((int)width, (int)height, surface);
-  content::ScreenInfo result;
-  main_contents_->GetRenderWidgetHostView()->GetRenderWidgetHost()->
-      GetScreenInfo(&result);
-  float dpr = result.device_scale_factor;
-  scene_->GetUiElementById(kBrowserUiElementId)->copy_rect =
-      { 0, 0, width / dpr, height / dpr };
+  float scale_factor = display::Screen::GetScreen()
+      ->GetPrimaryDisplay().device_scale_factor();
+  content_tex_width_ = width / scale_factor;
+  content_tex_height_ = height / scale_factor;
 }
 
 void VrShell::UiSurfaceChanged(JNIEnv* env,
@@ -846,11 +762,10 @@ void VrShell::UiSurfaceChanged(JNIEnv* env,
                                jint height,
                                const JavaParamRef<jobject>& surface) {
   ui_compositor_->SurfaceChanged((int)width, (int)height, surface);
-  content::ScreenInfo result;
-  ui_contents_->GetRenderWidgetHostView()->GetRenderWidgetHost()->GetScreenInfo(
-      &result);
-  ui_tex_width_ = width / result.device_scale_factor;
-  ui_tex_height_ = height / result.device_scale_factor;
+  float scale_factor = display::Screen::GetScreen()
+      ->GetPrimaryDisplay().device_scale_factor();
+  ui_tex_width_ = width / scale_factor;
+  ui_tex_height_ = height / scale_factor;
 }
 
 UiScene* VrShell::GetScene() {
@@ -897,12 +812,25 @@ void VrShell::DoUiAction(const UiAction action) {
     case RELOAD:
       controller.Reload(false);
       break;
+#if defined(ENABLE_VR_SHELL_UI_DEV)
+    case RELOAD_UI:
+      ui_contents_->GetController().Reload(false);
+      html_interface_.reset(new UiInterface);
+      html_interface_->SetMode(UiInterface::Mode::STANDARD);
+      vr_web_contents_observer_->SetUiInterface(html_interface_.get());
+      break;
+#endif
     case ZOOM_OUT:  // Not handled yet.
     case ZOOM_IN:  // Not handled yet.
       break;
     default:
       NOTREACHED();
   }
+}
+
+void VrShell::RenderViewHostChanged(content::RenderViewHost* old_host,
+                                    content::RenderViewHost* new_host) {
+  new_host->GetWidget()->GetView()->SetBackgroundColor(SK_ColorTRANSPARENT);
 }
 
 // ----------------------------------------------------------------------------

@@ -9,18 +9,16 @@
 #include "bindings/core/v8/ScriptPromiseResolver.h"
 #include "core/dom/DOMException.h"
 #include "core/dom/ExceptionCode.h"
-#include "core/inspector/ConsoleMessage.h"
-#include "core/origin_trials/OriginTrialContext.h"
-#include "core/origin_trials/OriginTrials.h"
 #include "modules/bluetooth/BluetoothDevice.h"
 #include "modules/bluetooth/BluetoothError.h"
 #include "modules/bluetooth/BluetoothSupplement.h"
 #include "modules/bluetooth/BluetoothUUID.h"
 #include "modules/bluetooth/RequestDeviceOptions.h"
-#include "platform/RuntimeEnabledFeatures.h"
 #include "platform/UserGestureIndicator.h"
 #include "public/platform/modules/bluetooth/WebBluetooth.h"
 #include "public/platform/modules/bluetooth/WebRequestDeviceOptions.h"
+#include <memory>
+#include <utility>
 
 namespace blink {
 
@@ -137,44 +135,42 @@ static void convertRequestDeviceOptions(const RequestDeviceOptions& options,
   }
 }
 
+class RequestDeviceCallback : public WebBluetoothRequestDeviceCallbacks {
+ public:
+  RequestDeviceCallback(Bluetooth* bluetooth, ScriptPromiseResolver* resolver)
+      : m_bluetooth(bluetooth), m_resolver(resolver) {}
+
+  void onSuccess(std::unique_ptr<WebBluetoothDeviceInit> deviceInit) override {
+    if (!m_resolver->getExecutionContext() ||
+        m_resolver->getExecutionContext()->activeDOMObjectsAreStopped())
+      return;
+
+    BluetoothDevice* device = m_bluetooth->getBluetoothDeviceRepresentingDevice(
+        std::move(deviceInit), m_resolver);
+
+    m_resolver->resolve(device);
+  }
+
+  void onError(
+      int32_t
+          error /* Corresponds to WebBluetoothResult in web_bluetooth.mojom */)
+      override {
+    if (!m_resolver->getExecutionContext() ||
+        m_resolver->getExecutionContext()->activeDOMObjectsAreStopped())
+      return;
+    m_resolver->reject(BluetoothError::take(m_resolver, error));
+  }
+
+ private:
+  Persistent<Bluetooth> m_bluetooth;
+  Persistent<ScriptPromiseResolver> m_resolver;
+};
+
 // https://webbluetoothchrome.github.io/web-bluetooth/#dom-bluetooth-requestdevice
 ScriptPromise Bluetooth::requestDevice(ScriptState* scriptState,
                                        const RequestDeviceOptions& options,
                                        ExceptionState& exceptionState) {
-// By adding the "OriginTrialEnabled" extended binding, we enable the
-// requestDevice function on all platforms for websites that contain an
-// origin trial token. Since we only support Chrome OS, Android and MacOS
-// for this experiment we reject any promises from other platforms unless
-// they have the enable-web-bluetooth flag on.
-#if !OS(CHROMEOS) && !OS(ANDROID) && !OS(MACOSX)
-  if (!RuntimeEnabledFeatures::webBluetoothEnabled()) {
-    return ScriptPromise::rejectWithDOMException(
-        scriptState, DOMException::create(
-                         NotSupportedError,
-                         "Web Bluetooth is not enabled on this platform. To "
-                         "find out how to enable it and the current "
-                         "implementation status visit https://goo.gl/HKa2If"));
-  }
-#endif
-
-  // Promote use of Origin Trials
-  // * When not being run on an origin trial.
-  // * Only once for the lifetime of this Bluetooth object, to avoid being
-  //   a nuisance and too verbose in the console. Reloading a page will reset
-  //   and the message can be shown again.
   ExecutionContext* context = scriptState->getExecutionContext();
-  OriginTrialContext* originTrials = OriginTrialContext::from(
-      context, OriginTrialContext::DontCreateIfNotExists);
-  bool originTrialActiveForThisPage =
-      originTrials && originTrials->isTrialEnabled("WebBluetooth");
-
-  if (!originTrialActiveForThisPage && !promotedOriginTrial) {
-    promotedOriginTrial = true;
-    context->addConsoleMessage(
-        ConsoleMessage::create(JSMessageSource, InfoMessageLevel,
-                               "Web Bluetooth is available as an Origin Trial: "
-                               "https://bit.ly/WebBluetoothOriginTrial"));
-  }
 
   // 1. If the incumbent settings object is not a secure context, reject promise
   //    with a SecurityError and abort these steps.
@@ -210,10 +206,27 @@ ScriptPromise Bluetooth::requestDevice(ScriptState* scriptState,
   // Subsequent steps are handled in the browser process.
   ScriptPromiseResolver* resolver = ScriptPromiseResolver::create(scriptState);
   ScriptPromise promise = resolver->promise();
-  webbluetooth->requestDevice(
-      webOptions,
-      new CallbackPromiseAdapter<BluetoothDevice, BluetoothError>(resolver));
+  webbluetooth->requestDevice(webOptions,
+                              new RequestDeviceCallback(this, resolver));
   return promise;
+}
+
+DEFINE_TRACE(Bluetooth) {
+  visitor->trace(m_deviceInstanceMap);
+}
+
+BluetoothDevice* Bluetooth::getBluetoothDeviceRepresentingDevice(
+    std::unique_ptr<WebBluetoothDeviceInit> deviceInit,
+    ScriptPromiseResolver* resolver) {
+  BluetoothDevice* device = m_deviceInstanceMap.get(deviceInit->id);
+  if (!device) {
+    String deviceId = deviceInit->id;
+    device = BluetoothDevice::take(resolver, std::move(deviceInit));
+
+    auto result = m_deviceInstanceMap.add(deviceId, device);
+    DCHECK(result.isNewEntry);
+  }
+  return device;
 }
 
 }  // namespace blink

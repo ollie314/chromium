@@ -27,7 +27,6 @@ class SkCanvas;
 
 namespace cc {
 class ContextProvider;
-class CompositorFrameMetadata;
 class Display;
 class SurfaceFactory;
 class SurfaceIdAllocator;
@@ -43,7 +42,6 @@ namespace content {
 
 class FrameSwapMessageQueue;
 class SynchronousCompositorRegistry;
-class WebGraphicsContext3DCommandBufferImpl;
 
 class SynchronousCompositorFrameSinkClient {
  public:
@@ -71,6 +69,7 @@ class SynchronousCompositorFrameSink
   SynchronousCompositorFrameSink(
       scoped_refptr<cc::ContextProvider> context_provider,
       scoped_refptr<cc::ContextProvider> worker_context_provider,
+      gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
       int routing_id,
       uint32_t compositor_frame_sink_id,
       std::unique_ptr<cc::BeginFrameSource> begin_frame_source,

@@ -16,12 +16,12 @@
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "cc/resources/transferable_resource.h"
+#include "cc/scheduler/begin_frame_source.h"
 #include "cc/surfaces/surface_factory_client.h"
 #include "third_party/skia/include/core/SkRegion.h"
 #include "third_party/skia/include/core/SkXfermode.h"
 #include "ui/aura/window.h"
-#include "ui/compositor/compositor.h"
-#include "ui/compositor/layer_owner_delegate.h"
+#include "ui/aura/window_observer.h"
 #include "ui/gfx/geometry/rect.h"
 
 namespace base {
@@ -32,6 +32,7 @@ class TracedValue;
 
 namespace cc {
 class SurfaceFactory;
+class SurfaceIdAllocator;
 }
 
 namespace gfx {
@@ -89,8 +90,9 @@ class SurfaceFactoryOwner : public base::RefCounted<SurfaceFactoryOwner>,
 
 // This class represents a rectangular area that is displayed on the screen.
 // It has a location, size and pixel contents.
-class Surface : public ui::LayerOwnerDelegate,
-                public ui::ContextFactoryObserver {
+class Surface : public ui::ContextFactoryObserver,
+                public aura::WindowObserver,
+                public cc::BeginFrameObserver {
  public:
   using PropertyDeallocator = void (*)(int64_t value);
 
@@ -206,23 +208,31 @@ class Surface : public ui::LayerOwnerDelegate,
   // Returns a trace value representing the state of the surface.
   std::unique_ptr<base::trace_event::TracedValue> AsTracedValue() const;
 
-  bool HasPendingDamageForTesting(const gfx::Rect& damage) const {
-    return pending_damage_.contains(gfx::RectToSkIRect(damage));
-  }
+  // Called when surface is being scheduled for a draw.
+  void WillDraw();
 
-  // Overridden from ui::LayerOwnerDelegate:
-  void OnLayerRecreated(ui::Layer* old_layer, ui::Layer* new_layer) override;
-
-  // Overridden from ui::ContextFactoryObserver.
-  void OnLostResources() override;
-
-  void WillDraw(const cc::LocalFrameId& local_frame_id);
+  // Called when the begin frame source has changed.
+  void SetBeginFrameSource(cc::BeginFrameSource* begin_frame_source);
 
   // Check whether this Surface and its children need to create new cc::Surface
   // IDs for their contents next time they get new buffer contents.
   void CheckIfSurfaceHierarchyNeedsCommitToNewSurfaces();
 
+  // Returns the active contents size.
   gfx::Size content_size() const { return content_size_; }
+
+  // Overridden from ui::ContextFactoryObserver:
+  void OnLostResources() override;
+
+  // Overridden from aura::WindowObserver:
+  void OnWindowAddedToRootWindow(aura::Window* window) override;
+  void OnWindowRemovingFromRootWindow(aura::Window* window,
+                                      aura::Window* new_root) override;
+
+  // Overridden from cc::BeginFrameObserver:
+  void OnBeginFrame(const cc::BeginFrameArgs& args) override;
+  const cc::BeginFrameArgs& LastUsedBeginFrameArgs() const override;
+  void OnBeginFrameSourcePausedChanged(bool paused) override {}
 
   // Sets the |value| of the given surface |property|. Setting to the default
   // value (e.g., NULL) removes the property. The caller is responsible for the
@@ -239,6 +249,10 @@ class Surface : public ui::LayerOwnerDelegate,
   // setting to NULL.
   template <typename T>
   void ClearProperty(const SurfaceProperty<T>* property);
+
+  bool HasPendingDamageForTesting(const gfx::Rect& damage) const {
+    return pending_damage_.contains(gfx::RectToSkIRect(damage));
+  }
 
  private:
   struct State {
@@ -300,6 +314,9 @@ class Surface : public ui::LayerOwnerDelegate,
   // current_resource_.
   void UpdateSurface(bool full_damage);
 
+  // Adds/Removes begin frame observer based on state.
+  void UpdateNeedsBeginFrame();
+
   int64_t SetPropertyInternal(const void* key,
                               const char* name,
                               PropertyDeallocator deallocator,
@@ -349,9 +366,8 @@ class Surface : public ui::LayerOwnerDelegate,
   // These lists contains the callbacks to notify the client when it is a good
   // time to start producing a new frame. These callbacks move to
   // |frame_callbacks_| when Commit() is called. Later they are moved to
-  // |active_frame_callbacks_| when the effect of the Commit() is reflected in
-  // the compositor's active layer tree. The callbacks fire once we're notified
-  // that the compositor started drawing that active layer tree.
+  // |active_frame_callbacks_| when the effect of the Commit() is scheduled to
+  // be drawn. They fire at the first begin frame notification after this.
   std::list<FrameCallback> pending_frame_callbacks_;
   std::list<FrameCallback> frame_callbacks_;
   std::list<FrameCallback> active_frame_callbacks_;
@@ -390,6 +406,11 @@ class Surface : public ui::LayerOwnerDelegate,
   // can set this to handle Commit() and apply any double buffered state it
   // maintains.
   SurfaceDelegate* delegate_ = nullptr;
+
+  // The begin frame source being observed.
+  cc::BeginFrameSource* begin_frame_source_ = nullptr;
+  cc::BeginFrameArgs last_begin_frame_args_;
+  bool needs_begin_frame_ = false;
 
   struct Value {
     const char* name;

@@ -116,7 +116,6 @@ class CSSAnimationData;
 class CSSTransitionData;
 class CSSVariableData;
 class Font;
-class FontMetrics;
 class Hyphenation;
 class RotateTransformOperation;
 class ScaleTransformOperation;
@@ -1507,41 +1506,46 @@ class CORE_EXPORT ComputedStyle : public ComputedStyleBase,
   // Outline properties.
   // outline-color
   void setOutlineColor(const StyleColor& v) {
-    SET_BORDERVALUE_COLOR(m_background, m_outline, v);
+    SET_BORDERVALUE_COLOR(m_rareNonInheritedData, m_outline, v);
   }
 
   // outline-style
-  EBorderStyle outlineStyle() const { return m_background->outline().style(); }
+  EBorderStyle outlineStyle() const {
+    return m_rareNonInheritedData->m_outline.style();
+  }
   void setOutlineStyle(EBorderStyle v) {
-    SET_VAR(m_background, m_outline.m_style, v);
+    SET_VAR(m_rareNonInheritedData, m_outline.m_style, v);
   }
   static OutlineIsAuto initialOutlineStyleIsAuto() { return OutlineIsAutoOff; }
   OutlineIsAuto outlineStyleIsAuto() const {
-    return static_cast<OutlineIsAuto>(m_background->outline().isAuto());
+    return static_cast<OutlineIsAuto>(
+        m_rareNonInheritedData->m_outline.isAuto());
   }
   void setOutlineStyleIsAuto(OutlineIsAuto isAuto) {
-    SET_VAR(m_background, m_outline.m_isAuto, isAuto);
+    SET_VAR(m_rareNonInheritedData, m_outline.m_isAuto, isAuto);
   }
 
   // outline-width
   static unsigned short initialOutlineWidth() { return 3; }
   int outlineWidth() const {
-    if (m_background->outline().style() == BorderStyleNone)
+    if (m_rareNonInheritedData->m_outline.style() == BorderStyleNone)
       return 0;
-    return m_background->outline().width();
+    return m_rareNonInheritedData->m_outline.width();
   }
   void setOutlineWidth(unsigned short v) {
-    SET_VAR(m_background, m_outline.m_width, v);
+    SET_VAR(m_rareNonInheritedData, m_outline.m_width, v);
   }
 
   // outline-offset
   static int initialOutlineOffset() { return 0; }
   int outlineOffset() const {
-    if (m_background->outline().style() == BorderStyleNone)
+    if (m_rareNonInheritedData->m_outline.style() == BorderStyleNone)
       return 0;
-    return m_background->outline().offset();
+    return m_rareNonInheritedData->m_outline.offset();
   }
-  void setOutlineOffset(int v) { SET_VAR(m_background, m_outline.m_offset, v); }
+  void setOutlineOffset(int v) {
+    SET_VAR(m_rareNonInheritedData, m_outline.m_offset, v);
+  }
 
   // Overflow properties.
   // overflow-anchor
@@ -1700,8 +1704,7 @@ class CORE_EXPORT ComputedStyle : public ComputedStyleBase,
   // Independent transform properties.
   // translate
   static PassRefPtr<TranslateTransformOperation> initialTranslate() {
-    return TranslateTransformOperation::create(
-        Length(0, Fixed), Length(0, Fixed), 0, TransformOperation::Translate3D);
+    return nullptr;
   }
   TranslateTransformOperation* translate() const {
     return m_rareNonInheritedData->m_transform->m_translate.get();
@@ -1712,8 +1715,7 @@ class CORE_EXPORT ComputedStyle : public ComputedStyleBase,
 
   // rotate
   static PassRefPtr<RotateTransformOperation> initialRotate() {
-    return RotateTransformOperation::create(0, 0, 1, 0,
-                                            TransformOperation::Rotate3D);
+    return nullptr;
   }
   RotateTransformOperation* rotate() const {
     return m_rareNonInheritedData->m_transform->m_rotate.get();
@@ -1723,10 +1725,7 @@ class CORE_EXPORT ComputedStyle : public ComputedStyleBase,
   }
 
   // scale
-  static PassRefPtr<ScaleTransformOperation> initialScale() {
-    return ScaleTransformOperation::create(1, 1, 1,
-                                           TransformOperation::Scale3D);
-  }
+  static PassRefPtr<ScaleTransformOperation> initialScale() { return nullptr; }
   ScaleTransformOperation* scale() const {
     return m_rareNonInheritedData->m_transform->m_scale.get();
   }
@@ -3475,18 +3474,6 @@ class CORE_EXPORT ComputedStyle : public ComputedStyleBase,
     return outlineWidth() > 0 && outlineStyle() > BorderStyleHidden;
   }
   int outlineOutsetExtent() const;
-  bool isOutlineEquivalent(const ComputedStyle* otherStyle) const {
-    // No other style, so we don't have an outline then we consider them to be
-    // the same.
-    if (!otherStyle)
-      return !hasOutline();
-    return m_background->outline().visuallyEqual(
-        otherStyle->m_background->outline());
-  }
-  void setOutlineFromStyle(const ComputedStyle& o) {
-    DCHECK(!isOutlineEquivalent(&o));
-    m_background.access()->m_outline = o.m_background->m_outline;
-  }
   float getOutlineStrokeWidthForFocusRing() const;
 
   // Position utility functions.
@@ -3959,7 +3946,9 @@ class CORE_EXPORT ComputedStyle : public ComputedStyleBase,
   StyleColor columnRuleColor() const {
     return m_rareNonInheritedData->m_multiCol->m_rule.color();
   }
-  StyleColor outlineColor() const { return m_background->outline().color(); }
+  StyleColor outlineColor() const {
+    return m_rareNonInheritedData->m_outline.color();
+  }
   StyleColor textEmphasisColor() const {
     return m_rareInheritedData->textEmphasisColor();
   }
@@ -4017,8 +4006,11 @@ class CORE_EXPORT ComputedStyle : public ComputedStyleBase,
   void addAppliedTextDecoration(const AppliedTextDecoration&);
   void applyMotionPathTransform(float originX,
                                 float originY,
+                                const FloatRect& boundingBox,
                                 TransformationMatrix&) const;
 
+  bool scrollAnchorDisablingPropertyChanged(const ComputedStyle& other,
+                                            StyleDifference&) const;
   bool diffNeedsFullLayoutAndPaintInvalidation(
       const ComputedStyle& other) const;
   bool diffNeedsFullLayout(const ComputedStyle& other) const;

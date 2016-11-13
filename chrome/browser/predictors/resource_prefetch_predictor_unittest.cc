@@ -35,9 +35,10 @@ using testing::UnorderedElementsAre;
 
 namespace predictors {
 
-typedef ResourcePrefetchPredictor::URLRequestSummary URLRequestSummary;
-typedef ResourcePrefetchPredictorTables::PrefetchDataMap PrefetchDataMap;
-typedef ResourcePrefetchPredictorTables::RedirectDataMap RedirectDataMap;
+using URLRequestSummary = ResourcePrefetchPredictor::URLRequestSummary;
+using PageRequestSummary = ResourcePrefetchPredictor::PageRequestSummary;
+using PrefetchDataMap = ResourcePrefetchPredictorTables::PrefetchDataMap;
+using RedirectDataMap = ResourcePrefetchPredictorTables::RedirectDataMap;
 
 scoped_refptr<net::HttpResponseHeaders> MakeResponseHeaders(
     const char* headers) {
@@ -153,6 +154,18 @@ class MockResourcePrefetchPredictorTables
   ~MockResourcePrefetchPredictorTables() { }
 };
 
+class MockResourcePrefetchPredictorObserver : public TestObserver {
+ public:
+  explicit MockResourcePrefetchPredictorObserver(
+      ResourcePrefetchPredictor* predictor)
+      : TestObserver(predictor) {}
+
+  MOCK_METHOD2(
+      OnNavigationLearned,
+      void(size_t url_visit_count,
+           const ResourcePrefetchPredictor::PageRequestSummary& summary));
+};
+
 class ResourcePrefetchPredictorTest : public testing::Test {
  public:
   ResourcePrefetchPredictorTest();
@@ -173,36 +186,6 @@ class ResourcePrefetchPredictorTest : public testing::Test {
             false,
             history::SOURCE_BROWSED);
     profile_->BlockUntilHistoryProcessesPendingRequests();
-  }
-
-  NavigationID CreateNavigationID(int process_id,
-                                  int render_frame_id,
-                                  const std::string& main_frame_url) {
-    NavigationID navigation_id(process_id, render_frame_id,
-                               GURL(main_frame_url));
-    navigation_id.creation_time = base::TimeTicks::Now();
-    return navigation_id;
-  }
-
-  URLRequestSummary CreateURLRequestSummary(
-      int process_id,
-      int render_frame_id,
-      const std::string& main_frame_url,
-      const std::string& resource_url = std::string(),
-      content::ResourceType resource_type = content::RESOURCE_TYPE_MAIN_FRAME,
-      net::RequestPriority priority = net::MEDIUM,
-      const std::string& mime_type = std::string(),
-      bool was_cached = false) {
-    URLRequestSummary summary;
-    summary.navigation_id = CreateNavigationID(process_id, render_frame_id,
-                                               main_frame_url);
-    summary.resource_url =
-        resource_url.empty() ? GURL(main_frame_url) : GURL(resource_url);
-    summary.resource_type = resource_type;
-    summary.priority = priority;
-    summary.mime_type = mime_type;
-    summary.was_cached = was_cached;
-    return summary;
   }
 
   URLRequestSummary CreateRedirectRequestSummary(
@@ -489,7 +472,8 @@ TEST_F(ResourcePrefetchPredictorTest, LazilyInitializeWithData) {
 
 // Single navigation but history count is low, so should not record.
 TEST_F(ResourcePrefetchPredictorTest, NavigationNotRecorded) {
-  AddUrlToHistory("http://www.google.com", 1);
+  const int kVisitCount = 1;
+  AddUrlToHistory("https://www.google.com", kVisitCount);
 
   URLRequestSummary main_frame =
       CreateURLRequestSummary(1, 1, "http://www.google.com");
@@ -516,6 +500,15 @@ TEST_F(ResourcePrefetchPredictorTest, NavigationNotRecorded) {
       content::RESOURCE_TYPE_SCRIPT, net::MEDIUM, "text/javascript", false);
   predictor_->RecordURLResponse(resource3);
 
+  StrictMock<MockResourcePrefetchPredictorObserver> mock_observer(
+      predictor_.get());
+  EXPECT_CALL(
+      mock_observer,
+      OnNavigationLearned(kVisitCount,
+                          CreatePageRequestSummary(
+                              "https://www.google.com", "http://www.google.com",
+                              {resource1, resource2, resource3})));
+
   PrefetchData host_data = CreatePrefetchData("www.google.com");
   InitializeResourceData(host_data.add_resources(),
                          "https://google.com/style1.css",
@@ -538,41 +531,51 @@ TEST_F(ResourcePrefetchPredictorTest, NavigationNotRecorded) {
 // Single navigation that will be recorded. Will check for duplicate
 // resources and also for number of resources saved.
 TEST_F(ResourcePrefetchPredictorTest, NavigationUrlNotInDB) {
-  AddUrlToHistory("http://www.google.com", 4);
+  const int kVisitCount = 4;
+  AddUrlToHistory("http://www.google.com", kVisitCount);
 
   URLRequestSummary main_frame =
       CreateURLRequestSummary(1, 1, "http://www.google.com");
   predictor_->RecordURLRequest(main_frame);
   EXPECT_EQ(1U, predictor_->inflight_navigations_.size());
 
-  URLRequestSummary resource1 = CreateURLRequestSummary(
+  std::vector<URLRequestSummary> resources;
+  resources.push_back(CreateURLRequestSummary(
       1, 1, "http://www.google.com", "http://google.com/style1.css",
-      content::RESOURCE_TYPE_STYLESHEET, net::MEDIUM, "text/css", false);
-  predictor_->RecordURLResponse(resource1);
-  URLRequestSummary resource2 = CreateURLRequestSummary(
+      content::RESOURCE_TYPE_STYLESHEET, net::MEDIUM, "text/css", false));
+  predictor_->RecordURLResponse(resources.back());
+  resources.push_back(CreateURLRequestSummary(
       1, 1, "http://www.google.com", "http://google.com/script1.js",
-      content::RESOURCE_TYPE_SCRIPT, net::MEDIUM, "text/javascript", false);
-  predictor_->RecordURLResponse(resource2);
-  URLRequestSummary resource3 = CreateURLRequestSummary(
+      content::RESOURCE_TYPE_SCRIPT, net::MEDIUM, "text/javascript", false));
+  predictor_->RecordURLResponse(resources.back());
+  resources.push_back(CreateURLRequestSummary(
       1, 1, "http://www.google.com", "http://google.com/script2.js",
-      content::RESOURCE_TYPE_SCRIPT, net::MEDIUM, "text/javascript", false);
-  predictor_->RecordURLResponse(resource3);
-  URLRequestSummary resource4 = CreateURLRequestSummary(
+      content::RESOURCE_TYPE_SCRIPT, net::MEDIUM, "text/javascript", false));
+  predictor_->RecordURLResponse(resources.back());
+  resources.push_back(CreateURLRequestSummary(
       1, 1, "http://www.google.com", "http://google.com/script1.js",
-      content::RESOURCE_TYPE_SCRIPT, net::MEDIUM, "text/javascript", true);
-  predictor_->RecordURLResponse(resource4);
-  URLRequestSummary resource5 = CreateURLRequestSummary(
+      content::RESOURCE_TYPE_SCRIPT, net::MEDIUM, "text/javascript", true));
+  predictor_->RecordURLResponse(resources.back());
+  resources.push_back(CreateURLRequestSummary(
       1, 1, "http://www.google.com", "http://google.com/image1.png",
-      content::RESOURCE_TYPE_IMAGE, net::MEDIUM, "image/png", false);
-  predictor_->RecordURLResponse(resource5);
-  URLRequestSummary resource6 = CreateURLRequestSummary(
+      content::RESOURCE_TYPE_IMAGE, net::MEDIUM, "image/png", false));
+  predictor_->RecordURLResponse(resources.back());
+  resources.push_back(CreateURLRequestSummary(
       1, 1, "http://www.google.com", "http://google.com/image2.png",
-      content::RESOURCE_TYPE_IMAGE, net::MEDIUM, "image/png", false);
-  predictor_->RecordURLResponse(resource6);
-  URLRequestSummary resource7 = CreateURLRequestSummary(
+      content::RESOURCE_TYPE_IMAGE, net::MEDIUM, "image/png", false));
+  predictor_->RecordURLResponse(resources.back());
+  resources.push_back(CreateURLRequestSummary(
       1, 1, "http://www.google.com", "http://google.com/style2.css",
-      content::RESOURCE_TYPE_STYLESHEET, net::MEDIUM, "text/css", true);
-  predictor_->RecordURLResponse(resource7);
+      content::RESOURCE_TYPE_STYLESHEET, net::MEDIUM, "text/css", true));
+  predictor_->RecordURLResponse(resources.back());
+
+  StrictMock<MockResourcePrefetchPredictorObserver> mock_observer(
+      predictor_.get());
+  EXPECT_CALL(mock_observer,
+              OnNavigationLearned(
+                  kVisitCount, CreatePageRequestSummary("http://www.google.com",
+                                                        "http://www.google.com",
+                                                        resources)));
 
   PrefetchData url_data = CreatePrefetchData("http://www.google.com/");
   InitializeResourceData(url_data.add_resources(),
@@ -599,14 +602,15 @@ TEST_F(ResourcePrefetchPredictorTest, NavigationUrlNotInDB) {
               UpdateData(empty_resource_data_, host_data, empty_redirect_data_,
                          empty_redirect_data_));
 
-  predictor_->OnNavigationComplete(main_frame.navigation_id);
+  predictor_->RecordMainFrameLoadComplete(main_frame.navigation_id);
   profile_->BlockUntilHistoryProcessesPendingRequests();
 }
 
 // Tests that navigation is recorded correctly for URL already present in
 // the database cache.
 TEST_F(ResourcePrefetchPredictorTest, NavigationUrlInDB) {
-  AddUrlToHistory("http://www.google.com", 4);
+  const int kVisitCount = 4;
+  AddUrlToHistory("http://www.google.com", kVisitCount);
 
   EXPECT_CALL(*mock_tables_.get(),
               GetAllData(Pointee(ContainerEq(PrefetchDataMap())),
@@ -626,34 +630,43 @@ TEST_F(ResourcePrefetchPredictorTest, NavigationUrlInDB) {
   predictor_->RecordURLRequest(main_frame);
   EXPECT_EQ(1U, predictor_->inflight_navigations_.size());
 
-  URLRequestSummary resource1 = CreateURLRequestSummary(
+  std::vector<URLRequestSummary> resources;
+  resources.push_back(CreateURLRequestSummary(
       1, 1, "http://www.google.com", "http://google.com/style1.css",
-      content::RESOURCE_TYPE_STYLESHEET, net::MEDIUM, "text/css", false);
-  predictor_->RecordURLResponse(resource1);
-  URLRequestSummary resource2 = CreateURLRequestSummary(
+      content::RESOURCE_TYPE_STYLESHEET, net::MEDIUM, "text/css", false));
+  predictor_->RecordURLResponse(resources.back());
+  resources.push_back(CreateURLRequestSummary(
       1, 1, "http://www.google.com", "http://google.com/script1.js",
-      content::RESOURCE_TYPE_SCRIPT, net::MEDIUM, "text/javascript", false);
-  predictor_->RecordURLResponse(resource2);
-  URLRequestSummary resource3 = CreateURLRequestSummary(
+      content::RESOURCE_TYPE_SCRIPT, net::MEDIUM, "text/javascript", false));
+  predictor_->RecordURLResponse(resources.back());
+  resources.push_back(CreateURLRequestSummary(
       1, 1, "http://www.google.com", "http://google.com/script2.js",
-      content::RESOURCE_TYPE_SCRIPT, net::MEDIUM, "text/javascript", false);
-  predictor_->RecordURLResponse(resource3);
-  URLRequestSummary resource4 = CreateURLRequestSummary(
+      content::RESOURCE_TYPE_SCRIPT, net::MEDIUM, "text/javascript", false));
+  predictor_->RecordURLResponse(resources.back());
+  resources.push_back(CreateURLRequestSummary(
       1, 1, "http://www.google.com", "http://google.com/script1.js",
-      content::RESOURCE_TYPE_SCRIPT, net::MEDIUM, "text/javascript", true);
-  predictor_->RecordURLResponse(resource4);
-  URLRequestSummary resource5 = CreateURLRequestSummary(
+      content::RESOURCE_TYPE_SCRIPT, net::MEDIUM, "text/javascript", true));
+  predictor_->RecordURLResponse(resources.back());
+  resources.push_back(CreateURLRequestSummary(
       1, 1, "http://www.google.com", "http://google.com/image1.png",
-      content::RESOURCE_TYPE_IMAGE, net::MEDIUM, "image/png", false);
-  predictor_->RecordURLResponse(resource5);
-  URLRequestSummary resource6 = CreateURLRequestSummary(
+      content::RESOURCE_TYPE_IMAGE, net::MEDIUM, "image/png", false));
+  predictor_->RecordURLResponse(resources.back());
+  resources.push_back(CreateURLRequestSummary(
       1, 1, "http://www.google.com", "http://google.com/image2.png",
-      content::RESOURCE_TYPE_IMAGE, net::MEDIUM, "image/png", false);
-  predictor_->RecordURLResponse(resource6);
-  URLRequestSummary resource7 = CreateURLRequestSummary(
+      content::RESOURCE_TYPE_IMAGE, net::MEDIUM, "image/png", false));
+  predictor_->RecordURLResponse(resources.back());
+  resources.push_back(CreateURLRequestSummary(
       1, 1, "http://www.google.com", "http://google.com/style2.css",
-      content::RESOURCE_TYPE_STYLESHEET, net::MEDIUM, "text/css", true);
-  predictor_->RecordURLResponse(resource7);
+      content::RESOURCE_TYPE_STYLESHEET, net::MEDIUM, "text/css", true));
+  predictor_->RecordURLResponse(resources.back());
+
+  StrictMock<MockResourcePrefetchPredictorObserver> mock_observer(
+      predictor_.get());
+  EXPECT_CALL(mock_observer,
+              OnNavigationLearned(
+                  kVisitCount, CreatePageRequestSummary("http://www.google.com",
+                                                        "http://www.google.com",
+                                                        resources)));
 
   PrefetchData url_data = CreatePrefetchData("http://www.google.com/");
   InitializeResourceData(url_data.add_resources(),
@@ -695,13 +708,14 @@ TEST_F(ResourcePrefetchPredictorTest, NavigationUrlInDB) {
               UpdateData(empty_resource_data_, host_data, empty_redirect_data_,
                          empty_redirect_data_));
 
-  predictor_->OnNavigationComplete(main_frame.navigation_id);
+  predictor_->RecordMainFrameLoadComplete(main_frame.navigation_id);
   profile_->BlockUntilHistoryProcessesPendingRequests();
 }
 
 // Tests that a URL is deleted before another is added if the cache is full.
 TEST_F(ResourcePrefetchPredictorTest, NavigationUrlNotInDBAndDBFull) {
-  AddUrlToHistory("http://www.nike.com/", 4);
+  const int kVisitCount = 4;
+  AddUrlToHistory("http://www.nike.com/", kVisitCount);
 
   EXPECT_CALL(*mock_tables_.get(),
               GetAllData(Pointee(ContainerEq(PrefetchDataMap())),
@@ -730,6 +744,14 @@ TEST_F(ResourcePrefetchPredictorTest, NavigationUrlNotInDBAndDBFull) {
       content::RESOURCE_TYPE_IMAGE, net::MEDIUM, "image/png", false);
   predictor_->RecordURLResponse(resource2);
 
+  StrictMock<MockResourcePrefetchPredictorObserver> mock_observer(
+      predictor_.get());
+  EXPECT_CALL(mock_observer,
+              OnNavigationLearned(
+                  kVisitCount, CreatePageRequestSummary(
+                                   "http://www.nike.com", "http://www.nike.com",
+                                   {resource1, resource2})));
+
   EXPECT_CALL(*mock_tables_.get(),
               DeleteSingleResourceDataPoint("http://www.google.com/",
                                             PREFETCH_KEY_TYPE_URL));
@@ -754,12 +776,13 @@ TEST_F(ResourcePrefetchPredictorTest, NavigationUrlNotInDBAndDBFull) {
               UpdateData(empty_resource_data_, host_data, empty_redirect_data_,
                          empty_redirect_data_));
 
-  predictor_->OnNavigationComplete(main_frame.navigation_id);
+  predictor_->RecordMainFrameLoadComplete(main_frame.navigation_id);
   profile_->BlockUntilHistoryProcessesPendingRequests();
 }
 
 TEST_F(ResourcePrefetchPredictorTest, RedirectUrlNotInDB) {
-  AddUrlToHistory("https://facebook.com/google", 4);
+  const int kVisitCount = 4;
+  AddUrlToHistory("https://facebook.com/google", kVisitCount);
 
   URLRequestSummary fb1 = CreateURLRequestSummary(1, 1, "http://fb.com/google");
   predictor_->RecordURLRequest(fb1);
@@ -772,6 +795,15 @@ TEST_F(ResourcePrefetchPredictorTest, RedirectUrlNotInDB) {
       1, 1, "http://facebook.com/google", "https://facebook.com/google");
   predictor_->RecordURLRedirect(fb3);
   NavigationID fb_end = CreateNavigationID(1, 1, "https://facebook.com/google");
+
+  StrictMock<MockResourcePrefetchPredictorObserver> mock_observer(
+      predictor_.get());
+  EXPECT_CALL(
+      mock_observer,
+      OnNavigationLearned(kVisitCount, CreatePageRequestSummary(
+                                           "https://facebook.com/google",
+                                           "http://fb.com/google",
+                                           std::vector<URLRequestSummary>())));
 
   // Since the navigation hasn't resources, corresponding entry
   // in resource table will be deleted.
@@ -802,7 +834,8 @@ TEST_F(ResourcePrefetchPredictorTest, RedirectUrlNotInDB) {
 // Tests that redirect is recorded correctly for URL already present in
 // the database cache.
 TEST_F(ResourcePrefetchPredictorTest, RedirectUrlInDB) {
-  AddUrlToHistory("https://facebook.com/google", 4);
+  const int kVisitCount = 7;
+  AddUrlToHistory("https://facebook.com/google", kVisitCount);
 
   EXPECT_CALL(*mock_tables_.get(),
               GetAllData(Pointee(ContainerEq(PrefetchDataMap())),
@@ -827,6 +860,15 @@ TEST_F(ResourcePrefetchPredictorTest, RedirectUrlInDB) {
       1, 1, "http://facebook.com/google", "https://facebook.com/google");
   predictor_->RecordURLRedirect(fb3);
   NavigationID fb_end = CreateNavigationID(1, 1, "https://facebook.com/google");
+
+  StrictMock<MockResourcePrefetchPredictorObserver> mock_observer(
+      predictor_.get());
+  EXPECT_CALL(
+      mock_observer,
+      OnNavigationLearned(kVisitCount, CreatePageRequestSummary(
+                                           "https://facebook.com/google",
+                                           "http://fb.com/google",
+                                           std::vector<URLRequestSummary>())));
 
   // Oldest entries in tables will be superseded and deleted.
   EXPECT_CALL(*mock_tables_.get(),

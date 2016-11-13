@@ -8,6 +8,7 @@
 #include "ash/common/session/session_state_delegate.h"
 #include "ash/common/wm_shell.h"
 #include "ash/public/cpp/shell_window_ids.h"
+#include "ash/shell.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/logging.h"
@@ -16,14 +17,15 @@
 #include "chrome/browser/chromeos/accessibility/accessibility_util.h"
 #include "chrome/browser/chromeos/login/ui/login_display_host.h"
 #include "chrome/browser/chromeos/options/network_config_view.h"
+#include "chrome/browser/chromeos/set_time_dialog.h"
 #include "chrome/browser/chromeos/system/system_clock.h"
+#include "chrome/browser/chromeos/ui/choose_mobile_network_dialog.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/ash/ash_util.h"
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/scoped_tabbed_browser_displayer.h"
 #include "chrome/browser/ui/singleton_tabs.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/grit/generated_resources.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/session_manager_client.h"
 #include "chromeos/login/login_state.h"
@@ -31,10 +33,15 @@
 #include "content/public/common/service_manager_connection.h"
 #include "net/base/escape.h"
 #include "services/service_manager/public/cpp/connector.h"
-#include "ui/base/l10n/l10n_util.h"
+#include "services/ui/public/cpp/property_type_converters.h"
+#include "services/ui/public/interfaces/window_manager.mojom.h"
+#include "third_party/cros_system_api/dbus/shill/dbus-constants.h"
+#include "ui/views/widget/widget.h"
+#include "ui/views/window/dialog_delegate.h"
 
 using chromeos::DBusThreadManager;
 using chromeos::LoginState;
+using views::Widget;
 
 namespace {
 
@@ -97,6 +104,8 @@ ash::LoginStatus SystemTrayClient::GetUserLoginStatus() {
       return ash::LoginStatus::SUPERVISED;
     case LoginState::LOGGED_IN_USER_KIOSK_APP:
       return ash::LoginStatus::KIOSK_APP;
+    case LoginState::LOGGED_IN_USER_ARC_KIOSK_APP:
+      return ash::LoginStatus::ARC_KIOSK_APP;
   }
   NOTREACHED();
   return ash::LoginStatus::NOT_LOGGED_IN;
@@ -126,6 +135,28 @@ int SystemTrayClient::GetDialogParentContainerId() {
   return ash::kShellWindowId_SystemModalContainer;
 }
 
+// static
+Widget* SystemTrayClient::CreateUnownedDialogWidget(
+    views::WidgetDelegate* widget_delegate) {
+  DCHECK(widget_delegate);
+  Widget::InitParams params = views::DialogDelegate::GetDialogWidgetInitParams(
+      widget_delegate, nullptr, nullptr, gfx::Rect());
+  // Place the dialog in the appropriate modal dialog container, either above
+  // or below the lock screen, based on the login state.
+  int container_id = GetDialogParentContainerId();
+  if (chrome::IsRunningInMash()) {
+    using ui::mojom::WindowManager;
+    params.mus_properties[WindowManager::kInitialContainerId_Property] =
+        mojo::ConvertTo<std::vector<uint8_t>>(container_id);
+  } else {
+    params.parent = ash::Shell::GetContainer(ash::Shell::GetPrimaryRootWindow(),
+                                             container_id);
+  }
+  Widget* widget = new Widget;  // Owned by native widget.
+  widget->Init(params);
+  return widget;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // ash::mojom::SystemTrayClient:
 
@@ -135,12 +166,13 @@ void SystemTrayClient::ShowSettings() {
 
 void SystemTrayClient::ShowDateSettings() {
   content::RecordAction(base::UserMetricsAction("ShowDateOptions"));
-  std::string sub_page =
-      std::string(chrome::kSearchSubPage) + "#" +
-      l10n_util::GetStringUTF8(IDS_OPTIONS_SETTINGS_SECTION_TITLE_DATETIME);
   // Everybody can change the time zone (even though it is a device setting).
   chrome::ShowSettingsSubPageForProfile(ProfileManager::GetActiveUserProfile(),
-                                        sub_page);
+                                        chrome::kDateTimeSubPage);
+}
+
+void SystemTrayClient::ShowSetTimeDialog() {
+  chromeos::SetTimeDialog::ShowDialogInContainer(GetDialogParentContainerId());
 }
 
 void SystemTrayClient::ShowDisplaySettings() {
@@ -177,10 +209,7 @@ void SystemTrayClient::ShowAccessibilityHelp() {
 
 void SystemTrayClient::ShowAccessibilitySettings() {
   content::RecordAction(base::UserMetricsAction("ShowAccessibilitySettings"));
-  std::string sub_page = std::string(chrome::kSearchSubPage) + "#" +
-                         l10n_util::GetStringUTF8(
-                             IDS_OPTIONS_SETTINGS_SECTION_TITLE_ACCESSIBILITY);
-  ShowSettingsSubPageForActiveUser(sub_page);
+  ShowSettingsSubPageForActiveUser(chrome::kAccessibilitySubPage);
 }
 
 void SystemTrayClient::ShowPaletteHelp() {
@@ -210,8 +239,17 @@ void SystemTrayClient::ShowNetworkConfigure(const std::string& network_id) {
   }
 
   // Dialog will default to the primary display.
-  chromeos::NetworkConfigView::ShowInContainer(network_id,
-                                               GetDialogParentContainerId());
+  chromeos::NetworkConfigView::ShowForNetworkId(network_id,
+                                                nullptr /* parent */);
+}
+
+void SystemTrayClient::ShowNetworkCreate(const std::string& type) {
+  int container_id = GetDialogParentContainerId();
+  if (type == shill::kTypeCellular) {
+    chromeos::ChooseMobileNetworkDialog::ShowDialogInContainer(container_id);
+    return;
+  }
+  chromeos::NetworkConfigView::ShowForType(type, nullptr /* parent */);
 }
 
 void SystemTrayClient::ShowNetworkSettings(const std::string& network_id) {

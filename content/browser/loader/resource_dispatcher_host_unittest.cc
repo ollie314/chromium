@@ -9,7 +9,6 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/feature_list.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/location.h"
@@ -21,6 +20,7 @@
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
+#include "base/test/scoped_feature_list.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "content/browser/browser_thread_impl.h"
 #include "content/browser/child_process_security_policy_impl.h"
@@ -159,6 +159,7 @@ static ResourceRequest CreateResourceRequest(const char* method,
   request.method = std::string(method);
   request.url = url;
   request.first_party_for_cookies = url;  // bypass third-party cookie blocking
+  request.request_initiator = url::Origin(url);  // ensure initiator is set
   request.referrer_policy = blink::WebReferrerPolicyDefault;
   request.load_flags = 0;
   request.origin_pid = 0;
@@ -239,7 +240,6 @@ class TestFilterSpecifyingChild : public ResourceMessageFilter {
       : ResourceMessageFilter(
             process_id,
             PROCESS_TYPE_RENDERER,
-            NULL,
             NULL,
             NULL,
             NULL,
@@ -898,16 +898,12 @@ class ResourceDispatcherHostTest : public testing::TestWithParam<TestConfig>,
         web_contents_->GetRenderProcessHost()->GetID());
     child_ids_.insert(web_contents_->GetRenderProcessHost()->GetID());
 
-    base::FeatureList::ClearInstanceForTesting();
     switch (GetParam()) {
       case TestConfig::kDefault:
-        base::FeatureList::InitializeInstance(std::string(), std::string());
         break;
       case TestConfig::kOptimizeIPCForSmallResourceEnabled: {
-        std::unique_ptr<base::FeatureList> feature_list(new base::FeatureList);
-        feature_list->InitializeFromCommandLine(
-            features::kOptimizeLoadingIPCForSmallResources.name, std::string());
-        base::FeatureList::SetInstance(std::move(feature_list));
+        scoped_feature_list_.InitAndEnableFeature(
+            features::kOptimizeLoadingIPCForSmallResources);
         ASSERT_TRUE(base::FeatureList::IsEnabled(
             features::kOptimizeLoadingIPCForSmallResources));
         break;
@@ -1080,7 +1076,7 @@ class ResourceDispatcherHostTest : public testing::TestWithParam<TestConfig>,
       std::unique_ptr<NavigationRequestInfo> request_info(
           new NavigationRequestInfo(common_params, begin_params, url,
                                     url::Origin(url), true, false, false, -1,
-                                    false));
+                                    false, false));
       std::unique_ptr<NavigationURLLoader> test_loader =
           NavigationURLLoader::Create(browser_context_.get(),
                                       std::move(request_info), nullptr, nullptr,
@@ -1133,6 +1129,7 @@ class ResourceDispatcherHostTest : public testing::TestWithParam<TestConfig>,
   std::unique_ptr<base::RunLoop> wait_for_request_complete_loop_;
   RenderViewHostTestEnabler render_view_host_test_enabler_;
   bool auto_advance_;
+  base::test::ScopedFeatureList scoped_feature_list_;
 };
 
 void ResourceDispatcherHostTest::MakeTestRequest(int render_view_id,
@@ -2568,7 +2565,7 @@ TEST_P(ResourceDispatcherHostTest, CancelRequestsForContext) {
     std::unique_ptr<NavigationRequestInfo> request_info(
         new NavigationRequestInfo(common_params, begin_params, download_url,
                                   url::Origin(download_url), true, false, false,
-                                  -1, false));
+                                  -1, false, false));
     std::unique_ptr<NavigationURLLoader> loader = NavigationURLLoader::Create(
         browser_context_.get(), std::move(request_info), nullptr, nullptr,
         &delegate);
@@ -3695,6 +3692,72 @@ TEST_P(ResourceDispatcherHostTest, ThrottleMustProcessResponseBeforeRead) {
   while (net::URLRequestTestJob::ProcessOnePendingMessage()) {
   }
   base::RunLoop().RunUntilIdle();
+}
+
+namespace {
+
+void StoreSyncLoadResult(bool* called,
+                         bool* was_null,
+                         SyncLoadResult* result_out,
+                         const SyncLoadResult* result) {
+  *called = true;
+  *was_null = !result;
+
+  if (result)
+    *result_out = *result;
+}
+
+} // namespace
+
+TEST_P(ResourceDispatcherHostTest, SyncLoadWithMojoSuccess) {
+  ResourceRequest request = CreateResourceRequest(
+      "GET", RESOURCE_TYPE_XHR, net::URLRequestTestJob::test_url_1());
+  request.priority = net::MAXIMUM_PRIORITY;
+
+  bool called = false;
+  bool was_null = false;
+  SyncLoadResult result;
+  host_.OnSyncLoadWithMojo(0, 1, request, filter_.get(),
+                           base::Bind(&StoreSyncLoadResult,
+                                      &called, &was_null, &result));
+  base::RunLoop().RunUntilIdle();
+  EXPECT_TRUE(called);
+  EXPECT_FALSE(was_null);
+  EXPECT_EQ(net::OK, result.error_code);
+}
+
+TEST_P(ResourceDispatcherHostTest, SyncLoadWithMojoError) {
+  ResourceRequest request = CreateResourceRequest(
+      "GET", RESOURCE_TYPE_XHR, net::URLRequestTestJob::test_url_error());
+  request.priority = net::MAXIMUM_PRIORITY;
+
+  bool called = false;
+  bool was_null = false;
+  SyncLoadResult result;
+  host_.OnSyncLoadWithMojo(0, 1, request, filter_.get(),
+                           base::Bind(&StoreSyncLoadResult,
+                                      &called, &was_null, &result));
+  base::RunLoop().RunUntilIdle();
+  EXPECT_TRUE(called);
+  EXPECT_FALSE(was_null);
+  EXPECT_EQ(net::ERR_INVALID_URL, result.error_code);
+}
+
+TEST_P(ResourceDispatcherHostTest, SyncLoadWithMojoCancel) {
+  ResourceRequest request = CreateResourceRequest(
+      "GET", RESOURCE_TYPE_XHR, net::URLRequestTestJob::test_url_error());
+  request.priority = net::MAXIMUM_PRIORITY;
+
+  bool called = false;
+  bool was_null = false;
+  SyncLoadResult result;
+  host_.OnSyncLoadWithMojo(0, 1, request, filter_.get(),
+                           base::Bind(&StoreSyncLoadResult,
+                                      &called, &was_null, &result));
+  host_.CancelRequestsForProcess(filter_->child_id());
+  base::RunLoop().RunUntilIdle();
+  EXPECT_TRUE(called);
+  EXPECT_TRUE(was_null);
 }
 
 // A URLRequestTestJob that sets a test certificate on the |ssl_info|

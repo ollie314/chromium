@@ -41,7 +41,6 @@
 #include "wtf/Allocator.h"
 #include "wtf/Noncopyable.h"
 
-class SkBitmap;
 class SkCanvas;
 class SkColorSpace;
 class SkImage;
@@ -80,7 +79,7 @@ class PLATFORM_EXPORT ImageBufferSurface {
   virtual void draw(GraphicsContext&,
                     const FloatRect& destRect,
                     const FloatRect& srcRect,
-                    SkXfermode::Mode);
+                    SkBlendMode);
   virtual void setHasExpensiveOp() {}
   virtual GLuint getBackingTextureHandleForOverwrite() { return 0; }
 

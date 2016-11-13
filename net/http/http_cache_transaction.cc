@@ -1218,13 +1218,11 @@ int HttpCache::Transaction::DoCacheReadResponseComplete(int result) {
     return OK;
   }
 
-  if ((response_.unused_since_prefetch &&
-       !(request_->load_flags & LOAD_PREFETCH)) ||
-      (!response_.unused_since_prefetch &&
-       (request_->load_flags & LOAD_PREFETCH))) {
-    // Either this is the first use of an entry since it was prefetched or
-    // this is a prefetch. The value of response.unused_since_prefetch is valid
-    // for this transaction but the bit needs to be flipped in storage.
+  if (response_.unused_since_prefetch !=
+      !!(request_->load_flags & LOAD_PREFETCH)) {
+    // Either this is the first use of an entry since it was prefetched XOR
+    // this is a prefetch. The value of response.unused_since_prefetch is
+    // valid for this transaction but the bit needs to be flipped in storage.
     next_state_ = STATE_TOGGLE_UNUSED_SINCE_PREFETCH;
     return OK;
   }
@@ -1984,12 +1982,15 @@ int HttpCache::Transaction::BeginCacheRead() {
     return ERR_CACHE_MISS;
   }
 
-  if (request_->method == "HEAD")
-    FixHeadersForHead();
-
   // We don't have the whole resource.
   if (truncated_)
     return ERR_CACHE_MISS;
+
+  if (RequiresValidation() != VALIDATION_NONE)
+    return ERR_CACHE_MISS;
+
+  if (request_->method == "HEAD")
+    FixHeadersForHead();
 
   if (entry_->disk_entry->GetDataSize(kMetadataIndex))
     next_state_ = STATE_CACHE_READ_METADATA;
@@ -2204,7 +2205,7 @@ ValidationType HttpCache::Transaction::RequiresValidation() {
     return VALIDATION_SYNCHRONOUS;
   }
 
-  if (effective_load_flags_ & LOAD_PREFERRING_CACHE)
+  if (effective_load_flags_ & LOAD_SKIP_CACHE_VALIDATION)
     return VALIDATION_NONE;
 
   if (response_.unused_since_prefetch &&

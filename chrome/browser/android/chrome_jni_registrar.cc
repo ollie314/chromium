@@ -119,6 +119,7 @@
 #include "chrome/browser/notifications/notification_platform_bridge_android.h"
 #include "chrome/browser/password_manager/account_chooser_dialog_android.h"
 #include "chrome/browser/password_manager/auto_signin_first_run_dialog_android.h"
+#include "chrome/browser/permissions/permission_dialog_delegate.h"
 #include "chrome/browser/permissions/permission_update_infobar_delegate_android.h"
 #include "chrome/browser/predictors/resource_prefetch_predictor_android.h"
 #include "chrome/browser/prerender/external_prerender_handler_android.h"
@@ -163,6 +164,7 @@
 #include "components/gcm_driver/android/component_jni_registrar.h"
 #include "components/gcm_driver/instance_id/android/component_jni_registrar.h"
 #include "components/invalidation/impl/android/component_jni_registrar.h"
+#include "components/payments/android/payments_jni_registrar.h"
 #include "components/policy/core/browser/android/component_jni_registrar.h"
 #include "components/safe_json/android/component_jni_registrar.h"
 #include "components/signin/core/browser/android/component_jni_registrar.h"
@@ -171,14 +173,18 @@
 #include "components/url_formatter/android/component_jni_registrar.h"
 #include "components/variations/android/component_jni_registrar.h"
 #include "components/web_contents_delegate_android/component_jni_registrar.h"
+#include "printing/features/features.h"
 
-#if defined(ENABLE_PRINTING) && !defined(ENABLE_PRINT_PREVIEW)
+#if BUILDFLAG(ENABLE_PRINTING) && !BUILDFLAG(ENABLE_PRINT_PREVIEW)
 #include "printing/printing_context_android.h"
 #endif
 
 #if defined(ENABLE_VR_SHELL) || defined(ENABLE_WEBVR)
 #include "chrome/browser/android/vr_shell/vr_shell.h"
 #include "chrome/browser/android/vr_shell/vr_shell_delegate.h"
+#include "third_party/gvr-android-sdk/display_synchronizer_jni.h"
+#include "third_party/gvr-android-sdk/gvr_api_jni.h"
+#include "third_party/gvr-android-sdk/native_callbacks_jni.h"
 #endif
 
 #if !defined(OFFICIAL_BUILD)
@@ -331,6 +337,9 @@ static base::android::RegistrationMethod kChromeRegisteredMethods[] = {
      autofill::PasswordGenerationPopupViewAndroid::Register},
     {"PasswordUIViewAndroid",
      PasswordUIViewAndroid::RegisterPasswordUIViewAndroid},
+    {"PaymentValidator", RegisterPaymentValidator},
+    {"PermissionDialogDelegate",
+     PermissionDialogDelegate::RegisterPermissionDialogDelegate},
     {"PermissionUpdateInfoBarDelegate",
      PermissionUpdateInfoBarDelegate::RegisterPermissionUpdateInfoBarDelegate},
     {"PersonalDataManagerAndroid",
@@ -393,6 +402,11 @@ static base::android::RegistrationMethod kChromeRegisteredMethods[] = {
 #if defined(ENABLE_VR_SHELL) || defined(ENABLE_WEBVR)
     {"VrShell", vr_shell::RegisterVrShell},
     {"VrShellDelegate", vr_shell::RegisterVrShellDelegate},
+    {"DisplaySynchronizer",
+     DisplaySynchronizer::RegisterDisplaySynchronizerNatives},
+    {"GvrApi", GvrApi::RegisterGvrApiNatives},
+    {"NativeCallbacks",
+     NativeCallbacks::RegisterNativeCallbacksNatives},
 #endif
     {"WarmupManager", RegisterWarmupManager},
     {"WebApkInstaller", WebApkInstaller::Register},
@@ -401,7 +415,7 @@ static base::android::RegistrationMethod kChromeRegisteredMethods[] = {
     {"WebsitePreferenceBridge", RegisterWebsitePreferenceBridge},
     {"WebsiteSettingsPopupAndroid",
      WebsiteSettingsPopupAndroid::RegisterWebsiteSettingsPopupAndroid},
-#if defined(ENABLE_PRINTING) && !defined(ENABLE_PRINT_PREVIEW)
+#if BUILDFLAG(ENABLE_PRINTING) && !BUILDFLAG(ENABLE_PRINT_PREVIEW)
     {"PrintingContext",
      printing::PrintingContextAndroid::RegisterPrintingContext},
 #endif

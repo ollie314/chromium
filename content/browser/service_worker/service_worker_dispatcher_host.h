@@ -39,7 +39,6 @@ class ServiceWorkerRegistration;
 class ServiceWorkerRegistrationHandle;
 class ServiceWorkerVersion;
 struct ServiceWorkerObjectInfo;
-struct ServiceWorkerRegistrationInfo;
 struct ServiceWorkerRegistrationObjectInfo;
 struct ServiceWorkerVersionAttributes;
 
@@ -50,8 +49,7 @@ class CONTENT_EXPORT ServiceWorkerDispatcherHost
   ServiceWorkerDispatcherHost(
       int render_process_id,
       MessagePortMessageFilter* message_port_message_filter,
-      ResourceContext* resource_context,
-      const MojoURLLoaderFactoryGetter& url_loader_factory_getter);
+      ResourceContext* resource_context);
 
   void Init(ServiceWorkerContextWrapper* context_wrapper);
 
@@ -84,10 +82,6 @@ class CONTENT_EXPORT ServiceWorkerDispatcherHost
 
   MessagePortMessageFilter* message_port_message_filter() {
     return message_port_message_filter_;
-  }
-
-  MojoURLLoaderFactoryGetter url_loader_factory_getter() const {
-    return url_loader_factory_getter_;
   }
 
  protected:
@@ -134,6 +128,20 @@ class CONTENT_EXPORT ServiceWorkerDispatcherHost
   void OnGetRegistrationForReady(int thread_id,
                                  int request_id,
                                  int provider_id);
+  void OnEnableNavigationPreload(int thread_id,
+                                 int request_id,
+                                 int provider_id,
+                                 int64_t registration_id,
+                                 bool enable);
+  void OnGetNavigationPreloadState(int thread_id,
+                                   int request_id,
+                                   int provider_id,
+                                   int64_t registration_id);
+  void OnSetNavigationPreloadHeader(int thread_id,
+                                    int request_id,
+                                    int provider_id,
+                                    int64_t registration_id,
+                                    const std::string& value);
   void OnProviderDestroyed(int provider_id);
   void OnSetHostedVersionId(int provider_id,
                             int64_t version_id,
@@ -254,7 +262,6 @@ class CONTENT_EXPORT ServiceWorkerDispatcherHost
   const int render_process_id_;
   MessagePortMessageFilter* const message_port_message_filter_;
   ResourceContext* resource_context_;
-  const MojoURLLoaderFactoryGetter url_loader_factory_getter_;
   scoped_refptr<ServiceWorkerContextWrapper> context_wrapper_;
 
   IDMap<ServiceWorkerHandle, IDMapOwnPointer> handles_;

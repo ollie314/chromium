@@ -135,7 +135,7 @@ class PLATFORM_EXPORT WebGLImageConversion final {
     ImageExtractor(Image*,
                    ImageHtmlDomSource,
                    bool premultiplyAlpha,
-                   bool ignoreGammaAndColorProfile);
+                   bool ignoreColorSpace);
 
     const void* imagePixelData() {
       return m_imagePixelLocker ? m_imagePixelLocker->pixels() : nullptr;
@@ -152,7 +152,7 @@ class PLATFORM_EXPORT WebGLImageConversion final {
     // Extracts the image and keeps track of its status, such as width, height,
     // Source Alignment, format, AlphaOp, etc. This needs to lock the resources
     // or relevant data if needed.
-    void extractImage(bool premultiplyAlpha, bool ignoreGammaAndColorProfile);
+    void extractImage(bool premultiplyAlpha, bool ignoreColorSpace);
 
     Image* m_image;
     Optional<ImagePixelLocker> m_imagePixelLocker;
@@ -216,8 +216,9 @@ class PLATFORM_EXPORT WebGLImageConversion final {
                             bool flipY,
                             AlphaOp,
                             DataFormat sourceFormat,
-                            unsigned width,
-                            unsigned height,
+                            unsigned sourceImageWidth,
+                            unsigned sourceImageHeight,
+                            const IntRect& sourceImageSubRectangle,
                             unsigned sourceUnpackAlignment,
                             Vector<uint8_t>& data);
 
@@ -228,6 +229,7 @@ class PLATFORM_EXPORT WebGLImageConversion final {
   static bool extractImageData(const uint8_t*,
                                DataFormat sourceDataFormat,
                                const IntSize&,
+                               const IntRect&,
                                GLenum format,
                                GLenum type,
                                bool flipY,
@@ -261,8 +263,9 @@ class PLATFORM_EXPORT WebGLImageConversion final {
   // GraphicsContext3DImagePacking.cpp.
   static bool packPixels(const uint8_t* sourceData,
                          DataFormat sourceDataFormat,
-                         unsigned width,
-                         unsigned height,
+                         unsigned sourceDataWidth,
+                         unsigned sourceDataHeight,
+                         const IntRect& sourceDataSubRectangle,
                          unsigned sourceUnpackAlignment,
                          unsigned destinationFormat,
                          unsigned destinationType,

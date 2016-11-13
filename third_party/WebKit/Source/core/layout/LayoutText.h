@@ -28,7 +28,6 @@
 #include "core/layout/LayoutObject.h"
 #include "core/layout/TextRunConstructor.h"
 #include "platform/LengthFunctions.h"
-#include "platform/text/TextPath.h"
 #include "wtf/Forward.h"
 #include "wtf/PassRefPtr.h"
 
@@ -207,10 +206,6 @@ class CORE_EXPORT LayoutText : public LayoutObject {
   bool isAllCollapsibleWhitespace() const;
   bool isRenderedCharacter(int offsetInNode) const;
 
-  // TODO(eae): Rename and change to only handle the word measurements use
-  // case once the simple code path has been removed. crbug.com/404597
-  bool canUseSimpleFontCodePath() const { return m_canUseSimpleFontCodePath; }
-
   void removeAndDestroyTextBoxes();
 
   PassRefPtr<AbstractInlineTextBox> firstAbstractInlineTextBox();
@@ -246,8 +241,6 @@ class CORE_EXPORT LayoutText : public LayoutObject {
       HashSet<const SimpleFontData*>& fallbackFonts,
       FloatRect& glyphBounds);
 
-  bool computeCanUseSimpleFontCodePath() const;
-
   // Make length() private so that callers that have a LayoutText*
   // will use the more efficient textLength() instead, while
   // callers with a LayoutObject* can continue to use length().
@@ -282,7 +275,7 @@ class CORE_EXPORT LayoutText : public LayoutObject {
   bool isText() const =
       delete;  // This will catch anyone doing an unnecessary check.
 
-  LayoutRect localOverflowRectForPaintInvalidation() const override;
+  LayoutRect localVisualRect() const override;
 
   void checkConsistency() const;
 
@@ -304,7 +297,6 @@ class CORE_EXPORT LayoutText : public LayoutObject {
   // inserted or removed).
   bool m_linesDirty : 1;
   bool m_containsReversedText : 1;
-  bool m_canUseSimpleFontCodePath : 1;
   mutable bool m_knownToHaveNoOverflowAndNoFallbackFonts : 1;
 
   float m_minWidth;
@@ -321,7 +313,7 @@ class CORE_EXPORT LayoutText : public LayoutObject {
 };
 
 inline UChar LayoutText::uncheckedCharacterAt(unsigned i) const {
-  ASSERT_WITH_SECURITY_IMPLICATION(i < textLength());
+  SECURITY_DCHECK(i < textLength());
   return is8Bit() ? characters8()[i] : characters16()[i];
 }
 
@@ -333,12 +325,13 @@ inline UChar LayoutText::characterAt(unsigned i) const {
 }
 
 inline UChar32 LayoutText::codepointAt(unsigned i) const {
-  UChar32 character = characterAt(i);
-  if (!U16_IS_LEAD(character))
-    return character;
-  UChar trail = characterAt(i + 1);
-  return U16_IS_TRAIL(trail) ? U16_GET_SUPPLEMENTARY(character, trail)
-                             : character;
+  if (i >= textLength())
+    return 0;
+  if (is8Bit())
+    return characters8()[i];
+  UChar32 c;
+  U16_GET(characters16(), 0, i, textLength(), c);
+  return c;
 }
 
 inline float LayoutText::hyphenWidth(const Font& font,

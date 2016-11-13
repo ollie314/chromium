@@ -339,8 +339,9 @@ void LayoutSVGInlineText::updateMetricsList(bool& lastCharacterWasWhiteSpace) {
     // If BiDi override is in effect, use the specified direction.
     if (bidiOverride && !styleRef().isLeftToRightDirection())
       direction = WTF::Unicode::RightToLeft;
-    bidiRuns.addRun(new BidiCharacterRun(0, run.charactersLength(),
-                                         status.context.get(), direction));
+    bidiRuns.addRun(new BidiCharacterRun(
+        status.context->override(), status.context->level(), 0,
+        run.charactersLength(), direction, status.context->dir()));
   } else {
     status.last = status.lastStrong = WTF::Unicode::OtherNeutral;
     bidiResolver.setStatus(status);
@@ -401,13 +402,12 @@ void LayoutSVGInlineText::computeNewScaledFontForStyle(
   scaledFont.update(document.styleEngine().fontSelector());
 }
 
-LayoutRect LayoutSVGInlineText::absoluteClippedOverflowRect() const {
-  return parent()->absoluteClippedOverflowRect();
+LayoutRect LayoutSVGInlineText::absoluteVisualRect() const {
+  return parent()->absoluteVisualRect();
 }
 
-FloatRect LayoutSVGInlineText::paintInvalidationRectInLocalSVGCoordinates()
-    const {
-  return parent()->paintInvalidationRectInLocalSVGCoordinates();
+FloatRect LayoutSVGInlineText::visualRectInLocalSVGCoordinates() const {
+  return parent()->visualRectInLocalSVGCoordinates();
 }
 
 PassRefPtr<StringImpl> LayoutSVGInlineText::originalText() const {

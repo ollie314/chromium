@@ -318,6 +318,24 @@ class EventCatcher {
   }
 }
 
+// Returns a function that when called returns a promise that resolves when
+// the device has disconnected. Example:
+// device.gatt.connect()
+//   .then(gatt => get_request_disconnection(gatt))
+//   .then(requestDisconnection => requestDisconnection())
+//   .then(() => // device is now disconnected)
+function get_request_disconnection(gattServer) {
+  return gattServer.getPrimaryService(request_disconnection_service_uuid)
+    .then(service => service.getCharacteristic(request_disconnection_characteristic_uuid))
+    .then(characteristic => {
+      return () => assert_promise_rejects_with_message(
+        characteristic.writeValue(new Uint8Array([0])),
+        new DOMException(
+          'GATT Server disconnected while performing a GATT operation.',
+          'NetworkError'));
+    });
+}
+
 function generateRequestDeviceArgsWithServices(services = ['heart_rate']) {
   return [{
     filters: [{ services: services }]

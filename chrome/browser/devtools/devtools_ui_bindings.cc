@@ -41,7 +41,7 @@
 #include "components/infobars/core/confirm_infobar_delegate.h"
 #include "components/infobars/core/infobar.h"
 #include "components/prefs/scoped_user_pref_update.h"
-#include "components/syncable_prefs/pref_service_syncable.h"
+#include "components/sync_preferences/pref_service_syncable.h"
 #include "components/zoom/page_zoom.h"
 #include "content/public/browser/child_process_security_policy.h"
 #include "content/public/browser/devtools_external_agent_proxy.h"
@@ -68,6 +68,7 @@
 #include "net/http/http_response_headers.h"
 #include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_fetcher_response_writer.h"
+#include "third_party/WebKit/public/public_features.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/page_transition_types.h"
 
@@ -858,9 +859,10 @@ void DevToolsUIBindings::ClearPreferences() {
 }
 
 void DevToolsUIBindings::Reattach(const DispatchCallback& callback) {
-  DCHECK(agent_host_.get());
-  agent_host_->DetachClient(this);
-  agent_host_->AttachClient(this);
+  if (agent_host_.get()) {
+    agent_host_->DetachClient(this);
+    agent_host_->AttachClient(this);
+  }
   callback.Run(nullptr);
 }
 
@@ -1115,7 +1117,6 @@ void DevToolsUIBindings::AttachTo(
 }
 
 void DevToolsUIBindings::Reload() {
-  DCHECK(agent_host_.get());
   reloading_ = true;
   web_contents_->GetController().Reload(false);
 }
@@ -1157,15 +1158,17 @@ void DevToolsUIBindings::DocumentAvailableInMainFrame() {
   if (!reloading_)
     return;
   reloading_ = false;
-  agent_host_->DetachClient(this);
-  agent_host_->AttachClient(this);
+  if (agent_host_.get()) {
+    agent_host_->DetachClient(this);
+    agent_host_->AttachClient(this);
+  }
 }
 
 void DevToolsUIBindings::DocumentOnLoadCompletedInMainFrame() {
   // In the DEBUG_DEVTOOLS mode, the DocumentOnLoadCompletedInMainFrame event
   // arrives before the LoadCompleted event, thus it should not trigger the
   // frontend load handling.
-#if !defined(DEBUG_DEVTOOLS)
+#if !BUILDFLAG(DEBUG_DEVTOOLS)
   FrontendLoaded();
 #endif
 }

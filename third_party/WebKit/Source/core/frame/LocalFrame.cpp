@@ -48,6 +48,7 @@
 #include "core/frame/FrameHost.h"
 #include "core/frame/FrameView.h"
 #include "core/frame/LocalDOMWindow.h"
+#include "core/frame/PerformanceMonitor.h"
 #include "core/frame/Settings.h"
 #include "core/frame/VisualViewport.h"
 #include "core/html/HTMLFrameElementBase.h"
@@ -69,8 +70,10 @@
 #include "core/paint/ObjectPainter.h"
 #include "core/paint/PaintInfo.h"
 #include "core/paint/PaintLayer.h"
+#include "core/paint/PaintLayerPainter.h"
 #include "core/paint/TransformRecorder.h"
 #include "core/svg/SVGDocumentExtensions.h"
+#include "core/timing/Performance.h"
 #include "platform/DragImage.h"
 #include "platform/PluginScriptForbiddenScope.h"
 #include "platform/RuntimeEnabledFeatures.h"
@@ -329,6 +332,7 @@ LocalFrame::~LocalFrame() {
 
 DEFINE_TRACE(LocalFrame) {
   visitor->trace(m_instrumentingAgents);
+  visitor->trace(m_performanceMonitor);
   visitor->trace(m_loader);
   visitor->trace(m_navigationScheduler);
   visitor->trace(m_view);
@@ -532,6 +536,11 @@ void LocalFrame::didChangeVisibilityState() {
     document()->didChangeVisibilityState();
 
   Frame::didChangeVisibilityState();
+}
+
+void LocalFrame::setDocumentHasReceivedUserGesture() {
+  if (document())
+    document()->setHasReceivedUserGesture();
 }
 
 LocalFrame* LocalFrame::localFrameRoot() {
@@ -866,10 +875,13 @@ inline LocalFrame::LocalFrame(FrameLoaderClient* client,
       m_inViewSourceMode(false),
       m_interfaceProvider(interfaceProvider),
       m_interfaceRegistry(interfaceRegistry) {
-  if (isLocalRoot())
+  if (isLocalRoot()) {
     m_instrumentingAgents = new InstrumentingAgents();
-  else
+    m_performanceMonitor = new PerformanceMonitor(this);
+  } else {
     m_instrumentingAgents = localFrameRoot()->m_instrumentingAgents;
+    m_performanceMonitor = localFrameRoot()->m_performanceMonitor;
+  }
 }
 
 WebFrameScheduler* LocalFrame::frameScheduler() {

@@ -20,7 +20,6 @@
 #include "ui/display/types/display_snapshot.h"
 #include "ui/events/ozone/device/device_event.h"
 #include "ui/events/ozone/device/device_manager.h"
-#include "ui/ozone/common/display_util.h"
 #include "ui/ozone/platform/drm/common/drm_util.h"
 #include "ui/ozone/platform/drm/host/drm_device_handle.h"
 #include "ui/ozone/platform/drm/host/drm_display_host.h"
@@ -306,28 +305,7 @@ void DrmDisplayHostManager::OnRemoveGraphicsDevice(
   ProcessEvent();
 }
 
-void DrmDisplayHostManager::OnGpuThreadReady() {
-  // If in the middle of a configuration, just respond with the old list of
-  // displays. This is fine, since after the DRM resources are initialized and
-  // IPC-ed to the GPU NotifyDisplayDelegate() is called to let the display
-  // delegate know that the display configuration changed and it needs to
-  // update it again.
-  if (!get_displays_callback_.is_null()) {
-    base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE,
-        base::Bind(&DrmDisplayHostManager::RunUpdateDisplaysCallback,
-                   weak_ptr_factory_.GetWeakPtr(), get_displays_callback_));
-    get_displays_callback_.Reset();
-  }
-
-  // Signal that we're taking DRM master since we're going through the
-  // initialization process again and we'll take all the available resources.
-  if (!take_display_control_callback_.is_null())
-    GpuTookDisplayControl(true);
-
-  if (!relinquish_display_control_callback_.is_null())
-    GpuRelinquishedDisplayControl(false);
-
+void DrmDisplayHostManager::OnGpuProcessLaunched() {
   std::unique_ptr<DrmDeviceHandle> handle =
       std::move(primary_drm_device_handle_);
   {
@@ -349,6 +327,29 @@ void DrmDisplayHostManager::OnGpuThreadReady() {
   // state.
   proxy_->GpuAddGraphicsDevice(drm_devices_[primary_graphics_card_path_],
                                base::FileDescriptor(handle->PassFD()));
+}
+
+void DrmDisplayHostManager::OnGpuThreadReady() {
+  // If in the middle of a configuration, just respond with the old list of
+  // displays. This is fine, since after the DRM resources are initialized and
+  // IPC-ed to the GPU NotifyDisplayDelegate() is called to let the display
+  // delegate know that the display configuration changed and it needs to
+  // update it again.
+  if (!get_displays_callback_.is_null()) {
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE,
+        base::Bind(&DrmDisplayHostManager::RunUpdateDisplaysCallback,
+                   weak_ptr_factory_.GetWeakPtr(), get_displays_callback_));
+    get_displays_callback_.Reset();
+  }
+
+  // Signal that we're taking DRM master since we're going through the
+  // initialization process again and we'll take all the available resources.
+  if (!take_display_control_callback_.is_null())
+    GpuTookDisplayControl(true);
+
+  if (!relinquish_display_control_callback_.is_null())
+    GpuRelinquishedDisplayControl(false);
 
   device_manager_->ScanDevices(this);
   NotifyDisplayDelegate();

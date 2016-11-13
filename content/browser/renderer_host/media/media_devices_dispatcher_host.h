@@ -7,8 +7,10 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "base/macros.h"
+#include "content/browser/media/media_devices_permission_checker.h"
 #include "content/browser/renderer_host/media/media_devices_manager.h"
 #include "content/common/content_export.h"
 #include "content/common/media/media_devices.mojom.h"
@@ -22,23 +24,21 @@ class Origin;
 namespace content {
 
 class MediaStreamManager;
-class MediaStreamUIProxy;
 
 class CONTENT_EXPORT MediaDevicesDispatcherHost
-    : public ::mojom::MediaDevicesDispatcherHost {
+    : public ::mojom::MediaDevicesDispatcherHost,
+      public MediaDeviceChangeSubscriber {
  public:
   MediaDevicesDispatcherHost(int render_process_id,
-                             int routing_id,
+                             int render_frame_id,
                              const std::string& device_id_salt,
-                             MediaStreamManager* media_stream_manager,
-                             bool use_fake_ui);
+                             MediaStreamManager* media_stream_manager);
   ~MediaDevicesDispatcherHost() override;
 
   static void Create(int render_process_id,
-                     int routing_id,
+                     int render_frame_id,
                      const std::string& device_id_salt,
                      MediaStreamManager* media_stream_manager,
-                     bool use_fake_ui,
                      ::mojom::MediaDevicesDispatcherHostRequest request);
 
   // ::mojom::MediaDevicesDispatcherHost implementation.
@@ -48,45 +48,24 @@ class CONTENT_EXPORT MediaDevicesDispatcherHost
       bool request_audio_output,
       const url::Origin& security_origin,
       const EnumerateDevicesCallback& client_callback) override;
+  void SubscribeDeviceChangeNotifications(
+      MediaDeviceType type,
+      uint32_t subscription_id,
+      const url::Origin& security_origin) override;
+  void UnsubscribeDeviceChangeNotifications(MediaDeviceType type,
+                                            uint32_t subscription_id) override;
 
-  // Sets a MediaStreamUIProxy to be used in a single run of EnumerateDevices(),
-  // provided that the MediaDevicesDispatcherHost was created with |use_fake_ui|
-  // set to true. Subsequent runs of EnumerateDevices() use a new internally
-  // generated fake MediaStreamUIProxy.
-  // |fake_ui_proxy| is ignored if the MediaDevicesDispatcherHost was created
-  // with |use_fake_ui|, in which case a real MediaStreamUIProxy will be used
-  // instead.
-  // This function is intended to be used for testing.
-  void SetFakeUIProxyForTesting(
-      std::unique_ptr<MediaStreamUIProxy> fake_ui_proxy);
+  // MediaDeviceChangeSubscriber implementation.
+  void OnDevicesChanged(MediaDeviceType type,
+                        const MediaDeviceInfoArray& device_infos) override;
+
+  void SetPermissionChecker(
+      std::unique_ptr<MediaDevicesPermissionChecker> permission_checker);
+
+  void SetDeviceChangeListenerForTesting(
+      ::mojom::MediaDevicesListenerPtr listener);
 
  private:
-  // Internal type that represents a callback that receives a
-  // MediaDevicesManager::BoolDeviceTypes containing the permissions for each
-  // device type.
-  using AccessCheckedCallback =
-      base::Callback<void(const MediaDevicesManager::BoolDeviceTypes&)>;
-
-  // Currently, the same permission (MEDIA_DEVICE_AUDIO_CAPTURE) is used for
-  // both audio input and output.
-  // TODO(guidou): use specific permission for audio output when it becomes
-  // available. See http://crbug.com/556542.
-  void CheckAccess(bool check_audio,
-                   bool check_video_input,
-                   const url::Origin& security_origin,
-                   const AccessCheckedCallback& callback);
-
-  void AudioAccessChecked(std::unique_ptr<MediaStreamUIProxy> ui_proxy,
-                          bool check_video_permission,
-                          const url::Origin& security_origin,
-                          const AccessCheckedCallback& callback,
-                          bool has_audio_permission);
-
-  void VideoAccessChecked(std::unique_ptr<MediaStreamUIProxy> ui_proxy,
-                          bool has_audio_permission,
-                          const AccessCheckedCallback& callback,
-                          bool has_video_permission);
-
   void DoEnumerateDevices(
       const MediaDevicesManager::BoolDeviceTypes& requested_types,
       const url::Origin& security_origin,
@@ -100,15 +79,26 @@ class CONTENT_EXPORT MediaDevicesDispatcherHost
       const MediaDevicesManager::BoolDeviceTypes& has_permissions,
       const MediaDeviceEnumeration& enumeration);
 
-  std::unique_ptr<MediaStreamUIProxy> GetUIProxy();
+  struct SubscriptionInfo;
+  void NotifyDeviceChangeOnUIThread(
+      const std::vector<SubscriptionInfo>& subscriptions,
+      MediaDeviceType type,
+      const MediaDeviceInfoArray& device_infos);
 
-  int render_process_id_;
-  int routing_id_;
-  std::string device_id_salt_;
-  std::string group_id_salt_;
+  // The following const fields can be accessed on any thread.
+  const int render_process_id_;
+  const int render_frame_id_;
+  const std::string device_id_salt_;
+  const std::string group_id_salt_;
+
+  // The following fields can only be accessed on the IO thread.
   MediaStreamManager* media_stream_manager_;
-  bool use_fake_ui_;
-  std::unique_ptr<MediaStreamUIProxy> fake_ui_proxy_;
+  std::unique_ptr<MediaDevicesPermissionChecker> permission_checker_;
+  std::vector<SubscriptionInfo>
+      device_change_subscriptions_[NUM_MEDIA_DEVICE_TYPES];
+
+  // This field can only be accessed on the UI thread.
+  ::mojom::MediaDevicesListenerPtr device_change_listener_;
 
   base::WeakPtrFactory<MediaDevicesDispatcherHost> weak_factory_;
 

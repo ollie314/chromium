@@ -432,6 +432,8 @@ void LayoutTable::layoutCaption(LayoutTableCaption& caption,
       collapsedMarginBeforeForChild(caption) + logicalHeight();
   caption.setLogicalLocation(
       LayoutPoint(caption.marginStart(), captionLogicalTop));
+  if (view()->layoutState()->isPaginated())
+    updateFragmentationInfoForChild(caption);
 
   if (!selfNeedsLayout())
     caption.setMayNeedPaintInvalidation();
@@ -452,6 +454,8 @@ void LayoutTable::layoutSection(LayoutTableSection& section,
   section.layoutIfNeeded();
   int sectionLogicalHeight = section.calcRowLogicalHeight();
   section.setLogicalHeight(LayoutUnit(sectionLogicalHeight));
+  if (view()->layoutState()->isPaginated())
+    updateFragmentationInfoForChild(section);
   setLogicalHeight(logicalHeight() + sectionLogicalHeight);
 }
 
@@ -563,7 +567,7 @@ void LayoutTable::layout() {
   SubtreeLayoutScope layouter(*this);
 
   {
-    LayoutState state(*this, locationOffset());
+    LayoutState state(*this);
     LayoutUnit oldLogicalWidth = logicalWidth();
     LayoutUnit oldLogicalHeight = logicalHeight();
 
@@ -732,22 +736,23 @@ void LayoutTable::layout() {
 
     computeOverflow(clientLogicalBottom());
     updateAfterLayout();
+
+    if (state.pageLogicalHeight()) {
+      m_blockOffsetToFirstRepeatableHeader = state.pageLogicalOffset(
+          *this, topSection ? topSection->logicalTop() : LayoutUnit());
+    }
   }
 
   // FIXME: This value isn't the intrinsic content logical height, but we need
   // to update the value as its used by flexbox layout. crbug.com/367324
   setIntrinsicContentLogicalHeight(contentLogicalHeight());
 
-  if (view()->layoutState()->pageLogicalHeight())
-    setPageLogicalOffset(
-        view()->layoutState()->pageLogicalOffset(*this, logicalTop()));
-
   m_columnLogicalWidthChanged = false;
   clearNeedsLayout();
 }
 
 void LayoutTable::invalidateCollapsedBorders() {
-  m_collapsedBorders.clear();
+  m_collapsedBordersInfo = nullptr;
   if (!collapseBorders())
     return;
 
@@ -760,10 +765,15 @@ void LayoutTable::invalidateCollapsedBorders() {
 // cache of its containing section, and invalidates itself if any border
 // changes. This method doesn't affect layout.
 void LayoutTable::recalcCollapsedBordersIfNeeded() {
-  if (m_collapsedBordersValid || !collapseBorders())
+  if (m_collapsedBordersValid)
     return;
   m_collapsedBordersValid = true;
-  m_collapsedBorders.clear();
+  m_collapsedBordersInfo = nullptr;
+  if (!collapseBorders())
+    return;
+
+  LayoutRect boundsOfChangedCells;
+  Vector<CollapsedBorderValue> values;
   for (LayoutObject* section = firstChild(); section;
        section = section->nextSibling()) {
     if (!section->isTableSection())
@@ -772,12 +782,23 @@ void LayoutTable::recalcCollapsedBordersIfNeeded() {
          row = row->nextRow()) {
       for (LayoutTableCell* cell = row->firstCell(); cell;
            cell = cell->nextCell()) {
-        ASSERT(cell->table() == this);
-        cell->collectBorderValues(m_collapsedBorders);
+        DCHECK(cell->table() == this);
+        if (cell->collectBorderValues(values) &&
+            !shouldDoFullPaintInvalidation()) {
+          LayoutRect cellRect = cell->localVisualRect();
+          cell->mapToVisualRectInAncestorSpace(this, cellRect);
+          boundsOfChangedCells.unite(cellRect);
+        }
       }
     }
   }
-  LayoutTableCell::sortBorderValues(m_collapsedBorders);
+  if (!values.isEmpty()) {
+    LayoutTableCell::sortBorderValues(values);
+    m_collapsedBordersInfo =
+        wrapUnique(new CollapsedBordersInfo(std::move(values)));
+  }
+
+  invalidatePaintRectangle(boundsOfChangedCells);
 }
 
 void LayoutTable::addOverflowFromChildren() {
@@ -1057,7 +1078,6 @@ void LayoutTable::recalcSections() const {
   m_foot = nullptr;
   m_firstBody = nullptr;
   m_hasColElements = false;
-  m_noCellColspanAtLeast = calcNoCellColspanAtLeast();
 
   // We need to get valid pointers to caption, head, foot and first body again
   LayoutObject* nextSibling;
@@ -1116,6 +1136,7 @@ void LayoutTable::recalcSections() const {
 
   m_effectiveColumns.resize(maxCols);
   m_effectiveColumnPositions.resize(maxCols + 1);
+  m_noCellColspanAtLeast = calcNoCellColspanAtLeast();
 
   ASSERT(selfNeedsLayout());
 
@@ -1657,10 +1678,10 @@ void LayoutTable::ensureIsReadyForPaintInvalidation() {
 
 PaintInvalidationReason LayoutTable::invalidatePaintIfNeeded(
     const PaintInvalidationState& paintInvalidationState) {
-  if (collapseBorders() && !m_collapsedBorders.isEmpty())
+  if (hasCollapsedBorders()) {
     paintInvalidationState.paintingLayer()
         .setNeedsPaintPhaseDescendantBlockBackgrounds();
-
+  }
   return LayoutBlock::invalidatePaintIfNeeded(paintInvalidationState);
 }
 

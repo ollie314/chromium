@@ -23,7 +23,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_android.h"
 #include "components/offline_pages/background/request_coordinator.h"
-#include "components/offline_pages/background/request_queue.h"
+#include "components/offline_pages/background/request_queue_results.h"
 #include "components/offline_pages/background/save_page_request.h"
 #include "components/offline_pages/offline_page_feature.h"
 #include "components/offline_pages/offline_page_item.h"
@@ -167,20 +167,19 @@ void OnGetAllRequestsDone(
   base::android::RunCallbackAndroid(j_callback_obj, j_result_obj);
 }
 
-RequestQueue::UpdateRequestResult ToUpdateRequestResult(
-    ItemActionStatus status) {
+UpdateRequestResult ToUpdateRequestResult(ItemActionStatus status) {
   switch (status) {
     case ItemActionStatus::SUCCESS:
-      return RequestQueue::UpdateRequestResult::SUCCESS;
+      return UpdateRequestResult::SUCCESS;
     case ItemActionStatus::NOT_FOUND:
-      return RequestQueue::UpdateRequestResult::REQUEST_DOES_NOT_EXIST;
+      return UpdateRequestResult::REQUEST_DOES_NOT_EXIST;
     case ItemActionStatus::STORE_ERROR:
-      return RequestQueue::UpdateRequestResult::STORE_FAILURE;
+      return UpdateRequestResult::STORE_FAILURE;
     case ItemActionStatus::ALREADY_EXISTS:
     default:
       NOTREACHED();
   }
-  return RequestQueue::UpdateRequestResult::STORE_FAILURE;
+  return UpdateRequestResult::STORE_FAILURE;
 }
 
 void OnRemoveRequestsDone(const ScopedJavaGlobalRef<jobject>& j_callback_obj,
@@ -211,11 +210,6 @@ void OnRemoveRequestsDone(const ScopedJavaGlobalRef<jobject>& j_callback_obj,
 static jboolean IsOfflineBookmarksEnabled(JNIEnv* env,
                                           const JavaParamRef<jclass>& clazz) {
   return offline_pages::IsOfflineBookmarksEnabled();
-}
-
-static jboolean IsBackgroundLoadingEnabled(JNIEnv* env,
-                                           const JavaParamRef<jclass>& clazz) {
-  return offline_pages::IsOfflinePagesBackgroundLoadingEnabled();
 }
 
 static jboolean IsPageSharingEnabled(JNIEnv* env,
@@ -499,6 +493,17 @@ ScopedJavaLocalRef<jstring> OfflinePageBridge::GetOfflinePageHeaderForReload(
       offline_pages::OfflinePageHeader::Reason::RELOAD;
   return ScopedJavaLocalRef<jstring>(ConvertUTF8ToJavaString(
       env, offline_header_for_reload.GetCompleteHeaderString()));
+}
+
+jboolean OfflinePageBridge::IsShowingOfflinePreview(
+    JNIEnv* env,
+    const base::android::JavaParamRef<jobject>& obj,
+    const JavaParamRef<jobject>& j_web_contents) {
+  content::WebContents* web_contents =
+      content::WebContents::FromJavaWebContents(j_web_contents);
+  if (!web_contents)
+    return false;
+  return offline_pages::OfflinePageUtils::IsShowingOfflinePreview(web_contents);
 }
 
 void OfflinePageBridge::GetRequestsInQueue(

@@ -179,12 +179,10 @@ FYI_WATERFALL = {
       'swarming': True,
       'os_type': 'win',
     },
-    'Win7 Release (ATI)': {
+    'Win7 Release (AMD)': {
       'swarming_dimensions': [
         {
-          # TODO(kbr): add device PCI ID 6613 once deployed
-          # http://crbug.com/639353
-          'gpu': '1002',
+          'gpu': '1002:6613',
           'os': 'Windows-2008ServerR2-SP1'
         },
       ],
@@ -192,12 +190,10 @@ FYI_WATERFALL = {
       'swarming': True,
       'os_type': 'win',
     },
-    'Win7 Debug (ATI)': {
+    'Win7 Debug (AMD)': {
       'swarming_dimensions': [
         {
-          # TODO(kbr): add device PCI ID 6613 once deployed
-          # http://crbug.com/639353
-          'gpu': '1002',
+          'gpu': '1002:6613',
           'os': 'Windows-2008ServerR2-SP1'
         },
       ],
@@ -270,6 +266,19 @@ FYI_WATERFALL = {
       'swarming': False,
       'os_type': 'win',
     },
+    'Win7 Release (AMD R5 230)': {
+      'swarming_dimensions': [
+        {
+          'gpu': '1002:6779',
+          'os': 'Windows-2008ServerR2-SP1'
+        },
+      ],
+      'build_config': 'Release',
+      # This bot is a one-off and doesn't have similar slaves in the
+      # swarming pool.
+      'swarming': False,
+      'os_type': 'win',
+    },
     'Win7 x64 Release (NVIDIA)': {
       'swarming_dimensions': [
         {
@@ -314,7 +323,7 @@ FYI_WATERFALL = {
       'swarming': True,
       'os_type': 'mac',
     },
-    'Mac 10.10 Release (ATI)': {
+    'Mac 10.10 Release (AMD)': {
       'swarming_dimensions': [
         {
           'gpu': '1002:679e',
@@ -327,7 +336,7 @@ FYI_WATERFALL = {
       'swarming': False,
       'os_type': 'mac',
     },
-    'Mac 10.10 Debug (ATI)': {
+    'Mac 10.10 Debug (AMD)': {
       'swarming_dimensions': [
         {
           'gpu': '1002:679e',
@@ -442,7 +451,7 @@ FYI_WATERFALL = {
       'swarming': False,
       'os_type': 'linux',
     },
-    'Linux Release (ATI)': {
+    'Linux Release (AMD R5 230)': {
       'swarming_dimensions': [
         {
           'gpu': '1002:6779',
@@ -622,12 +631,10 @@ FYI_WATERFALL = {
       'swarming': True,
       'os_type': 'win',
     },
-    'Optional Win7 Release (ATI)': {
+    'Optional Win7 Release (AMD)': {
       'swarming_dimensions': [
         {
-          # TODO(kbr): add device PCI ID 6613 once deployed
-          # http://crbug.com/639353
-          'gpu': '1002',
+          'gpu': '1002:6613',
           'os': 'Windows-2008ServerR2-SP1'
         },
       ],
@@ -709,6 +716,7 @@ COMMON_GTESTS = {
   'angle_deqp_gles2_tests': {
     'tester_configs': [
       {
+        'allow_on_android': True,
         'fyi_only': True,
         # Run this on the optional tryservers.
         'run_on_optional': True,
@@ -740,7 +748,8 @@ COMMON_GTESTS = {
     ],
     'desktop_swarming': {
       'shards': 4,
-    }
+    },
+    'android_args': ['--enable-xml-result-parsing']
   },
 
   'angle_deqp_gles3_tests': {
@@ -1047,11 +1056,17 @@ TELEMETRY_GPU_INTEGRATION_TESTS = {
     'disabled_tester_configs': [
       {
         'swarming_dimension_sets': [
-          # BUG 555545: Disable webgl_conformance_gl_tests on Win/AMD
+          # crbug.com/555545 and crbug.com/649824:
+          # Disable webgl_conformance_gl_tests on some Win/AMD cards.
+          # Always fails on older cards, flaky on newer cards.
+          # Note that these must match the GPUs exactly; wildcard
+          # matches (i.e., only device ID) aren't supported!
           {
-            # TODO(kbr): add device PCI ID 6613 once deployed
-            # http://crbug.com/639353
-            'gpu': '1002',
+            'gpu': '1002:6779',
+            'os': 'Windows-2008ServerR2-SP1'
+          },
+          {
+            'gpu': '1002:6613',
             'os': 'Windows-2008ServerR2-SP1'
           },
           # BUG 590951: Disable webgl_conformance_gl_tests on Win/Intel
@@ -1075,7 +1090,8 @@ TELEMETRY_GPU_INTEGRATION_TESTS = {
     'tester_configs': [
       {
         'fyi_only': True,
-        'os_types': ['linux']
+        'os_types': ['linux'],
+        'run_on_optional': True,
       }
     ],
     'target_name': 'webgl_conformance',
@@ -1287,6 +1303,13 @@ def generate_gtest(tester_name, tester_config, test, test_config, is_fyi):
       result['args'] += result['desktop_args']
     # Don't put the desktop args in the JSON.
     result.pop('desktop_args')
+  if 'android_args' in result:
+    if is_android(tester_config):
+      if not 'args' in result:
+        result['args'] = []
+      result['args'] += result['android_args']
+    # Don't put the android args in the JSON.
+    result.pop('android_args')
   if 'desktop_swarming' in result:
     if not is_android(tester_config):
       result['swarming'].update(result['desktop_swarming'])
@@ -1319,6 +1342,9 @@ def generate_telemetry_test(tester_name, tester_config,
   if 'desktop_args' in test_config and not is_android(tester_config):
     test_args.extend(substitute_args(tester_config,
                                      test_config['desktop_args']))
+  if 'android_args' in test_config and is_android(tester_config):
+    test_args.extend(substitute_args(tester_config,
+                                     test_config['android_args']))
   # The step name must end in 'test' or 'tests' in order for the
   # results to automatically show up on the flakiness dashboard.
   # (At least, this was true some time ago.) Continue to use this

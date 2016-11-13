@@ -58,27 +58,26 @@ class FloatSize;
 class FrameConsole;
 class FrameSelection;
 class FrameView;
-class HTMLPlugInElement;
 class InputMethodController;
+class InstrumentingAgents;
 class InterfaceProvider;
 class InterfaceRegistry;
 class IntPoint;
 class IntSize;
-class InstrumentingAgents;
-class JSONObject;
 class LayoutView;
 class LayoutViewItem;
 class LocalDOMWindow;
 class NavigationScheduler;
 class Node;
 class NodeTraversal;
+class Performance;
+class PerformanceMonitor;
 template <typename Strategy>
 class PositionWithAffinityTemplate;
 class PluginData;
 class Range;
 class ScriptController;
 class SpellChecker;
-class WebFrameHostScheduler;
 class WebFrameScheduler;
 
 extern template class CORE_EXTERN_TEMPLATE_EXPORT Supplement<LocalFrame>;
@@ -86,6 +85,8 @@ extern template class CORE_EXTERN_TEMPLATE_EXPORT Supplement<LocalFrame>;
 class CORE_EXPORT LocalFrame final : public Frame,
                                      public Supplementable<LocalFrame> {
   USING_GARBAGE_COLLECTED_MIXIN(LocalFrame);
+
+  friend class LocalFrameTest;
 
  public:
   static LocalFrame* create(FrameLoaderClient*,
@@ -121,6 +122,7 @@ class CORE_EXPORT LocalFrame final : public Frame,
   void printNavigationErrorMessage(const Frame&, const char* reason) override;
   bool prepareForCommit() override;
   void didChangeVisibilityState() override;
+  void setDocumentHasReceivedUserGesture() override;
 
   void detachChildren();
 
@@ -221,6 +223,8 @@ class CORE_EXPORT LocalFrame final : public Frame,
 
   PluginData* pluginData() const;
 
+  PerformanceMonitor* performanceMonitor() { return m_performanceMonitor; }
+
  private:
   friend class FrameNavigationDisabler;
 
@@ -266,6 +270,7 @@ class CORE_EXPORT LocalFrame final : public Frame,
   bool m_inViewSourceMode;
 
   Member<InstrumentingAgents> m_instrumentingAgents;
+  Member<PerformanceMonitor> m_performanceMonitor;
 
   InterfaceProvider* const m_interfaceProvider;
   InterfaceRegistry* const m_interfaceRegistry;

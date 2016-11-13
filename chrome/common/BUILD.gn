@@ -6,6 +6,7 @@ import("//build/buildflag_header.gni")
 import("//build/util/process_version.gni")
 import("//chrome/common/features.gni")
 import("//chrome/process_version_rc_template.gni")  # For branding_file_path.
+import("//extensions/features/features.gni")
 import("//mojo/public/tools/bindings/mojom.gni")
 import("//tools/grit/grit_rule.gni")
 
@@ -35,6 +36,8 @@ buildflag_header("features") {
     "ENABLE_PACKAGE_MASH_SERVICES=$enable_package_mash_services",
     "ENABLE_PLUGIN_INSTALLATION=$enable_plugin_installation",
     "ENABLE_SERVICE_DISCOVERY=$enable_service_discovery",
+    "ENABLE_SESSION_SERVICE=$enable_session_service",
+    "ENABLE_SUPERVISED_USERS=$enable_supervised_users",
     "ENABLE_XPC_NOTIFICATIONS=$enable_xpc_notifications",
     "PGO_BUILD=$pgo_build",
     "USE_VULCANIZE=$use_vulcanize",
@@ -146,8 +149,6 @@ static_library("common") {
     "v8_breakpad_support_win.h",
     "variations/child_process_field_trial_syncer.cc",
     "variations/child_process_field_trial_syncer.h",
-    "variations/variations_util.cc",
-    "variations/variations_util.h",
     "web_application_info.cc",
     "web_application_info.h",
     "widevine_cdm_constants.cc",
@@ -172,7 +173,6 @@ static_library("common") {
     "//chrome/common:constants",
     "//chrome/common/net",
     "//chrome/common/safe_browsing:proto",
-    "//chrome/common/variations:fieldtrial_testing_config",
     "//chrome/installer/util:with_no_strings",
     "//components/autofill/content/common:ipc_traits",
     "//components/autofill/core/common",
@@ -210,15 +210,18 @@ static_library("common") {
     "//content/public/common",
     "//crypto",
     "//extensions/common:common_constants",
+    "//extensions/features",
     "//gin",
     "//google_apis",
     "//gpu/command_buffer/service",
     "//gpu/config",
     "//ipc",
     "//media",
+    "//mojo/edk/system",
     "//mojo/public/cpp/bindings",
     "//net",
     "//ppapi/features",
+    "//printing/features",
     "//skia",
     "//third_party/icu",
     "//third_party/kasko:kasko_features",
@@ -351,15 +354,6 @@ static_library("common") {
       "media_galleries/picasa_types.h",
       "media_galleries/pmp_constants.h",
     ]
-  }
-  if (is_win || is_mac || is_chromeos) {
-    sources += [
-      "extensions/api/networking_private/networking_private_crypto.cc",
-      "extensions/api/networking_private/networking_private_crypto.h",
-    ]
-
-    # networking_private_crypto.cc depends on boringssl.
-    public_deps += [ "//third_party/boringssl" ]
   }
   if (is_mac) {
     public_deps += [ ":app_mode_app_support" ]
@@ -576,6 +570,8 @@ static_library("constants") {
   public_deps = [
     ":features",
     "//content/public/common:result_codes",
+    "//extensions/features",
+    "//printing/features",
   ]
   deps = [
     ":version_header",
@@ -669,16 +665,12 @@ source_set("app_mode_app_support") {
 
 mojom("mojo_bindings") {
   sources = [
-    "image_decoder.mojom",
     "network_diagnostics.mojom",
     "resource_usage_reporter.mojom",
     "shell_handler_win.mojom",
   ]
 
   public_deps = [
-    "//skia/public/interfaces",
     "//url/mojo:url_mojom_gurl",
   ]
-
-  use_new_wrapper_types = false
 }

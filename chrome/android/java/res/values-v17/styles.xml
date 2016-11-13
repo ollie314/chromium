@@ -521,6 +521,9 @@
     <style name="PaymentsUiSectionDescriptiveTextEndAligned" parent="PaymentsUiSectionDescriptiveText">
         <item name="android:textAlignment">viewEnd</item>
     </style>
+    <style name="PaymentsUiSectionPendingTextEndAligned" parent="PaymentsUiSectionDescriptiveTextEndAligned">
+        <item name="android:textColor">@color/explanation_text_color</item>
+    </style>
     <style name="PaymentsUiSectionAddButtonLabel">
         <item name="android:textColor">@color/light_active_color</item>
         <item name="android:textSize">14sp</item>
@@ -568,6 +571,14 @@
     </style>
     <style name="MaterialProgressBar" parent="Widget.AppCompat.ProgressBar.Horizontal">
         <item name="android:progressDrawable">@drawable/material_progressbar</item>
+    </style>
+    <style name="NumberRollTextViewStyle">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_gravity">center_vertical</item>
+        <item name="android:singleLine">true</item>
+        <item name="android:textColor">@android:color/white</item>
+        <item name="android:textSize">20sp</item>
     </style>
 
     <!-- New tab page RecyclerView overscroll color -->

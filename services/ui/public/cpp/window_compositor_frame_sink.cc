@@ -15,6 +15,7 @@ namespace ui {
 // static
 std::unique_ptr<WindowCompositorFrameSink> WindowCompositorFrameSink::Create(
     scoped_refptr<cc::ContextProvider> context_provider,
+    gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
     std::unique_ptr<WindowCompositorFrameSinkBinding>*
         compositor_frame_sink_binding) {
   cc::mojom::MojoCompositorFrameSinkPtr compositor_frame_sink;
@@ -27,7 +28,8 @@ std::unique_ptr<WindowCompositorFrameSink> WindowCompositorFrameSink::Create(
       GetProxy(&compositor_frame_sink),
       compositor_frame_sink_client.PassInterface()));
   return base::WrapUnique(new WindowCompositorFrameSink(
-      std::move(context_provider), compositor_frame_sink.PassInterface(),
+      std::move(context_provider), gpu_memory_buffer_manager,
+      compositor_frame_sink.PassInterface(),
       std::move(compositor_frame_sink_client_request)));
 }
 
@@ -45,10 +47,7 @@ bool WindowCompositorFrameSink::BindToClient(
       new mojo::Binding<cc::mojom::MojoCompositorFrameSinkClient>(
           this, std::move(client_request_)));
 
-  // TODO(enne): Get this from the WindowSurface via ServerWindowSurface.
-  begin_frame_source_.reset(new cc::DelayBasedBeginFrameSource(
-      base::MakeUnique<cc::DelayBasedTimeSource>(
-          base::ThreadTaskRunnerHandle::Get().get())));
+  begin_frame_source_ = base::MakeUnique<cc::ExternalBeginFrameSource>(this);
 
   client->SetBeginFrameSource(begin_frame_source_.get());
   return true;
@@ -72,10 +71,14 @@ void WindowCompositorFrameSink::SubmitCompositorFrame(
 
 WindowCompositorFrameSink::WindowCompositorFrameSink(
     scoped_refptr<cc::ContextProvider> context_provider,
+    gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
     mojo::InterfacePtrInfo<cc::mojom::MojoCompositorFrameSink>
         compositor_frame_sink_info,
     cc::mojom::MojoCompositorFrameSinkClientRequest client_request)
-    : cc::CompositorFrameSink(std::move(context_provider), nullptr),
+    : cc::CompositorFrameSink(std::move(context_provider),
+                              nullptr,
+                              gpu_memory_buffer_manager,
+                              nullptr),
       compositor_frame_sink_info_(std::move(compositor_frame_sink_info)),
       client_request_(std::move(client_request)) {}
 
@@ -87,6 +90,11 @@ void WindowCompositorFrameSink::DidReceiveCompositorFrameAck() {
   client_->DidReceiveCompositorFrameAck();
 }
 
+void WindowCompositorFrameSink::OnBeginFrame(
+    const cc::BeginFrameArgs& begin_frame_args) {
+  begin_frame_source_->OnBeginFrame(begin_frame_args);
+}
+
 void WindowCompositorFrameSink::ReclaimResources(
     const cc::ReturnedResourceArray& resources) {
   DCHECK(thread_checker_);
@@ -94,6 +102,10 @@ void WindowCompositorFrameSink::ReclaimResources(
   if (!client_)
     return;
   client_->ReclaimResources(resources);
+}
+
+void WindowCompositorFrameSink::OnNeedsBeginFrames(bool needs_begin_frames) {
+  compositor_frame_sink_->SetNeedsBeginFrame(needs_begin_frames);
 }
 
 WindowCompositorFrameSinkBinding::~WindowCompositorFrameSinkBinding() {}

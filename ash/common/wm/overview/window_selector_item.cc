@@ -27,17 +27,14 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
-#include "grit/ash_resources.h"
 #include "grit/ash_strings.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/base/resource/resource_bundle.h"
 #include "ui/compositor/layer_animation_sequence.h"
 #include "ui/compositor/scoped_animation_duration_scale_mode.h"
 #include "ui/gfx/animation/slide_animation.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/color_utils.h"
 #include "ui/gfx/geometry/safe_integer_conversions.h"
-#include "ui/gfx/geometry/vector2d.h"
 #include "ui/gfx/paint_vector_icon.h"
 #include "ui/gfx/transform_util.h"
 #include "ui/gfx/vector_icons_public.h"
@@ -288,7 +285,7 @@ class WindowSelectorItem::RoundedContainerView
     if (0 != (sequence->properties() &
               ui::LayerAnimationElement::AnimatableProperty::OPACITY)) {
       if (item_)
-        item_->HideHeaderAndSetShape(0);
+        item_->HideHeader();
       StopObservingLayerAnimations();
       AnimateColor(gfx::Tween::EASE_IN, kSelectorColorSlideMilliseconds);
     }
@@ -515,8 +512,8 @@ void WindowSelectorItem::CloseWindow() {
   transform_window_.Close();
 }
 
-void WindowSelectorItem::HideHeaderAndSetShape(int radius) {
-  transform_window_.HideHeaderAndSetShape(radius);
+void WindowSelectorItem::HideHeader() {
+  transform_window_.HideHeader();
 }
 
 void WindowSelectorItem::SetDimmed(bool dimmed) {
@@ -579,7 +576,6 @@ void WindowSelectorItem::SetItemBounds(const gfx::Rect& target_bounds,
   ScopedTransformOverviewWindow::ScopedAnimationSettings animation_settings;
   transform_window_.BeginScopedAnimation(animation_type, &animation_settings);
   transform_window_.SetTransform(root_window_, transform);
-  transform_window_.set_overview_transform(transform);
 }
 
 void WindowSelectorItem::SetOpacity(float opacity) {
@@ -636,7 +632,7 @@ void WindowSelectorItem::CreateWindowLabel(const base::string16& title) {
   window_label_->set_focus_on_creation(false);
   window_label_->Init(params_label);
   window_label_button_view_ = new OverviewLabelButton(this, title);
-  window_label_button_view_->SetBorder(views::Border::NullBorder());
+  window_label_button_view_->SetBorder(views::NullBorder());
   window_label_button_view_->SetEnabledTextColors(kLabelColor);
   window_label_button_view_->set_animate_on_state_change(false);
   WmWindow* label_window =
@@ -653,9 +649,6 @@ void WindowSelectorItem::CreateWindowLabel(const base::string16& title) {
                                                transform_window_.window());
   }
   window_label_button_view_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-  ui::ResourceBundle& bundle = ui::ResourceBundle::GetSharedInstance();
-  window_label_button_view_->SetFontList(
-      bundle.GetFontList(ui::ResourceBundle::BaseFont));
   // Hint at the background color that the label will be drawn onto (for
   // subpixel antialiasing). Does not actually set the background color.
   window_label_button_view_->SetBackgroundColorHint(kLabelBackgroundColor);

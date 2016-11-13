@@ -19,6 +19,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/mock_entropy_provider.h"
+#include "base/test/scoped_feature_list.h"
 #include "base/test/test_simple_task_runner.h"
 #include "base/threading/thread_local.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -35,7 +36,7 @@
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
 #include "components/safe_browsing_db/safe_browsing_prefs.h"
-#include "components/syncable_prefs/testing_pref_service_syncable.h"
+#include "components/sync_preferences/testing_pref_service_syncable.h"
 #include "content/public/test/test_browser_thread.h"
 #include "extensions/browser/quota_service.h"
 #include "net/url_request/url_request_context_getter.h"
@@ -229,12 +230,8 @@ class IncidentReportingServiceTest : public testing::Test {
     field_trial_->group();
 
 #if !defined(GOOGLE_CHROME_BUILD)
-    base::FeatureList::ClearInstanceForTesting();
-    std::unique_ptr<base::FeatureList> feature_list(new base::FeatureList);
-    // Disable kIncidentReportingDisableUpload (enable mocked upload).
-    feature_list->InitializeFromCommandLine(
-        std::string(), safe_browsing::kIncidentReportingDisableUpload.name);
-    base::FeatureList::SetInstance(std::move(feature_list));
+    scoped_feature_list_.InitAndDisableFeature(
+        safe_browsing::kIncidentReportingDisableUpload);
 #endif
 
     instance_.reset(new TestIncidentReportingService(
@@ -263,8 +260,8 @@ class IncidentReportingServiceTest : public testing::Test {
                                 OnProfileAdditionAction on_addition_action,
                                 std::unique_ptr<base::Value> incidents_sent) {
     // Create prefs for the profile with safe browsing enabled or not.
-    std::unique_ptr<syncable_prefs::TestingPrefServiceSyncable> prefs(
-        new syncable_prefs::TestingPrefServiceSyncable);
+    std::unique_ptr<sync_preferences::TestingPrefServiceSyncable> prefs(
+        new sync_preferences::TestingPrefServiceSyncable);
     chrome::RegisterUserProfilePrefs(prefs->registry());
     prefs->SetBoolean(prefs::kSafeBrowsingEnabled,
                       safe_browsing_opt_in != SAFE_BROWSING_OPT_OUT);
@@ -590,6 +587,8 @@ class IncidentReportingServiceTest : public testing::Test {
 
   // A mapping of profile name to its corresponding properties.
   std::map<std::string, ProfileProperties> profile_properties_;
+
+  base::test::ScopedFeatureList scoped_feature_list_;
 };
 
 // static

@@ -44,7 +44,7 @@
 #include "chrome/test/base/testing_io_thread_state.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
-#include "components/syncable_prefs/testing_pref_service_syncable.h"
+#include "components/sync_preferences/testing_pref_service_syncable.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/common/content_paths.h"
 #include "content/public/test/test_browser_thread_bundle.h"
@@ -464,7 +464,7 @@ base::Process CloudPrintProxyPolicyStartupTest::Launch(
                          base::RandInt(0, std::numeric_limits<int>::max())));
   startup_channel_ = IPC::ChannelProxy::Create(
       mojo::edk::ConnectToPeerProcess(
-          mojo::edk::CreateServerHandle(startup_channel_handle_, false))
+          mojo::edk::CreateServerHandle(startup_channel_handle_))
           .release(),
       IPC::Channel::MODE_SERVER, this, IOTaskRunner());
 
@@ -481,8 +481,7 @@ void CloudPrintProxyPolicyStartupTest::WaitForConnect() {
   mojo::MessagePipe pipe;
   BrowserThread::PostBlockingPoolTask(
       FROM_HERE, base::Bind(&ConnectOnBlockingPool, base::Passed(&pipe.handle1),
-                            mojo::edk::NamedPlatformHandle(
-                                GetServiceProcessChannel().name)));
+                            GetServiceProcessChannel()));
   ServiceProcessControl::GetInstance()->SetChannel(
       IPC::ChannelProxy::Create(IPC::ChannelMojo::CreateClientFactory(
                                     std::move(pipe.handle0), IOTaskRunner()),
@@ -521,8 +520,7 @@ base::CommandLine CloudPrintProxyPolicyStartupTest::MakeCmdLine(
 TEST_F(CloudPrintProxyPolicyStartupTest, StartAndShutdown) {
   mojo::edk::Init();
   mojo::edk::ScopedIPCSupport ipc_support(
-      BrowserThread::UnsafeGetMessageLoopForThread(BrowserThread::IO)
-          ->task_runner());
+      BrowserThread::GetTaskRunnerForThread(BrowserThread::IO));
 
   TestingBrowserProcess* browser_process =
       TestingBrowserProcess::GetGlobal();

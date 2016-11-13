@@ -33,7 +33,7 @@ class SessionStateDelegateChromeos
   bool IsActiveUserSessionStarted() const override;
   bool CanLockScreen() const override;
   bool IsScreenLocked() const override;
-  bool ShouldLockScreenBeforeSuspending() const override;
+  bool ShouldLockScreenAutomatically() const override;
   void LockScreen() override;
   void UnlockScreen() override;
   bool IsUserSessionBlocked() const override;
@@ -68,8 +68,8 @@ class SessionStateDelegateChromeos
   // Notify observers about session state change.
   void NotifySessionStateChanged();
 
-  // Switches to a new user. This call might show a dialog asking the user if he
-  // wants to stop desktop casting before switching.
+  // Switches to a new user. This call might show a dialog asking the user if
+  // they want to stop desktop casting before switching.
   void TryToSwitchUser(const AccountId& account_id);
 
   // List of observers is only used on Chrome OS for now.

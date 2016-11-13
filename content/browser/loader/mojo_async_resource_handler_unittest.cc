@@ -33,6 +33,7 @@
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "mojo/public/c/system/data_pipe.h"
 #include "mojo/public/c/system/types.h"
+#include "mojo/public/cpp/bindings/strong_binding.h"
 #include "mojo/public/cpp/system/data_pipe.h"
 #include "net/base/auth.h"
 #include "net/base/net_errors.h"
@@ -184,6 +185,10 @@ class TestResourceController : public ResourceController {
   }
 
   void CancelWithError(int error_code) override {
+    // While cancelling more than once is legal, none of these tests should do
+    // it.
+    EXPECT_FALSE(is_cancel_with_error_called_);
+
     is_cancel_with_error_called_ = true;
     error_ = error_code;
     if (quit_closure_)
@@ -223,8 +228,8 @@ class MojoAsyncResourceHandlerWithCustomDataPipeOperations
   MojoAsyncResourceHandlerWithCustomDataPipeOperations(
       net::URLRequest* request,
       ResourceDispatcherHostImpl* rdh,
-      mojo::InterfaceRequest<mojom::URLLoader> mojo_request,
-      mojom::URLLoaderClientPtr url_loader_client)
+      mojom::URLLoaderAssociatedRequest mojo_request,
+      mojom::URLLoaderClientAssociatedPtr url_loader_client)
       : MojoAsyncResourceHandler(request,
                                  rdh,
                                  std::move(mojo_request),
@@ -263,6 +268,43 @@ class MojoAsyncResourceHandlerWithCustomDataPipeOperations
       MojoAsyncResourceHandlerWithCustomDataPipeOperations);
 };
 
+class TestURLLoaderFactory final : public mojom::URLLoaderFactory {
+ public:
+  TestURLLoaderFactory() {}
+  ~TestURLLoaderFactory() override {}
+
+  void CreateLoaderAndStart(
+      mojom::URLLoaderAssociatedRequest request,
+      int32_t routing_id,
+      int32_t request_id,
+      const ResourceRequest& url_request,
+      mojom::URLLoaderClientAssociatedPtrInfo client_ptr_info) override {
+    loader_request_ = std::move(request);
+    client_ptr_info_ = std::move(client_ptr_info);
+  }
+
+  mojom::URLLoaderAssociatedRequest PassLoaderRequest() {
+    return std::move(loader_request_);
+  }
+
+  mojom::URLLoaderClientAssociatedPtrInfo PassClientPtrInfo() {
+    return std::move(client_ptr_info_);
+  }
+
+  void SyncLoad(int32_t routing_id,
+                int32_t request_id,
+                const ResourceRequest& url_request,
+                const SyncLoadCallback& callback) override {
+    NOTREACHED();
+  }
+
+ private:
+  mojom::URLLoaderAssociatedRequest loader_request_;
+  mojom::URLLoaderClientAssociatedPtrInfo client_ptr_info_;
+
+  DISALLOW_COPY_AND_ASSIGN(TestURLLoaderFactory);
+};
+
 class MojoAsyncResourceHandlerTestBase {
  public:
   MojoAsyncResourceHandlerTestBase()
@@ -290,9 +332,28 @@ class MojoAsyncResourceHandlerTestBase {
         true,                                    // is_async
         false                                    // is_using_lofi
         );
+
+    ResourceRequest request;
+    base::WeakPtr<mojo::StrongBinding<mojom::URLLoaderFactory>> weak_binding =
+        mojo::MakeStrongBinding(base::MakeUnique<TestURLLoaderFactory>(),
+                                mojo::GetProxy(&url_loader_factory_));
+
+    url_loader_factory_->CreateLoaderAndStart(
+        mojo::GetProxy(&url_loader_proxy_,
+                       url_loader_factory_.associated_group()),
+        0, 0, request, url_loader_client_.CreateRemoteAssociatedPtrInfo(
+                           url_loader_factory_.associated_group()));
+
+    url_loader_factory_.FlushForTesting();
+    DCHECK(weak_binding);
+    TestURLLoaderFactory* factory_impl =
+        static_cast<TestURLLoaderFactory*>(weak_binding->impl());
+
+    mojom::URLLoaderClientAssociatedPtr client_ptr;
+    client_ptr.Bind(factory_impl->PassClientPtrInfo());
     handler_.reset(new MojoAsyncResourceHandlerWithCustomDataPipeOperations(
-        request_.get(), &rdh_, nullptr,
-        url_loader_client_.CreateInterfacePtrAndBind()));
+        request_.get(), &rdh_, factory_impl->PassLoaderRequest(),
+        std::move(client_ptr)));
     handler_->SetController(&resource_controller_);
   }
 
@@ -344,6 +405,8 @@ class MojoAsyncResourceHandlerTestBase {
   TestBrowserThreadBundle thread_bundle_;
   TestResourceDispatcherHostDelegate rdh_delegate_;
   ResourceDispatcherHostImpl rdh_;
+  mojom::URLLoaderFactoryPtr url_loader_factory_;
+  mojom::URLLoaderAssociatedPtr url_loader_proxy_;
   TestURLLoaderClient url_loader_client_;
   TestResourceController resource_controller_;
   std::unique_ptr<TestBrowserContext> browser_context_;

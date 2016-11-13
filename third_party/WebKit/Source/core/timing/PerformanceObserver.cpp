@@ -49,7 +49,8 @@ void PerformanceObserver::observe(const PerformanceObserverInit& observerInit,
   }
   if (entryTypes == PerformanceEntry::Invalid) {
     exceptionState.throwTypeError(
-        "A Performance Observer MUST have a non-empty entryTypes attribute.");
+        "A Performance Observer MUST have at least one valid entryType in its "
+        "entryTypes attribute.");
     return;
   }
   m_filterOptions = entryTypes;
@@ -90,7 +91,7 @@ void PerformanceObserver::deliver() {
   performanceEntries.swap(m_performanceEntries);
   PerformanceObserverEntryList* entryList =
       new PerformanceObserverEntryList(performanceEntries);
-  m_callback->call(m_scriptState.get(), this, entryList, this);
+  m_callback->call(this, entryList, this);
 }
 
 DEFINE_TRACE(PerformanceObserver) {

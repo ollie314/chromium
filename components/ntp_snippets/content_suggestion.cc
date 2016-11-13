@@ -4,6 +4,8 @@
 
 #include "components/ntp_snippets/content_suggestion.h"
 
+#include <utility>
+
 namespace ntp_snippets {
 
 bool ContentSuggestion::ID::operator==(const ID& rhs) const {
@@ -15,7 +17,7 @@ bool ContentSuggestion::ID::operator!=(const ID& rhs) const {
   return !(*this == rhs);
 }
 
-ContentSuggestion::ContentSuggestion(ID id, const GURL& url)
+ContentSuggestion::ContentSuggestion(const ID& id, const GURL& url)
     : id_(id), url_(url), score_(0) {}
 
 ContentSuggestion::ContentSuggestion(Category category,
@@ -29,9 +31,15 @@ ContentSuggestion& ContentSuggestion::operator=(ContentSuggestion&&) = default;
 
 ContentSuggestion::~ContentSuggestion() = default;
 
-std::ostream& operator<<(std::ostream& os, ContentSuggestion::ID id) {
+std::ostream& operator<<(std::ostream& os, const ContentSuggestion::ID& id) {
   os << id.category() << "|" << id.id_within_category();
   return os;
+}
+
+void ContentSuggestion::set_download_suggestion_extra(
+    std::unique_ptr<DownloadSuggestionExtra> download_suggestion_extra) {
+  DCHECK_EQ(id_.category().id(), static_cast<int>(KnownCategories::DOWNLOADS));
+  download_suggestion_extra_ = std::move(download_suggestion_extra);
 }
 
 }  // namespace ntp_snippets

@@ -143,14 +143,12 @@ def cpp_type(idl_type, extended_attributes=None, raw_type=False, used_as_rvalue_
             Containers can be an array, a sequence or a dictionary.
     """
     def string_mode():
+        if idl_type.is_nullable:
+            return 'TreatNullAndUndefinedAsNullString'
         if extended_attributes.get('TreatNullAs') == 'EmptyString':
             return 'TreatNullAsEmptyString'
         if extended_attributes.get('TreatNullAs') == 'NullString':
-            if extended_attributes.get('TreatUndefinedAs') == 'NullString':
-                return 'TreatNullAndUndefinedAsNullString'
             return 'TreatNullAsNullString'
-        if idl_type.is_nullable:
-            return 'TreatNullAndUndefinedAsNullString'
         return ''
 
     extended_attributes = extended_attributes or {}
@@ -424,17 +422,8 @@ def add_includes_for_interface(interface_name):
     includes.update(includes_for_interface(interface_name))
 
 
-def impl_should_use_nullable_container(idl_type):
-    return not(idl_type.cpp_type_has_null_value)
-
-IdlTypeBase.impl_should_use_nullable_container = property(
-    impl_should_use_nullable_container)
-
-
 def impl_includes_for_type(idl_type, interfaces_info):
     includes_for_type = set()
-    if idl_type.impl_should_use_nullable_container:
-        includes_for_type.add('bindings/core/v8/Nullable.h')
 
     idl_type = idl_type.preprocessed_type
     native_array_element_type = idl_type.native_array_element_type
@@ -583,7 +572,7 @@ def v8_value_to_cpp_value(idl_type, extended_attributes, v8_value, variable_name
         cpp_expression_format = 'V8{idl_type}::toImpl({isolate}, {v8_value}, {variable_name}, exceptionState)'
     elif idl_type.is_callback_function:
         cpp_expression_format = (
-            '{idl_type}::create({isolate}, v8::Local<v8::Function>::Cast({v8_value}))')
+            '{idl_type}::create(ScriptState::current({isolate}), v8::Local<v8::Function>::Cast({v8_value}))')
     else:
         cpp_expression_format = (
             'V8{idl_type}::toImplWithTypeCheck({isolate}, {v8_value})')

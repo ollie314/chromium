@@ -59,15 +59,14 @@ namespace content {
 class BrowserPluginEmbedder;
 class BrowserPluginGuest;
 class DateTimeChooserAndroid;
-class DownloadItem;
 class FindRequestManager;
+class HostZoomMapObserver;
 class InterstitialPageImpl;
 class JavaScriptDialogManager;
 class LoaderIOThreadNotifier;
 class ManifestManagerHost;
 class MediaWebContentsObserver;
 class PluginContentOriginWhitelist;
-class PowerSaveBlocker;
 class RenderViewHost;
 class RenderViewHostDelegateView;
 class RenderWidgetHostImpl;
@@ -182,9 +181,6 @@ class CONTENT_EXPORT WebContentsImpl
   // plugins it is hosting.
   void CancelActiveAndPendingDialogs();
 
-  // Invoked when visible SSL state (as defined by SSLStatus) changes.
-  void DidChangeVisibleSSLState();
-
   // Informs the render view host and the BrowserPluginEmbedder, if present, of
   // a Drag Source End.
   void DragSourceEndedAt(int client_x, int client_y, int screen_x,
@@ -290,8 +286,9 @@ class CONTENT_EXPORT WebContentsImpl
   void ClosePage() override;
   RenderWidgetHostView* GetFullscreenRenderWidgetHostView() const override;
   SkColor GetThemeColor() const override;
-  WebUI* CreateSubframeWebUI(const GURL& url,
-                             const std::string& frame_name) override;
+  std::unique_ptr<WebUI> CreateSubframeWebUI(
+      const GURL& url,
+      const std::string& frame_name) override;
   WebUI* GetWebUI() const override;
   WebUI* GetCommittedWebUI() const override;
   void SetUserAgentOverride(const std::string& override) override;
@@ -325,6 +322,7 @@ class CONTENT_EXPORT WebContentsImpl
   int GetCrashedErrorCode() const override;
   bool IsBeingDestroyed() const override;
   void NotifyNavigationStateChanged(InvalidateTypes changed_flags) override;
+  void OnAudioStateChanged(bool is_audio_playing) override;
   base::TimeTicks GetLastActiveTime() const override;
   void SetLastActiveTime(base::TimeTicks last_active_time) override;
   base::TimeTicks GetLastHiddenTime() const override;
@@ -335,6 +333,7 @@ class CONTENT_EXPORT WebContentsImpl
   void AttachToOuterWebContentsFrame(
       WebContents* outer_web_contents,
       RenderFrameHost* outer_contents_frame) override;
+  void DidChangeVisibleSecurityState() override;
   void Stop() override;
   WebContents* Clone() override;
   void ReloadFocusedFrame(bool bypass_cache) override;
@@ -413,10 +412,8 @@ class CONTENT_EXPORT WebContentsImpl
   void GetManifest(const GetManifestCallback& callback) override;
   void ExitFullscreen(bool will_cause_resize) override;
   void ResumeLoadingCreatedWebContents() override;
-  void ResumeMediaSession() override;
-  void SuspendMediaSession() override;
-  void StopMediaSession() override;
   void OnPasswordInputShownOnHttp() override;
+  void OnAllPasswordInputsHiddenOnHttp() override;
   void OnCreditCardInputShownOnHttp() override;
   void SetIsOverlayContent(bool is_overlay_content) override;
 
@@ -430,13 +427,6 @@ class CONTENT_EXPORT WebContentsImpl
   void SetAllowOtherViews(bool allow) override;
   bool GetAllowOtherViews() override;
 #endif
-
-  // This method is called when the MediaSession state has changed, and will
-  // notify the WebContents observers.
-  void OnMediaSessionStateChanged();
-  // This method is called when the MediaSession metadata has changed, and will
-  // notify the WebContents observers.
-  void OnMediaSessionMetadataChanged();
 
   // Implementation of PageNavigator.
   WebContents* OpenURL(const OpenURLParams& params) override;
@@ -522,10 +512,10 @@ class CONTENT_EXPORT WebContentsImpl
   void DidCancelLoading() override;
   void DocumentAvailableInMainFrame(RenderViewHost* render_view_host) override;
   void RouteCloseEvent(RenderViewHost* rvh) override;
-  bool AddMessageToConsole(int32_t level,
-                           const base::string16& message,
-                           int32_t line_no,
-                           const base::string16& source_id) override;
+  bool DidAddMessageToConsole(int32_t level,
+                              const base::string16& message,
+                              int32_t line_no,
+                              const base::string16& source_id) override;
   RendererPreferences GetRendererPrefs(
       BrowserContext* browser_context) const override;
   void OnUserInteraction(RenderWidgetHostImpl* render_widget_host,
@@ -708,6 +698,7 @@ class CONTENT_EXPORT WebContentsImpl
   void SetFocusToLocationBar(bool select_all) override;
   bool IsHidden() override;
   int GetOuterDelegateFrameTreeNodeId() override;
+  RenderWidgetHostImpl* GetFullscreenRenderWidgetHost() const override;
 
   // NotificationObserver ------------------------------------------------------
 
@@ -1102,7 +1093,8 @@ class CONTENT_EXPORT WebContentsImpl
   // used to determine which WebUI should be created (if any). |frame_name|
   // corresponds to the name of a frame that the WebUI should be created for (or
   // the main frame if empty).
-  WebUI* CreateWebUI(const GURL& url, const std::string& frame_name);
+  std::unique_ptr<WebUIImpl> CreateWebUI(const GURL& url,
+                                         const std::string& frame_name);
 
   void SetJavaScriptDialogManagerForTesting(
       JavaScriptDialogManager* dialog_manager);
@@ -1414,6 +1406,8 @@ class CONTENT_EXPORT WebContentsImpl
   // Observes pepper playback changes, and notifies MediaSession.
   std::unique_ptr<PepperPlaybackObserver> pepper_playback_observer_;
 #endif  // defined(ENABLE_PLUGINS)
+
+  std::unique_ptr<HostZoomMapObserver> host_zoom_map_observer_;
 
   std::unique_ptr<RenderWidgetHostInputEventRouter> rwh_input_event_router_;
 

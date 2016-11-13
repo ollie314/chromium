@@ -1135,12 +1135,8 @@ paper-button {
         width: 32px;
 }
 
-#danger-icon[icon='cr:warning'] {
-  color: rgb(255, 193, 7);
-}
-
-#danger-icon[icon='downloads:remove-circle'] {
-  color: rgb(244, 67, 54);
+#danger-icon[icon='cr:warning'], .dangerous #description {
+  color: var(--google-red-700);
 }
 
 #name, #file-link, #url {
@@ -1185,10 +1181,6 @@ paper-button {
 
 .is-active #description {
   color: #616161;
-}
-
-.dangerous #description {
-  color: rgb(239, 108, 0);
 }
 
 #progress {
@@ -1262,7 +1254,7 @@ paper-button {
           <span id="tag">[[computeTag_(data.state, data.last_reason_text, data.file_externally_removed)]]</span>
         </div>
 
-        <a id="url" target="_blank">[[data.url]]</a>
+        <a id="url" target="_blank">[[chopUrl_(data.url)]]</a>
 
         <div id="description">[[computeDescription_(data.state, data.danger_type, data.file_name, data.progress_status_text)]]</div>
 
@@ -1365,7 +1357,7 @@ paper-button {
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file. */
 
-<if expr="not chromeos">
+<if expr="not chromeos and not is_android">
 @font-face {
   font-family: 'Roboto';
   font-style: normal;
@@ -3598,14 +3590,13 @@ paper-item {
     </downloads-toolbar>
     <iron-list id="downloads-list" items="{{items_}}" hidden="[[!hasDownloads_]]">
       <template>
-        <downloads-item data="[[item]]" hide-date="[[item.hideDate]]">
-        </downloads-item>
+        <downloads-item data="[[item]]"></downloads-item>
       </template>
     </iron-list>
     <div id="no-downloads" hidden="[[hasDownloads_]]">
       <div>
         <div class="illustration"></div>
-        <span></span>
+        <span>[[noDownloadsText_(inSearchMode_)]]</span>
       </div>
     </div>
   </template>

@@ -57,7 +57,6 @@
 namespace blink {
 
 class CompositorFilterOperations;
-class FloatRect;
 class Image;
 class JSONObject;
 class LinkHighlight;
@@ -261,6 +260,7 @@ class PLATFORM_EXPORT GraphicsLayer : public WebLayerScrollClient,
   std::unique_ptr<base::trace_event::ConvertableToTraceFormat> TakeDebugInfo(
       cc::Layer*) override;
   void didUpdateMainThreadScrollingReasons() override;
+  void didChangeScrollbarsHidden(bool);
 
   PaintController& getPaintController();
 

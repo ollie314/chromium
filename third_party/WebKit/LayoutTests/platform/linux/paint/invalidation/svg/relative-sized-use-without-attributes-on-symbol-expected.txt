@@ -34,7 +34,7 @@
         {
           "object": "LayoutSVGPath path",
           "rect": [16, 59, 136, 137],
-          "reason": "full"
+          "reason": "bounds change"
         },
         {
           "object": "LayoutSVGContainer use",
@@ -73,16 +73,8 @@
       "reason": "forced by layout"
     },
     {
-      "object": "LayoutSVGHiddenContainer defs",
-      "reason": "location change"
-    },
-    {
-      "object": "LayoutSVGHiddenContainer symbol id='gamesBorder'",
-      "reason": "location change"
-    },
-    {
       "object": "LayoutSVGPath path",
-      "reason": "full"
+      "reason": "bounds change"
     },
     {
       "object": "LayoutSVGContainer use",

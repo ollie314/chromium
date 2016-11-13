@@ -34,6 +34,7 @@
 #include "core/clipboard/DataTransfer.h"
 #include "core/dom/DOMNodeIds.h"
 #include "core/dom/Document.h"
+#include "core/dom/DocumentUserGestureToken.h"
 #include "core/dom/TouchList.h"
 #include "core/dom/shadow/FlatTreeTraversal.h"
 #include "core/dom/shadow/ShadowRoot.h"
@@ -68,7 +69,6 @@
 #include "core/layout/HitTestRequest.h"
 #include "core/layout/HitTestResult.h"
 #include "core/layout/LayoutPart.h"
-#include "core/layout/LayoutTextControlSingleLine.h"
 #include "core/layout/LayoutView.h"
 #include "core/layout/api/LayoutViewItem.h"
 #include "core/loader/DocumentLoader.h"
@@ -277,8 +277,10 @@ HitTestResult EventHandler::hitTestResultAtPoint(
     return result;
 
   m_frame->contentLayoutItem().hitTest(result);
-  if (!request.readOnly())
-    m_frame->document()->updateHoverActiveState(request, result.innerElement());
+  if (!request.readOnly()) {
+    m_frame->document()->updateHoverActiveState(request, result.innerElement(),
+                                                result.scrollbar());
+  }
 
   return result;
 }
@@ -528,6 +530,10 @@ OptionalCursor EventHandler::selectCursor(const HitTestResult& result) {
 OptionalCursor EventHandler::selectAutoCursor(const HitTestResult& result,
                                               Node* node,
                                               const Cursor& iBeam) {
+  if (result.scrollbar()) {
+    return pointerCursor();
+  }
+
   bool editable = (node && hasEditableStyle(*node));
 
   const bool isOverLink =
@@ -572,10 +578,6 @@ WebInputEventResult EventHandler::handleMousePressEvent(
       WebPointerProperties::Button::NoButton)
     return WebInputEventResult::HandledSuppressed;
 
-  UserGestureIndicator gestureIndicator(UserGestureToken::create());
-  m_frame->localFrameRoot()->eventHandler().m_lastMouseDownUserGestureToken =
-      UserGestureIndicator::currentToken();
-
   if (m_eventHandlerWillResetCapturingMouseEventsNode)
     m_capturingMouseEventsNode = nullptr;
   m_mouseEventManager->handleMousePressEventUpdateStates(mouseEvent);
@@ -618,6 +620,11 @@ WebInputEventResult EventHandler::handleMousePressEvent(
     m_mouseEventManager->invalidateClick();
     return result;
   }
+
+  UserGestureIndicator gestureIndicator(
+      DocumentUserGestureToken::create(m_frame->document()));
+  m_frame->localFrameRoot()->eventHandler().m_lastMouseDownUserGestureToken =
+      UserGestureIndicator::currentToken();
 
   if (RuntimeEnabledFeatures::middleClickAutoscrollEnabled()) {
     // We store whether middle click autoscroll is in progress before calling
@@ -809,7 +816,7 @@ WebInputEventResult EventHandler::handleMouseMoveOrLeaveEvent(
   // So we must force the hit-test to fail, while still clearing hover/active
   // state.
   if (forceLeave) {
-    m_frame->document()->updateHoverActiveState(request, 0);
+    m_frame->document()->updateHoverActiveState(request, nullptr, false);
   } else {
     mev = EventHandlingUtil::performMouseEventHitTest(m_frame, request,
                                                       mouseEvent);
@@ -897,20 +904,6 @@ WebInputEventResult EventHandler::handleMouseReleaseEvent(
   if (!mouseEvent.fromTouch())
     m_frame->selection().setCaretBlinkingSuspended(false);
 
-  std::unique_ptr<UserGestureIndicator> gestureIndicator;
-
-  if (m_frame->localFrameRoot()
-          ->eventHandler()
-          .m_lastMouseDownUserGestureToken) {
-    gestureIndicator = wrapUnique(new UserGestureIndicator(
-        m_frame->localFrameRoot()
-            ->eventHandler()
-            .m_lastMouseDownUserGestureToken.release()));
-  } else {
-    gestureIndicator =
-        wrapUnique(new UserGestureIndicator(UserGestureToken::create()));
-  }
-
   if (RuntimeEnabledFeatures::middleClickAutoscrollEnabled()) {
     if (Page* page = m_frame->page())
       page->autoscrollController().handleMouseReleaseForMiddleClickAutoscroll(
@@ -950,6 +943,24 @@ WebInputEventResult EventHandler::handleMouseReleaseEvent(
     m_capturingMouseEventsNode = nullptr;
   if (subframe)
     return passMouseReleaseEventToSubframe(mev, subframe);
+
+  // Mouse events will be associated with the Document where mousedown
+  // occurred. If, e.g., there is a mousedown, then a drag to a different
+  // Document and mouseup there, the mouseup's gesture will be associated with
+  // the mousedown's Document. It's not absolutely certain that this is the
+  // correct behavior.
+  std::unique_ptr<UserGestureIndicator> gestureIndicator;
+  if (m_frame->localFrameRoot()
+          ->eventHandler()
+          .m_lastMouseDownUserGestureToken) {
+    gestureIndicator = wrapUnique(new UserGestureIndicator(
+        m_frame->localFrameRoot()
+            ->eventHandler()
+            .m_lastMouseDownUserGestureToken.release()));
+  } else {
+    gestureIndicator = wrapUnique(new UserGestureIndicator(
+        DocumentUserGestureToken::create(m_frame->document())));
+  }
 
   WebInputEventResult eventResult = updatePointerTargetAndDispatchEvents(
       EventTypeNames::mouseup, mev.innerNode(), mev.event());
@@ -1519,13 +1530,13 @@ void EventHandler::updateGestureHoverActiveState(const HitTestRequest& request,
       // If the old hovered frame is different from the new hovered frame.
       // we should clear the old hovered node from the old hovered frame.
       if (newHoverFrame != oldHoverFrame)
-        doc->updateHoverActiveState(request, nullptr);
+        doc->updateHoverActiveState(request, nullptr, false);
     }
   }
 
   // Recursively set the new active/hover states on every frame in the chain of
   // innerElement.
-  m_frame->document()->updateHoverActiveState(request, innerElement);
+  m_frame->document()->updateHoverActiveState(request, innerElement, false);
 }
 
 // Update the mouseover/mouseenter/mouseout/mouseleave events across all frames
@@ -1851,7 +1862,8 @@ WebInputEventResult EventHandler::sendContextMenuEventForKey(
   HitTestRequest request(HitTestRequest::Active);
   HitTestResult result(request, locationInRootFrame);
   result.setInnerNode(targetNode);
-  doc->updateHoverActiveState(request, result.innerElement());
+  doc->updateHoverActiveState(request, result.innerElement(),
+                              result.scrollbar());
 
   // The contextmenu event is a mouse event even when invoked using the
   // keyboard.  This is required for web compatibility.
@@ -1917,8 +1929,8 @@ void EventHandler::hoverTimerFired(TimerBase*) {
                            view->rootFrameToContents(
                                m_mouseEventManager->lastKnownMousePosition()));
       layoutItem.hitTest(result);
-      m_frame->document()->updateHoverActiveState(request,
-                                                  result.innerElement());
+      m_frame->document()->updateHoverActiveState(
+          request, result.innerElement(), result.scrollbar());
     }
   }
 }
@@ -1932,8 +1944,8 @@ void EventHandler::activeIntervalTimerFired(TimerBase*) {
     // m_lastDeferredTapElement.get() == m_frame->document()->activeElement()
     HitTestRequest request(HitTestRequest::TouchEvent |
                            HitTestRequest::Release);
-    m_frame->document()->updateHoverActiveState(request,
-                                                m_lastDeferredTapElement.get());
+    m_frame->document()->updateHoverActiveState(
+        request, m_lastDeferredTapElement.get(), false);
   }
   m_lastDeferredTapElement = nullptr;
 }
@@ -1961,6 +1973,20 @@ void EventHandler::defaultKeyboardEventHandler(KeyboardEvent* event) {
 
 void EventHandler::dragSourceEndedAt(const PlatformMouseEvent& event,
                                      DragOperation operation) {
+  // Asides from routing the event to the correct frame, the hit test is also an
+  // opportunity for Layer to update the :hover and :active pseudoclasses.
+  HitTestRequest request(HitTestRequest::Release);
+  MouseEventWithHitTestResults mev =
+      EventHandlingUtil::performMouseEventHitTest(m_frame, request, event);
+
+  LocalFrame* targetFrame;
+  if (targetIsFrame(mev.innerNode(), targetFrame)) {
+    if (targetFrame) {
+      targetFrame->eventHandler().dragSourceEndedAt(event, operation);
+      return;
+    }
+  }
+
   m_mouseEventManager->dragSourceEndedAt(event, operation);
 }
 

@@ -24,7 +24,6 @@ Polymer({
 
   behaviors: [
     Polymer.IronScrollTargetBehavior,
-    WebUIListenerBehavior,
   ],
 
   properties: {
@@ -86,17 +85,26 @@ Polymer({
       type: Boolean,
       reflectToAttribute: true,
       notify: true,
-    }
+    },
+
+    showMenuPromo_: {
+      type: Boolean,
+      value: function() {
+        return loadTimeData.getBoolean('showMenuPromo');
+      },
+    },
   },
 
-  // TODO(calamity): Replace these event listeners with data bound properties.
   listeners: {
-    'cr-menu-tap': 'onMenuTap_',
-    'history-checkbox-select': 'checkboxSelected',
-    'unselect-all': 'unselectAll',
+    'cr-toolbar-menu-promo-close': 'onCrToolbarMenuPromoClose_',
+    'cr-toolbar-menu-promo-shown': 'onCrToolbarMenuPromoShown_',
+    'cr-toolbar-menu-tap': 'onCrToolbarMenuTap_',
     'delete-selected': 'deleteSelected',
+    'history-checkbox-select': 'checkboxSelected',
     'history-close-drawer': 'closeDrawer_',
     'history-view-changed': 'historyViewChanged_',
+    'opened-changed': 'onOpenedChanged_',
+    'unselect-all': 'unselectAll',
   },
 
   /** @override */
@@ -106,12 +114,6 @@ Polymer({
     cr.ui.decorate('command', cr.ui.Command);
     document.addEventListener('canExecute', this.onCanExecute_.bind(this));
     document.addEventListener('command', this.onCommand_.bind(this));
-  },
-
-  /** @override */
-  attached: function() {
-    this.addWebUIListener('sign-in-state-updated',
-                          this.updateSignInState.bind(this));
   },
 
   onFirstRender: function() {
@@ -140,10 +142,29 @@ Polymer({
   },
 
   /** @private */
-  onMenuTap_: function() {
+  onCrToolbarMenuPromoClose_: function() {
+    this.showMenuPromo_ = false;
+  },
+
+  /** @private */
+  onCrToolbarMenuPromoShown_: function() {
+    md_history.BrowserService.getInstance().menuPromoShown();
+  },
+
+  /** @private */
+  onCrToolbarMenuTap_: function() {
     var drawer = this.$$('#drawer');
     if (drawer)
       drawer.toggle();
+  },
+
+  /**
+   * @param {!CustomEvent} e
+   * @private
+   */
+  onOpenedChanged_: function(e) {
+    if (e.detail.value)
+      this.showMenuPromo_ = false;
   },
 
   /**
@@ -231,8 +252,11 @@ Polymer({
       var syncedDeviceManagerElem =
       /** @type {HistorySyncedDeviceManagerElement} */this
           .$$('history-synced-device-manager');
-      if (syncedDeviceManagerElem)
-        syncedDeviceManagerElem.tabSyncDisabled();
+      if (syncedDeviceManagerElem) {
+        md_history.ensureLazyLoaded().then(function() {
+          syncedDeviceManagerElem.tabSyncDisabled();
+        });
+      }
       return;
     }
 
@@ -298,13 +322,15 @@ Polymer({
     // This allows the synced-device-manager to render so that it can be set as
     // the scroll target.
     requestAnimationFrame(function() {
-      // <iron-pages> can occasionally end up with no item selected during
-      // tests.
-      if (!this.$.content.selectedItem)
-        return;
-      this.scrollTarget =
-          this.$.content.selectedItem.getContentScrollTarget();
-      this._scrollHandler();
+      md_history.ensureLazyLoaded().then(function() {
+        // <iron-pages> can occasionally end up with no item selected during
+        // tests.
+        if (!this.$.content.selectedItem)
+          return;
+        this.scrollTarget =
+            this.$.content.selectedItem.getContentScrollTarget();
+        this._scrollHandler();
+      }.bind(this));
     }.bind(this));
     this.recordHistoryPageView_();
   },

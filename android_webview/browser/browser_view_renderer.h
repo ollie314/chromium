@@ -10,6 +10,7 @@
 #include <map>
 #include <set>
 
+#include "android_webview/browser/child_frame.h"
 #include "android_webview/browser/compositor_frame_producer.h"
 #include "android_webview/browser/compositor_id.h"
 #include "android_webview/browser/parent_compositor_draw_constraints.h"
@@ -130,9 +131,6 @@ class BrowserViewRenderer : public content::SynchronousCompositorClient,
                      const gfx::Vector2dF& latest_overscroll_delta,
                      const gfx::Vector2dF& current_fling_velocity) override;
   ui::TouchHandleDrawable* CreateDrawable() override;
-  void OnDrawHardwareProcessFrameFuture(
-      const scoped_refptr<content::SynchronousCompositor::FrameFuture>&
-          frame_future) override;
 
   // CompositorFrameProducer overrides
   void OnParentDrawConstraintsUpdated(
@@ -155,6 +153,7 @@ class BrowserViewRenderer : public content::SynchronousCompositorClient,
   RootLayerStateAsValue(const gfx::Vector2dF& total_scroll_offset_dip,
                         const gfx::SizeF& scrollable_size_dip);
 
+  void ReturnUncommittedFrames(ChildFrameQueue frame);
   void ReturnUnusedResource(std::unique_ptr<ChildFrame> frame);
   void ReturnResourceFromParent(
       CompositorFrameConsumer* compositor_frame_consumer);
@@ -173,7 +172,7 @@ class BrowserViewRenderer : public content::SynchronousCompositorClient,
 
   BrowserViewRendererClient* const client_;
   const scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner_;
-  const bool async_on_draw_hardware_;
+  const bool sync_on_draw_hardware_;
   CompositorFrameConsumer* current_compositor_frame_consumer_;
   std::set<CompositorFrameConsumer*> compositor_frame_consumers_;
 
@@ -203,6 +202,10 @@ class BrowserViewRenderer : public content::SynchronousCompositorClient,
   bool clear_view_;
 
   bool offscreen_pre_raster_;
+
+  // Must do a synchronous draw first to ensure GL bindings are initialized.
+  // TODO(boliu): Wait on render thread and remove this.
+  bool allow_async_draw_;
 
   gfx::Vector2d last_on_draw_scroll_offset_;
   gfx::Rect last_on_draw_global_visible_rect_;

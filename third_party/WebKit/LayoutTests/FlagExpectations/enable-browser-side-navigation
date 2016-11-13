@@ -18,7 +18,7 @@ crbug.com/608375 http/tests/appcache/offline-access.html [ Crash Timeout ]
 crbug.com/608375 http/tests/appcache/remove-cache.html [ Failure Timeout ]
 crbug.com/608375 http/tests/appcache/top-frame-2.html [ Timeout ]
 crbug.com/608375 http/tests/serviceworker/appcache-ordering-main.html [ Failure ]
-crbug.com/608375 virtual/mojo-service-worker/http/tests/serviceworker/appcache-ordering-main.html [ Failure ]
+crbug.com/608375 virtual/disable-mojo-service-worker/http/tests/serviceworker/appcache-ordering-main.html [ Failure ]
 crbug.com/608375 virtual/service-worker-navigation-preload/http/tests/serviceworker/appcache-ordering-main.html [ Failure ]
 
 # https://crbug.com/575210: PlzNavigate: history navigation support
@@ -29,7 +29,7 @@ crbug.com/575210 http/tests/navigation/history-back-across-form-submission-to-fr
 crbug.com/575210 http/tests/navigation/rename-subframe-goback.html [ Failure ]
 crbug.com/575210 imported/wpt/html/browsers/browsing-the-web/history-traversal/popstate_event.html [ Crash Failure Timeout ]
 crbug.com/575210 imported/wpt/html/browsers/history/the-history-interface/004.html [ Failure ]
-crbug.com/575210 imported/wpt/html/browsers/history/the-location-interface/security_location_0.sub.htm [ Failure ]
+crbug.com/575210 imported/wpt/html/browsers/history/the-location-interface/security_location_0.htm [ Failure ]
 crbug.com/575210 virtual/stable/http/tests/navigation/history-back-across-form-submission-to-fragment.html [ Timeout ]
 crbug.com/575210 virtual/stable/http/tests/navigation/rename-subframe-goback.html [ Failure ]
 
@@ -38,6 +38,7 @@ crbug.com/551000 http/tests/inspector-protocol/reload-memory-cache.html [ Failur
 crbug.com/551000 http/tests/inspector/console-resource-errors.html [ Failure ]
 crbug.com/551000 http/tests/inspector/extensions-ignore-cache.html [ Failure ]
 crbug.com/551000 http/tests/inspector/extensions-network-redirect.html [ Timeout ]
+crbug.com/551000 http/tests/inspector/extensions-useragent.html [ Failure ]
 crbug.com/551000 http/tests/inspector/network/network-datareceived.html [ Failure ]
 crbug.com/551000 http/tests/inspector/network/network-document-initiator.html [ Failure ]
 crbug.com/551000 http/tests/inspector/network/network-initiator.html [ Failure ]
@@ -120,32 +121,20 @@ crbug.com/648588 virtual/stable/http/tests/navigation/post-goback1.html [ Failur
 # Properly set ZoomLevel (see IFrameZoomBrowsertests*)
 Bug(none) fast/css/preserve-user-specified-zoom-level-on-reload.html [ Failure ]
 
-# https://crbug.com/648600: Don't output 2 blank spaces at the end of some layout tests
-crbug.com/648600 fast/overflow/overflow-height-float-not-removed-crash.html [ Failure ]
-crbug.com/648600 virtual/spv2/fast/overflow/overflow-height-float-not-removed-crash.html [ Failure ]
-
 # https://crbug.com/648608: Properly set the initator of the navigation.
 crbug.com/648608 http/tests/cookies/same-site/popup-same-site-post.html [ Failure ]
 crbug.com/648608 http/tests/cookies/same-site/popup-same-site.html [ Failure ]
-
-# https://crbug.com/657834: <object> must failback to its alternative content.
-Bug(657834) fast/overflow/overflow-height-float-not-removed-crash3.html [ Failure ]
-Bug(657834) imported/wpt/html/semantics/embedded-content/the-object-element/object-attributes.html [ Failure ]
-Bug(657834) http/tests/misc/resource-timing-sizes-tags.html [ Failure ]
-Bug(657834) fast/table/giantCellspacing.html [ Failure ]
-Bug(657834) fast/css/acid2-pixel.html [ Crash Timeout Failure ]
-Bug(657834) fast/css/acid2.html [ Crash Timeout Failure ]
-Bug(657834) virtual/spv2/fast/overflow/overflow-height-float-not-removed-crash3.html [ Failure ]
-Bug(657834) plugins/object-onfocus-mutation-crash.html [ Timeout ]
 
 # Untriaged navigation
 Bug(none) fast/dom/Document/open-with-pending-load.html [ Failure ]
 Bug(none) fast/dom/HTMLAnchorElement/anchor-no-multiple-windows.html [ Failure ]
 Bug(none) http/tests/loading/pdf-commit-load-callbacks.html [ Crash Failure ]
+Bug(none) http/tests/misc/resource-timing-sizes-tags.html [ Failure ]
 Bug(none) http/tests/navigation/forward-to-fragment-fires-onload.html [ Timeout ]
 Bug(none) http/tests/navigation/response204.html [ Timeout ]
 Bug(none) http/tests/security/cross-frame-access-parent-isolated-world.html [ Timeout ]
 Bug(none) http/tests/security/cross-frame-access-parent-explicit-domain-isolated-world.html [ Timeout ]
+Bug(none) imported/wpt/html/browsers/the-window-object/security-window/window-security.html [ Failure ]
 Bug(none) virtual/stable/http/tests/navigation/forward-to-fragment-fires-onload.html [ Timeout ]
 Bug(none) virtual/stable/http/tests/navigation/response204.html [ Timeout ]
 

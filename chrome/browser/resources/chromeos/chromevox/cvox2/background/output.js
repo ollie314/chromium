@@ -343,52 +343,29 @@ Output.ROLE_INFO_ = {
 
 /**
  * Metadata about supported automation states.
- * @const {!Object<{on: {msgId: string, earconId: string},
- *                  off: {msgId: string, earconId: string},
- *                  omitted: {msgId: string, earconId: string}}>}
+ * @const {!Object<string, {on: {msgId: string, earconId: string},
+ *                          off: {msgId: string, earconId: string},
+ *                          isRoleSpecific: (boolean|undefined)}>}
  *     on: info used to describe a state that is set to true.
- *     off: info used to describe a state that is set to false.
- *     omitted: info used to describe a state that is undefined.
+ *     off: info used to describe a state that is set to undefined.
+ *     isRoleSpecific: info used for specific roles.
  * @private
  */
 Output.STATE_INFO_ = {
-  checked: {
-    on: {
-      msgId: 'checkbox_checked_state'
-    },
-    off: {
-      msgId: 'checkbox_unchecked_state'
-    },
-    omitted: {
-      msgId: 'checkbox_unchecked_state'
-    }
+  busy: {on: {msgId: 'busy_state'}},
+  collapsed: {on: {msgId: 'aria_expanded_false'}},
+  default: {on: {msgId: 'default_state'}},
+  disabled: {on: {msgId: 'aria_disabled_true'}},
+  expanded: {on: {msgId: 'aria_expanded_true'}},
+  multiselectable: {on: {msgId: 'aria_multiselectable_true'}},
+  pressed: {
+    isRoleSpecific: true,
+    on: {msgId: 'aria_pressed_true'},
+    off: {msgId: 'aria_pressed_false'}
   },
-  collapsed: {
-    on: {
-      msgId: 'aria_expanded_false'
-    },
-    off: {
-      msgId: 'aria_expanded_true'
-    }
-  },
-  disabled: {
-    on: {
-      msgId: 'aria_disabled_true'
-    }
-  },
-  expanded: {
-    on: {
-      msgId: 'aria_expanded_true'
-    },
-    off: {
-      msgId: 'aria_expanded_false'
-    }
-  },
-  visited: {
-    on: {
-      msgId: 'visited_state'
-    }
-  }
+  required: {on: {msgId: 'aria_required_true'}},
+  selected: {on: {msgId: 'aria_selected_true'}},
+  visited: {on: {msgId: 'visited_state'}}
 };
 
 /**
@@ -468,6 +445,10 @@ Output.RULES = {
       speak: '!relativePitch(hierarchicalLevel) ' +
           '$nameOrDescendants= ' +
           '$if($hierarchicalLevel, @tag_h+$hierarchicalLevel, $role) $state'
+    },
+    image: {
+      speak: '$if($name, $name, $urlFilename) ' +
+          '$value $state $role $description',
     },
     inlineTextBox: {
       speak: '$name='
@@ -553,8 +534,14 @@ Output.RULES = {
     staticText: {
       speak: '$name='
     },
+    switch: {
+      speak: '$if($checked, $earcon(CHECK_ON), $earcon(CHECK_OFF)) ' +
+          '$if($checked, @describe_switch_on($name), ' +
+          '@describe_switch_off($name)) $description $state'
+    },
     tab: {
-      speak: '@describe_tab($name) $state $description'
+      speak: '@describe_tab($name) $state $description ' +
+          '$if($setSize, @describe_index($posInSet, $setSize))',
     },
     table: {
       enter: '@table_summary($name, $tableRowCount, $tableColumnCount) ' +
@@ -573,9 +560,7 @@ Output.RULES = {
     },
     toggleButton: {
       speak: '$if($pressed, $earcon(CHECK_ON), $earcon(CHECK_OFF)) ' +
-          '$name $role ' +
-          '$if($pressed, @aria_pressed_true, @aria_pressed_false) ' +
-          '$description $state'
+          '$name $role $pressed $description $state'
     },
     toolbar: {
       enter: '$name $role $description'
@@ -665,14 +650,12 @@ Output.EarconAction.prototype = {
  * Annotation for text with a selection inside it.
  * @param {number} startIndex
  * @param {number} endIndex
- * @param {number=} opt_offset
  * @constructor
  */
-Output.SelectionSpan = function(startIndex, endIndex, opt_offset) {
+Output.SelectionSpan = function(startIndex, endIndex) {
   // TODO(dtseng): Direction lost below; should preserve for braille panning.
   this.startIndex = startIndex < endIndex ? startIndex : endIndex;
   this.endIndex = endIndex > startIndex ? endIndex : startIndex;
-  this.offset = opt_offset || 0;
 };
 
 /**
@@ -887,7 +870,6 @@ Output.prototype = {
 
     this.formatOptions_ = {speech: false, braille: true, auralStyle: false};
     this.format_(node, formatStr, this.brailleBuffer_);
-
     return this;
   },
 
@@ -947,7 +929,7 @@ Output.prototype = {
 
     // Braille.
     if (this.brailleBuffer_.length) {
-      var buff = this.createBrailleOutput_();
+      var buff = this.mergeBraille_(this.brailleBuffer_);
       var selSpan =
           buff.getSpanInstanceOf(Output.SelectionSpan);
       var startIndex = -1, endIndex = -1;
@@ -956,7 +938,7 @@ Output.prototype = {
         var valueEnd = buff.getSpanEnd(selSpan);
         startIndex = valueStart + selSpan.startIndex;
         endIndex = valueStart + selSpan.endIndex;
-        buff.setSpan(new cvox.ValueSpan(selSpan.offset), valueStart, valueEnd);
+        buff.setSpan(new cvox.ValueSpan(0), valueStart, valueEnd);
         buff.setSpan(new cvox.ValueSelectionSpan(), startIndex, endIndex);
       }
 
@@ -994,6 +976,8 @@ Output.prototype = {
       return;
     var uniqueAncestors = AutomationUtil.getUniqueAncestors(prevParent, parent);
     for (var i = 0; parent = uniqueAncestors[i]; i++) {
+      if (parent.role == RoleType.window)
+        break;
       if (Output.ROLE_INFO_[parent.role] &&
           Output.ROLE_INFO_[parent.role].outputContextFirst) {
         this.outputContextFirst_ = true;
@@ -1051,11 +1035,6 @@ Output.prototype = {
       if (options.isUnique)
         token = token.substring(0, token.length - 1);
 
-      // Annotate braille output with the corresponding automation nodes
-      // to support acting on nodes based on location in the output.
-      if (node && this.formatOptions_.braille)
-        options.annotation.push(new Output.NodeSpan(node));
-
       // Process token based on prefix.
       var prefix = token[0];
       token = token.slice(1);
@@ -1066,21 +1045,44 @@ Output.prototype = {
           var text = node.value;
           if (!node.state.editable && node.name == text)
             return;
+
+          var selectedText = '';
           if (text !== undefined) {
             if (node.textSelStart !== undefined) {
               options.annotation.push(new Output.SelectionSpan(
                   node.textSelStart,
                   node.textSelEnd));
+
+              selectedText =
+                  node.value.substring(node.textSelStart, node.textSelEnd);
             }
           }
           options.annotation.push(token);
-          this.append_(buff, text, options);
+          if (selectedText) {
+            this.append_(buff, selectedText, options);
+            this.append_(buff, Msgs.getMsg('selected'));
+          } else {
+            this.append_(buff, text, options);
+          }
         } else if (token == 'name') {
           options.annotation.push(token);
           var earcon = node ? this.findEarcon_(node, opt_prevNode) : null;
           if (earcon)
             options.annotation.push(earcon);
           this.append_(buff, node.name, options);
+        } else if (token == 'urlFilename') {
+          options.annotation.push('name');
+          var url = node.url;
+          var filename = '';
+          if (url.substring(0, 4) != 'data') {
+            filename =
+                url.substring(url.lastIndexOf('/') + 1, url.lastIndexOf('.'));
+
+            // Hack to not speak the filename if it's ridiculously long.
+            if (filename.length >= 30)
+            filename = filename.substring(0, 16) + '...';
+          }
+          this.append_(buff, filename, options);
         } else if (token == 'nameFromNode') {
           if (chrome.automation.NameFromType[node.nameFrom] ==
               'contents')
@@ -1119,10 +1121,28 @@ Output.prototype = {
             }).length;
             this.append_(buff, String(count));
           }
+        } else if (token == 'checked') {
+          var msg;
+          var ariaChecked = node.htmlAttributes['aria-checked'];
+          switch (ariaChecked) {
+            case 'mixed':
+              msg = 'aria_checked_mixed';
+              break;
+            case 'true':
+              msg = 'aria_checked_true';
+              break;
+            case 'false':
+              msg = 'aria_checked_false';
+              break;
+            default:
+            msg =
+                node.state.checked ? 'aria_checked_true' : 'aria_checked_false';
+          }
+          this.format_(node, '@' + msg, buff);
         } else if (token == 'state') {
           Object.getOwnPropertyNames(node.state).forEach(function(s) {
             var stateInfo = Output.STATE_INFO_[s];
-            if (stateInfo && stateInfo.on)
+            if (stateInfo && !stateInfo.isRoleSpecific && stateInfo.on)
               this.format_(node, '@' + stateInfo.on.msgId, buff);
           }.bind(this));
         } else if (token == 'find') {
@@ -1224,10 +1244,7 @@ Output.prototype = {
           options.annotation.push('state');
           var stateInfo = Output.STATE_INFO_[token];
           var resolvedInfo = {};
-          if (node.state[token] === undefined)
-            resolvedInfo = stateInfo.omitted;
-          else
-            resolvedInfo = node.state[token] ? stateInfo.on : stateInfo.off;
+          resolvedInfo = node.state[token] ? stateInfo.on : stateInfo.off;
           if (!resolvedInfo)
             return;
           if (this.formatOptions_.speech && resolvedInfo.earconId) {
@@ -1473,7 +1490,8 @@ Output.prototype = {
         this.format_(formatPrevNode, roleBlock.leave, buff, prevNode);
     }
 
-    var enterOutputs = [];
+    // Customize for braille node annotations.
+    var originalBuff = buff;
     var enterRole = {};
     for (var j = uniqueAncestors.length - 1, formatNode;
          (formatNode = uniqueAncestors[j]);
@@ -1482,8 +1500,18 @@ Output.prototype = {
       if (roleBlock.enter) {
         if (enterRole[formatNode.role])
           continue;
+
+        if (this.formatOptions_.braille)
+          buff = [];
+
         enterRole[formatNode.role] = true;
         this.format_(formatNode, roleBlock.enter, buff, prevNode);
+
+        if (this.formatOptions_.braille && buff.length) {
+          var nodeSpan = this.mergeBraille_(buff);
+          nodeSpan.setSpan(new Output.NodeSpan(formatNode), 0, nodeSpan.length);
+          originalBuff.push(nodeSpan);
+        }
       }
     }
   },
@@ -1496,6 +1524,11 @@ Output.prototype = {
    * @private
    */
   node_: function(node, prevNode, type, buff) {
+    var originalBuff = buff;
+
+    if (this.formatOptions_.braille)
+      buff = [];
+
     // Navigate is the default event.
     var eventBlock = Output.RULES[type] || Output.RULES['navigate'];
     var roleBlock = eventBlock[node.role] || {};
@@ -1506,6 +1539,13 @@ Output.prototype = {
         eventBlock['default'].speak;
 
     this.format_(node, speakFormat, buff, prevNode);
+
+    // Restore braille and add an annotation for this node.
+    if (this.formatOptions_.braille) {
+      var nodeSpan = this.mergeBraille_(buff);
+      nodeSpan.setSpan(new Output.NodeSpan(node), 0, nodeSpan.length);
+      originalBuff.push(nodeSpan);
+    }
   },
 
   /**
@@ -1525,18 +1565,32 @@ Output.prototype = {
       return;
 
     var options = {annotation: ['name'], isUnique: true};
-    var startIndex = range.start.index;
-    var endIndex = range.end.index;
+    var rangeStart = range.start.index;
+    var rangeEnd = range.end.index;
     if (this.formatOptions_.braille) {
       options.annotation.push(new Output.NodeSpan(node));
       var selStart = node.textSelStart;
       var selEnd = node.textSelEnd;
+
       if (selStart !== undefined &&
-          (selEnd >= startIndex && selStart <= endIndex)) {
+          selEnd >= rangeStart && selStart <= rangeEnd) {
+        // Editable text selection.
+
+        // |rangeStart| and |rangeEnd| are indices set by the caller and are
+        // assumed to be inside of the range. In braille, we only ever expect to
+        // get ranges surrounding a line as anything smaller doesn't make sense.
+
+        // |selStart| and |selEnd| reflect the editable selection. The relative
+        // selStart and relative selEnd for the current line are then just the
+        // difference between |selStart|, |selEnd| with |rangeStart|.
+        // See editing_test.js for examples.
         options.annotation.push(new Output.SelectionSpan(
-            selStart - startIndex,
-            selEnd - startIndex,
-            startIndex));
+            selStart - rangeStart, selEnd - rangeStart));
+      } else if (rangeStart != 0 || rangeEnd != range.start.getText().length) {
+        // Non-editable text selection over less than the full contents covered
+        // by the range. We exclude full content underlines because it is
+        // distracting to read braille with all cells underlined with a cursor.
+        options.annotation.push(new Output.SelectionSpan(rangeStart, rangeEnd));
       }
     }
 
@@ -1545,13 +1599,24 @@ Output.prototype = {
     var earcon = this.findEarcon_(node, prevNode);
     if (earcon)
       options.annotation.push(earcon);
-    this.append_(buff, range.start.getText().substring(startIndex, endIndex),
-        options);
+    var text = '';
+
+    if (this.formatOptions_.braille && !node.state.editable) {
+      // In braille, we almost always want to show the entire contents and
+      // simply place the cursor under the SelectionSpan we set above.
+      text = range.start.getText();
+    } else {
+      // This is output for speech or editable braille.
+      text = range.start.getText().substring(rangeStart, rangeEnd);
+    }
+
+    this.append_(buff, text, options);
+
     if (!this.outputContextFirst_)
       this.ancestry_(node, prevNode, type, buff);
 
     var loc =
-        range.start.node.boundsForRange(startIndex, endIndex);
+        range.start.node.boundsForRange(rangeStart, rangeEnd);
     if (loc)
       this.locations_.push(loc);
   },
@@ -1648,65 +1713,49 @@ Output.prototype = {
   },
 
   /**
-   * Converts the currently rendered braille buffers to a single spannable.
+   * Converts the braille |spans| buffer to a single spannable.
+   * @param {!Array<Spannable>} spans
    * @return {!Spannable}
    * @private
    */
-  createBrailleOutput_: function() {
-    var result = new Spannable();
+  mergeBraille_: function(spans) {
     var separator = '';  // Changes to space as appropriate.
-    this.brailleBuffer_.forEach(function(cur) {
-      // If this chunk is empty, don't add it since it won't result
-      // in any output on the braille display, but node spans would
-      // start before the separator in that case, which is not desired.
-      // The exception is if this chunk contains a selectionm, in which
-      // case it will result in a cursor which has to be preserved.
-      // In this case, having separators, potentially both before and after
-      // the empty string is correct.
-      if (cur.length == 0 && !cur.getSpanInstanceOf(Output.SelectionSpan))
-        return;
-      var spansToExtend = [];
-      var spansToRemove = [];
-      // Nodes that have node spans both on the character to the left
-      // of the separator and to the right should also cover the separator.
-      // We extend the left span to cover both the separator and what the
-      // right span used to cover, removing the right span, mostly for
-      // ease of writing tests and debug.
-      // Note that getSpan(position) never returns zero length spans
-      // (because they don't cover any position).  Still, we want to include
-      // these because they can be included (the selection span in an empty
-      // text field is an example), which is why we write the below code
-      // using getSpansInstanceOf and check the endpoints (isntead of doing
-      // the opposite).
-      result.getSpansInstanceOf(Output.NodeSpan).forEach(function(leftSpan) {
-        if (result.getSpanEnd(leftSpan) < result.length)
-          return;
-        var newEnd = result.length;
-        cur.getSpansInstanceOf(Output.NodeSpan).forEach(function(rightSpan) {
-          if (cur.getSpanStart(rightSpan) == 0 &&
-              leftSpan.node === rightSpan.node) {
-            newEnd = Math.max(
-                newEnd,
-                result.length + separator.length +
-                    cur.getSpanEnd(rightSpan));
-            spansToRemove.push(rightSpan);
-          }
-        });
-        if (newEnd > result.length)
-          spansToExtend.push({span: leftSpan, end: newEnd});
-      });
+    var prevHasInlineNode = false;
+    return spans.reduce(function(result, cur) {
+      // Ignore empty spans except when they contain a selection.
+      var hasSelection = cur.getSpanInstanceOf(Output.SelectionSpan);
+      if (cur.length == 0 && !hasSelection)
+        return result;
+
+      // For empty selections, we just add the space separator to account for
+      // showing the braille cursor.
+      if (cur.length == 0 && hasSelection) {
+        result.append(cur);
+        result.append(Output.SPACE);
+        separator = '';
+        return result;
+      }
+
+      // Keep track of if there's an inline node associated with
+      // |cur|.
+      var hasInlineNode = cur.getSpansInstanceOf(Output.NodeSpan)
+          .some(function(s) {
+            return s.node && s.node.display == 'inline';
+          });
+
+      // Now, decide whether we should include separators between the previous
+      // span and |cur|.
+      // Never separate chunks without something already there at this point.
+      if (result.length == 0 || hasInlineNode || prevHasInlineNode)
+        separator = '';
+      else
+        separator = Output.SPACE;
+
+      prevHasInlineNode = hasInlineNode;
       result.append(separator);
       result.append(cur);
-      spansToExtend.forEach(function(elem) {
-        result.setSpan(
-            elem.span,
-            result.getSpanStart(elem.span),
-            elem.end);
-      });
-      spansToRemove.forEach(result.removeSpan.bind(result));
-      separator = Output.SPACE;
-    });
-    return result;
+      return result;
+    }, new Spannable());
   },
 
   /**
@@ -1771,7 +1820,7 @@ Output.prototype = {
    * @return {!Spannable}
    */
   get brailleOutputForTest() {
-    return this.createBrailleOutput_();
+    return this.mergeBraille_(this.brailleBuffer_);
   }
 };
 

@@ -8,10 +8,6 @@
 // framework.
 var resultQueue = new ResultQueue();
 
-var pushSubscriptionOptions = {
-  userVisibleOnly: true
-};
-
 // Waits for the given ServiceWorkerRegistration to become ready.
 // Shim for https://github.com/w3c/ServiceWorker/issues/770.
 function swRegistrationReady(reg) {
@@ -48,10 +44,11 @@ function registerServiceWorker() {
   // The base dir used to resolve service_worker.js and the scope depends on
   // whether this script is included from an html file in ./, subscope1/, or
   // subscope2/.
-  navigator.serviceWorker.register('service_worker.js', {scope: './'}).then(
-      function(swRegistration) {
-        sendResultToTest('ok - service worker registered');
-      }, sendErrorToTest);
+  navigator.serviceWorker.register('service_worker.js', {
+    scope: './'
+  }).then(swRegistrationReady).then(() => {
+    sendResultToTest('ok - service worker registered');
+  }).catch(sendErrorToTest);
 }
 
 function unregisterServiceWorker() {
@@ -94,8 +91,16 @@ function swapManifestNoSenderId() {
 // from, where the subscription used a sender ID instead of public key.
 function documentSubscribePushWithoutKey() {
   navigator.serviceWorker.ready.then(function(swRegistration) {
-    return swRegistration.pushManager.subscribe(
-        pushSubscriptionOptions)
+    return swRegistration.pushManager.subscribe({userVisibleOnly: true})
+        .then(function(subscription) {
+          sendResultToTest(subscription.endpoint);
+        });
+  }).catch(sendErrorToTest);
+}
+
+function documentSubscribePushWithEmptyOptions() {
+  navigator.serviceWorker.ready.then(function(swRegistration) {
+    return swRegistration.pushManager.subscribe()
         .then(function(subscription) {
           sendResultToTest(subscription.endpoint);
         });
@@ -104,8 +109,22 @@ function documentSubscribePushWithoutKey() {
 
 function documentSubscribePush() {
   navigator.serviceWorker.ready.then(function(swRegistration) {
-    pushSubscriptionOptions.applicationServerKey = kApplicationServerKey.buffer;
-    return swRegistration.pushManager.subscribe(pushSubscriptionOptions)
+    return swRegistration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: kApplicationServerKey.buffer
+        })
+        .then(function(subscription) {
+          sendResultToTest(subscription.endpoint);
+        });
+  }).catch(sendErrorToTest);
+}
+
+function documentSubscribePushWithNumericKey() {
+  navigator.serviceWorker.ready.then(function(swRegistration) {
+    return swRegistration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: new TextEncoder().encode('1234567890')
+        })
         .then(function(subscription) {
           sendResultToTest(subscription.endpoint);
         });
@@ -119,9 +138,16 @@ function workerSubscribePush() {
 
 function workerSubscribePushNoKey() {
   // The worker will try to subscribe without providing a key. This should
-  // succeed if the worker was previously subscribed and fail otherwise.
+  // succeed if the worker was previously subscribed with a numeric key
+  // and fail otherwise.
   navigator.serviceWorker.controller.postMessage(
       {command: 'workerSubscribeNoKey'});
+}
+
+function workerSubscribePushWithNumericKey(numericKey = '1234567890') {
+  // Send the message to the worker for it to subscribe with the given key
+  navigator.serviceWorker.controller.postMessage(
+      {command: 'workerSubscribeWithNumericKey', key: numericKey});
 }
 
 function GetP256dh() {
@@ -136,7 +162,7 @@ function GetP256dh() {
 
 function permissionState() {
   navigator.serviceWorker.ready.then(function(swRegistration) {
-    return swRegistration.pushManager.permissionState(pushSubscriptionOptions)
+    return swRegistration.pushManager.permissionState({userVisibleOnly: true})
         .then(function(permission) {
           sendResultToTest('permission status - ' + permission);
         });

@@ -9,7 +9,7 @@
 
 #include <ppapi/c/pp_completion_callback.h>
 
-#include "fake_ppapi/fake_pepper_interface_html5_fs.h"
+#include "fake_ppapi/fake_filesystem.h"
 #include "fake_ppapi/fake_resource_manager.h"
 
 class FakeFileRefResource : public FakeResource {
@@ -17,9 +17,27 @@ class FakeFileRefResource : public FakeResource {
   FakeFileRefResource() : filesystem(NULL) {}
   static const char* classname() { return "FakeFileRefResource"; }
 
-  FakeHtml5FsFilesystem* filesystem;  // Weak reference.
-  FakeHtml5FsFilesystem::Path path;
+  FakeFilesystem* filesystem;  // Weak reference.
+  FakeFilesystem::Path path;
   std::string contents;
+};
+
+class FakeFileSystemResource : public FakeResource {
+ public:
+  FakeFileSystemResource() : filesystem(NULL), opened(false) {}
+  ~FakeFileSystemResource() { delete filesystem; }
+  static const char* classname() { return "FakeFileSystemResource"; }
+
+  FakeFilesystem* filesystem;  // Owned.
+  bool opened;
+};
+
+class FakeHtml5FsResource : public FakeResource {
+ public:
+  FakeHtml5FsResource() : filesystem_template(NULL) {}
+  static const char* classname() { return "FakeHtml5FsResource"; }
+
+  FakeFilesystem* filesystem_template;  // Weak reference.
 };
 
 int32_t RunCompletionCallback(PP_CompletionCallback* callback, int32_t result);

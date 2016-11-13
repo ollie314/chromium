@@ -61,7 +61,6 @@
 #include "core/loader/ThreadableLoader.h"
 #include "core/page/ChromeClient.h"
 #include "core/page/Page.h"
-#include "core/streams/Stream.h"
 #include "core/xmlhttprequest/XMLHttpRequestUpload.h"
 #include "platform/FileMetadata.h"
 #include "platform/HTTPNames.h"
@@ -74,6 +73,9 @@
 #include "platform/network/ParsedContentType.h"
 #include "platform/network/ResourceError.h"
 #include "platform/network/ResourceRequest.h"
+#include "platform/weborigin/SecurityOrigin.h"
+#include "platform/weborigin/SecurityPolicy.h"
+#include "platform/weborigin/Suborigin.h"
 #include "public/platform/WebURLRequest.h"
 #include "wtf/Assertions.h"
 #include "wtf/StdLibExtras.h"
@@ -224,8 +226,11 @@ XMLHttpRequest::XMLHttpRequest(
     : ActiveScriptWrappable(this),
       ActiveDOMObject(context),
       m_timeoutMilliseconds(0),
+      m_responseBlob(this, nullptr),
       m_state(kUnsent),
+      m_responseDocument(this, nullptr),
       m_lengthDownloadedToFile(0),
+      m_responseArrayBuffer(this, nullptr),
       m_receivedLength(0),
       m_exceptionCode(0),
       m_progressEventThrottle(
@@ -397,15 +402,6 @@ DOMArrayBuffer* XMLHttpRequest::responseArrayBuffer() {
   return m_responseArrayBuffer.get();
 }
 
-Stream* XMLHttpRequest::responseLegacyStream() {
-  DCHECK_EQ(m_responseTypeCode, ResponseTypeLegacyStream);
-
-  if (m_error || (m_state != kLoading && m_state != kDone))
-    return nullptr;
-
-  return m_responseLegacyStream;
-}
-
 void XMLHttpRequest::setTimeout(unsigned timeout,
                                 ExceptionState& exceptionState) {
   // FIXME: Need to trigger or update the timeout Timer here, if needed.
@@ -466,11 +462,6 @@ void XMLHttpRequest::setResponseType(const String& responseType,
     m_responseTypeCode = ResponseTypeBlob;
   } else if (responseType == "arraybuffer") {
     m_responseTypeCode = ResponseTypeArrayBuffer;
-  } else if (responseType == "legacystream") {
-    if (RuntimeEnabledFeatures::experimentalStreamEnabled())
-      m_responseTypeCode = ResponseTypeLegacyStream;
-    else
-      return;
   } else {
     NOTREACHED();
   }
@@ -490,8 +481,6 @@ String XMLHttpRequest::responseType() {
       return "blob";
     case ResponseTypeArrayBuffer:
       return "arraybuffer";
-    case ResponseTypeLegacyStream:
-      return "legacystream";
   }
   return "";
 }
@@ -958,7 +947,19 @@ void XMLHttpRequest::createRequest(PassRefPtr<EncodedFormData> httpBody,
 
   m_sameOriginRequest = getSecurityOrigin()->canRequestNoSuborigin(m_url);
 
-  if (!m_sameOriginRequest && m_includeCredentials)
+  // Per https://w3c.github.io/webappsec-suborigins/#security-model-opt-outs,
+  // credentials are forced when credentials mode is "same-origin", the
+  // 'unsafe-credentials' option is set, and the request's physical origin is
+  // the same as the URL's.
+  bool includeCredentials =
+      m_includeCredentials ||
+      (getSecurityOrigin()->hasSuborigin() &&
+       getSecurityOrigin()->suborigin()->policyContains(
+           Suborigin::SuboriginPolicyOptions::UnsafeCredentials) &&
+       SecurityOrigin::create(m_url)->isSameSchemeHostPort(
+           getSecurityOrigin()));
+
+  if (!m_sameOriginRequest && includeCredentials)
     UseCounter::count(&executionContext,
                       UseCounter::XMLHttpRequestCrossOriginWithCredentials);
 
@@ -972,8 +973,8 @@ void XMLHttpRequest::createRequest(PassRefPtr<EncodedFormData> httpBody,
   request.setHTTPMethod(m_method);
   request.setRequestContext(WebURLRequest::RequestContextXMLHttpRequest);
   request.setFetchCredentialsMode(
-      m_includeCredentials ? WebURLRequest::FetchCredentialsModeInclude
-                           : WebURLRequest::FetchCredentialsModeSameOrigin);
+      includeCredentials ? WebURLRequest::FetchCredentialsModeInclude
+                         : WebURLRequest::FetchCredentialsModeSameOrigin);
   request.setSkipServiceWorker(m_isolatedWorldSecurityOrigin.get()
                                    ? WebURLRequest::SkipServiceWorker::All
                                    : WebURLRequest::SkipServiceWorker::None);
@@ -983,7 +984,7 @@ void XMLHttpRequest::createRequest(PassRefPtr<EncodedFormData> httpBody,
   InspectorInstrumentation::willLoadXHR(
       &executionContext, this, this, m_method, m_url, m_async,
       httpBody ? httpBody->deepCopy() : nullptr, m_requestHeaders,
-      m_includeCredentials);
+      includeCredentials);
 
   if (httpBody) {
     DCHECK_NE(m_method, HTTPNames::GET);
@@ -1006,12 +1007,11 @@ void XMLHttpRequest::createRequest(PassRefPtr<EncodedFormData> httpBody,
 
   ResourceLoaderOptions resourceLoaderOptions;
   resourceLoaderOptions.allowCredentials =
-      (m_sameOriginRequest || m_includeCredentials)
-          ? AllowStoredCredentials
-          : DoNotAllowStoredCredentials;
+      (m_sameOriginRequest || includeCredentials) ? AllowStoredCredentials
+                                                  : DoNotAllowStoredCredentials;
   resourceLoaderOptions.credentialsRequested =
-      m_includeCredentials ? ClientRequestedCredentials
-                           : ClientDidNotRequestCredentials;
+      includeCredentials ? ClientRequestedCredentials
+                         : ClientDidNotRequestCredentials;
   resourceLoaderOptions.securityOrigin = getSecurityOrigin();
 
   // When responseType is set to "blob", we redirect the downloaded data to a
@@ -1111,9 +1111,6 @@ bool XMLHttpRequest::internalAbort() {
 
   clearVariablesForLoading();
 
-  if (m_responseLegacyStream && m_state != kDone)
-    m_responseLegacyStream->abort();
-
   clearResponse();
   clearRequest();
 
@@ -1156,8 +1153,6 @@ void XMLHttpRequest::clearResponse() {
 
   m_downloadingToFile = false;
   m_lengthDownloadedToFile = 0;
-
-  m_responseLegacyStream = nullptr;
 
   // These variables may referred by the response accessors. So, we can clear
   // this only when we clear the response holder variables above.
@@ -1541,9 +1536,6 @@ void XMLHttpRequest::didFinishLoadingInternal() {
     }
   }
 
-  if (m_responseLegacyStream)
-    m_responseLegacyStream->finalize();
-
   clearVariablesForLoading();
   endLoading();
 }
@@ -1586,7 +1578,6 @@ void XMLHttpRequest::notifyParserStopped() {
   // This should only be called when response document is parsed asynchronously.
   DCHECK(m_responseDocumentParser);
   DCHECK(!m_responseDocumentParser->isParsing());
-  DCHECK(!m_responseLegacyStream);
 
   // Do nothing if we are called from |internalAbort()|.
   if (m_error)
@@ -1749,11 +1740,6 @@ void XMLHttpRequest::didReceiveData(const char* data, unsigned len) {
     if (!m_binaryResponseBuilder)
       m_binaryResponseBuilder = SharedBuffer::create();
     m_binaryResponseBuilder->append(data, len);
-  } else if (m_responseTypeCode == ResponseTypeLegacyStream) {
-    if (!m_responseLegacyStream)
-      m_responseLegacyStream =
-          Stream::create(getExecutionContext(), responseType());
-    m_responseLegacyStream->addData(data, len);
   }
 
   if (m_blobLoader) {
@@ -1838,7 +1824,6 @@ ExecutionContext* XMLHttpRequest::getExecutionContext() const {
 
 DEFINE_TRACE(XMLHttpRequest) {
   visitor->trace(m_responseBlob);
-  visitor->trace(m_responseLegacyStream);
   visitor->trace(m_loader);
   visitor->trace(m_responseDocument);
   visitor->trace(m_responseDocumentParser);
@@ -1853,9 +1838,9 @@ DEFINE_TRACE(XMLHttpRequest) {
 
 DEFINE_TRACE_WRAPPERS(XMLHttpRequest) {
   visitor->traceWrappers(m_responseBlob);
-  visitor->traceWrappers(m_responseLegacyStream);
   visitor->traceWrappers(m_responseDocument);
   visitor->traceWrappers(m_responseArrayBuffer);
+  XMLHttpRequestEventTarget::traceWrappers(visitor);
 }
 
 std::ostream& operator<<(std::ostream& ostream, const XMLHttpRequest* xhr) {

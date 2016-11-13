@@ -40,6 +40,7 @@
 #include "platform/RuntimeEnabledFeatures.h"
 #include "platform/mhtml/ArchiveResource.h"
 #include "platform/mhtml/MHTMLArchive.h"
+#include "platform/network/NetworkInstrumentation.h"
 #include "platform/network/NetworkUtils.h"
 #include "platform/network/ResourceTimingInfo.h"
 #include "platform/tracing/TraceEvent.h"
@@ -484,30 +485,32 @@ Resource* ResourceFetcher::requestResource(
     FetchRequest& request,
     const ResourceFactory& factory,
     const SubstituteData& substituteData) {
+  unsigned long identifier = createUniqueIdentifier();
+  network_instrumentation::ScopedResourceLoadTracker scopedResourceLoadTracker(
+      identifier, request.resourceRequest());
   SCOPED_BLINK_UMA_HISTOGRAM_TIMER("Blink.Fetch.RequestResourceTime");
   DCHECK(request.options().synchronousPolicy == RequestAsynchronously ||
          factory.type() == Resource::Raw ||
          factory.type() == Resource::XSLStyleSheet);
 
   context().populateRequestData(request.mutableResourceRequest());
-  if (request.resourceRequest().httpHeaderField("Upgrade-Insecure-Requests") !=
-      AtomicString("1")) {
-    context().modifyRequestForCSP(request.mutableResourceRequest());
-  }
+  context().modifyRequestForCSP(request.mutableResourceRequest());
   context().addClientHintsIfNecessary(request);
   context().addCSPHeaderIfNecessary(factory.type(), request);
 
+  // TODO(dproy): Remove this. http://crbug.com/659666
   TRACE_EVENT1("blink", "ResourceFetcher::requestResource", "url",
                urlForTraceEvent(request.url()));
 
   if (!request.url().isValid())
     return nullptr;
 
-  unsigned long identifier = createUniqueIdentifier();
   request.mutableResourceRequest().setPriority(computeLoadPriority(
       factory.type(), request, ResourcePriority::NotVisible));
   initializeResourceRequest(request.mutableResourceRequest(), factory.type(),
                             request.defer());
+  network_instrumentation::resourcePrioritySet(
+      identifier, request.resourceRequest().priority());
 
   if (!context().canRequest(
           factory.type(), request.resourceRequest(),
@@ -634,6 +637,9 @@ Resource* ResourceFetcher::requestResource(
 
   if (!startLoad(resource))
     return nullptr;
+
+  scopedResourceLoadTracker.resourceLoadContinuesBeyondScope();
+
   DCHECK(!resource->errorOccurred() ||
          request.options().synchronousPolicy == RequestSynchronously);
   return resource;
@@ -1044,8 +1050,6 @@ bool ResourceFetcher::hasPendingRequest() const {
 void ResourceFetcher::preloadStarted(Resource* resource) {
   if (m_preloads && m_preloads->contains(resource))
     return;
-  TRACE_EVENT_ASYNC_STEP_INTO0("blink.net", "Resource", resource->identifier(),
-                               "Preload");
   resource->increasePreloadCount();
 
   if (!m_preloads)
@@ -1118,7 +1122,8 @@ void ResourceFetcher::didFinishLoading(Resource* resource,
                                        double finishTime,
                                        int64_t encodedDataLength,
                                        DidFinishLoadingReason finishReason) {
-  TRACE_EVENT_ASYNC_END0("blink.net", "Resource", resource->identifier());
+  network_instrumentation::endResourceLoad(
+      resource->identifier(), network_instrumentation::RequestOutcome::Success);
   DCHECK(resource);
 
   // When loading a multipart resource, make the loader non-block when finishing
@@ -1164,11 +1169,17 @@ void ResourceFetcher::didFinishLoading(Resource* resource,
   if (finishReason == DidFinishLoading)
     resource->finish(finishTime);
   context().didLoadResource(resource);
+
+  if (resource->isImage() &&
+      toImageResource(resource)->shouldReloadBrokenPlaceholder()) {
+    toImageResource(resource)->reloadIfLoFiOrPlaceholder(this);
+  }
 }
 
 void ResourceFetcher::didFailLoading(Resource* resource,
                                      const ResourceError& error) {
-  TRACE_EVENT_ASYNC_END0("blink.net", "Resource", resource->identifier());
+  network_instrumentation::endResourceLoad(
+      resource->identifier(), network_instrumentation::RequestOutcome::Fail);
   removeResourceLoader(resource->loader());
   m_resourceTimingInfoMap.take(const_cast<Resource*>(resource));
   bool isInternalRequest = resource->options().initiatorInfo.name ==
@@ -1176,6 +1187,11 @@ void ResourceFetcher::didFailLoading(Resource* resource,
   context().dispatchDidFail(resource->identifier(), error, isInternalRequest);
   resource->error(error);
   context().didLoadResource(resource);
+
+  if (resource->isImage() &&
+      toImageResource(resource)->shouldReloadBrokenPlaceholder()) {
+    toImageResource(resource)->reloadIfLoFiOrPlaceholder(this);
+  }
 }
 
 void ResourceFetcher::didReceiveResponse(Resource* resource,
@@ -1197,9 +1213,16 @@ void ResourceFetcher::didReceiveResponse(Resource* resource,
       // safe because of http://crbug.com/604084 the
       // wasFallbackRequiredByServiceWorker flag is never set when foreign fetch
       // handled a request.
+      if (!context().shouldLoadNewResource(resource->getType())) {
+        // Cancel the request if we should not trigger a reload now.
+        resource->loader()->didFail(
+            ResourceError::cancelledError(response.url()));
+        return;
+      }
       request.setSkipServiceWorker(
           WebURLRequest::SkipServiceWorker::Controlling);
-      resource->loader()->restartForServiceWorkerFallback(request);
+      resource->loader()->restart(request, context().loadingTaskRunner(),
+                                  context().defersLoading());
       return;
     }
 
@@ -1213,13 +1236,13 @@ void ResourceFetcher::didReceiveResponse(Resource* resource,
                                  resource->resourceRequest(), originalURL,
                                  resource->options())) {
       resource->loader()->didFail(
-          nullptr, ResourceError::cancelledDueToAccessCheckError(originalURL));
+          ResourceError::cancelledDueToAccessCheckError(originalURL));
       return;
     }
   } else if (resource->options().corsEnabled == IsCORSEnabled &&
              !canAccessResponse(resource, response)) {
     resource->loader()->didFail(
-        nullptr, ResourceError::cancelledDueToAccessCheckError(response.url()));
+        ResourceError::cancelledDueToAccessCheckError(response.url()));
     return;
   }
 
@@ -1229,8 +1252,7 @@ void ResourceFetcher::didReceiveResponse(Resource* resource,
   resource->responseReceived(response, std::move(handle));
   if (resource->loader() && response.httpStatusCode() >= 400 &&
       !resource->shouldIgnoreHTTPStatusCodeErrors()) {
-    resource->loader()->didFail(nullptr,
-                                ResourceError::cancelledError(response.url()));
+    resource->loader()->didFail(ResourceError::cancelledError(response.url()));
   }
 }
 
@@ -1274,6 +1296,10 @@ bool ResourceFetcher::startLoad(Resource* resource) {
   willSendRequest(resource->identifier(), request, ResourceResponse(),
                   resource->options());
 
+  // TODO(shaochuan): Saving modified ResourceRequest back to |resource|, remove
+  // once willSendRequest() takes const ResourceRequest. crbug.com/632580
+  resource->setResourceRequest(request);
+
   // Resource requests from suborigins should not be intercepted by the service
   // worker of the physical origin. This has the effect that, for now,
   // suborigins do not work with service workers. See
@@ -1290,6 +1316,8 @@ bool ResourceFetcher::startLoad(Resource* resource) {
 
   storeResourceTimingInitiatorInformation(resource);
   resource->setFetcherSecurityOrigin(sourceOrigin);
+
+  loader->activateCacheAwareLoadingIfNeeded(request);
   loader->start(request, context().loadingTaskRunner(),
                 context().defersLoading());
   return true;
@@ -1409,9 +1437,8 @@ void ResourceFetcher::updateAllImageResourcePriorities() {
 
     resource->didChangePriority(resourceLoadPriority,
                                 resourcePriority.intraPriorityValue);
-    TRACE_EVENT_ASYNC_STEP_INTO1("blink.net", "Resource",
-                                 resource->identifier(), "ChangePriority",
-                                 "priority", resourceLoadPriority);
+    network_instrumentation::resourcePrioritySet(resource->identifier(),
+                                                 resourceLoadPriority);
     context().dispatchDidChangeResourcePriority(
         resource->identifier(), resourceLoadPriority,
         resourcePriority.intraPriorityValue);
@@ -1423,7 +1450,7 @@ void ResourceFetcher::reloadLoFiImages() {
     Resource* resource = documentResource.value.get();
     if (resource && resource->isImage()) {
       ImageResource* imageResource = toImageResource(resource);
-      imageResource->reloadIfLoFi(this);
+      imageResource->reloadIfLoFiOrPlaceholder(this);
     }
   }
 }

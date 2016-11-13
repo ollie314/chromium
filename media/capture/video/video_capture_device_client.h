@@ -45,7 +45,7 @@ class CAPTURE_EXPORT VideoCaptureDeviceClient
  public:
   VideoCaptureDeviceClient(
       std::unique_ptr<VideoFrameReceiver> receiver,
-      const scoped_refptr<VideoCaptureBufferPool>& buffer_pool,
+      scoped_refptr<VideoCaptureBufferPool> buffer_pool,
       const VideoCaptureJpegDecoderFactoryCB& jpeg_decoder_factory);
   ~VideoCaptureDeviceClient() override;
 
@@ -66,7 +66,7 @@ class CAPTURE_EXPORT VideoCaptureDeviceClient
                                 base::TimeDelta timestamp) override;
   void OnIncomingCapturedVideoFrame(
       std::unique_ptr<Buffer> buffer,
-      const scoped_refptr<media::VideoFrame>& frame) override;
+      scoped_refptr<media::VideoFrame> frame) override;
   std::unique_ptr<Buffer> ResurrectLastOutputBuffer(
       const gfx::Size& dimensions,
       media::VideoPixelFormat format,
@@ -93,6 +93,13 @@ class CAPTURE_EXPORT VideoCaptureDeviceClient
       uint8_t** y_plane_data,
       uint8_t** u_plane_data,
       uint8_t** v_plane_data);
+
+  // A branch of OnIncomingCapturedData for Y16 frame_format.pixel_format.
+  void OnIncomingCapturedY16Data(const uint8_t* data,
+                                 int length,
+                                 const VideoCaptureFormat& frame_format,
+                                 base::TimeTicks reference_time,
+                                 base::TimeDelta timestamp);
 
   // The receiver to which we post events.
   const std::unique_ptr<VideoFrameReceiver> receiver_;

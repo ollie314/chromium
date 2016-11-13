@@ -32,7 +32,6 @@
 #include "core/editing/EditingUtilities.h"
 #include "core/editing/SelectionAdjuster.h"
 #include "core/editing/iterators/CharacterIterator.h"
-#include "core/layout/LayoutObject.h"
 #include "platform/geometry/LayoutPoint.h"
 #include "wtf/Assertions.h"
 #include "wtf/text/CString.h"
@@ -56,10 +55,11 @@ VisibleSelectionTemplate<Strategy>::VisibleSelectionTemplate(
     : m_base(selection.base()),
       m_extent(selection.extent()),
       m_affinity(selection.affinity()),
+      m_selectionType(NoSelection),
       m_isDirectional(selection.isDirectional()),
       m_granularity(selection.granularity()),
       m_hasTrailingWhitespace(selection.hasTrailingWhitespace()) {
-  validate();
+  validate(m_granularity);
 }
 
 template <typename Strategy>
@@ -70,41 +70,6 @@ VisibleSelectionTemplate<Strategy> VisibleSelectionTemplate<Strategy>::create(
 
 VisibleSelection createVisibleSelection(const SelectionInDOMTree& selection) {
   return VisibleSelection::create(selection);
-}
-
-VisibleSelection createVisibleSelection(const Position& pos,
-                                        TextAffinity affinity,
-                                        bool isDirectional) {
-  DCHECK(!needsLayoutTreeUpdate(pos));
-  SelectionInDOMTree::Builder builder;
-  builder.setAffinity(affinity).setIsDirectional(isDirectional);
-  if (pos.isNotNull())
-    builder.collapse(pos);
-  return createVisibleSelection(builder.build());
-}
-
-VisibleSelection createVisibleSelection(const Position& base,
-                                        const Position& extent,
-                                        TextAffinity affinity,
-                                        bool isDirectional) {
-  DCHECK(!needsLayoutTreeUpdate(base));
-  DCHECK(!needsLayoutTreeUpdate(extent));
-  // TODO(yosin): We should use |Builder::setBaseAndExtent()| once we get rid
-  // of callers passing |base.istNull()| but |extent.isNotNull()|.
-  SelectionInDOMTree::Builder builder;
-  builder.setBaseAndExtentDeprecated(base, extent)
-      .setAffinity(affinity)
-      .setIsDirectional(isDirectional);
-  return createVisibleSelection(builder.build());
-}
-
-VisibleSelection createVisibleSelection(const VisiblePosition& base,
-                                        const VisiblePosition& extent,
-                                        bool isDirectional) {
-  DCHECK(base.isValid());
-  DCHECK(extent.isValid());
-  return createVisibleSelection(base.deepEquivalent(), extent.deepEquivalent(),
-                                base.affinity(), isDirectional);
 }
 
 VisibleSelectionInFlatTree createVisibleSelection(
@@ -160,6 +125,19 @@ operator=(const VisibleSelectionTemplate<Strategy>& other) {
   m_granularity = other.m_granularity;
   m_hasTrailingWhitespace = other.m_hasTrailingWhitespace;
   return *this;
+}
+
+template <typename Strategy>
+SelectionTemplate<Strategy> VisibleSelectionTemplate<Strategy>::asSelection()
+    const {
+  typename SelectionTemplate<Strategy>::Builder builder;
+  if (m_base.isNotNull())
+    builder.setBaseAndExtent(m_base, m_extent);
+  return builder.setAffinity(m_affinity)
+      .setGranularity(m_granularity)
+      .setIsDirectional(m_isDirectional)
+      .setHasTrailingWhitespace(m_hasTrailingWhitespace)
+      .build();
 }
 
 template <typename Strategy>
@@ -242,14 +220,6 @@ VisibleSelectionTemplate<Strategy>::toNormalizedEphemeralRange() const {
 }
 
 template <typename Strategy>
-void VisibleSelectionTemplate<Strategy>::expandUsingGranularity(
-    TextGranularity granularity) {
-  if (isNone())
-    return;
-  validate(granularity);
-}
-
-template <typename Strategy>
 static EphemeralRangeTemplate<Strategy> makeSearchRange(
     const PositionTemplate<Strategy>& pos) {
   Node* node = pos.anchorNode();
@@ -268,7 +238,11 @@ static EphemeralRangeTemplate<Strategy> makeSearchRange(
 
 template <typename Strategy>
 void VisibleSelectionTemplate<Strategy>::appendTrailingWhitespace() {
+  if (isNone())
+    return;
   DCHECK_EQ(m_granularity, WordGranularity);
+  if (!isRange())
+    return;
   const EphemeralRangeTemplate<Strategy> searchRange = makeSearchRange(end());
   if (searchRange.isNull())
     return;

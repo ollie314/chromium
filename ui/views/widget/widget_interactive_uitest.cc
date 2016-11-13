@@ -30,6 +30,7 @@
 #include "ui/views/focus/focus_manager.h"
 #include "ui/views/test/focus_manager_test.h"
 #include "ui/views/test/native_widget_factory.h"
+#include "ui/views/test/views_interactive_ui_test_base.h"
 #include "ui/views/test/widget_test.h"
 #include "ui/views/touchui/touch_selection_controller_impl.h"
 #include "ui/views/widget/widget.h"
@@ -1196,6 +1197,11 @@ TEST_F(WidgetTestInteractive, MAYBE_ExitFullscreenRestoreState) {
 // Testing initial focus is assigned properly for normal top-level widgets,
 // and subclasses that specify a initially focused child view.
 TEST_F(WidgetTestInteractive, InitialFocus) {
+  // TODO: test uses GetContext(), which is not applicable to aura-mus.
+  // http://crbug.com/663809.
+  if (IsAuraMusClient())
+    return;
+
   // By default, there is no initially focused view (even if there is a
   // focusable subview).
   Widget* toplevel(CreateTopLevelPlatformWidget());
@@ -1262,7 +1268,7 @@ class CaptureLostTrackingWidget : public Widget {
 
 }  // namespace
 
-class WidgetCaptureTest : public ViewsTestBase {
+class WidgetCaptureTest : public ViewsInteractiveUITestBase {
  public:
   WidgetCaptureTest() {
   }
@@ -1272,14 +1278,10 @@ class WidgetCaptureTest : public ViewsTestBase {
   void SetUp() override {
     // On mus these tests run as part of views::ViewsTestSuite which already
     // does this initialization.
-    if (!IsMus()) {
-      gl::GLSurfaceTestSupport::InitializeOneOff();
-      ui::RegisterPathProvider();
-      base::FilePath ui_test_pak_path;
-      ASSERT_TRUE(PathService::Get(ui::UI_TEST_PAK, &ui_test_pak_path));
-      ui::ResourceBundle::InitSharedInstanceWithPakPath(ui_test_pak_path);
-    }
-    ViewsTestBase::SetUp();
+    if (!IsMus())
+      ViewsInteractiveUITestBase::SetUp();
+    else
+      ViewsTestBase::SetUp();
   }
 
   // Verifies Widget::SetCapture() results in updating native capture along with
@@ -1410,6 +1412,10 @@ TEST_F(WidgetCaptureTest, CaptureDesktopNativeWidget) {
 TEST_F(WidgetCaptureTest, FailedCaptureRequestIsNoop) {
   // Fails on mus. http://crbug.com/611764
   if (IsMus())
+    return;
+  // TODO: test uses GetContext(), which is not applicable to aura-mus.
+  // http://crbug.com/663809.
+  if (IsAuraMusClient())
     return;
 
   Widget widget;

@@ -59,6 +59,8 @@
 #include "modules/device_orientation/DeviceOrientationController.h"
 #include "modules/encryptedmedia/HTMLMediaElementEncryptedMedia.h"
 #include "modules/gamepad/NavigatorGamepad.h"
+#include "modules/remoteplayback/HTMLMediaElementRemotePlayback.h"
+#include "modules/remoteplayback/RemotePlayback.h"
 #include "modules/serviceworkers/NavigatorServiceWorker.h"
 #include "modules/serviceworkers/ServiceWorkerLinkResource.h"
 #include "modules/storage/DOMWindowStorageController.h"
@@ -69,13 +71,11 @@
 #include "platform/UserGestureIndicator.h"
 #include "platform/exported/WrappedResourceRequest.h"
 #include "platform/exported/WrappedResourceResponse.h"
-#include "platform/fonts/GlyphPageTreeNode.h"
 #include "platform/network/HTTPParsers.h"
 #include "platform/plugins/PluginData.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebApplicationCacheHost.h"
 #include "public/platform/WebMediaPlayerSource.h"
-#include "public/platform/WebMimeRegistry.h"
 #include "public/platform/WebRTCPeerConnectionHandler.h"
 #include "public/platform/WebSecurityOrigin.h"
 #include "public/platform/WebURL.h"
@@ -323,20 +323,12 @@ Frame* FrameLoaderClientImpl::top() const {
   return toCoreFrame(m_webFrame->top());
 }
 
-Frame* FrameLoaderClientImpl::previousSibling() const {
-  return toCoreFrame(m_webFrame->previousSibling());
-}
-
 Frame* FrameLoaderClientImpl::nextSibling() const {
   return toCoreFrame(m_webFrame->nextSibling());
 }
 
 Frame* FrameLoaderClientImpl::firstChild() const {
   return toCoreFrame(m_webFrame->firstChild());
-}
-
-Frame* FrameLoaderClientImpl::lastChild() const {
-  return toCoreFrame(m_webFrame->lastChild());
 }
 
 void FrameLoaderClientImpl::willBeDetached() {
@@ -426,11 +418,9 @@ void FrameLoaderClientImpl::dispatchWillCommitProvisionalLoad() {
     m_webFrame->client()->willCommitProvisionalLoad(m_webFrame);
 }
 
-void FrameLoaderClientImpl::dispatchDidStartProvisionalLoad(
-    double triggeringEventTime) {
+void FrameLoaderClientImpl::dispatchDidStartProvisionalLoad() {
   if (m_webFrame->client())
-    m_webFrame->client()->didStartProvisionalLoad(m_webFrame,
-                                                  triggeringEventTime);
+    m_webFrame->client()->didStartProvisionalLoad(m_webFrame);
   if (WebDevToolsAgentImpl* devTools = devToolsAgent())
     devTools->didStartProvisionalLoad(m_webFrame->frame());
 }
@@ -453,13 +443,6 @@ void FrameLoaderClientImpl::dispatchDidCommitLoad(
   if (!m_webFrame->parent()) {
     m_webFrame->viewImpl()->didCommitLoad(commitType == StandardCommit, false);
   }
-
-  // Save some histogram data so we can compute the average memory used per
-  // page load of the glyphs.
-  // TODO(esprehn): Is this ancient uma actually useful?
-  DEFINE_STATIC_LOCAL(CustomCountHistogram, gyphsPagesPerLoadHistogram,
-                      ("Memory.GlyphPagesPerLoad", 1, 10000, 50));
-  gyphsPagesPerLoadHistogram.count(GlyphPageTreeNode::treeGlyphPageCount());
 
   if (m_webFrame->client())
     m_webFrame->client()->didCommitProvisionalLoad(
@@ -694,8 +677,10 @@ void FrameLoaderClientImpl::selectorMatchChanged(
 DocumentLoader* FrameLoaderClientImpl::createDocumentLoader(
     LocalFrame* frame,
     const ResourceRequest& request,
-    const SubstituteData& data) {
-  WebDataSourceImpl* ds = WebDataSourceImpl::create(frame, request, data);
+    const SubstituteData& data,
+    ClientRedirectPolicy clientRedirectPolicy) {
+  WebDataSourceImpl* ds =
+      WebDataSourceImpl::create(frame, request, data, clientRedirectPolicy);
   if (m_webFrame->client())
     m_webFrame->client()->didCreateDataSource(m_webFrame, ds);
   return ds;
@@ -790,6 +775,11 @@ std::unique_ptr<WebMediaPlayer> FrameLoaderClientImpl::createWebMediaPlayer(
   return wrapUnique(webFrame->client()->createMediaPlayer(
       source, client, &encryptedMedia, encryptedMedia.contentDecryptionModule(),
       sinkId));
+}
+
+WebRemotePlaybackClient* FrameLoaderClientImpl::createWebRemotePlaybackClient(
+    HTMLMediaElement& htmlMediaElement) {
+  return HTMLMediaElementRemotePlayback::remote(htmlMediaElement);
 }
 
 ObjectContentType FrameLoaderClientImpl::getObjectContentType(

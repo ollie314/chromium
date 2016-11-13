@@ -17,7 +17,6 @@
 #include "content/browser/devtools/devtools_manager.h"
 #include "content/browser/devtools/devtools_protocol_handler.h"
 #include "content/browser/devtools/page_navigation_throttle.h"
-#include "content/browser/devtools/protocol/browser_handler.h"
 #include "content/browser/devtools/protocol/dom_handler.h"
 #include "content/browser/devtools/protocol/emulation_handler.h"
 #include "content/browser/devtools/protocol/input_handler.h"
@@ -373,6 +372,15 @@ RenderFrameDevToolsAgentHost::CreateThrottleForNavigation(
 }
 
 // static
+bool RenderFrameDevToolsAgentHost::IsNetworkHandlerEnabled(
+    FrameTreeNode* frame_tree_node) {
+  RenderFrameDevToolsAgentHost* agent_host = FindAgentHost(frame_tree_node);
+  if (!agent_host)
+    return false;
+  return agent_host->network_handler_->enabled();
+}
+
+// static
 void RenderFrameDevToolsAgentHost::WebContentsCreated(
     WebContents* web_contents) {
   if (ShouldForceCreation()) {
@@ -384,7 +392,6 @@ void RenderFrameDevToolsAgentHost::WebContentsCreated(
 RenderFrameDevToolsAgentHost::RenderFrameDevToolsAgentHost(
     RenderFrameHostImpl* host)
     : DevToolsAgentHostImpl(base::GenerateGUID()),
-      browser_handler_(new devtools::browser::BrowserHandler()),
       dom_handler_(new devtools::dom::DOMHandler()),
       input_handler_(new devtools::input::InputHandler()),
       inspector_handler_(new devtools::inspector::InspectorHandler()),
@@ -409,7 +416,6 @@ RenderFrameDevToolsAgentHost::RenderFrameDevToolsAgentHost(
       pending_handle_(nullptr),
       frame_tree_node_(host->frame_tree_node()) {
   DevToolsProtocolDispatcher* dispatcher = protocol_handler_->dispatcher();
-  dispatcher->SetBrowserHandler(browser_handler_.get());
   dispatcher->SetDOMHandler(dom_handler_.get());
   dispatcher->SetInputHandler(input_handler_.get());
   dispatcher->SetInspectorHandler(inspector_handler_.get());
@@ -549,7 +555,6 @@ void RenderFrameDevToolsAgentHost::OnClientDetached() {
 #if defined(OS_ANDROID)
   power_save_blocker_.reset();
 #endif
-  browser_handler_->Detached();
   if (emulation_handler_)
     emulation_handler_->Detached();
   if (page_handler_)
@@ -1044,6 +1049,21 @@ void RenderFrameDevToolsAgentHost::OnSwapCompositorFrame(
   if (frame_trace_recorder_ && tracing_handler_->did_initiate_recording()) {
     frame_trace_recorder_->OnSwapCompositorFrame(
         current_ ? current_->host() : nullptr, std::get<1>(param).metadata);
+  }
+}
+
+void RenderFrameDevToolsAgentHost::SignalSynchronousSwapCompositorFrame(
+    RenderFrameHost* frame_host,
+    cc::CompositorFrameMetadata frame_metadata) {
+  scoped_refptr<RenderFrameDevToolsAgentHost> dtah(FindAgentHost(frame_host));
+  if (dtah) {
+    // Unblock the compositor.
+    BrowserThread::PostTask(
+        BrowserThread::UI, FROM_HERE,
+        base::Bind(
+            &RenderFrameDevToolsAgentHost::SynchronousSwapCompositorFrame,
+            dtah.get(),
+            base::Passed(std::move(frame_metadata))));
   }
 }
 

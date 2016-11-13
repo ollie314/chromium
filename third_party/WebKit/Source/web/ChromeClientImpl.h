@@ -154,7 +154,7 @@ class WEB_EXPORT ChromeClientImpl final : public ChromeClient {
                                          LocalFrame*) override;
 
   void enterFullscreenForElement(Element*) override;
-  void exitFullscreenForElement(Element*) override;
+  void exitFullscreen(LocalFrame*) override;
 
   void clearCompositedSelection(LocalFrame*) override;
   void updateCompositedSelection(LocalFrame*,
@@ -203,7 +203,7 @@ class WEB_EXPORT ChromeClientImpl final : public ChromeClient {
 
   void showUnhandledTapUIIfNeeded(IntPoint, Node*, bool) override;
   void onMouseDown(Node*) override;
-  void didUpdateTopControls() const override;
+  void didUpdateBrowserControls() const override;
 
   CompositorProxyClient* createCompositorProxyClient(LocalFrame*) override;
   FloatSize elasticOverscroll() const override;

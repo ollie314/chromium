@@ -97,7 +97,7 @@ public class FakeSuggestionsSource implements SuggestionsSource {
 
     @Override
     public void dismissCategory(@CategoryInt int category) {
-        throw new UnsupportedOperationException();
+        silentlyRemoveCategory(category);
     }
 
     @Override
@@ -110,6 +110,11 @@ public class FakeSuggestionsSource implements SuggestionsSource {
         if (mThumbnails.containsKey(suggestion.mIdWithinCategory)) {
             callback.onResult(mThumbnails.get(suggestion.mIdWithinCategory));
         }
+    }
+
+    @Override
+    public void fetchSuggestions(@CategoryInt int category, String[] displayedSuggestionIds) {
+        throw new UnsupportedOperationException();
     }
 
     @Override

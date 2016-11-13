@@ -63,6 +63,7 @@
 #include "ui/aura/client/cursor_client_observer.h"
 #include "ui/aura/client/focus_client.h"
 #include "ui/aura/client/screen_position_client.h"
+#include "ui/aura/client/transient_window_client.h"
 #include "ui/aura/client/window_parenting_client.h"
 #include "ui/aura/env.h"
 #include "ui/aura/window.h"
@@ -92,7 +93,6 @@
 #include "ui/wm/public/activation_client.h"
 #include "ui/wm/public/scoped_tooltip_disabler.h"
 #include "ui/wm/public/tooltip_client.h"
-#include "ui/wm/public/transient_window_client.h"
 #include "ui/wm/public/window_types.h"
 
 #if defined(OS_WIN)
@@ -756,6 +756,8 @@ gfx::Rect RenderWidgetHostViewAura::GetViewBounds() const {
 }
 
 void RenderWidgetHostViewAura::SetBackgroundColor(SkColor color) {
+  if (color == background_color())
+    return;
   RenderWidgetHostViewBase::SetBackgroundColor(color);
   bool opaque = GetBackgroundOpaque();
   host_->SetBackgroundOpaque(opaque);
@@ -906,8 +908,14 @@ void RenderWidgetHostViewAura::OnSwapCompositorFrame(
     cc::CompositorFrame frame) {
   TRACE_EVENT0("content", "RenderWidgetHostViewAura::OnSwapCompositorFrame");
 
+  // Override the background color to the current compositor background.
+  // This allows us to, when navigating to a new page, transfer this color to
+  // that page. This allows us to pass this background color to new views on
+  // navigation.
+  SetBackgroundColor(frame.metadata.root_background_color);
+
   last_scroll_offset_ = frame.metadata.root_scroll_offset;
-  if (!frame.delegated_frame_data)
+  if (frame.render_pass_list.empty())
     return;
 
   cc::Selection<gfx::SelectionBound> selection = frame.metadata.selection;
@@ -1599,7 +1607,7 @@ cc::FrameSinkId RenderWidgetHostViewAura::FrameSinkIdAtPoint(
 
   // It is possible that the renderer has not yet produced a surface, in which
   // case we return our current namespace.
-  if (id.is_null())
+  if (!id.is_valid())
     return GetFrameSinkId();
   return id.frame_sink_id();
 }
@@ -1727,9 +1735,8 @@ void RenderWidgetHostViewAura::OnWindowFocused(aura::Window* gained_focus,
       input_method->SetFocusedTextInputClient(this);
 
       // Often the application can set focus to the view in response to a key
-      // down. However the following char event shouldn't be sent to the web
-      // page.
-      host_->SuppressNextCharEvents();
+      // down. However, the following events shouldn't be sent to the web page.
+      host_->SuppressEventsUntilKeyDown();
     }
 
     BrowserAccessibilityManager* manager =
@@ -1860,7 +1867,6 @@ void RenderWidgetHostViewAura::CreateAuraWindow() {
   aura::client::SetTooltipText(window_, &tooltip_);
   aura::client::SetActivationDelegate(window_, this);
   aura::client::SetFocusChangeObserver(window_, this);
-  window_->set_layer_owner_delegate(delegated_frame_host_.get());
   display::Screen::GetScreen()->AddObserver(this);
 }
 

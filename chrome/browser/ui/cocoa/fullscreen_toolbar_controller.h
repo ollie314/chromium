@@ -12,15 +12,24 @@
 #include "chrome/browser/ui/cocoa/location_bar/location_bar_view_mac.h"
 
 @class BrowserWindowController;
-@class CrTrackingArea;
-@class DropdownAnimation;
 @class FullscreenMenubarTracker;
+class FullscreenToolbarAnimationController;
+@class FullscreenToolbarMouseTracker;
+@class FullscreenToolbarVisibilityLockController;
+@class ImmersiveFullscreenController;
 
-enum class FullscreenSlidingStyle {
-  OMNIBOX_TABS_PRESENT,  // Tab strip and omnibox both visible.
-  OMNIBOX_TABS_HIDDEN,   // Tab strip and omnibox both hidden.
-  OMNIBOX_TABS_NONE,     // Tab strip and omnibox both hidden and never
-                         // shown.
+// This enum class represents the appearance of the fullscreen toolbar, which
+// includes the tab strip and omnibox.
+enum class FullscreenToolbarStyle {
+  // The toolbar is present. Moving the cursor to the top
+  // causes the menubar to appear and the toolbar to slide down.
+  TOOLBAR_PRESENT,
+  // The toolbar is hidden. Moving cursor to top shows the
+  // toolbar and menubar.
+  TOOLBAR_HIDDEN,
+  // Toolbar is hidden. Moving cursor to top causes the menubar
+  // to appear, but not the toolbar.
+  TOOLBAR_NONE,
 };
 
 // Provides a controller to fullscreen toolbar for a single browser
@@ -31,7 +40,7 @@ enum class FullscreenSlidingStyle {
 //
 
 // TODO (spqchan): Write tests for this class. See crbug.com/640064.
-@interface FullscreenToolbarController : NSObject<NSAnimationDelegate> {
+@interface FullscreenToolbarController : NSObject {
  @private
   // Our parent controller.
   BrowserWindowController* browserController_;  // weak
@@ -39,87 +48,37 @@ enum class FullscreenSlidingStyle {
   // Whether or not we are in fullscreen mode.
   BOOL inFullscreenMode_;
 
-  // The content view for the window.  This is nil when not in fullscreen mode.
-  NSView* contentView_;  // weak
-
-  // The frame for the tracking area. The value is the toolbar overlay's frame
-  // with additional height added at the bottom.
-  NSRect trackingAreaFrame_;
-
-  // The tracking area associated with the toolbar overlay bar. This tracking
-  // area is used to keep the toolbar active if the menubar had animated out
-  // but the mouse is still on the toolbar.
-  base::scoped_nsobject<CrTrackingArea> trackingArea_;
-
   // Updates the fullscreen toolbar layout for changes in the menubar. This
   // object is only set when the browser is in fullscreen mode.
   base::scoped_nsobject<FullscreenMenubarTracker> menubarTracker_;
 
-  // Pointer to the currently running animation.  Is nil if no animation is
-  // running.
-  base::scoped_nsobject<DropdownAnimation> currentAnimation_;
+  // Maintains the toolbar's visibility locks for the TOOLBAR_HIDDEN style.
+  base::scoped_nsobject<FullscreenToolbarVisibilityLockController>
+      visibilityLockController_;
 
-  // Timer for scheduled hiding of the toolbar when it had been revealed for
-  // tabstrip changes.
-  base::scoped_nsobject<NSTimer> hideTimer_;
+  // Manages the toolbar animations for the TOOLBAR_HIDDEN style.
+  std::unique_ptr<FullscreenToolbarAnimationController> animationController_;
 
-  // Tracks the currently requested system fullscreen mode, used to show or
-  // hide the menubar.  This should be |kFullScreenModeNormal| when the window
-  // is not main or not fullscreen, |kFullScreenModeHideAll| while the overlay
-  // is hidden, and |kFullScreenModeHideDock| while the overlay is shown.  If
-  // the window is not on the primary screen, this should always be
-  // |kFullScreenModeNormal|.  This value can get out of sync with the correct
-  // state if we miss a notification (which can happen when a window is closed).
-  // Used to track the current state and make sure we properly restore the menu
-  // bar when this controller is destroyed.
-  base::mac::FullScreenMode systemFullscreenMode_;
+  // Mouse tracker to track the user's interactions with the toolbar. This
+  // object is only set when the browser is in fullscreen mode.
+  base::scoped_nsobject<FullscreenToolbarMouseTracker> mouseTracker_;
 
-  // Whether the omnibox is hidden in fullscreen.
-  FullscreenSlidingStyle slidingStyle_;
-
-  // True when the toolbar is dropped to show tabstrip changes.
-  BOOL isRevealingToolbarForTabStripChanges_;
-
-  // True when the toolbar should be animated back out via a DropdownAnimation.
-  // This is set and unset in hideTimer: and mouseExited:. It's set to YES
-  // before it calls animateToolbarVisibility: and then set to NO after the
-  // animation has started.
-  BOOL shouldAnimateToolbarOut_;
-
-  // True when the toolbar is animating in/out for changes in the toolbar
-  // visibility locks.
-  BOOL isLockingBarVisibility_;
-  BOOL isReleasingBarVisibility_;
+  // Controller for immersive fullscreen.
+  base::scoped_nsobject<ImmersiveFullscreenController>
+      immersiveFullscreenController_;
 }
 
-@property(nonatomic, assign) FullscreenSlidingStyle slidingStyle;
+@property(nonatomic, assign) FullscreenToolbarStyle toolbarStyle;
 
 // Designated initializer.
-- (id)initWithBrowserController:(BrowserWindowController*)controller
-                          style:(FullscreenSlidingStyle)style;
+- (id)initWithBrowserController:(BrowserWindowController*)controller;
 
 // Informs the controller that the browser has entered or exited fullscreen
-// mode. |-setupFullscreenToolbarForContentView:showDropdown:| should be called
-// after the window is setup, just before it is shown. |-exitFullscreenMode|
-// should be called before any views are moved back to the non-fullscreen
-// window.  If |-setupFullscreenToolbarForContentView:showDropdown:| is called,
-// it must be balanced with a call to |-exitFullscreenMode| before the
-// controller is released.
-- (void)setupFullscreenToolbarForContentView:(NSView*)contentView;
+// mode. |-enterFullscreenMode| should be called when the window is about to
+// enter fullscreen. |-exitFullscreenMode| should be called before any views
+// are moved back to the non-fullscreen window.
+- (void)enterFullscreenMode;
 - (void)exitFullscreenMode;
-
-// Shows/hides the toolbar with animation to reflect changes for the toolbar
-// visibility locks. lockBarVisibilityWithAnimation: should only be called when
-// the lock state goes from unlocked to locked. Likewise,
-// releaseBarVisibilityWithAnimation: should only be called whenthe lock state
-// goes from locked to unlocked.
-- (void)lockBarVisibilityWithAnimation:(BOOL)animate;
-- (void)releaseBarVisibilityWithAnimation:(BOOL)animate;
-
-// Informs the controller that the overlay should be shown/hidden, possibly
-// with animation.
-- (void)ensureOverlayShownWithAnimation:(BOOL)animate;
-- (void)ensureOverlayHiddenWithAnimation:(BOOL)animate;
 
 // Cancels any running animation and timers.
 - (void)cancelAnimationAndTimer;
@@ -138,26 +97,27 @@ enum class FullscreenSlidingStyle {
 // return a float that ranges from (0, 1).
 - (CGFloat)toolbarFraction;
 
-// Returns YES if the mouse is on the window's screen. This is used to check
-// if the menubar events belong to window's screen since the menubar would
-// only be revealed if the mouse is there.
-- (BOOL)isMouseOnScreen;
+// Returns YES if the fullscreen toolbar must be shown.
+- (BOOL)mustShowFullscreenToolbar;
 
-// Sets |trackingAreaFrame_| from the given overlay frame.
-- (void)setTrackingAreaFromOverlayFrame:(NSRect)frame;
-
-// Returns YES if the browser is in the process of entering/exiting
-// fullscreen.
-- (BOOL)isFullscreenTransitionInProgress;
+// Called by the BrowserWindowController to update toolbar frame.
+- (void)updateToolbarFrame:(NSRect)frame;
 
 // Returns YES if the browser in in fullscreen.
 - (BOOL)isInFullscreen;
+
+// Updates the toolbar style. If the style has changed, then the toolbar will
+// relayout.
+- (void)updateToolbarStyleExitingTabFullscreen:(BOOL)isExitingTabFullscreen;
 
 // Updates the toolbar by updating the layout, menubar and dock.
 - (void)updateToolbar;
 
 // Returns |browserController_|.
 - (BrowserWindowController*)browserWindowController;
+
+// Returns the object in |visibilityLockController_|;
+- (FullscreenToolbarVisibilityLockController*)visibilityLockController;
 
 @end
 

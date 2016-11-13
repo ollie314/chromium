@@ -165,13 +165,14 @@ class QuicChromiumClientSessionTest
   MockAlarmFactory alarm_factory_;
   TransportSecurityState transport_security_state_;
   MockCryptoClientStreamFactory crypto_client_stream_factory_;
+  QuicClientPushPromiseIndex push_promise_index_;
   std::unique_ptr<QuicChromiumClientSession> session_;
+  TestServerPushDelegate test_push_delegate_;
   QuicConnectionVisitorInterface* visitor_;
   TestCompletionCallback callback_;
   QuicTestPacketMaker client_maker_;
   QuicTestPacketMaker server_maker_;
   ProofVerifyDetailsChromium verify_details_;
-  QuicClientPushPromiseIndex push_promise_index_;
 };
 
 INSTANTIATE_TEST_CASE_P(Tests,
@@ -248,7 +249,8 @@ TEST_P(QuicChromiumClientSessionTest, PushStreamTimedOutNoResponse) {
   promise_headers[":path"] = "/pushed.jpg";
 
   // Receive a PUSH PROMISE from the server.
-  session_->HandlePromised(stream->id(), kServerDataStreamId1, promise_headers);
+  EXPECT_TRUE(session_->HandlePromised(stream->id(), kServerDataStreamId1,
+                                       promise_headers));
 
   QuicClientPromisedInfo* promised =
       session_->GetPromisedById(kServerDataStreamId1);
@@ -294,7 +296,8 @@ TEST_P(QuicChromiumClientSessionTest, PushStreamTimedOutWithResponse) {
 
   session_->GetOrCreateStream(kServerDataStreamId1);
   // Receive a PUSH PROMISE from the server.
-  session_->HandlePromised(stream->id(), kServerDataStreamId1, promise_headers);
+  EXPECT_TRUE(session_->HandlePromised(stream->id(), kServerDataStreamId1,
+                                       promise_headers));
   session_->OnInitialHeadersComplete(kServerDataStreamId1, SpdyHeaderBlock());
   // Read data on the pushed stream.
   QuicStreamFrame data(kServerDataStreamId1, false, 0, StringPiece("SP"));
@@ -305,6 +308,159 @@ TEST_P(QuicChromiumClientSessionTest, PushStreamTimedOutWithResponse) {
   EXPECT_TRUE(promised);
   // Fire alarm to time out the push stream.
   alarm_factory_.FireAlarm(QuicClientPromisedInfoPeer::GetAlarm(promised));
+  EXPECT_EQ(2u,
+            QuicChromiumClientSessionPeer::GetPushedBytesCount(session_.get()));
+  EXPECT_EQ(2u, QuicChromiumClientSessionPeer::GetPushedAndUnclaimedBytesCount(
+                    session_.get()));
+}
+
+TEST_P(QuicChromiumClientSessionTest, CancelPushWhenPendingValidation) {
+  MockRead reads[] = {MockRead(SYNCHRONOUS, ERR_IO_PENDING, 0)};
+  std::unique_ptr<QuicEncryptedPacket> client_rst(client_maker_.MakeRstPacket(
+      1, true, kClientDataStreamId1, QUIC_RST_ACKNOWLEDGEMENT));
+
+  MockWrite writes[] = {
+      MockWrite(ASYNC, client_rst->data(), client_rst->length(), 1)};
+  socket_data_.reset(new SequencedSocketData(reads, arraysize(reads), writes,
+                                             arraysize(writes)));
+  Initialize();
+  session_->set_push_delegate(&test_push_delegate_);
+
+  ProofVerifyDetailsChromium details;
+  details.cert_verify_result.verified_cert =
+      ImportCertFromFile(GetTestCertsDirectory(), "spdy_pooling.pem");
+  ASSERT_TRUE(details.cert_verify_result.verified_cert.get());
+
+  CompleteCryptoHandshake();
+  session_->OnProofVerifyDetailsAvailable(details);
+
+  QuicChromiumClientStream* stream =
+      session_->CreateOutgoingDynamicStream(kDefaultPriority);
+  EXPECT_TRUE(stream);
+
+  SpdyHeaderBlock promise_headers;
+  promise_headers[":method"] = "GET";
+  promise_headers[":authority"] = "www.example.org";
+  promise_headers[":scheme"] = "https";
+  promise_headers[":path"] = "/pushed.jpg";
+
+  // Receive a PUSH PROMISE from the server.
+  EXPECT_TRUE(session_->HandlePromised(stream->id(), kServerDataStreamId1,
+                                       promise_headers));
+
+  QuicClientPromisedInfo* promised =
+      session_->GetPromisedById(kServerDataStreamId1);
+  EXPECT_TRUE(promised);
+
+  // Initiate rendezvous.
+  SpdyHeaderBlock client_request = promise_headers.Clone();
+  TestPushPromiseDelegate delegate(/*match=*/true);
+  promised->HandleClientRequest(client_request, &delegate);
+
+  // Cancel the push before receiving the response to the pushed request.
+  GURL pushed_url("https://www.example.org/pushed.jpg");
+  test_push_delegate_.CancelPush(pushed_url);
+  EXPECT_TRUE(session_->GetPromisedByUrl(pushed_url.spec()));
+
+  // Reset the stream now before tear down.
+  session_->CloseStream(kClientDataStreamId1);
+}
+
+TEST_P(QuicChromiumClientSessionTest, CancelPushBeforeReceivingResponse) {
+  base::HistogramTester histogram_tester;
+  MockRead reads[] = {MockRead(SYNCHRONOUS, ERR_IO_PENDING, 0)};
+  std::unique_ptr<QuicEncryptedPacket> client_rst(client_maker_.MakeRstPacket(
+      1, true, kServerDataStreamId1, QUIC_STREAM_CANCELLED));
+  MockWrite writes[] = {
+      MockWrite(ASYNC, client_rst->data(), client_rst->length(), 1)};
+  socket_data_.reset(new SequencedSocketData(reads, arraysize(reads), writes,
+                                             arraysize(writes)));
+  Initialize();
+  session_->set_push_delegate(&test_push_delegate_);
+
+  ProofVerifyDetailsChromium details;
+  details.cert_verify_result.verified_cert =
+      ImportCertFromFile(GetTestCertsDirectory(), "spdy_pooling.pem");
+  ASSERT_TRUE(details.cert_verify_result.verified_cert.get());
+
+  CompleteCryptoHandshake();
+  session_->OnProofVerifyDetailsAvailable(details);
+
+  QuicChromiumClientStream* stream =
+      session_->CreateOutgoingDynamicStream(kDefaultPriority);
+  EXPECT_TRUE(stream);
+
+  SpdyHeaderBlock promise_headers;
+  promise_headers[":method"] = "GET";
+  promise_headers[":authority"] = "www.example.org";
+  promise_headers[":scheme"] = "https";
+  promise_headers[":path"] = "/pushed.jpg";
+
+  // Receive a PUSH PROMISE from the server.
+  EXPECT_TRUE(session_->HandlePromised(stream->id(), kServerDataStreamId1,
+                                       promise_headers));
+
+  QuicClientPromisedInfo* promised =
+      session_->GetPromisedById(kServerDataStreamId1);
+  EXPECT_TRUE(promised);
+  // Cancel the push before receiving the response to the pushed request.
+  GURL pushed_url("https://www.example.org/pushed.jpg");
+  test_push_delegate_.CancelPush(pushed_url);
+
+  EXPECT_FALSE(session_->GetPromisedByUrl(pushed_url.spec()));
+  EXPECT_EQ(0u,
+            QuicChromiumClientSessionPeer::GetPushedBytesCount(session_.get()));
+  EXPECT_EQ(0u, QuicChromiumClientSessionPeer::GetPushedAndUnclaimedBytesCount(
+                    session_.get()));
+}
+
+TEST_P(QuicChromiumClientSessionTest, CancelPushAfterReceivingResponse) {
+  base::HistogramTester histogram_tester;
+  MockRead reads[] = {MockRead(SYNCHRONOUS, ERR_IO_PENDING, 0)};
+  std::unique_ptr<QuicEncryptedPacket> client_rst(client_maker_.MakeRstPacket(
+      1, true, kServerDataStreamId1, QUIC_STREAM_CANCELLED));
+  MockWrite writes[] = {
+      MockWrite(ASYNC, client_rst->data(), client_rst->length(), 1)};
+  socket_data_.reset(new SequencedSocketData(reads, arraysize(reads), writes,
+                                             arraysize(writes)));
+  Initialize();
+  session_->set_push_delegate(&test_push_delegate_);
+
+  ProofVerifyDetailsChromium details;
+  details.cert_verify_result.verified_cert =
+      ImportCertFromFile(GetTestCertsDirectory(), "spdy_pooling.pem");
+  ASSERT_TRUE(details.cert_verify_result.verified_cert.get());
+
+  CompleteCryptoHandshake();
+  session_->OnProofVerifyDetailsAvailable(details);
+
+  QuicChromiumClientStream* stream =
+      session_->CreateOutgoingDynamicStream(kDefaultPriority);
+  EXPECT_TRUE(stream);
+
+  SpdyHeaderBlock promise_headers;
+  promise_headers[":method"] = "GET";
+  promise_headers[":authority"] = "www.example.org";
+  promise_headers[":scheme"] = "https";
+  promise_headers[":path"] = "/pushed.jpg";
+
+  session_->GetOrCreateStream(kServerDataStreamId1);
+  // Receive a PUSH PROMISE from the server.
+  EXPECT_TRUE(session_->HandlePromised(stream->id(), kServerDataStreamId1,
+                                       promise_headers));
+  session_->OnInitialHeadersComplete(kServerDataStreamId1, SpdyHeaderBlock());
+  // Read data on the pushed stream.
+  QuicStreamFrame data(kServerDataStreamId1, false, 0, StringPiece("SP"));
+  session_->OnStreamFrame(data);
+
+  QuicClientPromisedInfo* promised =
+      session_->GetPromisedById(kServerDataStreamId1);
+  EXPECT_TRUE(promised);
+  // Cancel the push after receiving data on the push stream.
+  GURL pushed_url("https://www.example.org/pushed.jpg");
+  test_push_delegate_.CancelPush(pushed_url);
+
+  EXPECT_FALSE(session_->GetPromisedByUrl(pushed_url.spec()));
   EXPECT_EQ(2u,
             QuicChromiumClientSessionPeer::GetPushedBytesCount(session_.get()));
   EXPECT_EQ(2u, QuicChromiumClientSessionPeer::GetPushedAndUnclaimedBytesCount(

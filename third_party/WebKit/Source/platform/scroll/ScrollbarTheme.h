@@ -38,7 +38,6 @@ namespace blink {
 class CullRect;
 class GraphicsContext;
 class PlatformMouseEvent;
-class ScrollbarThemePaintParams;
 
 class PLATFORM_EXPORT ScrollbarTheme {
   WTF_MAKE_NONCOPYABLE(ScrollbarTheme);
@@ -70,7 +69,7 @@ class PLATFORM_EXPORT ScrollbarTheme {
 
   virtual bool supportsControlTints() const { return false; }
   virtual bool usesOverlayScrollbars() const { return false; }
-  virtual void updateScrollbarOverlayStyle(const ScrollbarThemeClient&) {}
+  virtual void updateScrollbarOverlayColorTheme(const ScrollbarThemeClient&) {}
 
   virtual bool invalidateOnMouseEnterExit() { return false; }
   virtual bool invalidateOnWindowActiveChange() const { return false; }
@@ -104,6 +103,8 @@ class PLATFORM_EXPORT ScrollbarTheme {
   int thumbPosition(const ScrollbarThemeClient& scrollbar) {
     return thumbPosition(scrollbar, scrollbar.currentPos());
   }
+  virtual double overlayScrollbarFadeOutDelaySeconds() const;
+  virtual double overlayScrollbarFadeOutDurationSeconds() const;
   // The position the thumb would have, relative to the track, at the specified
   // scroll position.
   virtual int thumbPosition(const ScrollbarThemeClient&, float scrollPosition);

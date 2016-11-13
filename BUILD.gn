@@ -13,6 +13,7 @@ import("//build/config/features.gni")
 import("//build/config/sanitizers/sanitizers.gni")
 import("//build/config/ui.gni")
 import("//build_overrides/v8.gni")
+import("//extensions/features/features.gni")
 import("//media/media_options.gni")
 import("//remoting/remoting_enable.gni")
 import("//third_party/openh264/openh264_args.gni")
@@ -266,6 +267,7 @@ group("both_gn_and_gyp") {
       "//third_party/cacheinvalidation:cacheinvalidation_unittests",
       "//third_party/codesighs",
       "//third_party/pdfium/samples:pdfium_test",
+      "//third_party/webrtc/tools:frame_analyzer",
       "//tools/battor_agent",
       "//tools/battor_agent:battor_agent_unittests",
       "//tools/gn",
@@ -355,6 +357,12 @@ group("both_gn_and_gyp") {
       "//ui/aura:demo",
       "//ui/wm:wm_unittests",
     ]
+  }
+
+  if (is_linux && !is_chromeos && !is_chromecast && !use_ozone) {
+    # TODO(thomasanderson): Remove this once we build using
+    # GTK3 by default. (crbug.com/132847, crbug.com/79722)
+    deps += [ "//chrome/browser/ui/libgtkui:libgtk3ui" ]
   }
 
   if (use_ozone) {
@@ -517,7 +525,7 @@ group("both_gn_and_gyp") {
     ]
   }
 
-  if (is_win) {
+  if (is_win || is_mac) {
     deps += [ "//third_party/swiftshader" ]
   }
 
@@ -732,10 +740,7 @@ group("gn_only") {
   }
 
   if (!is_android && !is_ios && !is_chromeos) {
-    deps += [
-      "//components/proximity_auth:proximity_auth_unittests",
-      "//media/remoting:media_remoting_unittests",
-    ]
+    deps += [ "//components/proximity_auth:proximity_auth_unittests" ]
   }
 
   if (is_win || is_linux) {
@@ -744,6 +749,7 @@ group("gn_only") {
       "//media/mojo/services:media_mojo_shell_unittests",
       "//mojo",
       "//services/navigation",
+      "//services/preferences:tests",
       "//services/ui/demo",
       "//services/ui/demo:mus_demo_unittests",
       "//services/ui/public/interfaces:ui_struct_traits_unittests",
@@ -752,7 +758,7 @@ group("gn_only") {
       "//ui/views/mus:views_mus_unittests",
     ]
 
-    if (use_ozone) {
+    if (use_ozone && is_chromeos) {
       deps += [ "//services/ui/display:display_service_unittests" ]
     }
   }
@@ -850,6 +856,7 @@ group("gn_only") {
     deps += [
       "//build/android/gyp/test:hello_world",
       "//build/android/incremental_install:bootstrap_java",
+      "//build/android/java_assertion_enabler",
     ]
   }
 
@@ -876,6 +883,7 @@ group("gn_mojo_targets") {
     deps = [
       "//ipc:ipc_tests",
       "//mojo:tests",
+      "//services:service_unittests",
     ]
   }
 }
@@ -923,10 +931,7 @@ if (!is_ios) {
     }
 
     if (is_win) {
-      deps += [
-        "//components/test_runner:layout_test_helper",
-        "//content/shell:content_shell_crash_service",
-      ]
+      deps += [ "//content/shell:content_shell_crash_service" ]
     }
 
     if (!is_win && !is_android) {
@@ -960,6 +965,7 @@ group("chromium_builder_perf") {
       "//cc:cc_perftests",
       "//chrome/test:load_library_perf_tests",
       "//chrome/test:telemetry_perf_tests",
+      "//components/tracing:tracing_perftests",
       "//gpu:gpu_perftests",
       "//media:media_perftests",
       "//tools/perf/chrome_telemetry_build:telemetry_chrome_test",
@@ -976,9 +982,7 @@ group("chromium_builder_perf") {
         data_deps += [ "//chrome:linux_symbols" ]
       }
 
-      if (!is_chromeos) {
-        data_deps += [ "//tools/perf/clear_system_cache" ]
-      }
+      data_deps += [ "//tools/perf/clear_system_cache" ]
     }
 
     if (is_win) {
@@ -1080,78 +1084,4 @@ template("assert_valid_out_dir") {
 
 assert_valid_out_dir("_unused") {
   actual_sources = [ "$root_build_dir/foo" ]
-}
-
-if (is_win) {
-  group("chromium_builder_lkgr_drmemory_win") {
-    testonly = true
-
-    deps = [
-      "//components/test_runner:layout_test_helper",
-      "//content/shell:content_shell",
-      "//content/shell:content_shell_crash_service",
-    ]
-  }
-
-  group("chromium_builder_dbg_drmemory_win") {
-    testonly = true
-
-    deps = [
-      "//base:base_unittests",
-      "//cc:cc_unittests",
-      "//cc/blink:cc_blink_unittests",
-      "//chrome/installer/setup:setup_unittests",
-      "//chrome/installer/util:installer_util_unittests",
-      "//chrome/test:browser_tests",
-      "//chrome/test:chrome_app_unittests",
-      "//chrome/test:unit_tests",
-      "//chrome/test/chromedriver:chromedriver_unittests",
-      "//chrome_elf:chrome_elf_unittests",
-      "//components:components_unittests",
-      "//components/test_runner:layout_test_helper",
-      "//content/shell:content_shell_crash_service",
-      "//content/test:content_browsertests",
-      "//content/test:content_unittests",
-      "//courgette:courgette_unittests",
-      "//crypto:crypto_unittests",
-      "//device:device_unittests",
-      "//extensions:extensions_browsertests",
-      "//extensions:extensions_unittests",
-      "//gin:gin_shell",
-      "//gin:gin_unittests",
-      "//google_apis:google_apis_unittests",
-      "//google_apis/gcm:gcm_unit_tests",
-      "//gpu:gpu_unittests",
-      "//ipc:ipc_tests",
-      "//jingle:jingle_unittests",
-      "//media:media_unittests",
-      "//media/capture:capture_unittests",
-      "//media/cast:cast_unittests",
-      "//media/midi:midi_unittests",
-      "//mojo",
-      "//net:net_unittests",
-      "//printing:printing_unittests",
-      "//remoting:remoting_unittests",
-      "//skia:skia_unittests",
-      "//sql:sql_unittests",
-      "//storage//browser:storage_unittests",
-      "//third_party/WebKit/Source/platform:blink_platform_unittests",
-      "//third_party/WebKit/Source/platform/heap:blink_heap_unittests",
-      "//third_party/angle/src/tests:angle_unittests",
-      "//third_party/cacheinvalidation:cacheinvalidation_unittests",
-      "//third_party/leveldatabase:env_chromium_unittests",
-      "//third_party/libaddressinput:libaddressinput_unittests",
-      "//third_party/libphonenumber:libphonenumber_unittests",
-      "//ui/accessibility:accessibility_unittests",
-      "//ui/aura:aura_unittests",
-      "//ui/compositor:compositor_unittests",
-      "//ui/display:display_unittests",
-      "//ui/events:events_unittests",
-      "//ui/gfx:gfx_unittests",
-      "//ui/gl:gl_unittests",
-      "//ui/keyboard:keyboard_unittests",
-      "//ui/touch_selection:ui_touch_selection_unittests",
-      "//url:url_unittests",
-    ]
-  }
 }

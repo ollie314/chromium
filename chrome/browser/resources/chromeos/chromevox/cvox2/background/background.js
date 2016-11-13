@@ -12,6 +12,7 @@ goog.provide('Background');
 goog.require('AutomationPredicate');
 goog.require('AutomationUtil');
 goog.require('BackgroundKeyboardHandler');
+goog.require('BrailleCommandHandler');
 goog.require('ChromeVoxState');
 goog.require('CommandHandler');
 goog.require('FindHandler');
@@ -74,8 +75,10 @@ Background = function() {
    * @type {RegExp}
    * @private
    */
-  this.NextCompatRegExp_ = Background.globsToRegExp_([
-    '*docs.google.com*'
+  this.nextCompatRegExp_ = Background.globsToRegExp_([
+    '*docs.google.com/document/*',
+    '*docs.google.com/spreadsheets/*',
+    '*docs.google.com/presentation/*'
   ]);
 
   /**
@@ -175,14 +178,6 @@ Background = function() {
 };
 
 /**
- * @const {string}
- */
-Background.ISSUE_URL = 'https://code.google.com/p/chromium/issues/entry?' +
-    'labels=Type-Bug,Pri-2,cvox2,OS-Chrome&' +
-    'components=UI>accessibility&' +
-    'description=';
-
-/**
  * Map from gesture names (AXGesture defined in ui/accessibility/ax_enums.idl)
  *     to commands when in Classic mode.
  * @type {Object<string, string>}
@@ -250,7 +245,7 @@ Background.prototype = {
           ChromeVoxMode.CLASSIC_COMPAT;
 
     var nextSite = this.isWhitelistedForNext_(topLevelRoot.docUrl);
-    var nextCompat = this.NextCompatRegExp_.test(topLevelRoot.docUrl);
+    var nextCompat = this.nextCompatRegExp_.test(topLevelRoot.docUrl);
     var classicCompat =
         this.isWhitelistedForClassicCompat_(topLevelRoot.docUrl);
     if (nextCompat && useNext)
@@ -352,7 +347,7 @@ Background.prototype = {
     if (opt_setValue !== undefined)
       useNext = opt_setValue;
     else
-      useNext = localStorage['useNext'] != 'true';
+      useNext = localStorage['useNext'] !== 'true';
 
     localStorage['useNext'] = useNext;
     if (useNext)
@@ -425,20 +420,10 @@ Background.prototype = {
   navigateToRange: function(range, opt_focus, opt_speechProps) {
     opt_focus = opt_focus === undefined ? true : opt_focus;
     opt_speechProps = opt_speechProps || {};
-
-    if (opt_focus) {
-      // TODO(dtseng): Figure out what it means to focus a range.
-      var actionNode = range.start.node;
-      if (actionNode.role == RoleType.inlineTextBox)
-        actionNode = actionNode.parent;
-
-      // Iframes, when focused, causes the child webArea to fire focus event.
-      // This can result in getting stuck when navigating backward.
-      if (actionNode.role != RoleType.iframe && !actionNode.state.focused &&
-          !AutomationPredicate.structuralContainer(actionNode))
-        actionNode.focus();
-    }
     var prevRange = this.currentRange_;
+    if (opt_focus)
+      this.setFocusToRange_(range, prevRange);
+
     this.setCurrentRange(range);
 
     var o = new Output();
@@ -489,7 +474,14 @@ Background.prototype = {
           this.pageSel_.select();
       }
     } else {
-      range.select();
+      // Ensure we don't select the editable when we first encounter it.
+      var lca = null;
+      if (range.start.node && prevRange.start.node) {
+        lca = AutomationUtil.getLeastCommonAncestor(prevRange.start.node,
+                                                    range.start.node);
+      }
+      if (!lca || lca.state.editable || !range.start.node.state.editable)
+        range.select();
     }
 
     o.withRichSpeechAndBraille(
@@ -548,6 +540,14 @@ Background.prototype = {
             // Cast ok since displayPosition is always defined in this case.
             /** @type {number} */ (evt.displayPosition));
         break;
+      case cvox.BrailleKeyCommand.CHORD:
+        if (!evt.brailleDots)
+          return false;
+
+        var command = BrailleCommandHandler.getCommand(evt.brailleDots);
+        if (command)
+          CommandHandler.onCommand(command);
+        break;
       default:
         return false;
     }
@@ -560,9 +560,10 @@ Background.prototype = {
    * @private
    */
   shouldEnableClassicForUrl_: function(url) {
-    return this.mode != ChromeVoxMode.FORCE_NEXT &&
-        !this.isBlacklistedForClassic_(url) &&
-        !this.isWhitelistedForNext_(url);
+    return this.nextCompatRegExp_.test(url) ||
+        (this.mode != ChromeVoxMode.FORCE_NEXT &&
+         !this.isBlacklistedForClassic_(url) &&
+         !this.isWhitelistedForNext_(url));
   },
 
   /**
@@ -617,7 +618,7 @@ Background.prototype = {
     };
 
     if (params.forNextCompat) {
-      var reStr = this.NextCompatRegExp_.toString();
+      var reStr = this.nextCompatRegExp_.toString();
       disableChromeVoxCommand['excludeUrlRegExp'] =
           reStr.substring(1, reStr.length - 1);
     }
@@ -657,7 +658,7 @@ Background.prototype = {
     actionNode.doDefault();
     if (selectionSpan) {
       var start = text.getSpanStart(selectionSpan);
-      var targetPosition = position - start + selectionSpan.offset;
+      var targetPosition = position - start;
       actionNode.setSelection(targetPosition, targetPosition);
     }
   },
@@ -756,6 +757,61 @@ Background.prototype = {
         this.setCurrentRange(null);
     }.bind(this));
   },
+
+  /**
+   * @param {!cursors.Range} range
+   * @param {cursors.Range} prevRange
+   * @private
+   */
+  setFocusToRange_: function(range, prevRange) {
+    var start = range.start.node;
+    var end = range.end.node;
+    if (start.state.focused || end.state.focused)
+      return;
+
+    var isFocusableLinkOrControl = function(node) {
+      return node.state.focusable &&
+          AutomationPredicate.linkOrControl(node);
+    };
+
+    // First, see if we've crossed a root. Remove once webview handles focus
+    // correctly.
+    if (prevRange && prevRange.start.node) {
+      var entered = AutomationUtil.getUniqueAncestors(
+          prevRange.start.node, start);
+      var embeddedObject = entered.find(function(f) {
+        return f.role == RoleType.embeddedObject; });
+      if (embeddedObject)
+        embeddedObject.focus();
+    }
+
+    // Next, try to focus the start or end node.
+    if (isFocusableLinkOrControl(start)) {
+      if (!start.state.focused)
+        start.focus();
+      return;
+    } else if (isFocusableLinkOrControl(end)) {
+      if (!end.state.focused)
+        end.focus();
+      return;
+    }
+
+    // If a common ancestor of |start| and |end| is a link, focus that.
+    var ancestor = AutomationUtil.getLeastCommonAncestor(start, end);
+    while (ancestor && ancestor.root == start.root) {
+      if (isFocusableLinkOrControl(ancestor)) {
+        if (!ancestor.state.focused)
+          ancestor.focus();
+        return;
+      }
+      ancestor = ancestor.parent;
+    }
+
+    // If nothing is focusable, set the sequential focus navigation starting
+    // point, which ensures that the next time you press Tab, you'll reach
+    // the next or previous focusable node from |start|.
+    start.setSequentialFocusNavigationStartingPoint();
+  }
 };
 
 /**

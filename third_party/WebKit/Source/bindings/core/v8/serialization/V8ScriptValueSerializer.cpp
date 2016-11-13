@@ -41,7 +41,6 @@ RefPtr<SerializedScriptValue> V8ScriptValueSerializer::serialize(
 #endif
   DCHECK(m_serializedScriptValue);
   AutoReset<const ExceptionState*> reset(&m_exceptionState, &exceptionState);
-  ScriptState::Scope scope(m_scriptState.get());
 
   // Prepare to transfer the provided transferables.
   prepareTransfer(transferables);
@@ -283,7 +282,8 @@ bool V8ScriptValueSerializer::writeDOMObject(ScriptWrappable* wrappable,
     writeUint32(canvas->clientId());
     writeUint32(canvas->sinkId());
     writeUint32(canvas->localId());
-    writeUint64(canvas->nonce());
+    writeUint64(canvas->nonceHigh());
+    writeUint64(canvas->nonceLow());
     return true;
   }
   return false;

@@ -36,7 +36,7 @@
 #include "content/common/navigation_params.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/common/javascript_message_type.h"
-#include "media/mojo/interfaces/service_factory.mojom.h"
+#include "media/mojo/interfaces/interface_factory.mojom.h"
 #include "net/http/http_response_headers.h"
 #include "services/service_manager/public/cpp/interface_factory.h"
 #include "services/service_manager/public/cpp/interface_registry.h"
@@ -50,6 +50,7 @@ class GURL;
 struct AccessibilityHostMsg_EventParams;
 struct AccessibilityHostMsg_FindInPageResultParams;
 struct AccessibilityHostMsg_LocationChangeParams;
+struct FrameHostMsg_DidCommitProvisionalLoad_Params;
 struct FrameHostMsg_DidFailProvisionalLoadWithError_Params;
 struct FrameHostMsg_OpenURL_Params;
 struct FrameMsg_TextTrackSettings_Params;
@@ -58,7 +59,6 @@ struct FrameHostMsg_ShowPopup_Params;
 #endif
 
 namespace base {
-class FilePath;
 class ListValue;
 }
 
@@ -96,9 +96,7 @@ struct ContentSecurityPolicyHeader;
 struct ContextMenuParams;
 struct FileChooserParams;
 struct FrameOwnerProperties;
-struct GlobalRequestID;
 struct FileChooserParams;
-struct Referrer;
 struct ResourceResponse;
 
 class CONTENT_EXPORT RenderFrameHostImpl
@@ -107,7 +105,7 @@ class CONTENT_EXPORT RenderFrameHostImpl
       public BrowserAccessibilityDelegate,
       public SiteInstanceImpl::Observer,
       public NON_EXPORTED_BASE(
-          service_manager::InterfaceFactory<media::mojom::ServiceFactory>) {
+          service_manager::InterfaceFactory<media::mojom::InterfaceFactory>) {
  public:
   using AXTreeSnapshotCallback =
       base::Callback<void(
@@ -195,9 +193,9 @@ class CONTENT_EXPORT RenderFrameHostImpl
   // SiteInstanceImpl::Observer
   void RenderProcessGone(SiteInstanceImpl* site_instance) override;
 
-  // service_manager::InterfaceFactory<media::mojom::ServiceFactory>
+  // service_manager::InterfaceFactory<media::mojom::InterfaceFactory>
   void Create(const service_manager::Identity& remote_identity,
-              media::mojom::ServiceFactoryRequest request) override;
+              media::mojom::InterfaceFactoryRequest request) override;
 
   // Creates a RenderFrame in the renderer process.
   bool CreateRenderFrame(int proxy_routing_id,
@@ -266,7 +264,7 @@ class CONTENT_EXPORT RenderFrameHostImpl
   // distinguished by owning a RenderWidgetHost, which manages input events
   // and painting for this frame and its contiguous local subtree in the
   // renderer process.
-  bool is_local_root() { return !!render_widget_host_; }
+  bool is_local_root() const { return !!render_widget_host_; }
 
   // Returns the RenderWidgetHostImpl attached to this frame or the nearest
   // ancestor frame, which could potentially be the root. For most input
@@ -374,15 +372,6 @@ class CONTENT_EXPORT RenderFrameHostImpl
 
   // Navigates to an interstitial page represented by the provided data URL.
   void NavigateToInterstitialURL(const GURL& data_url);
-
-  // Treat this prospective navigation as though it originated from the frame.
-  // Used, e.g., for a navigation request that originated from a RemoteFrame.
-  // |source_site_instance| is the SiteInstance of the frame that initiated the
-  // navigation.
-  // TODO(creis): Remove this method and have RenderFrameProxyHost call
-  // RequestOpenURL with its FrameTreeNode.
-  void OpenURL(const FrameHostMsg_OpenURL_Params& params,
-               SiteInstance* source_site_instance);
 
   // Stop the load in progress.
   void Stop();
@@ -579,6 +568,8 @@ class CONTENT_EXPORT RenderFrameHostImpl
   // no longer on the stack when we attempt to swap it out.
   void SuppressFurtherDialogs();
 
+  void SetHasReceivedUserGesture();
+
   // PlzNavigate: returns the LoFi state of the last successful navigation that
   // made a network request.
   LoFiState last_navigation_lofi_state() const {
@@ -600,7 +591,8 @@ class CONTENT_EXPORT RenderFrameHostImpl
                       FrameTreeNode* frame_tree_node,
                       int32_t routing_id,
                       int32_t widget_routing_id,
-                      bool hidden);
+                      bool hidden,
+                      bool renderer_initiated_creation);
 
  private:
   friend class TestRenderFrameHost;
@@ -625,10 +617,10 @@ class CONTENT_EXPORT RenderFrameHostImpl
                            LoadEventForwardingWhilePendingDeletion);
 
   // IPC Message handlers.
-  void OnAddMessageToConsole(int32_t level,
-                             const base::string16& message,
-                             int32_t line_no,
-                             const base::string16& source_id);
+  void OnDidAddMessageToConsole(int32_t level,
+                                const base::string16& message,
+                                int32_t line_no,
+                                const base::string16& source_id);
   void OnDetach();
   void OnFrameFocused();
   void OnOpenURL(const FrameHostMsg_OpenURL_Params& params);
@@ -815,6 +807,14 @@ class CONTENT_EXPORT RenderFrameHostImpl
   // happen before it fires (to avoid flakiness).
   void DisableSwapOutTimerForTesting();
 
+  void OnRendererConnect(const service_manager::ServiceInfo& local_info,
+                         const service_manager::ServiceInfo& remote_info);
+
+  // Returns ownership of the NavigationHandle associated with a navigation that
+  // just committed.
+  std::unique_ptr<NavigationHandleImpl> TakeNavigationHandleForCommit(
+      const FrameHostMsg_DidCommitProvisionalLoad_Params& params);
+
   // For now, RenderFrameHosts indirectly keep RenderViewHosts alive via a
   // refcount that calls Shutdown when it reaches zero.  This allows each
   // RenderFrameHostManager to just care about RenderFrameHosts, while ensuring
@@ -958,6 +958,11 @@ class CONTENT_EXPORT RenderFrameHostImpl
   std::unique_ptr<service_manager::InterfaceRegistry> interface_registry_;
   std::unique_ptr<service_manager::InterfaceProvider> remote_interfaces_;
 
+  service_manager::ServiceInfo browser_info_;
+  service_manager::ServiceInfo renderer_info_;
+
+  int on_connect_handler_id_ = 0;
+
 #if defined(OS_ANDROID)
   // The filter for MessagePort messages between an Android apps and web.
   scoped_refptr<AppWebMessagePortMessageFilter>
@@ -1038,6 +1043,15 @@ class CONTENT_EXPORT RenderFrameHostImpl
 
   mojo::Binding<mojom::FrameHost> frame_host_binding_;
   mojom::FramePtr frame_;
+
+  // If this is true then this object was created in response to a renderer
+  // initiated request. Init() will be called, and until then navigation
+  // requests should be queued.
+  bool waiting_for_init_;
+
+  typedef std::pair<CommonNavigationParams, BeginNavigationParams>
+      PendingNavigation;
+  std::unique_ptr<PendingNavigation> pendinging_navigate_;
 
   // Callback for responding when
   // |FrameHostMsg_TextSurroundingSelectionResponse| message comes.

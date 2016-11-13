@@ -348,9 +348,19 @@ class CORE_EXPORT LayoutBlockFlow : public LayoutBlock {
 
   FloatingObject* insertFloatingObject(LayoutBox&);
 
-  // Called from lineWidth, to position the floats added in the last line.
+  // Position all floats that have not yet been positioned.
+  //
+  // |logicalTop| is the minimum logical top for the floats. The final logical
+  // top of the floats will also be affected by clearance and space available
+  // after having positioned earlier floats.
+  //
   // Returns true if and only if it has positioned any floats.
-  bool positionNewFloats(LineWidth* = nullptr);
+  bool positionNewFloats(LayoutUnit logicalTop, LineWidth* = nullptr);
+
+  // Position and lay out the float, if it needs layout.
+  // |logicalTop| is the minimum logical top offset for the float (margin edge).
+  // The value returned is the minimum logical top offset for subsequent floats.
+  LayoutUnit positionAndLayoutFloat(FloatingObject&, LayoutUnit logicalTop);
 
   LayoutUnit nextFloatLogicalBottomBelow(LayoutUnit) const;
   LayoutUnit nextFloatLogicalBottomBelowForBlock(LayoutUnit) const;
@@ -376,6 +386,8 @@ class CORE_EXPORT LayoutBlockFlow : public LayoutBlock {
   bool isOverhangingFloat(const FloatingObject& floatObject) const {
     return logicalBottomForFloat(floatObject) > logicalHeight();
   }
+
+  LayoutUnit logicalHeightWithVisibleOverflow() const final;
 
   // This function is only public so we can call it from NGBox while we're
   // still working on LayoutNG.
@@ -765,12 +777,6 @@ class CORE_EXPORT LayoutBlockFlow : public LayoutBlock {
     return maxPositiveMarginAfter() - maxNegativeMarginAfter();
   }
 
-  // Floats' margins do not collapse with page or column boundaries, and we
-  // therefore need to treat them specially in some cases.
-  LayoutUnit marginBeforeIfFloating() const {
-    return isFloating() ? marginBefore() : LayoutUnit();
-  }
-
   LayoutUnit collapseMargins(LayoutBox& child,
                              MarginInfo&,
                              bool childIsSelfCollapsing,
@@ -861,7 +867,7 @@ class CORE_EXPORT LayoutBlockFlow : public LayoutBlock {
                                               bool reachedEnd,
                                               GlyphOverflowAndFallbackFontsMap&,
                                               VerticalPositionCache&,
-                                              WordMeasurements&);
+                                              const WordMeasurements&);
   BidiRun* computeInlineDirectionPositionsForSegment(
       RootInlineBox*,
       const LineInfo&,
@@ -872,7 +878,7 @@ class CORE_EXPORT LayoutBlockFlow : public LayoutBlock {
       BidiRun* trailingSpaceRun,
       GlyphOverflowAndFallbackFontsMap& textBoxDataMap,
       VerticalPositionCache&,
-      WordMeasurements&);
+      const WordMeasurements&);
   void computeBlockDirectionPositionsForLine(RootInlineBox*,
                                              BidiRun*,
                                              GlyphOverflowAndFallbackFontsMap&,
@@ -889,7 +895,7 @@ class CORE_EXPORT LayoutBlockFlow : public LayoutBlock {
                                              LineInfo&,
                                              VerticalPositionCache&,
                                              BidiRun* trailingSpaceRun,
-                                             WordMeasurements&);
+                                             const WordMeasurements&);
   void layoutRunsAndFloats(LineLayoutState&);
   const InlineIterator& restartLayoutRunsAndFloatsInRange(
       LayoutUnit oldLogicalHeight,

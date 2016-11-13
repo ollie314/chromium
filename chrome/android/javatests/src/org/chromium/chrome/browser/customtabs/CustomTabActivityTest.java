@@ -24,7 +24,6 @@ import android.graphics.drawable.ColorDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
-import android.os.Environment;
 import android.support.customtabs.CustomTabsCallback;
 import android.support.customtabs.CustomTabsClient;
 import android.support.customtabs.CustomTabsIntent;
@@ -46,7 +45,6 @@ import org.chromium.base.library_loader.LibraryLoader;
 import org.chromium.base.library_loader.LibraryProcessType;
 import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.base.test.util.CommandLineFlags;
-import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Restriction;
 import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.R;
@@ -114,8 +112,7 @@ public class CustomTabActivityTest extends CustomTabActivityTestBase {
     protected void setUp() throws Exception {
         super.setUp();
         Context appContext = getInstrumentation().getTargetContext().getApplicationContext();
-        mTestServer = EmbeddedTestServer.createAndStartFileServer(
-                appContext, Environment.getExternalStorageDirectory());
+        mTestServer = EmbeddedTestServer.createAndStartServer(appContext);
         mTestPage = mTestServer.getURL(TEST_PAGE);
         mTestPage2 = mTestServer.getURL(TEST_PAGE_2);
         PathUtils.setPrivateDataDirectorySuffix(PRIVATE_DATA_DIRECTORY_SUFFIX);
@@ -242,13 +239,11 @@ public class CustomTabActivityTest extends CustomTabActivityTestBase {
 
     /**
      * Test the entries in the context menu shown when long clicking an image.
+     * Restricted to phone due to BUG=crbug.com/655970
      */
-    /*
-     * @SmallTest
-     * @RetryOnFailure
-     * BUG=crbug.com/655970
-     */
-    @DisabledTest
+    @SmallTest
+    @RetryOnFailure
+    @Restriction(ChromeRestriction.RESTRICTION_TYPE_PHONE)
     public void testContextMenuEntriesForImage() throws InterruptedException, TimeoutException {
         startCustomTabActivityWithIntent(createMinimalCustomTabIntent());
 
@@ -279,9 +274,11 @@ public class CustomTabActivityTest extends CustomTabActivityTestBase {
 
     /**
      * Test the entries in the context menu shown when long clicking an link.
+     * Restricted to phone due to BUG=crbug.com/655970
      */
     @SmallTest
     @RetryOnFailure
+    @Restriction(ChromeRestriction.RESTRICTION_TYPE_PHONE)
     public void testContextMenuEntriesForLink() throws InterruptedException, TimeoutException {
         startCustomTabActivityWithIntent(createMinimalCustomTabIntent());
 
@@ -1491,7 +1488,7 @@ public class CustomTabActivityTest extends CustomTabActivityTestBase {
                                    Profile.getLastUsedProfile(), url,
                                    connection.mSpeculation.webContents);
             }
-        });
+        }, LONG_TIMEOUT_MS, CriteriaHelper.DEFAULT_POLLING_INTERVAL);
     }
 
     private CustomTabsSession bindWithCallback(final CustomTabsCallback callback) {

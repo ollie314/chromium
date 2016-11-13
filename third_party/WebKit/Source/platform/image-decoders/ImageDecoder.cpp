@@ -71,7 +71,7 @@ std::unique_ptr<ImageDecoder> ImageDecoder::create(
     PassRefPtr<SegmentReader> passData,
     bool dataComplete,
     AlphaOption alphaOption,
-    GammaAndColorProfileOption colorOptions) {
+    ColorSpaceOption colorOptions) {
   RefPtr<SegmentReader> data = passData;
 
   // We need at least kLongestSignatureLength bytes to run the signature
@@ -332,19 +332,14 @@ size_t ImagePlanes::rowBytes(int i) const {
 
 namespace {
 
-#if USE(SKCOLORXFORM)
-
 // The output device color space is global and shared across multiple threads.
 SpinLock gTargetColorSpaceLock;
 SkColorSpace* gTargetColorSpace = nullptr;
-
-#endif  // USE(SKCOLORXFORM)
 
 }  // namespace
 
 // static
 void ImageDecoder::setTargetColorProfile(const WebVector<char>& profile) {
-#if USE(SKCOLORXFORM)
   if (profile.isEmpty())
     return;
 
@@ -357,22 +352,40 @@ void ImageDecoder::setTargetColorProfile(const WebVector<char>& profile) {
     return;
 
   gTargetColorSpace =
-      SkColorSpace::NewICC(profile.data(), profile.size()).release();
+      SkColorSpace::MakeICC(profile.data(), profile.size()).release();
 
   // UMA statistics.
   BitmapImageMetrics::countGamma(gTargetColorSpace);
-#endif  // USE(SKCOLORXFORM)
 }
 
-void ImageDecoder::setColorSpaceAndComputeTransform(const char* iccData,
-                                                    unsigned iccLength,
-                                                    bool useSRGB) {
-  // Sub-classes should not call this if they were instructed to ignore embedded
-  // color profiles.
-  DCHECK(!m_ignoreGammaAndColorProfile);
+sk_sp<SkColorSpace> ImageDecoder::colorSpace() const {
+  // TODO(ccameron): This should always return a non-null SkColorSpace. This is
+  // disabled for now because specifying a non-renderable color space results in
+  // errors.
+  // https://bugs.chromium.org/p/skia/issues/detail?id=5907
+  if (!RuntimeEnabledFeatures::colorCorrectRenderingEnabled())
+    return nullptr;
 
-  m_colorProfile.assign(iccData, iccLength);
-  m_hasColorProfile = true;
+  if (m_embeddedColorSpace)
+    return m_embeddedColorSpace;
+  return SkColorSpace::MakeNamed(SkColorSpace::kSRGB_Named);
+}
+
+void ImageDecoder::setColorProfileAndComputeTransform(const char* iccData,
+                                                      unsigned iccLength) {
+  sk_sp<SkColorSpace> colorSpace = SkColorSpace::MakeICC(iccData, iccLength);
+  if (!colorSpace)
+    DLOG(ERROR) << "Failed to parse image ICC profile";
+  setColorSpaceAndComputeTransform(std::move(colorSpace));
+}
+
+void ImageDecoder::setColorSpaceAndComputeTransform(
+    sk_sp<SkColorSpace> colorSpace) {
+  DCHECK(!m_ignoreColorSpace);
+
+  m_embeddedColorSpace = colorSpace;
+
+  m_sourceToOutputDeviceColorTransform = nullptr;
 
   // With color correct rendering, we do not transform to the output color space
   // at decode time.  Instead, we tag the raw image pixels and pass the tagged
@@ -380,18 +393,7 @@ void ImageDecoder::setColorSpaceAndComputeTransform(const char* iccData,
   if (RuntimeEnabledFeatures::colorCorrectRenderingEnabled())
     return;
 
-#if USE(SKCOLORXFORM)
-  m_sourceToOutputDeviceColorTransform = nullptr;
-
-  // Create the input profile.
-  sk_sp<SkColorSpace> srcSpace = nullptr;
-  if (useSRGB) {
-    srcSpace = SkColorSpace::NewNamed(SkColorSpace::kSRGB_Named);
-  } else {
-    srcSpace = SkColorSpace::NewICC(iccData, iccLength);
-  }
-
-  if (!srcSpace)
+  if (!m_embeddedColorSpace)
     return;
 
   // Take a lock around initializing and accessing the global device color
@@ -402,16 +404,15 @@ void ImageDecoder::setColorSpaceAndComputeTransform(const char* iccData,
   // initialized.
   if (!gTargetColorSpace) {
     gTargetColorSpace =
-        SkColorSpace::NewNamed(SkColorSpace::kSRGB_Named).release();
+        SkColorSpace::MakeNamed(SkColorSpace::kSRGB_Named).release();
   }
 
-  if (SkColorSpace::Equals(srcSpace.get(), gTargetColorSpace)) {
+  if (SkColorSpace::Equals(m_embeddedColorSpace.get(), gTargetColorSpace)) {
     return;
   }
 
   m_sourceToOutputDeviceColorTransform =
-      SkColorSpaceXform::New(srcSpace.get(), gTargetColorSpace);
-#endif  // USE(SKCOLORXFORM)
+      SkColorSpaceXform::New(m_embeddedColorSpace.get(), gTargetColorSpace);
 }
 
 }  // namespace blink

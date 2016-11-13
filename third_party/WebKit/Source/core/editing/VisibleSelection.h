@@ -39,7 +39,6 @@
 
 namespace blink {
 
-class LayoutPoint;
 class SelectionAdjuster;
 
 const TextAffinity SelDefaultAffinity = TextAffinity::Downstream;
@@ -75,6 +74,7 @@ class CORE_TEMPLATE_CLASS_EXPORT VisibleSelectionTemplate {
   void setExtent(const PositionTemplate<Strategy>&);
   void setExtent(const VisiblePositionTemplate<Strategy>&);
 
+  SelectionTemplate<Strategy> asSelection() const;
   PositionTemplate<Strategy> base() const { return m_base; }
   PositionTemplate<Strategy> extent() const { return m_extent; }
   PositionTemplate<Strategy> start() const { return m_start; }
@@ -121,8 +121,6 @@ class CORE_TEMPLATE_CLASS_EXPORT VisibleSelectionTemplate {
   void setIsDirectional(bool isDirectional) { m_isDirectional = isDirectional; }
 
   void appendTrailingWhitespace();
-
-  void expandUsingGranularity(TextGranularity);
 
   // TODO(yosin) Most callers probably don't want these functions, but
   // are using them for historical reasons. |toNormalizedEphemeralRange()|
@@ -206,21 +204,7 @@ using VisibleSelection = VisibleSelectionTemplate<EditingStrategy>;
 using VisibleSelectionInFlatTree =
     VisibleSelectionTemplate<EditingInFlatTreeStrategy>;
 
-// TODO(yosin): We should get rid of |createVisibleSelection()| overloads
-// except for taking |SelectionInDOMTree| and |SelectionInFlatTree|.
 CORE_EXPORT VisibleSelection createVisibleSelection(const SelectionInDOMTree&);
-CORE_EXPORT VisibleSelection createVisibleSelection(const Position&,
-                                                    TextAffinity,
-                                                    bool isDirectional = false);
-CORE_EXPORT VisibleSelection
-createVisibleSelection(const Position& base,
-                       const Position& extent,
-                       TextAffinity = SelDefaultAffinity,
-                       bool isDirectional = false);
-CORE_EXPORT VisibleSelection createVisibleSelection(const VisiblePosition&,
-                                                    const VisiblePosition&,
-                                                    bool isDirectional = false);
-
 CORE_EXPORT VisibleSelectionInFlatTree
 createVisibleSelection(const SelectionInFlatTree&);
 

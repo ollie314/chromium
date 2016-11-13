@@ -11,6 +11,24 @@
             ]
         }
     ],
+    "AndroidSpellChecker": [
+        {
+            "platforms": [
+                "android"
+            ],
+            "experiments": [
+                {
+                    "name": "Enabled_NonLowEnd",
+                    "enable_features": [
+                        "AndroidSpellCheckerNonLowEnd"
+                    ],
+                    "disable_features": [
+                        "AndroidSpellChecker"
+                    ]
+                }
+            ]
+        }
+    ],
     "AsyncDNS": [
         {
             "platforms": [
@@ -205,6 +223,30 @@
                         "Foreground": "8;32;0.3;0;30000",
                         "ForegroundFileIO": "8;32;0.3;0;30000",
                         "RedirectSequencedWorkerPools": "true"
+                    }
+                },
+                {
+                    "name": "DisableViaFlag",
+                    "forcing_flag": "disable-browser-task-scheduler"
+                }
+            ]
+        }
+    ],
+    "CSSExternalScanner": [
+        {
+            "platforms": [
+                "win",
+                "mac",
+                "chromeos",
+                "linux",
+                "android"
+            ],
+            "experiments": [
+                {
+                    "name": "Enabled_ScanAndPreload",
+                    "params": {
+                        "cssExternalScannerNoPreload": "false",
+                        "cssExternalScannerPreload": "true"
                     }
                 }
             ]
@@ -1034,6 +1076,18 @@
             ]
         }
     ],
+    "NoCreditCardAbort": [
+        {
+            "platforms": [
+                "android"
+            ],
+            "experiments": [
+                {
+                    "name": "Disabled"
+                }
+            ]
+        }
+    ],
     "NonValidatingReloadOnNormalReload": [
         {
             "platforms": [
@@ -1047,21 +1101,6 @@
                     "name": "Enabled",
                     "enable_features": [
                         "NonValidatingReloadOnNormalReload"
-                    ]
-                }
-            ]
-        }
-    ],
-    "NonValidatingReloadOnRefreshContentV2": [
-        {
-            "platforms": [
-                "android"
-            ],
-            "experiments": [
-                {
-                    "name": "Enabled",
-                    "enable_features": [
-                        "NonValidatingReloadOnRefreshContentV2"
                     ]
                 }
             ]
@@ -1319,24 +1358,6 @@
             ]
         }
     ],
-    "PluginPowerSaverTiny": [
-        {
-            "platforms": [
-                "chromeos",
-                "linux",
-                "mac",
-                "win"
-            ],
-            "experiments": [
-                {
-                    "name": "Enabled",
-                    "enable_features": [
-                        "BlockSmallPluginContent"
-                    ]
-                }
-            ]
-        }
-    ],
     "PointerEvent": [
         {
             "platforms": [
@@ -1405,6 +1426,24 @@
             ]
         }
     ],
+    "PrintScaling": [
+        {
+            "platforms": [
+                "chromeos",
+                "linux",
+                "mac",
+                "win"
+            ],
+            "experiments": [
+                {
+                    "name": "Enabled",
+                    "enable_features": [
+                        "PrintScaling"
+                    ]
+                }
+            ]
+        }
+    ],
     "ProgressBarAnimationAndroid": [
         {
             "platforms": [
@@ -1437,7 +1476,7 @@
             ]
         }
     ],
-    "RafAlignedInput": [
+    "RafAlignedMouseInput": [
         {
             "platforms": [
                 "android",
@@ -1450,7 +1489,26 @@
                 {
                     "name": "Enabled",
                     "enable_features": [
-                        "RafAlignedInput"
+                        "RafAlignedMouseInput"
+                    ]
+                }
+            ]
+        }
+    ],
+    "RafAlignedTouchInput": [
+        {
+            "platforms": [
+                "android",
+                "chromeos",
+                "linux",
+                "mac",
+                "win"
+            ],
+            "experiments": [
+                {
+                    "name": "Enabled",
+                    "enable_features": [
+                        "RafAlignedTouchInput"
                     ]
                 }
             ]
@@ -1769,6 +1827,28 @@
             ]
         }
     ],
+    "SecurityChip": [
+        {
+            "platforms": [
+                "chromeos",
+                "linux",
+                "mac",
+                "win"
+            ],
+            "experiments": [
+                {
+                    "name": "Enabled",
+                    "params": {
+                        "animation": "animate-all",
+                        "visibility": "show-all"
+                    },
+                    "enable_features": [
+                        "SecurityChip"
+                    ]
+                }
+            ]
+        }
+    ],
     "SecurityWarningIconUpdate": [
         {
             "platforms": [
@@ -1819,9 +1899,9 @@
             ],
             "experiments": [
                 {
-                    "name": "Enable2",
+                    "name": "Enable3",
                     "params": {
-                        "dismissal_threshold": "2"
+                        "dismissal_threshold": "3"
                     }
                 }
             ]
@@ -1929,6 +2009,26 @@
                 },
                 {
                     "name": "Disabled"
+                }
+            ]
+        }
+    ],
+    "TLS13Negotiation": [
+        {
+            "platforms": [
+                "android",
+                "chromeos",
+                "ios",
+                "linux",
+                "mac",
+                "win"
+            ],
+            "experiments": [
+                {
+                    "name": "Enabled",
+                    "enable_features": [
+                        "NegotiateTLS13"
+                    ]
                 }
             ]
         }

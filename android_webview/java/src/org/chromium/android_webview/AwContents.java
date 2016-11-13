@@ -79,6 +79,7 @@ import org.chromium.ui.base.ActivityWindowAndroid;
 import org.chromium.ui.base.PageTransition;
 import org.chromium.ui.base.ViewAndroidDelegate;
 import org.chromium.ui.base.WindowAndroid;
+import org.chromium.ui.display.DisplayAndroid.DisplayAndroidObserver;
 
 import java.io.File;
 import java.lang.annotation.Annotation;
@@ -99,8 +100,7 @@ import java.util.concurrent.Callable;
  * continuous build &amp; test in the open source SDK-based tree).
  */
 @JNINamespace("android_webview")
-public class AwContents implements SmartClipProvider,
-        PostMessageSender.PostMessageSenderDelegate {
+public class AwContents implements SmartClipProvider, PostMessageSender.PostMessageSenderDelegate {
     private static final String TAG = "AwContents";
     private static final boolean TRACE = false;
     private static final int NO_WARN = 0;
@@ -287,6 +287,7 @@ public class AwContents implements SmartClipProvider,
     private final AwZoomControls mZoomControls;
     private final AwScrollOffsetManager mScrollOffsetManager;
     private OverScrollGlow mOverScrollGlow;
+    private final DisplayAndroidObserver mDisplayObserver;
     // This can be accessed on any thread after construction. See AwContentsIoThreadClient.
     private final AwSettings mSettings;
     private final ScrollAccessibilityHelper mScrollAccessibilityHelper;
@@ -693,8 +694,23 @@ public class AwContents implements SmartClipProvider,
 
         @Override
         public void onConfigurationChanged(Configuration configuration) {
-            setLocale(LocaleUtils.getLocale(configuration.locale));
+            setLocale(LocaleUtils.toLanguageTag(configuration.locale));
             mSettings.updateAcceptLanguages();
+        }
+    };
+
+    //--------------------------------------------------------------------------------------------
+    private class AwDisplayAndroidObserver implements DisplayAndroidObserver {
+        @Override
+        public void onRotationChanged(int rotation) {}
+
+        @Override
+        public void onDIPScaleChanged(float dipScale) {
+            if (TRACE) Log.i(TAG, "%s onDIPScaleChanged dipScale=%f", this, dipScale);
+
+            nativeSetDipScale(mNativeAwContents, dipScale);
+            mLayoutSizer.setDIPScale(dipScale);
+            mSettings.setDIPScale(dipScale);
         }
     };
 
@@ -729,7 +745,7 @@ public class AwContents implements SmartClipProvider,
             InternalAccessDelegate internalAccessAdapter,
             NativeDrawGLFunctorFactory nativeDrawGLFunctorFactory, AwContentsClient contentsClient,
             AwSettings settings, DependencyFactory dependencyFactory) {
-        setLocale(LocaleUtils.getDefaultLocale());
+        setLocale(LocaleUtils.getDefaultLocaleString());
         settings.updateAcceptLanguages();
 
         mBrowserContext = browserContext;
@@ -770,6 +786,7 @@ public class AwContents implements SmartClipProvider,
         mBackgroundThreadClient = new BackgroundThreadClientImpl();
         mIoThreadClient = new IoThreadClientImpl();
         mInterceptNavigationDelegate = new InterceptNavigationDelegateImpl();
+        mDisplayObserver = new AwDisplayAndroidObserver();
         mUpdateVisibilityRunnable = new Runnable() {
             @Override
             public void run() {
@@ -804,13 +821,15 @@ public class AwContents implements SmartClipProvider,
         onContainerViewChanged();
     }
 
-    private static void initializeContentViewCore(ContentViewCore contentViewCore,
+    private void initializeContentViewCore(ContentViewCore contentViewCore,
             Context context, ViewAndroidDelegate viewDelegate,
             InternalAccessDelegate internalDispatcher, WebContents webContents,
             GestureStateListener gestureStateListener, ContentViewClient contentViewClient,
             ContentViewCore.ZoomControlsDelegate zoomControlsDelegate,
             WindowAndroid windowAndroid) {
         contentViewCore.initialize(viewDelegate, internalDispatcher, webContents, windowAndroid);
+        contentViewCore.setActionModeCallback(
+                new AwActionModeCallback(this, contentViewCore.getActionModeCallbackHelper()));
         contentViewCore.addGestureStateListener(gestureStateListener);
         contentViewCore.setContentViewClient(contentViewClient);
         contentViewCore.setZoomControlsDelegate(zoomControlsDelegate);
@@ -915,7 +934,8 @@ public class AwContents implements SmartClipProvider,
         updateNativeAwGLFunctor();
         mContainerView.setWillNotDraw(false);
 
-        mViewAndroidDelegate.updateCurrentContainerView(mContainerView);
+        mViewAndroidDelegate.updateCurrentContainerView(mContainerView,
+                mWindowAndroid.getWindowAndroid().getDisplay());
         mContentViewCore.setContainerView(mContainerView);
         if (mAwPdfExporter != null) {
             mAwPdfExporter.setContainerView(mContainerView);
@@ -1053,10 +1073,8 @@ public class AwContents implements SmartClipProvider,
         installWebContentsObserver();
         mSettings.setWebContents(webContents);
 
-        float dipScale = mContentViewCore.getDeviceScaleFactor();
-        nativeSetDipScale(mNativeAwContents, dipScale);
-        mLayoutSizer.setDIPScale(dipScale);
-        mSettings.setDIPScale(dipScale);
+        final float dipScale = mWindowAndroid.getWindowAndroid().getDisplay().getDipScale();
+        mDisplayObserver.onDIPScaleChanged(dipScale);
 
         updateContentViewCoreVisibility();
 
@@ -2081,7 +2099,7 @@ public class AwContents implements SmartClipProvider,
      */
     public float getScale() {
         if (isDestroyed(WARN)) return 1;
-        return (float) (mPageScaleFactor * mContentViewCore.getDeviceScaleFactor());
+        return mPageScaleFactor * mContentViewCore.getDeviceScaleFactor();
     }
 
     /**
@@ -2374,6 +2392,7 @@ public class AwContents implements SmartClipProvider,
         if (TRACE) Log.i(TAG, "%s onAttachedToWindow", this);
         mTemporarilyDetached = false;
         mAwViewMethods.onAttachedToWindow();
+        mWindowAndroid.getWindowAndroid().getDisplay().addObserver(mDisplayObserver);
     }
 
     /**
@@ -2382,6 +2401,7 @@ public class AwContents implements SmartClipProvider,
     @SuppressLint("MissingSuperCall")
     public void onDetachedFromWindow() {
         if (TRACE) Log.i(TAG, "%s onDetachedFromWindow", this);
+        mWindowAndroid.getWindowAndroid().getDisplay().removeObserver(mDisplayObserver);
         mAwViewMethods.onDetachedFromWindow();
     }
 
@@ -3137,7 +3157,7 @@ public class AwContents implements SmartClipProvider,
             postUpdateContentViewCoreVisibility();
             mCurrentFunctor.onAttachedToWindow();
 
-            setLocale(LocaleUtils.getDefaultLocale());
+            setLocale(LocaleUtils.getDefaultLocaleString());
             mSettings.updateAcceptLanguages();
 
             if (mComponentCallbacks != null) return;

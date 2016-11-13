@@ -59,6 +59,16 @@ class RebaselineCLTest(BaseTestCase, LoggingTestCase):
         })
         self.command.rietveld = Rietveld(web)
 
+        self.tool.buildbot.set_retry_sumary_json(Build('MOCK Try Win', 5000), json.dumps({
+            'failures': [
+                'fast/dom/prototype-newtest.html',
+                'fast/dom/prototype-taco.html',
+                'fast/dom/prototype-inheritance.html',
+                'svg/dynamic-updates/SVGFEDropShadowElement-dom-stdDeviation-attr.html',
+            ],
+            'ignored': [],
+        }))
+
         # Write to the mock filesystem so that these tests are considered to exist.
         port = self.mac_port
         tests = [
@@ -91,11 +101,6 @@ class RebaselineCLTest(BaseTestCase, LoggingTestCase):
     def test_execute_with_issue_number_given(self):
         self.command.execute(self.command_options(issue=11112222), [], self.tool)
         self.assertLog([
-            'INFO: Tests to rebaseline:\n',
-            'INFO:   fast/dom/prototype-newtest.html: MOCK Try Win (5000)\n',
-            'INFO:   svg/dynamic-updates/SVGFEDropShadowElement-dom-stdDeviation-attr.html: MOCK Try Win (5000)\n',
-            'INFO:   fast/dom/prototype-inheritance.html: MOCK Try Win (5000)\n',
-            'INFO:   fast/dom/prototype-taco.html: MOCK Try Win (5000)\n',
             'INFO: Rebaselining fast/dom/prototype-inheritance.html\n',
             'INFO: Rebaselining fast/dom/prototype-newtest.html\n',
             'INFO: Rebaselining fast/dom/prototype-taco.html\n',
@@ -114,11 +119,6 @@ class RebaselineCLTest(BaseTestCase, LoggingTestCase):
         self.command.git_cl = lambda: git_cl
         self.command.execute(self.command_options(), [], self.tool)
         self.assertLog([
-            'INFO: Tests to rebaseline:\n',
-            'INFO:   fast/dom/prototype-newtest.html: MOCK Try Win (5000)\n',
-            'INFO:   svg/dynamic-updates/SVGFEDropShadowElement-dom-stdDeviation-attr.html: MOCK Try Win (5000)\n',
-            'INFO:   fast/dom/prototype-inheritance.html: MOCK Try Win (5000)\n',
-            'INFO:   fast/dom/prototype-taco.html: MOCK Try Win (5000)\n',
             'INFO: Rebaselining fast/dom/prototype-inheritance.html\n',
             'INFO: Rebaselining fast/dom/prototype-newtest.html\n',
             'INFO: Rebaselining fast/dom/prototype-taco.html\n',
@@ -131,11 +131,42 @@ class RebaselineCLTest(BaseTestCase, LoggingTestCase):
         # is in the list of failed tests, but not in the list of files modified
         # in the given CL; it should be included because all_tests is set to True.
         self.assertLog([
-            'INFO: Tests to rebaseline:\n',
-            'INFO:   fast/dom/prototype-inheritance.html: MOCK Try Win (5000)\n',
-            'INFO:   fast/dom/prototype-taco.html: MOCK Try Win (5000)\n',
             'INFO: Rebaselining fast/dom/prototype-inheritance.html\n',
             'INFO: Rebaselining fast/dom/prototype-taco.html\n',
+        ])
+
+    def test_execute_with_flaky_test_that_fails_on_retry(self):
+        # In this example, the --only-changed-tests flag is not given, but
+        # svg/dynamic-updates/SVGFEDropShadowElement-dom-stdDeviation-attr.html
+        # failed both with and without the patch in the try job, so it is not
+        # rebaselined.
+        self.tool.buildbot.set_retry_sumary_json(Build('MOCK Try Win', 5000), json.dumps({
+            'failures': [
+                'fast/dom/prototype-taco.html',
+                'fast/dom/prototype-inheritance.html',
+            ],
+            'ignored': ['svg/dynamic-updates/SVGFEDropShadowElement-dom-stdDeviation-attr.html'],
+        }))
+        self.command.execute(self.command_options(issue=11112222), [], self.tool)
+        self.assertLog([
+            'INFO: Rebaselining fast/dom/prototype-inheritance.html\n',
+            'INFO: Rebaselining fast/dom/prototype-taco.html\n',
+        ])
+
+    def test_execute_with_no_retry_summary_downloaded(self):
+        # In this example, the --only-changed-tests flag is not given, but
+        # svg/dynamic-updates/SVGFEDropShadowElement-dom-stdDeviation-attr.html
+        # failed both with and without the patch in the try job, so it is not
+        # rebaselined.
+        self.tool.buildbot.set_retry_sumary_json(
+            Build('MOCK Try Win', 5000), None)
+        self.command.execute(self.command_options(issue=11112222), [], self.tool)
+        self.assertLog([
+            'WARNING: No retry summary available for build Build(builder_name=u\'MOCK Try Win\', build_number=5000).\n',
+            'INFO: Rebaselining fast/dom/prototype-inheritance.html\n',
+            'INFO: Rebaselining fast/dom/prototype-newtest.html\n',
+            'INFO: Rebaselining fast/dom/prototype-taco.html\n',
+            'INFO: Rebaselining svg/dynamic-updates/SVGFEDropShadowElement-dom-stdDeviation-attr.html\n',
         ])
 
     def test_execute_with_nonexistent_test(self):
@@ -184,7 +215,7 @@ class RebaselineCLTest(BaseTestCase, LoggingTestCase):
         self.assertTrue(self.command.trigger_jobs_for_missing_builds([]))
         self.assertEqual(
             self.tool.executive.calls,
-            [['git', 'cl', 'try', '-b', 'MOCK Try Linux'], ['git', 'cl', 'try', '-b', 'MOCK Try Win']])
+            [['git', 'cl', 'try', '-b', 'MOCK Try Linux', '-b', 'MOCK Try Win']])
         self.assertLog([
             'INFO: Triggering try jobs for:\n',
             'INFO:   MOCK Try Linux\n',

@@ -15,6 +15,7 @@
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/client/capture_client.h"
 #include "ui/aura/client/cursor_client.h"
+#include "ui/aura/client/drag_drop_client.h"
 #include "ui/aura/client/focus_client.h"
 #include "ui/aura/client/screen_position_client.h"
 #include "ui/aura/client/window_parenting_client.h"
@@ -46,7 +47,6 @@
 #include "ui/wm/core/window_animations.h"
 #include "ui/wm/core/window_util.h"
 #include "ui/wm/public/activation_client.h"
-#include "ui/wm/public/drag_drop_client.h"
 #include "ui/wm/public/window_move_client.h"
 #include "ui/wm/public/window_types.h"
 
@@ -72,6 +72,15 @@ namespace {
 
 void SetRestoreBounds(aura::Window* window, const gfx::Rect& bounds) {
   window->SetProperty(aura::client::kRestoreBoundsKey, new gfx::Rect(bounds));
+}
+
+void SetIcon(aura::Window* window,
+             const aura::WindowProperty<gfx::ImageSkia*>* key,
+             const gfx::ImageSkia& value) {
+  if (value.isNull())
+    window->ClearProperty(key);
+  else
+    window->SetProperty(key, new gfx::ImageSkia(value));
 }
 
 }  // namespace
@@ -102,17 +111,10 @@ void NativeWidgetAura::RegisterNativeWidgetForWindow(
 void NativeWidgetAura::AssignIconToAuraWindow(aura::Window* window,
                                               const gfx::ImageSkia& window_icon,
                                               const gfx::ImageSkia& app_icon) {
-  if (!window)
-    return;
-
-  if (window_icon.isNull() && app_icon.isNull()) {
-    window->ClearProperty(aura::client::kWindowIconKey);
-    return;
+  if (window) {
+    SetIcon(window, aura::client::kWindowIconKey, window_icon);
+    SetIcon(window, aura::client::kAppIconKey, app_icon);
   }
-
-  window->SetProperty(
-      aura::client::kWindowIconKey,
-      new gfx::ImageSkia(!window_icon.isNull() ? window_icon : app_icon));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -920,8 +922,7 @@ void NativeWidgetAura::OnMouseEvent(ui::MouseEvent* event) {
   DCHECK(window_->IsVisible());
   if (event->type() == ui::ET_MOUSEWHEEL) {
     delegate_->OnMouseEvent(event);
-    if (event->handled())
-      return;
+    return;
   }
 
   if (tooltip_manager_.get())

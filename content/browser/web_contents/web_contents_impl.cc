@@ -54,13 +54,14 @@
 #include "content/browser/frame_host/render_frame_proxy_host.h"
 #include "content/browser/frame_host/render_widget_host_view_child_frame.h"
 #include "content/browser/host_zoom_map_impl.h"
+#include "content/browser/host_zoom_map_observer.h"
 #include "content/browser/loader/loader_io_thread_notifier.h"
 #include "content/browser/loader/resource_dispatcher_host_impl.h"
 #include "content/browser/manifest/manifest_manager_host.h"
 #include "content/browser/media/audio_stream_monitor.h"
 #include "content/browser/media/capture/web_contents_audio_muter.h"
 #include "content/browser/media/media_web_contents_observer.h"
-#include "content/browser/media/session/media_session.h"
+#include "content/browser/media/session/media_session_impl.h"
 #include "content/browser/message_port_message_filter.h"
 #include "content/browser/plugin_content_origin_whitelist.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
@@ -469,6 +470,7 @@ WebContentsImpl::WebContentsImpl(BrowserContext* browser_context)
   wake_lock_service_context_.reset(new device::WakeLockServiceContext(
       BrowserThread::GetTaskRunnerForThread(BrowserThread::FILE),
       base::Bind(&WebContentsImpl::GetNativeView, base::Unretained(this))));
+  host_zoom_map_observer_.reset(new HostZoomMapObserver(this));
 }
 
 WebContentsImpl::~WebContentsImpl() {
@@ -926,10 +928,9 @@ RenderWidgetHostView* WebContentsImpl::GetTopLevelRenderWidgetHostView() {
 
 RenderWidgetHostView* WebContentsImpl::GetFullscreenRenderWidgetHostView()
     const {
-  RenderWidgetHost* const widget_host =
-      RenderWidgetHostImpl::FromID(fullscreen_widget_process_id_,
-                                   fullscreen_widget_routing_id_);
-  return widget_host ? widget_host->GetView() : NULL;
+  if (auto widget_host = GetFullscreenRenderWidgetHost())
+    return widget_host->GetView();
+  return nullptr;
 }
 
 WebContentsView* WebContentsImpl::GetView() const {
@@ -1029,8 +1030,9 @@ void WebContentsImpl::GetScreenInfo(ScreenInfo* screen_info) {
     GetView()->GetScreenInfo(screen_info);
 }
 
-WebUI* WebContentsImpl::CreateSubframeWebUI(const GURL& url,
-                                            const std::string& frame_name) {
+std::unique_ptr<WebUI> WebContentsImpl::CreateSubframeWebUI(
+    const GURL& url,
+    const std::string& frame_name) {
   DCHECK(!frame_name.empty());
   return CreateWebUI(url, frame_name);
 }
@@ -1256,8 +1258,7 @@ void WebContentsImpl::SetAudioMuted(bool mute) {
   for (auto& observer : observers_)
     observer.DidUpdateAudioMutingState(mute);
 
-  // Notification for UI updates in response to the changed muting state.
-  NotifyNavigationStateChanged(INVALIDATE_TYPE_TAB);
+  OnAudioStateChanged(!mute && audio_stream_monitor_.IsCurrentlyAudible());
 }
 
 bool WebContentsImpl::IsConnectedToBluetoothDevice() const {
@@ -1315,6 +1316,14 @@ void WebContentsImpl::NotifyNavigationStateChanged(
 
   if (GetOuterWebContents())
     GetOuterWebContents()->NotifyNavigationStateChanged(changed_flags);
+}
+
+void WebContentsImpl::OnAudioStateChanged(bool is_audio_playing) {
+  SendPageMessage(
+      new PageMsg_AudioStateChanged(MSG_ROUTING_NONE, is_audio_playing));
+
+  // Notification for UI updates in response to the changed muting state.
+  NotifyNavigationStateChanged(INVALIDATE_TYPE_TAB);
 }
 
 base::TimeTicks WebContentsImpl::GetLastActiveTime() const {
@@ -1454,6 +1463,20 @@ void WebContentsImpl::AttachToOuterWebContentsFrame(
   text_input_manager_.reset(nullptr);
 }
 
+void WebContentsImpl::DidChangeVisibleSecurityState() {
+  if (delegate_) {
+    delegate_->VisibleSecurityStateChanged(this);
+
+    SecurityStyleExplanations security_style_explanations;
+    blink::WebSecurityStyle security_style =
+        delegate_->GetSecurityStyle(this, &security_style_explanations);
+    for (auto& observer : observers_) {
+      observer.SecurityStyleChanged(security_style,
+                                    security_style_explanations);
+    }
+  }
+}
+
 void WebContentsImpl::Stop() {
   for (FrameTreeNode* node : frame_tree_.Nodes())
     node->StopLoading();
@@ -1541,7 +1564,8 @@ void WebContentsImpl::Init(const WebContents::CreateParams& params) {
 
   GetRenderManager()->Init(site_instance.get(), view_routing_id,
                            params.main_frame_routing_id,
-                           main_frame_widget_routing_id);
+                           main_frame_widget_routing_id,
+                           params.renderer_initiated_creation);
 
   // blink::FrameTree::setName always keeps |unique_name| empty in case of a
   // main frame - let's do the same thing here.
@@ -2042,10 +2066,15 @@ void WebContentsImpl::CreateNewWindow(
       // delete the RenderView that had already been created.
       Send(new ViewMsg_Close(route_id));
     }
+    // Note: even though we're not creating a WebContents here, it could have
+    // been created by the embedder so ensure that the RenderFrameHost is
+    // properly initialized.
     // It's safe to only target the frame because the render process will not
     // have a chance to create more frames at this point.
-    ResourceDispatcherHostImpl::ResumeBlockedRequestsForRouteFromUI(
-        GlobalFrameRoutingId(render_process_id, main_frame_route_id));
+    RenderFrameHostImpl* rfh =
+        RenderFrameHostImpl::FromID(render_process_id, main_frame_route_id);
+    if (rfh)
+      rfh->Init();
     return;
   }
 
@@ -3786,35 +3815,12 @@ void WebContentsImpl::OnUpdateFaviconURL(
     observer.DidUpdateFaviconURL(candidates);
 }
 
-void WebContentsImpl::OnMediaSessionStateChanged() {
-  MediaSession* session = MediaSession::Get(this);
-  for (auto& observer : observers_) {
-    observer.MediaSessionStateChanged(session->IsControllable(),
-                                       session->IsSuspended());
-  }
-}
-
-void WebContentsImpl::OnMediaSessionMetadataChanged() {
-  MediaSession* session = MediaSession::Get(this);
-  for (auto& observer : observers_) {
-    observer.MediaSessionMetadataChanged(session->metadata());
-  }
-}
-
-void WebContentsImpl::ResumeMediaSession() {
-  MediaSession::Get(this)->Resume(MediaSession::SuspendType::UI);
-}
-
-void WebContentsImpl::SuspendMediaSession() {
-  MediaSession::Get(this)->Suspend(MediaSession::SuspendType::UI);
-}
-
-void WebContentsImpl::StopMediaSession() {
-  MediaSession::Get(this)->Stop(MediaSession::SuspendType::UI);
-}
-
 void WebContentsImpl::OnPasswordInputShownOnHttp() {
   controller_.ssl_manager()->DidShowPasswordInputOnHttp();
+}
+
+void WebContentsImpl::OnAllPasswordInputsHiddenOnHttp() {
+  controller_.ssl_manager()->DidHideAllPasswordInputsOnHttp();
 }
 
 void WebContentsImpl::OnCreditCardInputShownOnHttp() {
@@ -3836,20 +3842,6 @@ void WebContentsImpl::OnFirstVisuallyNonEmptyPaint() {
     for (auto& observer : observers_)
       observer.DidChangeThemeColor(theme_color_);
     last_sent_theme_color_ = theme_color_;
-  }
-}
-
-void WebContentsImpl::DidChangeVisibleSSLState() {
-  if (delegate_) {
-    delegate_->VisibleSSLStateChanged(this);
-
-    SecurityStyleExplanations security_style_explanations;
-    blink::WebSecurityStyle security_style =
-        delegate_->GetSecurityStyle(this, &security_style_explanations);
-    for (auto& observer : observers_) {
-      observer.SecurityStyleChanged(security_style,
-                                    security_style_explanations);
-    }
   }
 }
 
@@ -3993,6 +3985,18 @@ void WebContentsImpl::NotifyViewSwapped(RenderViewHost* old_host,
 
 void WebContentsImpl::NotifyFrameSwapped(RenderFrameHost* old_host,
                                          RenderFrameHost* new_host) {
+  // Copies the background color from an old WebContents to a new one that
+  // replaces it on the screen. This allows the new WebContents to use the
+  // old one's background color as the starting background color, before having
+  // loaded any contents. As a result, we avoid flashing white when navigating
+  // from a site whith a dark background to another site with a dark background.
+  if (old_host && new_host) {
+    RenderWidgetHostView* old_view = old_host->GetView();
+    RenderWidgetHostView* new_view = new_host->GetView();
+    if (old_view && new_view)
+      new_view->SetBackgroundColor(old_view->background_color());
+  }
+
   for (auto& observer : observers_)
     observer.RenderFrameHostChanged(old_host, new_host);
 }
@@ -4650,14 +4654,14 @@ void WebContentsImpl::SetFocusedFrame(FrameTreeNode* node,
     rwh->Focus();
 }
 
-bool WebContentsImpl::AddMessageToConsole(int32_t level,
-                                          const base::string16& message,
-                                          int32_t line_no,
-                                          const base::string16& source_id) {
+bool WebContentsImpl::DidAddMessageToConsole(int32_t level,
+                                             const base::string16& message,
+                                             int32_t line_no,
+                                             const base::string16& source_id) {
   if (!delegate_)
     return false;
-  return delegate_->AddMessageToConsole(this, level, message, line_no,
-                                        source_id);
+  return delegate_->DidAddMessageToConsole(this, level, message, line_no,
+                                           source_id);
 }
 
 void WebContentsImpl::OnUserInteraction(
@@ -4828,8 +4832,7 @@ NavigationControllerImpl& WebContentsImpl::GetControllerForRenderManager() {
 
 std::unique_ptr<WebUIImpl> WebContentsImpl::CreateWebUIForRenderFrameHost(
     const GURL& url) {
-  return std::unique_ptr<WebUIImpl>(
-      static_cast<WebUIImpl*>(CreateWebUI(url, std::string())));
+  return CreateWebUI(url, std::string());
 }
 
 NavigationEntry*
@@ -5023,6 +5026,11 @@ int WebContentsImpl::GetOuterDelegateFrameTreeNodeId() {
   return FrameTreeNode::kFrameTreeNodeInvalidId;
 }
 
+RenderWidgetHostImpl* WebContentsImpl::GetFullscreenRenderWidgetHost() const {
+  return RenderWidgetHostImpl::FromID(fullscreen_widget_process_id_,
+                                      fullscreen_widget_routing_id_);
+}
+
 RenderFrameHostManager* WebContentsImpl::GetRenderManager() const {
   return frame_tree_.root()->render_manager();
 }
@@ -5069,19 +5077,21 @@ void WebContentsImpl::OnPreferredSizeChanged(const gfx::Size& old_size) {
     delegate_->UpdatePreferredSize(this, new_size);
 }
 
-WebUI* WebContentsImpl::CreateWebUI(const GURL& url,
-                                    const std::string& frame_name) {
-  WebUIImpl* web_ui = new WebUIImpl(this, frame_name);
-  WebUIController* controller = WebUIControllerFactoryRegistry::GetInstance()->
-      CreateWebUIControllerForURL(web_ui, url);
+std::unique_ptr<WebUIImpl> WebContentsImpl::CreateWebUI(
+    const GURL& url,
+    const std::string& frame_name) {
+  std::unique_ptr<WebUIImpl> web_ui =
+      base::MakeUnique<WebUIImpl>(this, frame_name);
+  WebUIController* controller =
+      WebUIControllerFactoryRegistry::GetInstance()
+          ->CreateWebUIControllerForURL(web_ui.get(), url);
   if (controller) {
     web_ui->AddMessageHandler(new GenericHandler());
     web_ui->SetController(controller);
     return web_ui;
   }
 
-  delete web_ui;
-  return NULL;
+  return nullptr;
 }
 
 FindRequestManager* WebContentsImpl::GetOrCreateFindRequestManager() {

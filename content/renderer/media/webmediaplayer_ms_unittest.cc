@@ -422,10 +422,13 @@ class WebMediaPlayerMSTest
   void removeTextTrack(blink::WebInbandTextTrack*) override {}
   void mediaSourceOpened(blink::WebMediaSource*) override {}
   void requestSeek(double) override {}
-  void remoteRouteAvailabilityChanged(bool) override {}
+  void remoteRouteAvailabilityChanged(
+      blink::WebRemotePlaybackAvailability) override {}
   void connectedToRemoteDevice() override {}
   void disconnectedFromRemoteDevice() override {}
   void cancelledRemotePlaybackRequest() override {}
+  void remotePlaybackStarted() override {}
+  bool isAutoplayingMuted() override { return false; }
   void requestReload(const blink::WebURL& newUrl) override {}
 
   // Implementation of cc::VideoFrameProvider::Client

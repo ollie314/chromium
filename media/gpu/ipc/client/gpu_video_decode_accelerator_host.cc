@@ -133,7 +133,7 @@ void GpuVideoDecodeAcceleratorHost::AssignPictureBuffers(
       PostNotifyError(INVALID_ARGUMENT);
       return;
     }
-    texture_ids.push_back(buffer.texture_ids());
+    texture_ids.push_back(buffer.client_texture_ids());
     buffer_ids.push_back(buffer.id());
   }
   Send(new AcceleratedVideoDecoderMsg_AssignPictureBuffers(
@@ -161,6 +161,14 @@ void GpuVideoDecodeAcceleratorHost::Reset() {
   if (!channel_)
     return;
   Send(new AcceleratedVideoDecoderMsg_Reset(decoder_route_id_));
+}
+
+void GpuVideoDecodeAcceleratorHost::SetSurface(int32_t surface_id) {
+  DCHECK(CalledOnValidThread());
+  if (!channel_)
+    return;
+  Send(
+      new AcceleratedVideoDecoderMsg_SetSurface(decoder_route_id_, surface_id));
 }
 
 void GpuVideoDecodeAcceleratorHost::Destroy() {

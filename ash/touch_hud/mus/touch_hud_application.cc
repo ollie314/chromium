@@ -7,8 +7,11 @@
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/touch_hud/touch_hud_renderer.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "services/service_manager/public/cpp/connector.h"
+#include "services/service_manager/public/cpp/interface_registry.h"
+#include "services/service_manager/public/cpp/service_context.h"
 #include "services/ui/public/cpp/property_type_converters.h"
 #include "services/ui/public/interfaces/window_manager_constants.mojom.h"
 #include "ui/views/mus/aura_init.h"
@@ -64,14 +67,15 @@ class TouchHudUI : public views::WidgetDelegateView,
 TouchHudApplication::TouchHudApplication() : binding_(this) {}
 TouchHudApplication::~TouchHudApplication() {}
 
-void TouchHudApplication::OnStart(const service_manager::Identity& identity) {
-  aura_init_.reset(new views::AuraInit(connector(), "views_mus_resources.pak"));
-  window_manager_connection_ =
-      views::WindowManagerConnection::Create(connector(), identity);
+void TouchHudApplication::OnStart() {
+  aura_init_ = base::MakeUnique<views::AuraInit>(
+      context()->connector(), context()->identity(), "views_mus_resources.pak");
+  window_manager_connection_ = views::WindowManagerConnection::Create(
+      context()->connector(), context()->identity());
 }
 
 bool TouchHudApplication::OnConnect(
-    const service_manager::Identity& remote_identity,
+    const service_manager::ServiceInfo& remote_info,
     service_manager::InterfaceRegistry* registry) {
   registry->AddInterface<mash::mojom::Launchable>(this);
   return true;

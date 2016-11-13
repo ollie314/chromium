@@ -41,6 +41,7 @@
 #elif defined(OS_MACOSX)
 #include "net/cert/cert_verify_proc_mac.h"
 #elif defined(OS_WIN)
+#include "base/win/windows_version.h"
 #include "net/cert/cert_verify_proc_win.h"
 #else
 #error Implement certificate verification.
@@ -357,6 +358,17 @@ struct HashToArrayComparator {
   }
 };
 
+bool AreSHA1IntermediatesAllowed() {
+#if defined(OS_WIN)
+  // TODO(rsleevi): Remove this once https://crbug.com/588789 is resolved
+  // for Windows 7/2008 users.
+  // Note: This must be kept in sync with cert_verify_proc_unittest.cc
+  return base::win::GetVersion() < base::win::VERSION_WIN8;
+#else
+  return false;
+#endif
+};
+
 }  // namespace
 
 // static
@@ -378,7 +390,8 @@ CertVerifyProc* CertVerifyProc::CreateDefault() {
 #endif
 }
 
-CertVerifyProc::CertVerifyProc() {}
+CertVerifyProc::CertVerifyProc()
+    : sha1_legacy_mode_enabled(base::FeatureList::IsEnabled(kSHA1LegacyMode)) {}
 
 CertVerifyProc::~CertVerifyProc() {}
 
@@ -473,8 +486,20 @@ int CertVerifyProc::Verify(X509Certificate* cert,
   // TODO(mattm): apply the SHA-1 deprecation check to all certs unless
   // CertVerifier::VERIFY_ENABLE_SHA1_LOCAL_ANCHORS flag is present.
   if (verify_result->has_md5 ||
-      (verify_result->has_sha1_leaf && verify_result->is_issued_by_known_root &&
-       IsPastSHA1DeprecationDate(*cert))) {
+      // Current SHA-1 behaviour:
+      // - Reject all publicly trusted SHA-1
+      // - ... unless it's in the intermediate and SHA-1 intermediates are
+      //   allowed for that platform. See https://crbug.com/588789
+      (!sha1_legacy_mode_enabled &&
+       (verify_result->is_issued_by_known_root &&
+        (verify_result->has_sha1_leaf ||
+         (verify_result->has_sha1 && !AreSHA1IntermediatesAllowed())))) ||
+      // Legacy SHA-1 behaviour:
+      // - Reject all publicly trusted SHA-1 leaf certs issued after
+      //   2016-01-01.
+      (sha1_legacy_mode_enabled && (verify_result->has_sha1_leaf &&
+                                    verify_result->is_issued_by_known_root &&
+                                    IsPastSHA1DeprecationDate(*cert)))) {
     verify_result->cert_status |= CERT_STATUS_WEAK_SIGNATURE_ALGORITHM;
     // Avoid replacing a more serious error, such as an OS/library failure,
     // by ensuring that if verification failed, it failed with a certificate
@@ -565,13 +590,11 @@ static bool CheckNameConstraints(const std::vector<std::string>& dns_names,
     if (host_info.IsIPAddress())
       continue;
 
-    const size_t registry_len = registry_controlled_domains::GetRegistryLength(
-        dns_name,
-        registry_controlled_domains::EXCLUDE_UNKNOWN_REGISTRIES,
-        registry_controlled_domains::INCLUDE_PRIVATE_REGISTRIES);
     // If the name is not in a known TLD, ignore it. This permits internal
     // names.
-    if (registry_len == 0)
+    if (!registry_controlled_domains::HostHasRegistryControlledDomain(
+            dns_name, registry_controlled_domains::EXCLUDE_UNKNOWN_REGISTRIES,
+            registry_controlled_domains::INCLUDE_PRIVATE_REGISTRIES))
       continue;
 
     for (size_t j = 0; domains[j][0]; ++j) {
@@ -748,5 +771,9 @@ bool CertVerifyProc::HasTooLongValidity(const X509Certificate& cert) {
 
   return false;
 }
+
+// static
+const base::Feature CertVerifyProc::kSHA1LegacyMode{
+    "SHA1LegacyMode", base::FEATURE_DISABLED_BY_DEFAULT};
 
 }  // namespace net

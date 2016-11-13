@@ -8,7 +8,9 @@
     "test": "node scripts/npm_test.js",
     "test:build": "node scripts/npm_test.js --build-only",
     "test:run": "node scripts/npm_test.js --test-only",
-    "lint": "eslint -c front_end/.eslintrc.js --ignore-path front_end/.eslintignore front_end"
+    "lint": "eslint front_end",
+    "format": "node scripts/format.js",
+    "closure": "python scripts/compile_frontend.py"
   },
   "repository": {
     "type": "git",
@@ -28,6 +30,10 @@
   },
   "homepage": "https://devtools.chrome.com",
   "devDependencies": {
-    "eslint": "3.5.0"
+    "eslint": "3.9.1",
+    "clang-format": "1.0.45",
+    "async": "1.5.2",
+    "glob": "7.1.1",
+    "resolve": "1.1.7"
   }
 }

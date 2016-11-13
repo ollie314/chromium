@@ -154,6 +154,7 @@ ThreadState::ThreadState(BlinkGC::ThreadHeapMode threadHeapMode)
       m_sweepForbidden(false),
       m_noAllocationCount(0),
       m_gcForbiddenCount(0),
+      m_mixinsBeingConstructedCount(0),
       m_accumulatedSweepingTime(0),
       m_vectorBackingArenaIndex(BlinkGC::Vector1ArenaIndex),
       m_currentArenaAges(0),
@@ -1136,6 +1137,8 @@ void ThreadState::preSweep() {
 
 #if defined(ADDRESS_SANITIZER)
 void ThreadState::poisonAllHeaps() {
+  CrossThreadPersistentRegion::LockScope persistentLock(
+      ProcessHeap::crossThreadPersistentRegion());
   // Poisoning all unmarked objects in the other arenas.
   for (int i = 1; i < BlinkGC::NumberOfArenas; i++)
     m_arenas[i]->poisonArena();
@@ -1146,6 +1149,8 @@ void ThreadState::poisonAllHeaps() {
 }
 
 void ThreadState::poisonEagerArena() {
+  CrossThreadPersistentRegion::LockScope persistentLock(
+      ProcessHeap::crossThreadPersistentRegion());
   m_arenas[BlinkGC::EagerSweepArenaIndex]->poisonArena();
   // CrossThreadPersistents in unmarked objects may be accessed from other
   // threads (e.g. in CrossThreadPersistentRegion::shouldTracePersistent) and

@@ -339,8 +339,11 @@ void GraphicsLayer::notifyFirstPaintToClient() {
     DisplayItemList& itemList = m_paintController->newDisplayItemList();
     for (DisplayItem& item : itemList) {
       DisplayItem::Type type = item.getType();
+      if (type == DisplayItem::kDocumentBackground &&
+          !m_paintController->nonDefaultBackgroundColorPainted()) {
+        continue;
+      }
       if (DisplayItem::isDrawingType(type) &&
-          type != DisplayItem::kDocumentBackground &&
           static_cast<const DrawingDisplayItem&>(item).picture()) {
         m_painted = true;
         isFirstPaint = true;
@@ -1161,6 +1164,11 @@ GraphicsLayer::TakeDebugInfo(cc::Layer* layer) {
 void GraphicsLayer::didUpdateMainThreadScrollingReasons() {
   m_debugInfo.setMainThreadScrollingReasons(
       platformLayer()->mainThreadScrollingReasons());
+}
+
+void GraphicsLayer::didChangeScrollbarsHidden(bool hidden) {
+  if (m_scrollableArea)
+    m_scrollableArea->setScrollbarsHidden(hidden);
 }
 
 PaintController& GraphicsLayer::getPaintController() {

@@ -13,6 +13,7 @@
 #include "base/message_loop/message_loop.h"
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/histogram_tester.h"
 #include "build/build_config.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/infobars/infobar_service.h"
@@ -265,48 +266,6 @@ TEST_F(WebsiteSettingsTest, OnPermissionsChanged) {
   setting = content_settings->GetContentSetting(
       url(), url(), CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA, std::string());
   EXPECT_EQ(setting, CONTENT_SETTING_ALLOW);
-}
-
-TEST_F(WebsiteSettingsTest, OnPermissionsChanged_Fullscreen) {
-  // Setup site permissions.
-  HostContentSettingsMap* content_settings =
-      HostContentSettingsMapFactory::GetForProfile(profile());
-  ContentSetting setting = content_settings->GetContentSetting(
-      url(), url(), CONTENT_SETTINGS_TYPE_FULLSCREEN, std::string());
-  EXPECT_EQ(setting, CONTENT_SETTING_ASK);
-
-  EXPECT_CALL(*mock_ui(), SetIdentityInfo(_));
-  EXPECT_CALL(*mock_ui(), SetCookieInfo(_));
-  EXPECT_CALL(*mock_ui(), SetSelectedTab(
-      WebsiteSettingsUI::TAB_ID_PERMISSIONS));
-
-  // SetPermissionInfo() is called once initially, and then again every time
-  // OnSitePermissionChanged() is called.
-  EXPECT_CALL(*mock_ui(), SetPermissionInfoStub()).Times(3);
-
-  // Execute code under tests.
-  website_settings()->OnSitePermissionChanged(CONTENT_SETTINGS_TYPE_FULLSCREEN,
-                                              CONTENT_SETTING_ALLOW);
-
-  // Verify that the site permissions were changed correctly.
-  setting = content_settings->GetContentSetting(
-      url(), url(), CONTENT_SETTINGS_TYPE_FULLSCREEN, std::string());
-  EXPECT_EQ(setting, CONTENT_SETTING_ALLOW);
-
-  // ... and that the primary pattern must match the secondary one.
-  setting = content_settings->GetContentSetting(
-      url(), GURL("https://test.com"),
-      CONTENT_SETTINGS_TYPE_FULLSCREEN, std::string());
-  EXPECT_EQ(setting, CONTENT_SETTING_ASK);
-
-
-  // Resetting the setting should move the permission back to ASK.
-  website_settings()->OnSitePermissionChanged(CONTENT_SETTINGS_TYPE_FULLSCREEN,
-                                              CONTENT_SETTING_ASK);
-
-  setting = content_settings->GetContentSetting(
-      url(), url(), CONTENT_SETTINGS_TYPE_FULLSCREEN, std::string());
-  EXPECT_EQ(setting, CONTENT_SETTING_ASK);
 }
 
 TEST_F(WebsiteSettingsTest, OnSiteDataAccessed) {
@@ -893,3 +852,68 @@ TEST_F(WebsiteSettingsTest, InternalPage) {
   EXPECT_EQ(base::string16(), website_settings()->organization_name());
 }
 #endif
+
+// Tests that metrics are recorded on a WebsiteSettings for pages with
+// various security levels.
+TEST_F(WebsiteSettingsTest, SecurityLevelMetrics) {
+  struct TestCase {
+    const std::string url;
+    const SecurityStateModel::SecurityLevel security_level;
+    const std::string histogram_name;
+  };
+  const char kGenericHistogram[] = "WebsiteSettings.Action";
+
+  const TestCase kTestCases[] = {
+      {"https://example.test", SecurityStateModel::SECURE,
+       "Security.PageInfo.Action.HttpsUrl.Valid"},
+      {"https://example.test", SecurityStateModel::EV_SECURE,
+       "Security.PageInfo.Action.HttpsUrl.Valid"},
+      {"https://example2.test", SecurityStateModel::NONE,
+       "Security.PageInfo.Action.HttpsUrl.Downgraded"},
+      {"https://example.test", SecurityStateModel::DANGEROUS,
+       "Security.PageInfo.Action.HttpsUrl.Dangerous"},
+      {"http://example.test", SecurityStateModel::HTTP_SHOW_WARNING,
+       "Security.PageInfo.Action.HttpUrl.Warning"},
+      {"http://example.test", SecurityStateModel::DANGEROUS,
+       "Security.PageInfo.Action.HttpUrl.Dangerous"},
+      {"http://example.test", SecurityStateModel::NONE,
+       "Security.PageInfo.Action.HttpUrl.Neutral"},
+  };
+
+  for (const auto& test : kTestCases) {
+    base::HistogramTester histograms;
+    SetURL(test.url);
+    security_info_.security_level = test.security_level;
+    ResetMockUI();
+    ClearWebsiteSettings();
+    SetDefaultUIExpectations(mock_ui());
+
+    histograms.ExpectTotalCount(kGenericHistogram, 0);
+    histograms.ExpectTotalCount(test.histogram_name, 0);
+
+    website_settings()->RecordWebsiteSettingsAction(
+        WebsiteSettings::WebsiteSettingsAction::
+            WEBSITE_SETTINGS_PERMISSIONS_TAB_SELECTED);
+
+    // RecordWebsiteSettingsAction() is called during WebsiteSettings
+    // creation in addition to the explicit RecordWebsiteSettingsAction()
+    // call, so it is called twice in total.
+    histograms.ExpectTotalCount(kGenericHistogram, 2);
+    histograms.ExpectBucketCount(
+        kGenericHistogram,
+        WebsiteSettings::WebsiteSettingsAction::WEBSITE_SETTINGS_OPENED, 1);
+    histograms.ExpectBucketCount(kGenericHistogram,
+                                 WebsiteSettings::WebsiteSettingsAction::
+                                     WEBSITE_SETTINGS_PERMISSIONS_TAB_SELECTED,
+                                 1);
+
+    histograms.ExpectTotalCount(test.histogram_name, 2);
+    histograms.ExpectBucketCount(
+        test.histogram_name,
+        WebsiteSettings::WebsiteSettingsAction::WEBSITE_SETTINGS_OPENED, 1);
+    histograms.ExpectBucketCount(test.histogram_name,
+                                 WebsiteSettings::WebsiteSettingsAction::
+                                     WEBSITE_SETTINGS_PERMISSIONS_TAB_SELECTED,
+                                 1);
+  }
+}

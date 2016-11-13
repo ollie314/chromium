@@ -303,6 +303,33 @@ TEST_F('SettingsAutofillSectionBrowserTest', 'CreditCardTests', function() {
       });
     });
 
+    test('verifySaveExpiredCreditCardEdit', function(done) {
+      var creditCard = FakeDataMaker.emptyCreditCardEntry();
+
+      var now = new Date();
+      creditCard.expirationYear = now.getFullYear() - 2;
+      // works fine for January.
+      creditCard.expirationMonth = now.getMonth() - 1;
+
+      var creditCardDialog = self.createCreditCardDialog_(creditCard);
+
+      return test_util.whenAttributeIs(
+          creditCardDialog.$.dialog, 'open', true).then(function() {
+        creditCardDialog.addEventListener('save-credit-card', function() {
+          // Fail the test because the save event should not be called when
+          // the card is expired.
+          assertTrue(false);
+        });
+        creditCardDialog.addEventListener('tap', function() {
+          // Test is |done| in a timeout in order to ensure that
+          // 'save-credit-card' is NOT fired after this test.
+          assertFalse(creditCardDialog.$.expired.hidden);
+          window.setTimeout(done, 100);
+        });
+        MockInteractions.tap(creditCardDialog.$.saveButton);
+      });
+    });
+
     // Test will timeout if event is not received.
     test('verifySaveCreditCardEdit', function(done) {
       var creditCard = FakeDataMaker.emptyCreditCardEntry();
@@ -310,6 +337,7 @@ TEST_F('SettingsAutofillSectionBrowserTest', 'CreditCardTests', function() {
 
       return test_util.whenAttributeIs(
           creditCardDialog.$.dialog, 'open', true).then(function() {
+        assertTrue(creditCardDialog.$.expired.hidden);
         creditCardDialog.addEventListener('save-credit-card', function(event) {
           assertEquals(creditCard.guid, event.detail.guid);
           done();
@@ -565,7 +593,6 @@ TEST_F('SettingsAutofillSectionBrowserTest', 'AddressTests', function() {
           // Fail the test because the save event should not be called when
           // cancel is clicked.
           assertTrue(false);
-          done();
         });
 
         dialog.addEventListener('close', function() {
@@ -651,7 +678,6 @@ TEST_F('SettingsAutofillSectionBrowserTest', 'AddressLocaleTests', function() {
       address.companyName = 'Organization';
       address.addressLines = 'Street address';
       address.addressLevel2 = 'Post town';
-      address.addressLevel1 = 'County';
       address.postalCode = 'Postal code';
       address.countryCode = 'GB';
       address.phoneNumbers = [ 'Phone' ];
@@ -659,7 +685,7 @@ TEST_F('SettingsAutofillSectionBrowserTest', 'AddressLocaleTests', function() {
 
       return self.createAddressDialog_(address).then(function(dialog) {
         var rows = dialog.$.dialog.querySelectorAll('.address-row');
-        assertEquals(8, rows.length);
+        assertEquals(7, rows.length);
 
         // Name
         var row = rows[0];
@@ -681,24 +707,19 @@ TEST_F('SettingsAutofillSectionBrowserTest', 'AddressLocaleTests', function() {
         cols = row.querySelectorAll('.address-column');
         assertEquals(1, cols.length);
         assertEquals(address.addressLevel2, cols[0].value);
-        // County
-        row = rows[4];
-        cols = row.querySelectorAll('.address-column');
-        assertEquals(1, cols.length);
-        assertEquals(address.addressLevel1, cols[0].value);
         // Postal code
-        row = rows[5];
+        row = rows[4];
         cols = row.querySelectorAll('.address-column');
         assertEquals(1, cols.length);
         assertEquals(address.postalCode, cols[0].value);
         // Country
-        row = rows[6];
+        row = rows[5];
         cols = row.querySelectorAll('.address-column');
         assertEquals(1, cols.length);
         assertEquals(
             'United Kingdom', cols[0].selectedOptions[0].textContent.trim());
         // Phone, Email
-        row = rows[7];
+        row = rows[6];
         cols = row.querySelectorAll('.address-column');
         assertEquals(2, cols.length);
         assertEquals(address.phoneNumbers[0], cols[0].value);

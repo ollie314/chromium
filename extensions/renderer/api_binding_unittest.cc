@@ -7,15 +7,12 @@
 #include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
-#include "content/public/child/v8_value_converter.h"
 #include "extensions/renderer/api_binding.h"
+#include "extensions/renderer/api_binding_test.h"
 #include "extensions/renderer/api_binding_test_util.h"
+#include "extensions/renderer/api_event_handler.h"
 #include "extensions/renderer/api_request_handler.h"
 #include "gin/converter.h"
-#include "gin/public/context_holder.h"
-#include "gin/public/isolate_holder.h"
-#include "gin/test/v8_test.h"
-#include "gin/try_catch.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "v8/include/v8.h"
 
@@ -96,18 +93,13 @@ const char kFunctions[] =
 
 const char kError[] = "Uncaught TypeError: Invalid invocation";
 
-void RunJSFunction(v8::Local<v8::Function> function,
-                   v8::Local<v8::Context> context,
-                   int argc,
-                   v8::Local<v8::Value> argv[]) {
-  v8::MaybeLocal<v8::Value> result =
-      function->Call(context, context->Global(), argc, argv);
-  EXPECT_FALSE(result.IsEmpty());
+bool AllowAllAPIs(const std::string& name) {
+  return true;
 }
 
 }  // namespace
 
-class APIBindingTest : public gin::V8Test {
+class APIBindingUnittest : public APIBindingTest {
  public:
   void OnFunctionCall(const std::string& name,
                       std::unique_ptr<base::ListValue> arguments,
@@ -123,21 +115,16 @@ class APIBindingTest : public gin::V8Test {
   }
 
  protected:
-  APIBindingTest() {}
+  APIBindingUnittest() {}
   void SetUp() override {
-    gin::V8Test::SetUp();
-    v8::HandleScope handle_scope(instance_->isolate());
-    holder_ = base::MakeUnique<gin::ContextHolder>(instance_->isolate());
-    holder_->SetContext(
-        v8::Local<v8::Context>::New(instance_->isolate(), context_));
+    APIBindingTest::SetUp();
     request_handler_ = base::MakeUnique<APIRequestHandler>(
-        base::Bind(&RunJSFunction));
+        base::Bind(&RunFunctionOnGlobalAndIgnoreResult));
   }
 
   void TearDown() override {
     request_handler_.reset();
-    holder_.reset();
-    gin::V8Test::TearDown();
+    APIBindingTest::TearDown();
   }
 
   void ExpectPass(v8::Local<v8::Object> object,
@@ -165,65 +152,57 @@ class APIBindingTest : public gin::V8Test {
                const std::string& expected_error);
 
   std::unique_ptr<base::ListValue> arguments_;
-  std::unique_ptr<gin::ContextHolder> holder_;
   std::unique_ptr<APIRequestHandler> request_handler_;
   std::string last_request_id_;
 
-  DISALLOW_COPY_AND_ASSIGN(APIBindingTest);
+  DISALLOW_COPY_AND_ASSIGN(APIBindingUnittest);
 };
 
-void APIBindingTest::RunTest(v8::Local<v8::Object> object,
-                             const std::string& script_source,
-                             bool should_pass,
-                             const std::string& expected_json_arguments,
-                             const std::string& expected_error) {
+void APIBindingUnittest::RunTest(v8::Local<v8::Object> object,
+                                 const std::string& script_source,
+                                 bool should_pass,
+                                 const std::string& expected_json_arguments,
+                                 const std::string& expected_error) {
   EXPECT_FALSE(arguments_);
   std::string wrapped_script_source =
       base::StringPrintf("(function(obj) { %s })", script_source.c_str());
-  v8::Isolate* isolate = instance_->isolate();
 
-  v8::Local<v8::Context> context =
-      v8::Local<v8::Context>::New(isolate, context_);
+  v8::Local<v8::Context> context = ContextLocal();
   v8::Local<v8::Function> func =
       FunctionFromString(context, wrapped_script_source);
   ASSERT_FALSE(func.IsEmpty());
 
-  v8::TryCatch try_catch(isolate);
   v8::Local<v8::Value> argv[] = {object};
-  func->Call(v8::Undefined(isolate), 1, argv);
 
   if (should_pass) {
-    EXPECT_FALSE(try_catch.HasCaught())
-        << gin::V8ToString(try_catch.Message()->Get());
+    RunFunction(func, context, 1, argv);
     ASSERT_TRUE(arguments_) << script_source;
     EXPECT_EQ(expected_json_arguments, ValueToString(*arguments_));
   } else {
-    ASSERT_TRUE(try_catch.HasCaught()) << script_source;
-    std::string message = gin::V8ToString(try_catch.Message()->Get());
-    EXPECT_EQ(expected_error, message);
+    RunFunctionAndExpectError(func, context, 1, argv, expected_error);
+    EXPECT_FALSE(arguments_);
   }
 
   arguments_.reset();
 }
 
-TEST_F(APIBindingTest, Test) {
+TEST_F(APIBindingUnittest, Test) {
   std::unique_ptr<base::ListValue> functions = ListValueFromString(kFunctions);
   ASSERT_TRUE(functions);
   ArgumentSpec::RefMap refs;
   APIBinding binding(
-      "test", *functions, base::ListValue(),
-      base::Bind(&APIBindingTest::OnFunctionCall, base::Unretained(this)),
+      "test", *functions, nullptr, nullptr,
+      base::Bind(&APIBindingUnittest::OnFunctionCall, base::Unretained(this)),
       &refs);
   EXPECT_TRUE(refs.empty());
 
-  v8::Isolate* isolate = instance_->isolate();
+  v8::HandleScope handle_scope(isolate());
+  v8::Local<v8::Context> context = ContextLocal();
 
-  v8::HandleScope handle_scope(isolate);
-  v8::Local<v8::Context> context =
-      v8::Local<v8::Context>::New(isolate, context_);
-
-  v8::Local<v8::Object> binding_object =
-      binding.CreateInstance(context, isolate);
+  APIEventHandler event_handler(
+      base::Bind(&RunFunctionOnGlobalAndIgnoreResult));
+  v8::Local<v8::Object> binding_object = binding.CreateInstance(
+      context, isolate(), &event_handler, base::Bind(&AllowAllAPIs));
 
   ExpectPass(binding_object, "obj.oneString('foo');", "['foo']");
   ExpectPass(binding_object, "obj.oneString('');", "['']");
@@ -277,7 +256,7 @@ TEST_F(APIBindingTest, Test) {
   ExpectFailure(binding_object, "obj.optionalCallback(0)", kError);
 }
 
-TEST_F(APIBindingTest, TypeRefsTest) {
+TEST_F(APIBindingUnittest, TypeRefsTest) {
   const char kTypes[] =
       "[{"
       "  'id': 'refObj',"
@@ -313,21 +292,20 @@ TEST_F(APIBindingTest, TypeRefsTest) {
   ASSERT_TRUE(types);
   ArgumentSpec::RefMap refs;
   APIBinding binding(
-      "test", *functions, *types,
-      base::Bind(&APIBindingTest::OnFunctionCall, base::Unretained(this)),
+      "test", *functions, types.get(), nullptr,
+      base::Bind(&APIBindingUnittest::OnFunctionCall, base::Unretained(this)),
       &refs);
   EXPECT_EQ(2u, refs.size());
   EXPECT_TRUE(base::ContainsKey(refs, "refObj"));
   EXPECT_TRUE(base::ContainsKey(refs, "refEnum"));
 
-  v8::Isolate* isolate = instance_->isolate();
+  v8::HandleScope handle_scope(isolate());
+  v8::Local<v8::Context> context = ContextLocal();
 
-  v8::HandleScope handle_scope(isolate);
-  v8::Local<v8::Context> context =
-      v8::Local<v8::Context>::New(isolate, context_);
-
-  v8::Local<v8::Object> binding_object =
-      binding.CreateInstance(context, isolate);
+  APIEventHandler event_handler(
+      base::Bind(&RunFunctionOnGlobalAndIgnoreResult));
+  v8::Local<v8::Object> binding_object = binding.CreateInstance(
+      context, isolate(), &event_handler, base::Bind(&AllowAllAPIs));
 
   ExpectPass(binding_object, "obj.takesRefObj({prop1: 'foo'})",
              "[{'prop1':'foo'}]");
@@ -340,60 +318,98 @@ TEST_F(APIBindingTest, TypeRefsTest) {
   ExpectFailure(binding_object, "obj.takesRefEnum('gamma')", kError);
 }
 
-// TODO(devlin): Once we have an object that encompasses all these pieces (the
-// APIBinding, ArgumentSpec::RefMap, and APIRequestHandler), we should move this
-// test.
-TEST_F(APIBindingTest, Callbacks) {
-  const char kTestCall[] =
-      "obj.functionWithCallback('foo', function() {\n"
-      "  this.callbackArguments = Array.from(arguments);\n"
-      "});";
-
-  const char kFunctionSpec[] =
+TEST_F(APIBindingUnittest, RestrictedAPIs) {
+  const char kRestrictedFunctions[] =
       "[{"
-      "  'name': 'functionWithCallback',"
-      "  'parameters': [{"
-      "    'name': 'str',"
-      "    'type': 'string'"
-      "  }, {"
-      "    'name': 'callback',"
-      "    'type': 'function'"
-      "  }]"
+      "  'name': 'allowedOne',"
+      "  'parameters': []"
+      "}, {"
+      "  'name': 'allowedTwo',"
+      "  'parameters': []"
+      "}, {"
+      "  'name': 'restrictedOne',"
+      "  'parameters': []"
+      "}, {"
+      "  'name': 'restrictedTwo',"
+      "  'parameters': []"
       "}]";
-
   std::unique_ptr<base::ListValue> functions =
-      ListValueFromString(kFunctionSpec);
+      ListValueFromString(kRestrictedFunctions);
   ASSERT_TRUE(functions);
   ArgumentSpec::RefMap refs;
   APIBinding binding(
-      "test", *functions, base::ListValue(),
-      base::Bind(&APIBindingTest::OnFunctionCall, base::Unretained(this)),
+      "test", *functions, nullptr, nullptr,
+      base::Bind(&APIBindingUnittest::OnFunctionCall, base::Unretained(this)),
       &refs);
 
-  v8::Isolate* isolate = instance_->isolate();
+  v8::HandleScope handle_scope(isolate());
+  v8::Local<v8::Context> context = ContextLocal();
 
-  v8::HandleScope handle_scope(isolate);
-  v8::Local<v8::Context> context =
-      v8::Local<v8::Context>::New(isolate, context_);
+  auto is_available = [](const std::string& name) {
+    std::set<std::string> functions = {"test.allowedOne", "test.allowedTwo",
+                                       "test.restrictedOne",
+                                       "test.restrictedTwo"};
+    EXPECT_TRUE(functions.count(name));
+    return name == "test.allowedOne" || name == "test.allowedTwo";
+  };
 
-  v8::Local<v8::Object> binding_object =
-      binding.CreateInstance(context, isolate);
+  APIEventHandler event_handler(
+      base::Bind(&RunFunctionOnGlobalAndIgnoreResult));
+  v8::Local<v8::Object> binding_object = binding.CreateInstance(
+      context, isolate(), &event_handler, base::Bind(is_available));
 
-  ExpectPass(binding_object, kTestCall, "['foo']");
-  ASSERT_FALSE(last_request_id().empty());
-  const char kResponseArgsJson[] = "['response',1,{'key':42}]";
-  std::unique_ptr<base::ListValue> expected_args =
-      ListValueFromString(kResponseArgsJson);
-  request_handler()->CompleteRequest(last_request_id(), *expected_args);
+  auto is_defined = [&binding_object, context](const std::string& name) {
+    v8::Local<v8::Value> val =
+        GetPropertyFromObject(binding_object, context, name);
+    EXPECT_FALSE(val.IsEmpty());
+    return !val->IsUndefined() && !val->IsNull();
+  };
 
-  v8::Local<v8::Value> res;
-  ASSERT_TRUE(context->Global()
-                  ->Get(context, gin::StringToV8(isolate, "callbackArguments"))
-                  .ToLocal(&res));
+  EXPECT_TRUE(is_defined("allowedOne"));
+  EXPECT_TRUE(is_defined("allowedTwo"));
+  EXPECT_FALSE(is_defined("restrictedOne"));
+  EXPECT_FALSE(is_defined("restrictedTwo"));
+}
 
-  std::unique_ptr<base::Value> out_val = V8ToBaseValue(res, context);
-  ASSERT_TRUE(out_val);
-  EXPECT_EQ(ReplaceSingleQuotes(kResponseArgsJson), ValueToString(*out_val));
+// Tests that events specified in the API are created as properties of the API
+// object.
+TEST_F(APIBindingUnittest, TestEventCreation) {
+  const char kEvents[] = "[{'name': 'onFoo'}, {'name': 'onBar'}]";
+  std::unique_ptr<base::ListValue> events = ListValueFromString(kEvents);
+  ASSERT_TRUE(events);
+  std::unique_ptr<base::ListValue> functions = ListValueFromString(kFunctions);
+  ASSERT_TRUE(functions);
+  ArgumentSpec::RefMap refs;
+  APIBinding binding(
+      "test", *functions, nullptr, events.get(),
+      base::Bind(&APIBindingUnittest::OnFunctionCall, base::Unretained(this)),
+      &refs);
+
+  v8::HandleScope handle_scope(isolate());
+  v8::Local<v8::Context> context = ContextLocal();
+
+  APIEventHandler event_handler(
+      base::Bind(&RunFunctionOnGlobalAndIgnoreResult));
+  v8::Local<v8::Object> binding_object = binding.CreateInstance(
+      context, isolate(), &event_handler, base::Bind(&AllowAllAPIs));
+
+  // Event behavior is tested in the APIEventHandler unittests as well as the
+  // APIBindingsSystem tests, so we really only need to check that the events
+  // are being initialized on the object.
+  v8::Maybe<bool> has_on_foo =
+      binding_object->Has(context, gin::StringToV8(isolate(), "onFoo"));
+  EXPECT_TRUE(has_on_foo.IsJust());
+  EXPECT_TRUE(has_on_foo.FromJust());
+
+  v8::Maybe<bool> has_on_bar =
+      binding_object->Has(context, gin::StringToV8(isolate(), "onBar"));
+  EXPECT_TRUE(has_on_bar.IsJust());
+  EXPECT_TRUE(has_on_bar.FromJust());
+
+  v8::Maybe<bool> has_on_baz =
+      binding_object->Has(context, gin::StringToV8(isolate(), "onBaz"));
+  EXPECT_TRUE(has_on_baz.IsJust());
+  EXPECT_FALSE(has_on_baz.FromJust());
 }
 
 }  // namespace extensions

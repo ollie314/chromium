@@ -27,16 +27,17 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-from modular_build import read_file, write_file
 import os
 import os.path as path
-import generate_protocol_externs
-import modular_build
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
+
+from build import modular_build
+from build import generate_protocol_externs
+
 try:
     import simplejson as json
 except ImportError:
@@ -233,8 +234,8 @@ def find_java():
 java_exec = find_java()
 
 closure_compiler_jar = to_platform_path(path.join(scripts_path, 'closure', 'compiler.jar'))
-closure_runner_jar = to_platform_path(path.join(scripts_path, 'compiler-runner', 'closure-runner.jar'))
-jsdoc_validator_jar = to_platform_path(path.join(scripts_path, 'jsdoc-validator', 'jsdoc-validator.jar'))
+closure_runner_jar = to_platform_path(path.join(scripts_path, 'closure', 'closure_runner', 'closure_runner.jar'))
+jsdoc_validator_jar = to_platform_path(path.join(scripts_path, 'jsdoc_validator', 'jsdoc_validator.jar'))
 
 modules_dir = tempfile.mkdtemp()
 common_closure_args = [
@@ -334,6 +335,10 @@ def dump_module(name, recursively, processed_modules):
             command += dump_module(dependency, recursively, processed_modules)
     command += module_arg(name) + ':'
     filtered_scripts = descriptors.module_compiled_files(name)
+    filtered_scripts = [path.join(devtools_frontend_path, name, script) for script in filtered_scripts]
+    # TODO(dgozman): move to separate module
+    if name == 'sdk':
+        filtered_scripts.append(protocol_externs_file)
     command += str(len(filtered_scripts))
     first_dependency = True
     for dependency in dependencies + [runtime_module_name]:
@@ -344,20 +349,18 @@ def dump_module(name, recursively, processed_modules):
         first_dependency = False
         command += jsmodule_name_prefix + dependency
     for script in filtered_scripts:
-        command += ' --js ' + to_platform_path(path.join(devtools_frontend_path, name, script))
+        command += ' --js ' + to_platform_path(script)
     return command
 
 print 'Compiling frontend...'
 
 compiler_args_file = tempfile.NamedTemporaryFile(mode='wt', delete=False)
 try:
-    platform_protocol_externs_file = to_platform_path(protocol_externs_file)
     runtime_js_path = to_platform_path(path.join(devtools_frontend_path, 'Runtime.js'))
     checked_modules = modules_to_check()
     for name in checked_modules:
         closure_args = ' '.join(common_closure_args)
         closure_args += ' --externs ' + to_platform_path(global_externs_file)
-        closure_args += ' --externs ' + platform_protocol_externs_file
         runtime_module = module_arg(runtime_module_name) + ':1 --js ' + runtime_js_path
         closure_args += runtime_module + dump_module(name, True, {})
         compiler_args_file.write('%s %s%s' % (name, closure_args, os.linesep))
@@ -371,14 +374,14 @@ spawned_compiler_command = java_exec + [
     closure_compiler_jar
 ] + common_closure_args
 
-print 'Compiling devtools.js...'
+print 'Compiling devtools_compatibility.js...'
 
 command = spawned_compiler_command + [
     '--externs', to_platform_path(global_externs_file),
     '--externs', to_platform_path(path.join(devtools_frontend_path, 'host', 'InspectorFrontendHostAPI.js')),
     '--jscomp_off=externsValidation',
-    '--module', jsmodule_name_prefix + 'devtools_js' + ':1',
-    '--js', to_platform_path(path.join(devtools_frontend_path, 'devtools.js'))
+    '--module', jsmodule_name_prefix + 'devtools__compatibility_js' + ':1',
+    '--js', to_platform_path(path.join(devtools_frontend_path, 'devtools_compatibility.js'))
 ]
 devtools_js_compile_proc = popen(command)
 
@@ -453,7 +456,7 @@ if error_count:
     errors_found = True
 
 (devtools_js_compile_out, _) = devtools_js_compile_proc.communicate()
-print 'devtools.js compilation output:%s' % os.linesep, devtools_js_compile_out
+print 'devtools_compatibility.js compilation output:%s' % os.linesep, devtools_js_compile_out
 errors_found |= has_errors(devtools_js_compile_out)
 
 os.remove(compiler_args_file.name)

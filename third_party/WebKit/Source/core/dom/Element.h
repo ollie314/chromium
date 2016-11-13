@@ -53,16 +53,15 @@ class CompositorMutation;
 class CustomElementDefinition;
 class DOMStringMap;
 class DOMTokenList;
-class Dictionary;
 class ElementRareData;
 class ElementShadow;
 class ExceptionState;
 class Image;
-class IntSize;
+class InputDeviceCapabilities;
 class Locale;
 class MutableStylePropertySet;
+class NamedNodeMap;
 class NodeIntersectionObserverData;
-class PropertySetCSSStyleDeclaration;
 class PseudoElement;
 class ResizeObservation;
 class ResizeObserver;
@@ -315,8 +314,6 @@ class CORE_EXPORT Element : public ContainerNode {
   Element* cloneElementWithChildren();
   Element* cloneElementWithoutChildren();
 
-  void scheduleSVGFilterLayerUpdateHack();
-
   void setBooleanAttribute(const QualifiedName&, bool);
 
   virtual const StylePropertySet* additionalPresentationAttributeStyle() {
@@ -400,7 +397,8 @@ class CORE_EXPORT Element : public ContainerNode {
 
   virtual LayoutObject* createLayoutObject(const ComputedStyle&);
   virtual bool layoutObjectIsNeeded(const ComputedStyle&);
-  void recalcStyle(StyleRecalcChange, Text* nextTextSibling = nullptr);
+  void recalcStyle(StyleRecalcChange);
+  StyleRecalcChange rebuildLayoutTree();
   void pseudoStateChanged(CSSSelector::PseudoType);
   void setAnimationStyleChange(bool);
   void clearAnimationStyleChange();
@@ -685,7 +683,7 @@ class CORE_EXPORT Element : public ContainerNode {
   void clearMutableInlineStyleIfEmpty();
 
   void setTabIndex(int);
-  short tabIndex() const override;
+  int tabIndex() const override;
 
   // A compositor proxy is a very limited wrapper around an element. It
   // exposes only those properties that are requested at the time the proxy is
@@ -765,7 +763,7 @@ class CORE_EXPORT Element : public ContainerNode {
   bool supportsSpatialNavigationFocus() const;
 
   void clearTabIndexExplicitlyIfNeeded();
-  void setTabIndexExplicitly(short);
+  void setTabIndexExplicitly();
   // Subclasses may override this method to affect focusability. This method
   // must be called on an up-to-date ComputedStyle, so it may use existence of
   // layoutObject and the LayoutObject::style() to reason about focusability.
@@ -823,8 +821,6 @@ class CORE_EXPORT Element : public ContainerNode {
   PassRefPtr<ComputedStyle> propagateInheritedProperties(StyleRecalcChange);
 
   StyleRecalcChange recalcOwnStyle(StyleRecalcChange);
-  StyleRecalcChange rebuildLayoutTree();
-
   inline void checkForEmptyStyleChange();
 
   void updatePseudoElement(PseudoId, StyleRecalcChange);
@@ -915,7 +911,6 @@ class CORE_EXPORT Element : public ContainerNode {
   ElementRareData* elementRareData() const;
   ElementRareData& ensureElementRareData();
 
-  AttrNodeList& ensureAttrNodeList();
   void removeAttrNodeList();
   void detachAllAttrNodesFromElement();
   void detachAttrNodeFromElementWithValue(Attr*, const AtomicString& value);

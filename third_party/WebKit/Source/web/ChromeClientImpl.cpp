@@ -260,7 +260,11 @@ void ChromeClientImpl::startDragging(LocalFrame* frame,
                                      WebDragOperationsMask mask,
                                      const WebImage& dragImage,
                                      const WebPoint& dragImageOffset) {
-  m_webView->startDragging(frame, dragData, mask, dragImage, dragImageOffset);
+  WebLocalFrameImpl* webFrame = WebLocalFrameImpl::fromFrame(frame);
+  WebReferrerPolicy policy = webFrame->document().referrerPolicy();
+  m_webView->setDoingDragAndDrop(true);
+  webFrame->localRoot()->frameWidget()->client()->startDragging(
+      policy, dragData, mask, dragImage, dragImageOffset);
 }
 
 bool ChromeClientImpl::acceptsLoadDrops() const {
@@ -627,18 +631,25 @@ void ChromeClientImpl::showMouseOverURL(const HitTestResult& result) {
     return;
 
   WebURL url;
-  // Find out if the mouse is over a link, and if so, let our UI know...
-  if (result.isLiveLink() && !result.absoluteLinkURL().getString().isEmpty()) {
-    url = result.absoluteLinkURL();
-  } else if (result.innerNode() && (isHTMLObjectElement(*result.innerNode()) ||
-                                    isHTMLEmbedElement(*result.innerNode()))) {
-    LayoutObject* object = result.innerNode()->layoutObject();
-    if (object && object->isLayoutPart()) {
-      Widget* widget = toLayoutPart(object)->widget();
-      if (widget && widget->isPluginContainer()) {
-        WebPluginContainerImpl* plugin = toWebPluginContainerImpl(widget);
-        url = plugin->plugin()->linkAtPosition(
-            result.roundedPointInInnerNodeFrame());
+
+  // Ignore URL if hitTest include scrollbar since we might have both a
+  // scrollbar and an element in the case of overlay scrollbars.
+  if (!result.scrollbar()) {
+    // Find out if the mouse is over a link, and if so, let our UI know...
+    if (result.isLiveLink() &&
+        !result.absoluteLinkURL().getString().isEmpty()) {
+      url = result.absoluteLinkURL();
+    } else if (result.innerNode() &&
+               (isHTMLObjectElement(*result.innerNode()) ||
+                isHTMLEmbedElement(*result.innerNode()))) {
+      LayoutObject* object = result.innerNode()->layoutObject();
+      if (object && object->isLayoutPart()) {
+        Widget* widget = toLayoutPart(object)->widget();
+        if (widget && widget->isPluginContainer()) {
+          WebPluginContainerImpl* plugin = toWebPluginContainerImpl(widget);
+          url = plugin->plugin()->linkAtPosition(
+              result.roundedPointInInnerNodeFrame());
+        }
       }
     }
   }
@@ -711,8 +722,6 @@ void ChromeClientImpl::openFileChooser(LocalFrame* frame,
   params.directory = fileChooser->settings().allowsDirectoryUpload;
   params.acceptTypes = fileChooser->settings().acceptTypes();
   params.selectedFiles = fileChooser->settings().selectedFiles;
-  if (params.selectedFiles.size() > 0)
-    params.initialValue = params.selectedFiles[0];
   params.useMediaCapture = fileChooser->settings().useMediaCapture;
   params.needLocalPath = fileChooser->settings().allowsDirectoryUpload;
   params.requestor = frame->document()->url();
@@ -847,8 +856,8 @@ void ChromeClientImpl::enterFullscreenForElement(Element* element) {
   m_webView->enterFullscreenForElement(element);
 }
 
-void ChromeClientImpl::exitFullscreenForElement(Element* element) {
-  m_webView->exitFullscreenForElement(element);
+void ChromeClientImpl::exitFullscreen(LocalFrame* frame) {
+  m_webView->exitFullscreen(frame);
 }
 
 void ChromeClientImpl::clearCompositedSelection(LocalFrame* frame) {
@@ -1089,8 +1098,8 @@ void ChromeClientImpl::registerViewportLayers() const {
     m_webView->registerViewportLayersWithCompositor();
 }
 
-void ChromeClientImpl::didUpdateTopControls() const {
-  m_webView->didUpdateTopControls();
+void ChromeClientImpl::didUpdateBrowserControls() const {
+  m_webView->didUpdateBrowserControls();
 }
 
 CompositorProxyClient* ChromeClientImpl::createCompositorProxyClient(
@@ -1149,11 +1158,7 @@ void ChromeClientImpl::installSupplements(LocalFrame& frame) {
   provideNavigatorContentUtilsTo(
       frame, NavigatorContentUtilsClientImpl::create(webFrame));
 
-  bool enableWebBluetooth = RuntimeEnabledFeatures::webBluetoothEnabled();
-#if OS(CHROMEOS) || OS(ANDROID) || OS(MACOSX)
-  enableWebBluetooth = true;
-#endif
-  if (enableWebBluetooth)
+  if (RuntimeEnabledFeatures::webBluetoothEnabled())
     BluetoothSupplement::provideTo(frame, client->bluetooth());
 
   ScreenOrientationController::provideTo(frame,

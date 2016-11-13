@@ -27,54 +27,34 @@ enum NGFragmentationType {
   FragmentRegion
 };
 
-struct NGExclusion : public GarbageCollected<NGExclusion> {
-  NGExclusion(LayoutUnit top,
-              LayoutUnit right,
-              LayoutUnit bottom,
-              LayoutUnit left) {
-    rect.location.left = left;
-    rect.location.top = top;
-    rect.size.width = right - left;
-    rect.size.height = bottom - top;
-  }
-  LayoutUnit Top() const { return rect.location.top; }
-  LayoutUnit Right() const { return rect.size.width + rect.location.left; }
-  LayoutUnit Bottom() const { return rect.size.height + rect.location.top; }
-  LayoutUnit Left() const { return rect.location.left; }
-
-  String ToString() const {
-    return String::format("%s,%s %sx%s",
-                          rect.location.left.toString().ascii().data(),
-                          rect.location.top.toString().ascii().data(),
-                          rect.size.width.toString().ascii().data(),
-                          rect.size.height.toString().ascii().data());
-  }
-  NGPhysicalRect rect;
-
-  DEFINE_INLINE_TRACE() {}
-};
-
 // The NGPhysicalConstraintSpace contains the underlying data for the
 // NGConstraintSpace. It is not meant to be used directly as all members are in
 // the physical coordinate space. Instead NGConstraintSpace should be used.
 class CORE_EXPORT NGPhysicalConstraintSpace final
     : public GarbageCollectedFinalized<NGPhysicalConstraintSpace> {
  public:
-  NGPhysicalConstraintSpace();
-  NGPhysicalConstraintSpace(NGPhysicalSize);
+  NGPhysicalConstraintSpace(
+      NGPhysicalSize available_size,
+      NGPhysicalSize percentage_resolution_size,
+      bool fixed_width,
+      bool fixed_height,
+      bool width_direction_triggers_scrollbar,
+      bool height_direction_triggers_scrollbar,
+      NGFragmentationType width_direction_fragmentation_type,
+      NGFragmentationType height_direction_fragmentation_type,
+      bool is_new_fc);
 
-  NGPhysicalSize ContainerSize() const { return container_size_; }
-
-  void AddExclusion(const NGExclusion*, unsigned options = 0);
-  const HeapVector<Member<const NGExclusion>>& Exclusions(
+  void AddExclusion(const NGLogicalRect&, unsigned options = 0);
+  const Vector<std::unique_ptr<const NGLogicalRect>>& Exclusions(
       unsigned options = 0) const;
 
-  DEFINE_INLINE_TRACE() { visitor->trace(exclusions_); }
+  DEFINE_INLINE_TRACE() {}
 
  private:
   friend class NGConstraintSpace;
 
-  NGPhysicalSize container_size_;
+  NGPhysicalSize available_size_;
+  NGPhysicalSize percentage_resolution_size_;
 
   unsigned fixed_width_ : 1;
   unsigned fixed_height_ : 1;
@@ -87,7 +67,7 @@ class CORE_EXPORT NGPhysicalConstraintSpace final
   // formatting Context
   unsigned is_new_fc_ : 1;
 
-  HeapVector<Member<const NGExclusion>> exclusions_;
+  Vector<std::unique_ptr<const NGLogicalRect>> exclusions_;
 };
 
 }  // namespace blink

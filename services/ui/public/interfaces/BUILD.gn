@@ -7,12 +7,11 @@ import("//testing/test.gni")
 
 mojom("interfaces") {
   sources = [
-    "accelerator_registrar.mojom",
     "accessibility_manager.mojom",
     "animations.mojom",
     "clipboard.mojom",
     "cursor.mojom",
-    "display.mojom",
+    "display_manager.mojom",
     "event_matcher.mojom",
     "gpu_memory_buffer.mojom",
     "gpu_service.mojom",

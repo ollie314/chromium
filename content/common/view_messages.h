@@ -40,6 +40,7 @@
 #include "media/base/channel_layout.h"
 #include "media/base/ipc/media_param_traits.h"
 #include "media/base/media_log_event.h"
+#include "media/capture/ipc/capture_param_traits.h"
 #include "net/base/network_change_notifier.h"
 #include "third_party/WebKit/public/platform/WebDisplayMode.h"
 #include "third_party/WebKit/public/platform/WebFloatPoint.h"
@@ -179,7 +180,7 @@ IPC_STRUCT_TRAITS_BEGIN(content::ResizeParams)
   IPC_STRUCT_TRAITS_MEMBER(screen_info)
   IPC_STRUCT_TRAITS_MEMBER(new_size)
   IPC_STRUCT_TRAITS_MEMBER(physical_backing_size)
-  IPC_STRUCT_TRAITS_MEMBER(top_controls_shrink_blink_size)
+  IPC_STRUCT_TRAITS_MEMBER(browser_controls_shrink_blink_size)
   IPC_STRUCT_TRAITS_MEMBER(top_controls_height)
   IPC_STRUCT_TRAITS_MEMBER(bottom_controls_height)
   IPC_STRUCT_TRAITS_MEMBER(visible_viewport_size)
@@ -244,6 +245,9 @@ IPC_STRUCT_TRAITS_BEGIN(content::RendererPreferences)
   IPC_STRUCT_TRAITS_MEMBER(plugin_fullscreen_allowed)
   IPC_STRUCT_TRAITS_MEMBER(use_video_overlay_for_embedded_encrypted_video)
   IPC_STRUCT_TRAITS_MEMBER(network_contry_iso)
+#if defined(OS_LINUX)
+  IPC_STRUCT_TRAITS_MEMBER(system_font_family_name)
+#endif
 #if defined(OS_WIN)
   IPC_STRUCT_TRAITS_MEMBER(caption_font_family_name)
   IPC_STRUCT_TRAITS_MEMBER(caption_font_height)
@@ -282,7 +286,6 @@ IPC_STRUCT_TRAITS_BEGIN(content::TextInputState)
   IPC_STRUCT_TRAITS_MEMBER(can_compose_inline)
   IPC_STRUCT_TRAITS_MEMBER(show_ime_if_needed)
   IPC_STRUCT_TRAITS_MEMBER(is_non_ime_change)
-  IPC_STRUCT_TRAITS_MEMBER(batch_edit)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_BEGIN(ViewHostMsg_CreateWorker_Params)
@@ -451,13 +454,6 @@ IPC_MESSAGE_ROUTED1(ViewMsg_SetPageScale, float /* page_scale_factor */)
 IPC_MESSAGE_ROUTED1(ViewMsg_Zoom,
                     content::PageZoom /* function */)
 
-// Set the zoom level for a particular url that the renderer is in the
-// process of loading.  This will be stored, to be used if the load commits
-// and ignored otherwise.
-IPC_MESSAGE_ROUTED2(ViewMsg_SetZoomLevelForLoadingURL,
-                    GURL /* url */,
-                    double /* zoom_level */)
-
 // Used to tell a render view whether it should expose various bindings
 // that allow JS content extended privileges.  See BindingsPolicy for valid
 // flag values.
@@ -580,14 +576,12 @@ IPC_MESSAGE_ROUTED1(ViewMsg_ReleaseDisambiguationPopupBitmap,
 IPC_MESSAGE_ROUTED0(ViewMsg_GetRenderedText)
 
 #if defined(OS_ANDROID)
-// Notifies the renderer whether hiding/showing the top controls is enabled
+// Notifies the renderer whether hiding/showing the browser controls is enabled
 // and whether or not to animate to the proper state.
-IPC_MESSAGE_ROUTED3(ViewMsg_UpdateTopControlsState,
+IPC_MESSAGE_ROUTED3(ViewMsg_UpdateBrowserControlsState,
                     bool /* enable_hiding */,
                     bool /* enable_showing */,
                     bool /* animate */)
-
-IPC_MESSAGE_ROUTED0(ViewMsg_ShowImeIfNeeded)
 
 // Extracts the data at the given rect, returning it through the
 // ViewHostMsg_SmartClipDataExtracted IPC.
@@ -602,10 +596,6 @@ IPC_MESSAGE_ROUTED3(ViewMsg_ReclaimCompositorResources,
                     uint32_t /* compositor_frame_sink_id */,
                     bool /* is_swap_ack */,
                     cc::ReturnedResourceArray /* resources */)
-
-// Sent by browser to give renderer compositor a new namespace ID for any
-// SurfaceSequences it has to create.
-IPC_MESSAGE_ROUTED1(ViewMsg_SetFrameSinkId, cc::FrameSinkId /* frame_sink_id */)
 
 IPC_MESSAGE_ROUTED0(ViewMsg_SelectWordAroundCaret)
 
@@ -634,20 +624,6 @@ IPC_MESSAGE_ROUTED1(ViewMsg_HandleCompositorProto,
 // to be be delivered until the notification is disabled.
 IPC_MESSAGE_ROUTED1(ViewHostMsg_SetNeedsBeginFrames,
                     bool /* enabled */)
-
-// Similar to ViewHostMsg_CreateWindow, except used for sub-widgets, like
-// <select> dropdowns.  This message is sent to the WebContentsImpl that
-// contains the widget being created.
-IPC_SYNC_MESSAGE_CONTROL2_1(ViewHostMsg_CreateWidget,
-                            int /* opener_id */,
-                            blink::WebPopupType /* popup type */,
-                            int /* route_id */)
-
-// Similar to ViewHostMsg_CreateWidget except the widget is a full screen
-// window.
-IPC_SYNC_MESSAGE_CONTROL1_1(ViewHostMsg_CreateFullscreenWidget,
-                            int /* opener_id */,
-                            int /* route_id */)
 
 // These three messages are sent to the parent RenderViewHost to display the
 // page/widget that was created by

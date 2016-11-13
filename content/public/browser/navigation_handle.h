@@ -11,6 +11,7 @@
 #include "content/public/browser/navigation_throttle.h"
 #include "content/public/common/referrer.h"
 #include "net/base/net_errors.h"
+#include "net/http/http_response_info.h"
 #include "ui/base/page_transition_types.h"
 
 class GURL;
@@ -69,12 +70,6 @@ class CONTENT_EXPORT NavigationHandle {
   //  * redirect via the <meta http-equiv="refresh"> tag
   //  * using window.history.pushState
   virtual bool IsRendererInitiated() = 0;
-
-  // Whether the navigation is synchronous or not. Examples of synchronous
-  // navigations are:
-  // * reference fragment navigations
-  // * pushState/popState
-  virtual bool IsSynchronousNavigation() = 0;
 
   // Whether the navigation is for an iframe with srcdoc attribute.
   virtual bool IsSrcdoc() = 0;
@@ -146,9 +141,10 @@ class CONTENT_EXPORT NavigationHandle {
   // called.
   virtual RenderFrameHost* GetRenderFrameHost() = 0;
 
-  // Whether the navigation happened in the same page. This is only known
-  // after the navigation has committed. It is an error to call this method
-  // before the navigation has committed.
+  // Whether the navigation happened in the same page. Examples of same page
+  // navigations are:
+  // * reference fragment navigations
+  // * pushState/replaceState
   virtual bool IsSamePage() = 0;
 
   // Whether the navigation has encountered a server redirect or not.
@@ -171,6 +167,12 @@ class CONTENT_EXPORT NavigationHandle {
   // redirect). The headers returned should not be modified, as modifications
   // will not be reflected in the network stack.
   virtual const net::HttpResponseHeaders* GetResponseHeaders() = 0;
+
+  // Returns the connection info for the request, the default value is
+  // CONNECTION_INFO_UNKNOWN if there hasn't been a response (or redirect)
+  // yet. The connection info may change during the navigation (e.g. after
+  // encountering a server redirect).
+  virtual net::HttpResponseInfo::ConnectionInfo GetConnectionInfo() = 0;
 
   // Resumes a navigation that was previously deferred by a NavigationThrottle.
   virtual void Resume() = 0;

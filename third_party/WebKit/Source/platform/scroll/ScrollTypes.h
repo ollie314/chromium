@@ -42,6 +42,11 @@ inline ScrollOffset toScrollOffset(const FloatPoint& p) {
   return ScrollOffset(p.x(), p.y());
 }
 
+enum OverlayScrollbarClipBehavior {
+  IgnoreOverlayScrollbarSize,
+  ExcludeOverlayScrollbarSizeForHitTesting
+};
+
 enum ScrollDirection {
   ScrollUpIgnoringWritingMode,
   ScrollDownIgnoringWritingMode,
@@ -59,9 +64,15 @@ enum ScrollDirectionPhysical { ScrollUp, ScrollDown, ScrollLeft, ScrollRight };
 enum ScrollType {
   UserScroll,
   ProgrammaticScroll,
+  ClampingScroll,
   CompositorScroll,
   AnchoringScroll
 };
+
+inline bool scrollTypeClearsFragmentAnchor(ScrollType scrollType) {
+  return scrollType == UserScroll || scrollType == ProgrammaticScroll ||
+         scrollType == CompositorScroll;
+}
 
 // Convert logical scroll direction to physical. Physical scroll directions are
 // unaffected.
@@ -184,10 +195,9 @@ enum ScrollbarPart {
   AllParts = 0xffffffff
 };
 
-enum ScrollbarOverlayStyle {
-  ScrollbarOverlayStyleDefault,
-  ScrollbarOverlayStyleDark,
-  ScrollbarOverlayStyleLight
+enum ScrollbarOverlayColorTheme {
+  ScrollbarOverlayColorThemeDark,
+  ScrollbarOverlayColorThemeLight
 };
 
 enum ScrollBehavior {

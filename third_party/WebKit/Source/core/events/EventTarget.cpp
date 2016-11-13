@@ -42,9 +42,9 @@
 #include "core/events/PointerEvent.h"
 #include "core/frame/FrameHost.h"
 #include "core/frame/LocalDOMWindow.h"
+#include "core/frame/PerformanceMonitor.h"
 #include "core/frame/Settings.h"
 #include "core/frame/UseCounter.h"
-#include "core/inspector/ConsoleMessage.h"
 #include "core/inspector/InspectorInstrumentation.h"
 #include "platform/EventDispatchForbiddenScope.h"
 #include "platform/Histogram.h"
@@ -67,11 +67,16 @@ enum PassiveForcedListenerResultType {
 
 Event::PassiveMode eventPassiveMode(
     const RegisteredEventListener& eventListener) {
-  if (!eventListener.passive())
-    return Event::PassiveMode::NotPassive;
+  if (!eventListener.passive()) {
+    if (eventListener.passiveSpecified())
+      return Event::PassiveMode::NotPassive;
+    return Event::PassiveMode::NotPassiveDefault;
+  }
   if (eventListener.passiveForcedForDocumentTarget())
     return Event::PassiveMode::PassiveForcedDocumentLevel;
-  return Event::PassiveMode::Passive;
+  if (eventListener.passiveSpecified())
+    return Event::PassiveMode::Passive;
+  return Event::PassiveMode::PassiveDefault;
 }
 
 Settings* windowSettings(LocalDOMWindow* executingWindow) {
@@ -94,19 +99,14 @@ bool isScrollBlockingEvent(const AtomicString& eventType) {
          eventType == EventTypeNames::wheel;
 }
 
-double blockedEventsWarningThreshold(const ExecutionContext* context,
+double blockedEventsWarningThreshold(ExecutionContext* context,
                                      const Event* event) {
   if (!event->cancelable())
     return 0.0;
   if (!isScrollBlockingEvent(event->type()))
     return 0.0;
-
-  if (!context->isDocument())
-    return 0.0;
-  FrameHost* frameHost = toDocument(context)->frameHost();
-  if (!frameHost)
-    return 0.0;
-  return frameHost->settings().blockedMainThreadEventsWarningThreshold();
+  return PerformanceMonitor::threshold(context,
+                                       PerformanceMonitor::kBlockedEvent);
 }
 
 void reportBlockedEvent(ExecutionContext* context,
@@ -137,9 +137,10 @@ void reportBlockedEvent(ExecutionContext* context,
       eventListenerEffectiveFunction(v8Listener->isolate(), handler);
   std::unique_ptr<SourceLocation> location =
       SourceLocation::fromFunction(function);
-  ConsoleMessage* message = ConsoleMessage::create(
-      JSMessageSource, WarningMessageLevel, messageText, std::move(location));
-  context->addConsoleMessage(message);
+
+  PerformanceMonitor::reportGenericViolation(
+      context, PerformanceMonitor::kBlockedEvent, messageText, delayedSeconds,
+      location.get());
   registeredListener->setBlockedEventWarningEmitted();
 }
 
@@ -158,12 +159,7 @@ DEFINE_TRACE_WRAPPERS(EventTarget) {
   while (EventListener* listener = iterator.nextListener()) {
     if (listener->type() != EventListener::JSEventListenerType)
       continue;
-    V8AbstractEventListener* v8listener =
-        static_cast<V8AbstractEventListener*>(listener);
-    if (!v8listener->hasExistingListenerObject())
-      continue;
-
-    visitor->traceWrappers(v8listener);
+    visitor->traceWrappers(static_cast<V8AbstractEventListener*>(listener));
   }
 }
 
@@ -200,6 +196,8 @@ inline LocalDOMWindow* EventTarget::executingWindow() {
 void EventTarget::setDefaultAddEventListenerOptions(
     const AtomicString& eventType,
     AddEventListenerOptionsResolved& options) {
+  options.setPassiveSpecified(options.hasPassive());
+
   if (!isScrollBlockingEvent(eventType)) {
     if (!options.hasPassive())
       options.setPassive(false);
@@ -303,8 +301,13 @@ bool EventTarget::addEventListenerInternal(
   RegisteredEventListener registeredListener;
   bool added = ensureEventTargetData().eventListenerMap.add(
       eventType, listener, options, &registeredListener);
-  if (added)
+  if (added) {
+    if (listener->type() == EventListener::JSEventListenerType) {
+      ScriptWrappableVisitor::writeBarrier(
+          this, static_cast<V8AbstractEventListener*>(listener));
+    }
     addedEventListener(eventType, registeredListener);
+  }
   return added;
 }
 
@@ -416,9 +419,11 @@ EventListener* EventTarget::getAttributeEventListener(
   EventListenerVector* listenerVector = getEventListeners(eventType);
   if (!listenerVector)
     return nullptr;
+
   for (auto& eventListener : *listenerVector) {
     EventListener* listener = eventListener.listener();
-    if (listener->isAttribute() && listener->belongsToTheCurrentWorld())
+    if (listener->isAttribute() &&
+        listener->belongsToTheCurrentWorld(getExecutionContext()))
       return listener;
   }
   return nullptr;
@@ -724,7 +729,7 @@ bool EventTarget::fireEventListeners(Event* event,
 
     CHECK_LE(i, size);
   }
-  d->firingEventIterators->removeLast();
+  d->firingEventIterators->pop_back();
   return firedListener;
 }
 

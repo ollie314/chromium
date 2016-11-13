@@ -19,7 +19,6 @@
 #include "base/synchronization/waitable_event_watcher.h"
 #include "build/build_config.h"
 #include "content/browser/child_process_launcher.h"
-#include "content/browser/power_monitor_message_broadcaster.h"
 #include "content/public/browser/browser_child_process_host.h"
 #include "content/public/browser/child_process_data.h"
 #include "content/public/common/child_process_host_delegate.h"
@@ -66,14 +65,12 @@ class CONTENT_EXPORT BrowserChildProcessHostImpl
   // Copies kEnableFeatures and kDisableFeatures to the command line. Generates
   // them from the FeatureList override state, to take into account overrides
   // from FieldTrials.
-  static std::unique_ptr<base::SharedMemory> CopyFeatureAndFieldTrialFlags(
-      base::CommandLine* cmd_line);
+  static void CopyFeatureAndFieldTrialFlags(base::CommandLine* cmd_line);
 
   // BrowserChildProcessHost implementation:
   bool Send(IPC::Message* message) override;
   void Launch(SandboxedProcessLauncherDelegate* delegate,
               base::CommandLine* cmd_line,
-              const base::SharedMemory* field_trial_state,
               bool terminate_on_shutdown) override;
   const ChildProcessData& GetData() const override;
   ChildProcessHost* GetHost() const override;
@@ -159,8 +156,6 @@ class CONTENT_EXPORT BrowserChildProcessHostImpl
   std::unique_ptr<ChildConnection> child_connection_;
 
   std::unique_ptr<ChildProcessLauncher> child_process_;
-
-  PowerMonitorMessageBroadcaster power_monitor_message_broadcaster_;
 
 #if defined(OS_WIN)
   // Watches to see if the child process exits before the IPC channel has

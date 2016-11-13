@@ -33,7 +33,6 @@
 namespace blink {
 
 class Event;
-class TextTrackContainer;
 class MediaControlsWindowEventListener;
 
 class CORE_EXPORT MediaControls final : public HTMLDivElement {
@@ -62,6 +61,8 @@ class CORE_EXPORT MediaControls final : public HTMLDivElement {
   void changedClosedCaptionsVisibility();
   void refreshClosedCaptionsButtonVisibility();
   void toggleTextTrackList();
+  void showTextTrackAtIndex(unsigned indexToEnable);
+  void disableShowingTextTracks();
 
   void enteredFullscreen();
   void exitedFullscreen();
@@ -181,7 +182,6 @@ class CORE_EXPORT MediaControls final : public HTMLDivElement {
   Timer<MediaControls> m_panelWidthChangedTimer;
   int m_panelWidth;
 
-  bool m_allowHiddenVolumeControls : 1;
   bool m_keepShowingUntilTimerFires : 1;
 };
 

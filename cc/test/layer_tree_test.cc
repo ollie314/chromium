@@ -20,7 +20,6 @@
 #include "cc/layers/layer.h"
 #include "cc/layers/layer_impl.h"
 #include "cc/output/buffer_to_texture_target_map.h"
-#include "cc/proto/compositor_message_to_impl.pb.h"
 #include "cc/test/animation_test_common.h"
 #include "cc/test/begin_frame_args_test.h"
 #include "cc/test/fake_image_serialization_processor.h"
@@ -98,14 +97,11 @@ class LayerTreeHostImplForTesting : public LayerTreeHostImpl {
       const LayerTreeSettings& settings,
       LayerTreeHostImplClient* host_impl_client,
       TaskRunnerProvider* task_runner_provider,
-      SharedBitmapManager* shared_bitmap_manager,
-      gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
       TaskGraphRunner* task_graph_runner,
       RenderingStatsInstrumentation* stats_instrumentation) {
     return base::WrapUnique(new LayerTreeHostImplForTesting(
         test_hooks, settings, host_impl_client, task_runner_provider,
-        shared_bitmap_manager, gpu_memory_buffer_manager, task_graph_runner,
-        stats_instrumentation));
+        task_graph_runner, stats_instrumentation));
   }
 
  protected:
@@ -114,16 +110,12 @@ class LayerTreeHostImplForTesting : public LayerTreeHostImpl {
       const LayerTreeSettings& settings,
       LayerTreeHostImplClient* host_impl_client,
       TaskRunnerProvider* task_runner_provider,
-      SharedBitmapManager* shared_bitmap_manager,
-      gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
       TaskGraphRunner* task_graph_runner,
       RenderingStatsInstrumentation* stats_instrumentation)
       : LayerTreeHostImpl(settings,
                           host_impl_client,
                           task_runner_provider,
                           stats_instrumentation,
-                          shared_bitmap_manager,
-                          gpu_memory_buffer_manager,
                           task_graph_runner,
                           AnimationHost::CreateForTesting(ThreadInstance::IMPL),
                           0),
@@ -263,6 +255,10 @@ class LayerTreeHostImplForTesting : public LayerTreeHostImpl {
     test_hooks_->NotifyTileStateChangedOnThread(this, tile);
   }
 
+  AnimationHost* animation_host() const {
+    return static_cast<AnimationHost*>(mutator_host());
+  }
+
  private:
   TestHooks* test_hooks_;
   bool block_notify_ready_to_activate_for_testing_;
@@ -347,21 +343,17 @@ class LayerTreeHostForTesting : public LayerTreeHostInProcess {
       CompositorMode mode,
       LayerTreeHostClient* client,
       LayerTreeHostSingleThreadClient* single_thread_client,
-      SharedBitmapManager* shared_bitmap_manager,
-      gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
       TaskGraphRunner* task_graph_runner,
       const LayerTreeSettings& settings,
       scoped_refptr<base::SingleThreadTaskRunner> main_task_runner,
-      scoped_refptr<base::SingleThreadTaskRunner> impl_task_runner) {
+      scoped_refptr<base::SingleThreadTaskRunner> impl_task_runner,
+      MutatorHost* mutator_host) {
     LayerTreeHostInProcess::InitParams params;
     params.client = client;
-    params.shared_bitmap_manager = shared_bitmap_manager;
-    params.gpu_memory_buffer_manager = gpu_memory_buffer_manager;
     params.task_graph_runner = task_graph_runner;
     params.settings = &settings;
+    params.mutator_host = mutator_host;
 
-    params.animation_host =
-        AnimationHost::CreateForTesting(ThreadInstance::MAIN);
     std::unique_ptr<LayerTreeHostForTesting> layer_tree_host(
         new LayerTreeHostForTesting(test_hooks, &params, mode));
     std::unique_ptr<TaskRunnerProvider> task_runner_provider =
@@ -391,8 +383,7 @@ class LayerTreeHostForTesting : public LayerTreeHostInProcess {
     std::unique_ptr<LayerTreeHostImpl> host_impl =
         LayerTreeHostImplForTesting::Create(
             test_hooks_, GetSettings(), host_impl_client,
-            GetTaskRunnerProvider(), shared_bitmap_manager(),
-            gpu_memory_buffer_manager(), task_graph_runner(),
+            GetTaskRunnerProvider(), task_graph_runner(),
             rendering_stats_instrumentation());
     input_handler_weak_ptr_ = host_impl->AsWeakPtr();
     return host_impl;
@@ -433,11 +424,10 @@ class LayerTreeHostRemoteForLayerTreeTest
       TestHooks* test_hooks,
       LayerTreeHostClient* client,
       LayerTreeSettings const* settings,
-      SharedBitmapManager* shared_bitmap_manager,
-      gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
       TaskGraphRunner* task_graph_runner,
       scoped_refptr<base::SingleThreadTaskRunner> main_task_runner,
-      scoped_refptr<base::SingleThreadTaskRunner> impl_task_runner) {
+      scoped_refptr<base::SingleThreadTaskRunner> impl_task_runner,
+      MutatorHost* mutator_host) {
     std::unique_ptr<FakeImageSerializationProcessor>
         image_serialization_processor =
             base::MakeUnique<FakeImageSerializationProcessor>();
@@ -445,8 +435,7 @@ class LayerTreeHostRemoteForLayerTreeTest
     LayerTreeHostRemote::InitParams params;
     params.client = client;
     params.main_task_runner = main_task_runner;
-    params.animation_host =
-        AnimationHost::CreateForTesting(ThreadInstance::MAIN);
+    params.mutator_host = mutator_host;
     params.remote_compositor_bridge =
         CreateRemoteCompositorBridge(main_task_runner);
     params.engine_picture_cache =
@@ -456,9 +445,8 @@ class LayerTreeHostRemoteForLayerTreeTest
     std::unique_ptr<LayerTreeHostRemoteForLayerTreeTest> layer_tree_host =
         base::WrapUnique(
             new LayerTreeHostRemoteForLayerTreeTest(&params, test_hooks));
-    layer_tree_host->Initialize(shared_bitmap_manager,
-                                gpu_memory_buffer_manager, task_graph_runner,
-                                main_task_runner, impl_task_runner,
+    layer_tree_host->Initialize(task_graph_runner, main_task_runner,
+                                impl_task_runner,
                                 std::move(image_serialization_processor));
     return layer_tree_host;
   }
@@ -467,16 +455,15 @@ class LayerTreeHostRemoteForLayerTreeTest
 
   std::unique_ptr<LayerTreeHostInProcess> CreateLayerTreeHostInProcess(
       LayerTreeHostClient* client,
-      SharedBitmapManager* shared_bitmap_manager,
-      gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
       TaskGraphRunner* task_graph_runner,
       const LayerTreeSettings& settings,
       scoped_refptr<base::SingleThreadTaskRunner> main_task_runner,
-      scoped_refptr<base::SingleThreadTaskRunner> impl_task_runner) override {
+      scoped_refptr<base::SingleThreadTaskRunner> impl_task_runner,
+      MutatorHost* mutator_host) override {
     return LayerTreeHostForTesting::Create(
         test_hooks_, CompositorMode::THREADED, client, nullptr,
-        shared_bitmap_manager, gpu_memory_buffer_manager, task_graph_runner,
-        settings, main_task_runner, impl_task_runner);
+        task_graph_runner, settings, main_task_runner, impl_task_runner,
+        mutator_host);
   }
 
  private:
@@ -493,6 +480,11 @@ class LayerTreeTestCompositorFrameSinkClient
       : hooks_(hooks) {}
 
   // TestCompositorFrameSinkClient implementation.
+  std::unique_ptr<OutputSurface> CreateDisplayOutputSurface(
+      scoped_refptr<ContextProvider> compositor_context_provider) override {
+    return hooks_->CreateDisplayOutputSurfaceOnThread(
+        std::move(compositor_context_provider));
+  }
   void DisplayReceivedCompositorFrame(const CompositorFrame& frame) override {
     hooks_->DisplayReceivedCompositorFrameOnThread(frame);
   }
@@ -523,7 +515,10 @@ LayerTreeTest::LayerTreeTest()
     timeout_seconds_ = 5 * 60;
 }
 
-LayerTreeTest::~LayerTreeTest() {}
+LayerTreeTest::~LayerTreeTest() {
+  if (animation_host_)
+    animation_host_->SetMutatorHostClient(nullptr);
+}
 
 bool LayerTreeTest::IsRemoteTest() const {
   return mode_ == CompositorMode::REMOTE;
@@ -664,22 +659,23 @@ void LayerTreeTest::DoBeginTest() {
       base::ThreadTaskRunnerHandle::Get();
   scoped_refptr<base::SingleThreadTaskRunner> impl_task_runner =
       impl_thread_ ? impl_thread_->task_runner() : nullptr;
+
+  animation_host_ = AnimationHost::CreateForTesting(ThreadInstance::MAIN);
+
   if (IsRemoteTest()) {
     std::unique_ptr<LayerTreeHostRemoteForLayerTreeTest>
         layer_tree_host_remote = LayerTreeHostRemoteForLayerTreeTest::Create(
-            this, client_.get(), &settings_, shared_bitmap_manager_.get(),
-            gpu_memory_buffer_manager_.get(), task_graph_runner_.get(),
-            main_task_runner, impl_task_runner);
+            this, client_.get(), &settings_, task_graph_runner_.get(),
+            main_task_runner, impl_task_runner, animation_host_.get());
     layer_tree_host_in_process_ =
         layer_tree_host_remote->layer_tree_host_in_process();
     layer_tree_host_ = std::move(layer_tree_host_remote);
   } else {
     std::unique_ptr<LayerTreeHostForTesting> layer_tree_host_for_testing =
         LayerTreeHostForTesting::Create(
-            this, mode_, client_.get(), client_.get(),
-            shared_bitmap_manager_.get(), gpu_memory_buffer_manager_.get(),
-            task_graph_runner_.get(), settings_, main_task_runner,
-            impl_task_runner);
+            this, mode_, client_.get(), client_.get(), task_graph_runner_.get(),
+            settings_, main_task_runner, impl_task_runner,
+            animation_host_.get());
     layer_tree_host_in_process_ = layer_tree_host_for_testing.get();
     layer_tree_host_ = std::move(layer_tree_host_for_testing);
   }
@@ -872,8 +868,7 @@ void LayerTreeTest::RequestNewCompositorFrameSink() {
   auto compositor_frame_sink = CreateCompositorFrameSink(
       std::move(shared_context_provider), std::move(worker_context_provider));
   compositor_frame_sink->SetClient(compositor_frame_sink_client_.get());
-
-    layer_tree_host_->SetCompositorFrameSink(std::move(compositor_frame_sink));
+  layer_tree_host_->SetCompositorFrameSink(std::move(compositor_frame_sink));
 }
 
 std::unique_ptr<TestCompositorFrameSink>
@@ -888,13 +883,13 @@ LayerTreeTest::CreateCompositorFrameSink(
   bool force_disable_reclaim_resources = true;
   return base::MakeUnique<TestCompositorFrameSink>(
       compositor_context_provider, std::move(worker_context_provider),
-      CreateDisplayOutputSurface(compositor_context_provider),
       shared_bitmap_manager(), gpu_memory_buffer_manager(),
       layer_tree_host()->GetSettings().renderer_settings, impl_task_runner_,
       synchronous_composite, force_disable_reclaim_resources);
 }
 
-std::unique_ptr<OutputSurface> LayerTreeTest::CreateDisplayOutputSurface(
+std::unique_ptr<OutputSurface>
+LayerTreeTest::CreateDisplayOutputSurfaceOnThread(
     scoped_refptr<ContextProvider> compositor_context_provider) {
   // By default the Display shares a context with the LayerTreeHostImpl.
   return FakeOutputSurface::Create3d(std::move(compositor_context_provider));

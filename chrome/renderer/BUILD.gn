@@ -4,6 +4,7 @@
 
 import("//build/config/features.gni")
 import("//chrome/common/features.gni")
+import("//extensions/features/features.gni")
 import("//tools/grit/grit_rule.gni")
 
 grit("resources") {
@@ -24,8 +25,6 @@ static_library("renderer") {
   sources = [
     "app_categorizer.cc",
     "app_categorizer.h",
-    "banners/app_banner_client.cc",
-    "banners/app_banner_client.h",
     "benchmarking_extension.cc",
     "benchmarking_extension.h",
     "chrome_content_renderer_client.cc",
@@ -50,8 +49,6 @@ static_library("renderer") {
     "net/net_error_page_controller.h",
     "net_benchmarking_extension.cc",
     "net_benchmarking_extension.h",
-    "page_load_histograms.cc",
-    "page_load_histograms.h",
     "page_load_metrics/metrics_render_frame_observer.cc",
     "page_load_metrics/metrics_render_frame_observer.h",
     "page_load_metrics/page_timing_metrics_sender.cc",
@@ -119,9 +116,12 @@ static_library("renderer") {
     "//content/app/strings",
     "//content/public/common",
     "//content/public/renderer",
+    "//extensions/features",
     "//media",
+    "//media/capture",
     "//net",
     "//ppapi/features",
+    "//printing/features",
     "//skia",
     "//storage/common",
     "//third_party/WebKit/public:blink",
@@ -372,6 +372,7 @@ static_library("test_support") {
   deps = [
     ":renderer",
     "//content/test:test_support",
+    "//extensions/features",
     "//testing/gmock",
     "//testing/gtest",
   ]

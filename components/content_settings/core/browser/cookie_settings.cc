@@ -12,6 +12,7 @@
 #include "components/content_settings/core/common/pref_names.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_service.h"
+#include "extensions/features/features.h"
 #include "net/base/net_errors.h"
 #include "net/base/static_cookie_policy.h"
 #include "url/gurl.h"
@@ -106,6 +107,16 @@ void CookieSettings::ResetCookieSetting(const GURL& primary_url) {
       CONTENT_SETTING_DEFAULT);
 }
 
+bool CookieSettings::IsStorageDurable(const GURL& origin) const {
+  // TODO(dgrogan): Don't use host_content_settings_map_ directly.
+  // https://crbug.com/539538
+  ContentSetting setting = host_content_settings_map_->GetContentSetting(
+      origin /*primary*/, origin /*secondary*/,
+      CONTENT_SETTINGS_TYPE_DURABLE_STORAGE,
+      std::string() /*resource_identifier*/);
+  return setting == CONTENT_SETTING_ALLOW;
+}
+
 void CookieSettings::ShutdownOnUIThread() {
   DCHECK(thread_checker_.CalledOnValidThread());
   pref_change_registrar_.RemoveAll();
@@ -119,7 +130,7 @@ ContentSetting CookieSettings::GetCookieSetting(const GURL& url,
   if (url.SchemeIsCryptographic() && first_party_url.SchemeIs(kChromeUIScheme))
     return CONTENT_SETTING_ALLOW;
 
-#if defined(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
   if (url.SchemeIs(kExtensionScheme) &&
       first_party_url.SchemeIs(kExtensionScheme)) {
     return CONTENT_SETTING_ALLOW;

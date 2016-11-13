@@ -6,6 +6,7 @@
 #define WebGL2RenderingContextBase_h
 
 #include "bindings/core/v8/ScriptPromise.h"
+#include "bindings/core/v8/TraceWrapperMember.h"
 #include "modules/webgl/WebGLExtension.h"
 #include "modules/webgl/WebGLRenderingContextBase.h"
 #include <memory>
@@ -492,15 +493,6 @@ class WebGL2RenderingContextBase : public WebGLRenderingContextBase {
                      GLint,
                      GLenum,
                      GLenum,
-                     HTMLImageElement*,
-                     ExceptionState&);
-  void texSubImage3D(GLenum,
-                     GLint,
-                     GLint,
-                     GLint,
-                     GLint,
-                     GLenum,
-                     GLenum,
                      HTMLCanvasElement*,
                      ExceptionState&);
   void texSubImage3D(GLenum,
@@ -531,6 +523,26 @@ class WebGL2RenderingContextBase : public WebGLRenderingContextBase {
                          GLint,
                          GLsizei,
                          GLsizei);
+
+  void compressedTexImage2D(GLenum target,
+                            GLint level,
+                            GLenum internalformat,
+                            GLsizei width,
+                            GLsizei height,
+                            GLint border,
+                            DOMArrayBufferView* data,
+                            GLuint srcOffset,
+                            GLuint srcLengthOverride);
+  void compressedTexSubImage2D(GLenum target,
+                               GLint level,
+                               GLint xoffset,
+                               GLint yoffset,
+                               GLsizei width,
+                               GLsizei height,
+                               GLenum format,
+                               DOMArrayBufferView* data,
+                               GLuint srcOffset,
+                               GLuint srcLengthOverride);
   void compressedTexImage3D(GLenum,
                             GLint,
                             GLenum,
@@ -538,7 +550,9 @@ class WebGL2RenderingContextBase : public WebGLRenderingContextBase {
                             GLsizei,
                             GLsizei,
                             GLint,
-                            DOMArrayBufferView*);
+                            DOMArrayBufferView*,
+                            GLuint,
+                            GLuint);
   void compressedTexSubImage3D(GLenum,
                                GLint,
                                GLint,
@@ -548,7 +562,28 @@ class WebGL2RenderingContextBase : public WebGLRenderingContextBase {
                                GLsizei,
                                GLsizei,
                                GLenum,
-                               DOMArrayBufferView*);
+                               DOMArrayBufferView*,
+                               GLuint,
+                               GLuint);
+
+  // Have to re-declare/re-define the following compressedTex{Sub}Image2D
+  // functions from the base class. This is because the above
+  // compressedTex{Sub}Image2D() hide the name from base class.
+  void compressedTexImage2D(GLenum target,
+                            GLint level,
+                            GLenum internalformat,
+                            GLsizei width,
+                            GLsizei height,
+                            GLint border,
+                            DOMArrayBufferView* data);
+  void compressedTexSubImage2D(GLenum target,
+                               GLint level,
+                               GLint xoffset,
+                               GLint yoffset,
+                               GLsizei width,
+                               GLsizei height,
+                               GLenum format,
+                               DOMArrayBufferView* data);
 
   /* Programs and shaders */
   GLint getFragDataLocation(WebGLProgram*, const String&);
@@ -642,7 +677,7 @@ class WebGL2RenderingContextBase : public WebGLRenderingContextBase {
   GLboolean isQuery(WebGLQuery*);
   void beginQuery(GLenum, WebGLQuery*);
   void endQuery(GLenum);
-  WebGLQuery* getQuery(GLenum, GLenum);
+  ScriptValue getQuery(ScriptState*, GLenum, GLenum);
   ScriptValue getQueryParameter(ScriptState*, WebGLQuery*, GLenum);
 
   /* Sampler Objects */
@@ -658,7 +693,7 @@ class WebGL2RenderingContextBase : public WebGLRenderingContextBase {
   WebGLSync* fenceSync(GLenum, GLbitfield);
   GLboolean isSync(WebGLSync*);
   void deleteSync(WebGLSync*);
-  GLenum clientWaitSync(WebGLSync*, GLbitfield, GLint64);
+  GLenum clientWaitSync(WebGLSync*, GLbitfield, GLuint64);
   void waitSync(WebGLSync*, GLbitfield, GLint64);
 
   ScriptValue getSyncParameter(ScriptState*, WebGLSync*, GLenum);
@@ -701,6 +736,14 @@ class WebGL2RenderingContextBase : public WebGLRenderingContextBase {
   void bindVertexArray(WebGLVertexArrayObject*);
 
   /* Reading */
+  void readPixels(GLint x,
+                  GLint y,
+                  GLsizei width,
+                  GLsizei height,
+                  GLenum format,
+                  GLenum type,
+                  DOMArrayBufferView* pixels,
+                  GLuint offset);
   void readPixels(GLint x,
                   GLint y,
                   GLsizei width,
@@ -884,6 +927,7 @@ class WebGL2RenderingContextBase : public WebGLRenderingContextBase {
   TraceWrapperMember<WebGLQuery> m_currentBooleanOcclusionQuery;
   TraceWrapperMember<WebGLQuery>
       m_currentTransformFeedbackPrimitivesWrittenQuery;
+  TraceWrapperMember<WebGLQuery> m_currentElapsedQuery;
   HeapVector<TraceWrapperMember<WebGLSampler>> m_samplerUnits;
 
   GLint m_packRowLength;

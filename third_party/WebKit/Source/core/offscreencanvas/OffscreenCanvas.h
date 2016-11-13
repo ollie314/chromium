@@ -10,6 +10,7 @@
 #include "bindings/core/v8/ScriptWrappable.h"
 #include "core/html/HTMLCanvasElement.h"
 #include "core/html/canvas/CanvasImageSource.h"
+#include "core/offscreencanvas/ImageEncodeOptions.h"
 #include "platform/geometry/IntSize.h"
 #include "platform/graphics/OffscreenCanvasFrameDispatcher.h"
 #include "platform/heap/Handle.h"
@@ -40,7 +41,10 @@ class CORE_EXPORT OffscreenCanvas final
   void setHeight(unsigned, ExceptionState&);
 
   // API Methods
-  ImageBitmap* transferToImageBitmap(ExceptionState&);
+  ImageBitmap* transferToImageBitmap(ScriptState*, ExceptionState&);
+  ScriptPromise convertToBlob(ScriptState*,
+                              const ImageEncodeOptions&,
+                              ExceptionState&);
 
   IntSize size() const { return m_size; }
   void setAssociatedCanvasId(int canvasId) { m_canvasId = canvasId; }
@@ -66,16 +70,19 @@ class CORE_EXPORT OffscreenCanvas final
   void setSurfaceId(uint32_t clientId,
                     uint32_t sinkId,
                     uint32_t localId,
-                    uint64_t nonce) {
+                    uint64_t nonceHigh,
+                    uint64_t nonceLow) {
     m_clientId = clientId;
     m_sinkId = sinkId;
     m_localId = localId;
-    m_nonce = nonce;
+    m_nonceHigh = nonceHigh;
+    m_nonceLow = nonceLow;
   }
   uint32_t clientId() const { return m_clientId; }
   uint32_t sinkId() const { return m_sinkId; }
   uint32_t localId() const { return m_localId; }
-  uint64_t nonce() const { return m_nonce; }
+  uint64_t nonceHigh() const { return m_nonceHigh; }
+  uint64_t nonceLow() const { return m_nonceLow; }
 
   // CanvasImageSource implementation
   PassRefPtr<Image> getSourceImageForCanvas(SourceImageStatus*,
@@ -105,6 +112,7 @@ class CORE_EXPORT OffscreenCanvas final
   Member<CanvasRenderingContext> m_context;
   int m_canvasId = -1;  // DOMNodeIds starts from 0, using -1 to indicate no
                         // associated canvas element.
+
   IntSize m_size;
   bool m_isNeutered = false;
 
@@ -122,7 +130,8 @@ class CORE_EXPORT OffscreenCanvas final
   uint32_t m_clientId = 0;
   uint32_t m_sinkId = 0;
   uint32_t m_localId = 0;
-  uint64_t m_nonce = 0;
+  uint64_t m_nonceHigh = 0;
+  uint64_t m_nonceLow = 0;
 };
 
 }  // namespace blink

@@ -432,7 +432,7 @@ void TextAutosizer::endLayout(LayoutBlock* block) {
     // Tables can create two layout scopes for the same block so the isEmpty
     // check below is needed to guard against endLayout being called twice.
   } else if (!m_clusterStack.isEmpty() && currentCluster()->m_root == block) {
-    m_clusterStack.removeLast();
+    m_clusterStack.pop_back();
   }
 }
 
@@ -1129,7 +1129,7 @@ bool TextAutosizer::isWiderOrNarrowerDescendant(Cluster* cluster) {
 }
 
 TextAutosizer::Cluster* TextAutosizer::currentCluster() const {
-  ASSERT_WITH_SECURITY_IMPLICATION(!m_clusterStack.isEmpty());
+  SECURITY_DCHECK(!m_clusterStack.isEmpty());
   return m_clusterStack.last().get();
 }
 

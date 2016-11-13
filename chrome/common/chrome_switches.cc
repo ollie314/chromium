@@ -7,6 +7,7 @@
 #include "base/base_switches.h"
 #include "base/command_line.h"
 #include "build/build_config.h"
+#include "printing/features/features.h"
 
 namespace switches {
 
@@ -145,6 +146,10 @@ const char kCrashOnHangThreads[]            = "crash-on-hang-threads";
 const char kCreateBrowserOnStartupForTests[] =
     "create-browser-on-startup-for-tests";
 
+// Specifies the HTTP endpoint which will be used to serve
+// chrome-devtools://devtools/custom/<path>
+const char kCustomDevtoolsFrontend[] = "custom-devtools-frontend";
+
 // Enables a frame context menu item that toggles the frame in and out of glass
 // mode (Windows Vista and up only).
 const char kDebugEnableFrameToggle[]        = "debug-enable-frame-toggle";
@@ -233,9 +238,6 @@ const char kDisableExtensionsFileAccessCheck[] =
 // requests originating from extensions.
 const char kDisableExtensionsHttpThrottling[] =
     "disable-extensions-http-throttling";
-
-// Disable field trial tests configured in fieldtrial_testing_config.json.
-const char kDisableFieldTrialTestingConfig[] = "disable-field-trial-config";
 
 // Disables the HTTP/2 protocol.
 const char kDisableHttp2[] = "disable-http2";
@@ -531,16 +533,6 @@ const char kFastStart[]            = "fast-start";
 // the app to be installed if it hasn't been already.
 const char kForceAppMode[]                  = "force-app-mode";
 
-// This option can be used to force parameters of field trials when testing
-// changes locally. The argument is a param list of (key, value) pairs prefixed
-// by an associated (trial, group) pair. You specify the param list for multiple
-// (trial, group) pairs with a comma separator.
-// Example:
-//   "Trial1.Group1:k1/v1/k2/v2,Trial2.Group2:k3/v3/k4/v4"
-// Trial names, groups names, parameter names, and value should all be URL
-// escaped for all non-alphanumeric characters.
-const char kForceFieldTrialParams[] = "force-fieldtrial-params";
-
 // Displays the First Run experience when the browser is started, regardless of
 // whether or not it's actually the First Run (this overrides kNoFirstRun).
 const char kForceFirstRun[]                 = "force-first-run";
@@ -621,6 +613,10 @@ const char kLoadComponentExtension[]        = "load-component-extension";
 // Loads an extension from the specified directory.
 const char kLoadExtension[]                 = "load-extension";
 
+// Loads the Media Router component extension on startup.
+const char kLoadMediaRouterComponentExtension[] =
+    "load-media-router-component-extension";
+
 // Makes Chrome default browser
 const char kMakeDefaultBrowser[]            = "make-default-browser";
 
@@ -636,9 +632,6 @@ extern const char kSecurityChipAnimationAll[] = "animate-all";
 
 // Forces the maximum disk space to be used by the media cache, in bytes.
 const char kMediaCacheSize[]                = "media-cache-size";
-
-// Enables Media Router.
-const char kMediaRouter[]                   = "media-router";
 
 // Enables the recording of metrics reports but disables reporting. In contrast
 // to kDisableMetrics, this executes all the code that a normal client would
@@ -835,9 +828,7 @@ const char kQuicVersion[] = "quic-version";
 const char kRemoteDebuggingTargets[] = "remote-debugging-targets";
 
 // Indicates the last session should be restored on startup. This overrides the
-// preferences value and is primarily intended for testing. The value of this
-// switch is the number of tabs to wait until loaded before 'load completed' is
-// sent to the ui_test.
+// preferences value.
 const char kRestoreLastSession[]            = "restore-last-session";
 
 // Disable saving pages as HTML-only, disable saving pages as HTML Complete
@@ -1028,9 +1019,6 @@ const char kDisableAppLink[] = "disable-app-link";
 // Disables Contextual Search.
 const char kDisableContextualSearch[] = "disable-contextual-search";
 
-// Disable VR UI if supported.
-const char kDisableVrShell[] = "disable-vr-shell";
-
 // Enable the accessibility tab switcher.
 const char kEnableAccessibilityTabSwitcher[] =
     "enable-accessibility-tab-switcher";
@@ -1052,11 +1040,8 @@ const char kEnableHostedMode[] = "enable-hosted-mode";
 // unresponsive web content.
 const char kEnableHungRendererInfoBar[] = "enable-hung-renderer-infobar";
 
-// Enable VR UI if supported.
-const char kEnableVrShell[] = "enable-vr-shell";
-
 // Enables "Add to Home screen" in the app menu to generate WebAPKs.
-const char kEnableWebApk[] = "enable-webapk";
+const char kEnableWebApk[] = "enable-improved-a2hs";
 
 // Forces the update menu badge to show.
 const char kForceShowUpdateMenuBadge[] = "force-show-update-menu-badge";
@@ -1088,9 +1073,6 @@ const char kTabManagementExperimentTypeDisabled[] =
     "tab-management-experiment-type-disabled";
 const char kTabManagementExperimentTypeElderberry[] =
     "tab-management-experiment-type-elderberry";
-
-// Custom WebAPK server URL for the sake of testing.
-const char kWebApkServerUrl[] = "webapk-server-url";
 #endif  // defined(OS_ANDROID)
 
 #if defined(OS_CHROMEOS)
@@ -1258,7 +1240,7 @@ const char kWindows10CustomTitlebar[]       = "windows10-custom-titlebar";
 const char kWindows8Search[]                = "windows8-search";
 #endif  // defined(OS_WIN)
 
-#if defined(ENABLE_PRINT_PREVIEW) && !defined(OFFICIAL_BUILD)
+#if BUILDFLAG(ENABLE_PRINT_PREVIEW) && !defined(OFFICIAL_BUILD)
 // Enables support to debug printing subsystem.
 const char kDebugPrint[] = "debug-print";
 #endif

@@ -77,7 +77,7 @@ import org.chromium.chrome.browser.download.DownloadManagerService;
 import org.chromium.chrome.browser.download.DownloadUtils;
 import org.chromium.chrome.browser.fullscreen.ChromeFullscreenManager;
 import org.chromium.chrome.browser.gsa.ContextReporter;
-import org.chromium.chrome.browser.gsa.GSAServiceClient;
+import org.chromium.chrome.browser.gsa.GSAAccountChangeListener;
 import org.chromium.chrome.browser.gsa.GSAState;
 import org.chromium.chrome.browser.help.HelpAndFeedback;
 import org.chromium.chrome.browser.infobar.InfoBarContainer;
@@ -87,6 +87,7 @@ import org.chromium.chrome.browser.metrics.StartupMetrics;
 import org.chromium.chrome.browser.metrics.UmaSessionStats;
 import org.chromium.chrome.browser.metrics.UmaUtils;
 import org.chromium.chrome.browser.multiwindow.MultiWindowUtils;
+import org.chromium.chrome.browser.net.spdyproxy.DataReductionProxySettings;
 import org.chromium.chrome.browser.nfc.BeamController;
 import org.chromium.chrome.browser.nfc.BeamProvider;
 import org.chromium.chrome.browser.offlinepages.OfflinePageBridge;
@@ -101,6 +102,7 @@ import org.chromium.chrome.browser.printing.PrintShareActivity;
 import org.chromium.chrome.browser.printing.TabPrinter;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.share.ShareHelper;
+import org.chromium.chrome.browser.snackbar.DataReductionPromoSnackbarController;
 import org.chromium.chrome.browser.snackbar.DataUseSnackbarController;
 import org.chromium.chrome.browser.snackbar.SnackbarManager;
 import org.chromium.chrome.browser.snackbar.SnackbarManager.SnackbarManageable;
@@ -135,6 +137,7 @@ import org.chromium.policy.CombinedPolicyProvider;
 import org.chromium.policy.CombinedPolicyProvider.PolicyChangeListener;
 import org.chromium.printing.PrintManagerDelegateImpl;
 import org.chromium.printing.PrintingController;
+import org.chromium.printing.PrintingControllerImpl;
 import org.chromium.ui.base.ActivityWindowAndroid;
 import org.chromium.ui.base.DeviceFormFactor;
 import org.chromium.ui.base.PageTransition;
@@ -196,7 +199,6 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
     private TabContentManager mTabContentManager;
     private UmaSessionStats mUmaSessionStats;
     private ContextReporter mContextReporter;
-    protected GSAServiceClient mGSAServiceClient;
 
     private boolean mPartnerBrowserRefreshNeeded;
 
@@ -222,6 +224,7 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
     private ReaderModeManager mReaderModeManager;
     private SnackbarManager mSnackbarManager;
     private DataUseSnackbarController mDataUseSnackbarController;
+    private DataReductionPromoSnackbarController mDataReductionPromoSnackbarController;
     private AppMenuPropertiesDelegate mAppMenuPropertiesDelegate;
     private AppMenuHandler mAppMenuHandler;
     private ToolbarManager mToolbarManager;
@@ -472,6 +475,19 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
                         && DataUseTabUIManager.checkAndResetDataUseTrackingEnded(tab)) {
                     mDataUseSnackbarController.showDataUseTrackingEndedBar();
                 }
+
+                // Only alert about data savings once the first paint has happened. It doesn't make
+                // sense to show a snackbar about savings when nothing has been displayed yet.
+                if (DataReductionProxySettings.getInstance().isSnackbarPromoAllowed(tab.getUrl())) {
+                    if (mDataReductionPromoSnackbarController == null) {
+                        mDataReductionPromoSnackbarController =
+                                new DataReductionPromoSnackbarController(
+                                        getApplicationContext(), getSnackbarManager());
+                    }
+                    mDataReductionPromoSnackbarController.maybeShowDataReductionPromoSnackbar(
+                            DataReductionProxySettings.getInstance()
+                                    .getTotalHttpContentLengthSaved());
+                }
             }
 
             @Override
@@ -639,8 +655,7 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
         ChromeActivitySessionTracker.getInstance().onStartWithNative();
 
         if (GSAState.getInstance(this).isGsaAvailable()) {
-            mGSAServiceClient = new GSAServiceClient(this);
-            mGSAServiceClient.connect();
+            GSAAccountChangeListener.getInstance().connect();
             createContextReporterIfNeeded();
         } else {
             ContextReporter.reportStatus(ContextReporter.STATUS_GSA_NOT_AVAILABLE);
@@ -742,9 +757,9 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
         Tab tab = getActivityTab();
         if (tab != null && !hasWindowFocus()) tab.onActivityHidden();
         if (mAppMenuHandler != null) mAppMenuHandler.hideAppMenu();
-        if (mGSAServiceClient != null) {
-            mGSAServiceClient.disconnect();
-            mGSAServiceClient = null;
+
+        if (GSAState.getInstance(this).isGsaAvailable()) {
+            GSAAccountChangeListener.getInstance().disconnect();
             if (mSyncStateChangedListener != null) {
                 ProfileSyncService syncService = ProfileSyncService.get();
                 if (syncService != null) {
@@ -1074,7 +1089,7 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
         final Tab currentTab = getActivityTab();
         if (currentTab == null) return;
 
-        PrintingController printingController = getChromeApplication().getPrintingController();
+        PrintingController printingController = PrintingControllerImpl.getInstance();
         if (printingController != null && !currentTab.isNativePage() && !printingController.isBusy()
                 && PrefServiceBridge.getInstance().isPrintingEnabled()) {
             PrintShareActivity.enablePrintShareOption(this, new Runnable() {
@@ -1191,7 +1206,7 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
     }
 
     /**
-     * @return The resource id that contains how large the top controls are.
+     * @return The resource id that contains how large the browser controls are.
      */
     public int getControlContainerHeightResource() {
         return R.dimen.control_container_height;
@@ -1370,7 +1385,7 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
      * @return The content offset provider, may be null.
      */
     public ContentOffsetProvider getContentOffsetProvider() {
-        return mCompositorViewHolder.getContentOffsetProvider();
+        return mCompositorViewHolder;
     }
 
     /**
@@ -1655,7 +1670,7 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
             onShareMenuItemSelected(id == R.id.direct_share_menu_id,
                     getCurrentTabModel().isIncognito());
         } else if (id == R.id.print_id) {
-            PrintingController printingController = getChromeApplication().getPrintingController();
+            PrintingController printingController = PrintingControllerImpl.getInstance();
             if (printingController != null && !printingController.isBusy()
                     && PrefServiceBridge.getInstance().isPrintingEnabled()) {
                 printingController.startPrint(new TabPrinter(currentTab),

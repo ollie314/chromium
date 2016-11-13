@@ -20,6 +20,7 @@
 #include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/metrics/histogram.h"
+#include "base/path_service.h"
 #include "base/profiler/scoped_tracker.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/stringprintf.h"
@@ -45,7 +46,7 @@
 #include "components/sync/base/stop_source.h"
 #include "components/sync/base/system_encryptor.h"
 #include "components/sync/device_info/device_info.h"
-#include "components/sync/device_info/device_info_service.h"
+#include "components/sync/device_info/device_info_sync_bridge.h"
 #include "components/sync/device_info/device_info_sync_service.h"
 #include "components/sync/device_info/device_info_tracker.h"
 #include "components/sync/driver/backend_migrator.h"
@@ -74,11 +75,11 @@
 #include "components/sync/syncable/directory.h"
 #include "components/sync/syncable/sync_db_util.h"
 #include "components/sync/syncable/syncable_read_transaction.h"
+#include "components/sync_preferences/pref_service_syncable.h"
 #include "components/sync_sessions/favicon_cache.h"
 #include "components/sync_sessions/session_data_type_controller.h"
 #include "components/sync_sessions/sessions_sync_manager.h"
 #include "components/sync_sessions/sync_sessions_client.h"
-#include "components/syncable_prefs/pref_service_syncable.h"
 #include "components/version_info/version_info_values.h"
 #include "net/cookies/cookie_monster.h"
 #include "net/url_request/url_request_context_getter.h"
@@ -95,7 +96,7 @@ using syncer::ChangeProcessor;
 using syncer::DataTypeController;
 using syncer::DataTypeManager;
 using syncer::DataTypeStatusTable;
-using syncer::DeviceInfoService;
+using syncer::DeviceInfoSyncBridge;
 using syncer::DeviceInfoSyncService;
 using syncer::JsBackend;
 using syncer::JsController;
@@ -151,6 +152,11 @@ static const base::FilePath::CharType kSyncDataFolderName[] =
 static const base::FilePath::CharType kLevelDBFolderName[] =
     FILE_PATH_LITERAL("LevelDB");
 
+#if defined(OS_WIN)
+static const base::FilePath::CharType kLoopbackServerBackendFilename[] =
+    FILE_PATH_LITERAL("profile.pb");
+#endif
+
 namespace {
 
 // Perform the actual sync data folder deletion.
@@ -163,13 +169,6 @@ void DeleteSyncDataFolder(const base::FilePath& directory_path) {
 }
 
 }  // namespace
-
-bool ShouldShowActionOnUI(const syncer::SyncProtocolError& error) {
-  return (error.action != syncer::UNKNOWN_ACTION &&
-          error.action != syncer::DISABLE_SYNC_ON_CLIENT &&
-          error.action != syncer::STOP_SYNC_FOR_DISABLED_ACCOUNT &&
-          error.action != syncer::RESET_LOCAL_SYNC_DATA);
-}
 
 ProfileSyncService::InitParams::InitParams() = default;
 ProfileSyncService::InitParams::~InitParams() = default;
@@ -185,8 +184,6 @@ ProfileSyncService::InitParams::InitParams(InitParams&& other)  // NOLINT
       url_request_context(std::move(other.url_request_context)),
       debug_identifier(std::move(other.debug_identifier)),
       channel(other.channel),
-      db_thread(std::move(other.db_thread)),
-      file_thread(std::move(other.file_thread)),
       blocking_pool(other.blocking_pool) {}
 
 ProfileSyncService::ProfileSyncService(InitParams init_params)
@@ -204,8 +201,6 @@ ProfileSyncService::ProfileSyncService(InitParams init_params)
       url_request_context_(init_params.url_request_context),
       debug_identifier_(std::move(init_params.debug_identifier)),
       channel_(init_params.channel),
-      db_thread_(init_params.db_thread),
-      file_thread_(init_params.file_thread),
       blocking_pool_(init_params.blocking_pool),
       is_first_time_sync_configure_(false),
       backend_initialized_(false),
@@ -292,7 +287,7 @@ void ProfileSyncService::Initialize() {
     // TODO(skym): Stop creating leveldb files when signed out.
     // TODO(skym): Verify using AsUTF8Unsafe is okay here. Should work as long
     // as the Local State file is guaranteed to be UTF-8.
-    device_info_service_ = base::MakeUnique<DeviceInfoService>(
+    device_info_service_ = base::MakeUnique<DeviceInfoSyncBridge>(
         local_device_.get(),
         base::Bind(&ModelTypeStore::CreateStore, syncer::DEVICE_INFO,
                    directory_path_.Append(base::FilePath(kLevelDBFolderName))
@@ -364,7 +359,7 @@ void ProfileSyncService::Initialize() {
 #endif
 
 #if !defined(OS_ANDROID)
-  DCHECK(sync_error_controller_ == NULL)
+  DCHECK(sync_error_controller_ == nullptr)
       << "Initialize() called more than once.";
   sync_error_controller_ = base::MakeUnique<syncer::SyncErrorController>(this);
   AddObserver(sync_error_controller_.get());
@@ -430,7 +425,7 @@ bool ProfileSyncService::IsDataTypeControllerRunning(
 
 sync_sessions::OpenTabsUIDelegate* ProfileSyncService::GetOpenTabsUIDelegate() {
   if (!IsDataTypeControllerRunning(syncer::SESSIONS))
-    return NULL;
+    return nullptr;
   return sessions_sync_manager_.get();
 }
 
@@ -497,10 +492,47 @@ void ProfileSyncService::InitializeBackend(bool delete_stale_data) {
     return;
   }
 
+  if (!sync_thread_) {
+    sync_thread_ = base::MakeUnique<base::Thread>("Chrome_SyncThread");
+    base::Thread::Options options;
+    options.timer_slack = base::TIMER_SLACK_MAXIMUM;
+    CHECK(sync_thread_->StartWithOptions(options));
+  }
+
   SyncCredentials credentials = GetCredentials();
 
   if (delete_stale_data)
     ClearStaleErrors();
+
+  bool enable_local_sync_backend = false;
+  base::FilePath local_sync_backend_folder;
+#if defined(OS_WIN)
+  enable_local_sync_backend = base::CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kEnableLocalSyncBackend);
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kLocalSyncBackendDir)) {
+    local_sync_backend_folder =
+        base::CommandLine::ForCurrentProcess()->GetSwitchValuePath(
+            switches::kLocalSyncBackendDir);
+  } else {
+    // TODO(pastarmovj): Add DIR_ROAMING_USER_DATA to PathService to simplify
+    // this code and move the logic in its right place. See crbug/657810.
+    CHECK(
+        base::PathService::Get(base::DIR_APP_DATA, &local_sync_backend_folder));
+    local_sync_backend_folder =
+        local_sync_backend_folder.Append(FILE_PATH_LITERAL("Chrome/User Data"));
+  }
+  // This code as it is now will assume the same profile order is present on all
+  // machines, which is not a given. It is to be defined if only the Default
+  // profile should get this treatment or all profile as is the case now. The
+  // solution for now will be to assume profiles are created in the same order
+  // on all machines and in the future decide if only the Default one should be
+  // considered roamed.
+  local_sync_backend_folder =
+      local_sync_backend_folder.Append(base_directory_.BaseName());
+  local_sync_backend_folder =
+      local_sync_backend_folder.Append(kLoopbackServerBackendFilename);
+#endif  // defined(OS_WIN)
 
   SyncBackendHost::HttpPostProviderFactoryGetter
       http_post_provider_factory_getter =
@@ -509,11 +541,10 @@ void ProfileSyncService::InitializeBackend(bool delete_stale_data) {
                      url_request_context_, network_time_update_callback_);
 
   backend_->Initialize(
-      this, std::move(sync_thread_), db_thread_, file_thread_,
-      GetJsEventHandler(), sync_service_url_, local_device_->GetSyncUserAgent(),
-      credentials, delete_stale_data,
-      std::unique_ptr<syncer::SyncManagerFactory>(
-          new syncer::SyncManagerFactory()),
+      this, sync_thread_.get(), GetJsEventHandler(), sync_service_url_,
+      local_device_->GetSyncUserAgent(), credentials, delete_stale_data,
+      enable_local_sync_backend, local_sync_backend_folder,
+      base::MakeUnique<syncer::SyncManagerFactory>(),
       MakeWeakHandle(sync_enabled_weak_factory_.GetWeakPtr()),
       base::Bind(syncer::ReportUnrecoverableError, channel_),
       http_post_provider_factory_getter, std::move(saved_nigori_state_));
@@ -757,7 +788,7 @@ void ProfileSyncService::ShutdownImpl(syncer::ShutdownReason reason) {
   // shutting it down.
   std::unique_ptr<SyncBackendHost> doomed_backend(backend_.release());
   if (doomed_backend) {
-    sync_thread_ = doomed_backend->Shutdown(reason);
+    doomed_backend->Shutdown(reason);
     doomed_backend.reset();
   }
   base::TimeDelta shutdown_time = base::Time::Now() - shutdown_start_time;
@@ -1781,7 +1812,7 @@ syncer::UserShare* ProfileSyncService::GetUserShare() const {
     return backend_->GetUserShare();
   }
   NOTREACHED();
-  return NULL;
+  return nullptr;
 }
 
 syncer::SyncCycleSnapshot ProfileSyncService::GetLastCycleSnapshot() const {
@@ -1937,7 +1968,7 @@ void ProfileSyncService::ConsumeCachedPassphraseIfPossible() {
 
 void ProfileSyncService::RequestAccessToken() {
   // Only one active request at a time.
-  if (access_token_request_ != NULL)
+  if (access_token_request_ != nullptr)
     return;
   request_access_token_retry_timer_.Stop();
   OAuth2TokenService::ScopeSet oauth2_scopes;
@@ -2290,7 +2321,7 @@ bool ProfileSyncService::IsSyncRequested() const {
 
 SigninManagerBase* ProfileSyncService::signin() const {
   if (!signin_)
-    return NULL;
+    return nullptr;
   return signin_->GetOriginal();
 }
 
@@ -2370,7 +2401,7 @@ syncer::SyncableService* ProfileSyncService::GetDeviceInfoSyncableService() {
   return device_info_sync_service_.get();
 }
 
-syncer::ModelTypeService* ProfileSyncService::GetDeviceInfoService() {
+syncer::ModelTypeSyncBridge* ProfileSyncService::GetDeviceInfoSyncBridge() {
   return device_info_service_.get();
 }
 
@@ -2393,7 +2424,7 @@ void ProfileSyncService::OverrideNetworkResourcesForTest(
 }
 
 bool ProfileSyncService::HasSyncingBackend() const {
-  return backend_ != NULL;
+  return backend_ != nullptr;
 }
 
 void ProfileSyncService::UpdateFirstSyncTimePref() {
@@ -2406,7 +2437,7 @@ void ProfileSyncService::UpdateFirstSyncTimePref() {
 }
 
 void ProfileSyncService::FlushDirectory() const {
-  // backend_initialized_ implies backend_ isn't NULL and the manager exists.
+  // backend_initialized_ implies backend_ isn't null and the manager exists.
   // If sync is not initialized yet, we fail silently.
   if (backend_initialized_)
     backend_->FlushDirectory();
@@ -2419,10 +2450,8 @@ base::FilePath ProfileSyncService::GetDirectoryPathForTest() const {
 base::MessageLoop* ProfileSyncService::GetSyncLoopForTest() const {
   if (sync_thread_) {
     return sync_thread_->message_loop();
-  } else if (backend_) {
-    return backend_->GetSyncLoopForTesting();
   } else {
-    return NULL;
+    return nullptr;
   }
 }
 

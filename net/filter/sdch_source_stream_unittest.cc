@@ -327,6 +327,103 @@ TEST_P(SdchSourceStreamTest, BogusDictionaryId) {
   EXPECT_EQ("SDCH", sdch_source()->Description());
 }
 
+// Regression test for crbug.com/661570.
+// Tests that if output is replaced, SdchSourceStream::FilterData correctly
+// drains input buffer and breaks out of the while loop.
+TEST_P(SdchSourceStreamTest, BogusSdchContentInvalidDictionaryId) {
+  // Test a regular string and an empty string.
+  std::string recovery_strings[] = {"this is a recovery", ""};
+  int out_buffer_sizes[] = {kBufferSize, kSmallBufferSize};
+  for (auto recovery : recovery_strings) {
+    for (auto out_buffer_size : out_buffer_sizes) {
+      set_out_buffer_size(out_buffer_size);
+      SetErrorRecovery(SdchSourceStream::Delegate::REPLACE_OUTPUT, recovery);
+      Init();
+      std::string response(
+          "some random string that is not a valid sdch response.");
+      std::unique_ptr<MockDelegate> delegate = GetNewDelegate();
+      MockDelegate* raw_delegate_pointer = delegate.get();
+      MockSourceStream* mock_source = new MockSourceStream;
+      std::unique_ptr<SdchSourceStream> sdch_source(
+          new SdchSourceStream(base::WrapUnique(mock_source),
+                               std::move(delegate), SourceStream::TYPE_SDCH));
+      mock_source->AddReadResult(response.c_str(), response.size(), OK,
+                                 GetParam());
+      // Add a synchronous EOF.
+      mock_source->AddReadResult(response.c_str(), 0, OK,
+                                 MockSourceStream::SYNC);
+      std::string actual_output;
+      while (true) {
+        TestCompletionCallback callback;
+        int rv = sdch_source->Read(out_buffer(), out_buffer_size,
+                                   callback.callback());
+        if (rv == ERR_IO_PENDING)
+          rv = CompleteReadIfAsync(rv, &callback, mock_source);
+        if (rv == OK)
+          break;
+        if (out_buffer_size == kSmallBufferSize)
+          EXPECT_GE(kSmallBufferSize, static_cast<size_t>(rv));
+        ASSERT_GT(rv, OK);
+        actual_output.append(out_data(), rv);
+      }
+
+      EXPECT_TRUE(raw_delegate_pointer->dictionary_id_error_handled());
+      EXPECT_EQ(recovery, actual_output);
+      EXPECT_EQ("SDCH", sdch_source->Description());
+    }
+  }
+}
+
+// Same as BogusDictionaryContentInvalidDictionaryId, but with a valid
+// dictionary id.
+TEST_P(SdchSourceStreamTest, BogusSdchContent) {
+  // Test a regular string and an empty string.
+  std::string recovery_strings[] = {"this is a recovery", ""};
+  int out_buffer_sizes[] = {kBufferSize, kSmallBufferSize};
+  for (auto recovery : recovery_strings) {
+    for (auto out_buffer_size : out_buffer_sizes) {
+      set_out_buffer_size(out_buffer_size);
+      SetErrorRecovery(SdchSourceStream::Delegate::REPLACE_OUTPUT, recovery);
+      Init();
+      std::string response;
+      std::string server_id;
+      AppendDictionaryIdTo(&response, &server_id);
+      response.append("some random string that is not a valid sdch response.");
+      std::unique_ptr<MockDelegate> delegate = GetNewDelegate();
+      MockDelegate* raw_delegate_pointer = delegate.get();
+      MockSourceStream* mock_source = new MockSourceStream;
+      std::unique_ptr<SdchSourceStream> sdch_source(
+          new SdchSourceStream(base::WrapUnique(mock_source),
+                               std::move(delegate), SourceStream::TYPE_SDCH));
+      mock_source->AddReadResult(response.c_str(), response.size(), OK,
+                                 GetParam());
+      // Add a synchronous EOF.
+      mock_source->AddReadResult(response.c_str(), 0, OK,
+                                 MockSourceStream::SYNC);
+      std::string actual_output;
+      while (true) {
+        TestCompletionCallback callback;
+        int rv = sdch_source->Read(out_buffer(), out_buffer_size,
+                                   callback.callback());
+        if (rv == ERR_IO_PENDING)
+          rv = CompleteReadIfAsync(rv, &callback, mock_source);
+        if (rv == OK)
+          break;
+        if (out_buffer_size == kSmallBufferSize)
+          EXPECT_GE(kSmallBufferSize, static_cast<size_t>(rv));
+        ASSERT_GT(rv, OK);
+        actual_output.append(out_data(), rv);
+      }
+
+      // Should have a decoding error and not a dictionary id error.
+      EXPECT_TRUE(raw_delegate_pointer->decoding_error_handled());
+      EXPECT_EQ(recovery, actual_output);
+      EXPECT_EQ(server_id, raw_delegate_pointer->last_get_dictionary_id());
+      EXPECT_EQ("SDCH", sdch_source->Description());
+    }
+  }
+}
+
 // When encounter a dictionary error, delegate returns ErrorRecovery NONE.
 TEST_P(SdchSourceStreamTest, BogusDictionaryIdNoRecover) {
   char id[] = {0x1f, '0', '0', '0', '0', '0', '0', '0', 0x0};
@@ -540,6 +637,58 @@ TEST_P(SdchSourceStreamTest, FilterChaining) {
     EXPECT_EQ(sizeof(kTestData) - 1, actual_output.size());
     EXPECT_EQ(kTestData, actual_output);
     EXPECT_EQ("GZIP,SDCH", sdch_source->Description());
+  }
+}
+
+// Test that if TYPE_SDCH_POSSIBLE and TYPE_GZIP_FALLBACK are added to a
+// gzipped content, the content can be decoded without problem.
+TEST_P(SdchSourceStreamTest, PossibleSdchActuallyGzip) {
+  int out_buffer_sizes[] = {kBufferSize, kSmallBufferSize};
+  for (auto out_buffer_size : out_buffer_sizes) {
+    char plain_data[] = "Hello, World!";
+    unsigned char gzip_data[] = {
+        // From:
+        //   echo -n 'Hello, World!' | gzip | xxd -i | sed -e 's/^/  /'
+        // with the 8 footer bytes removed.
+        0x1f, 0x8b, 0x08, 0x00, 0x2b, 0x02, 0x84, 0x55, 0x00,
+        0x03, 0xf3, 0x48, 0xcd, 0xc9, 0xc9, 0xd7, 0x51, 0x08,
+        0xcf, 0x2f, 0xca, 0x49, 0x51, 0x04, 0x00};
+    SetErrorRecovery(SdchSourceStream::Delegate::PASS_THROUGH, std::string());
+    Init();
+    std::unique_ptr<MockDelegate> delegate = GetNewDelegate();
+    MockDelegate* raw_delegate_pointer = delegate.get();
+    MockSourceStream* source = new MockSourceStream();
+    source->AddReadResult(reinterpret_cast<char*>(gzip_data), sizeof(gzip_data),
+                          OK, GetParam());
+    source->AddReadResult(
+        reinterpret_cast<char*>(gzip_data) + sizeof(gzip_data), 0, OK,
+        MockSourceStream::SYNC);
+    std::unique_ptr<GzipSourceStream> gzip_source = GzipSourceStream::Create(
+        base::WrapUnique(source), SourceStream::TYPE_GZIP);
+    std::unique_ptr<GzipSourceStream> gzip_fallback_source =
+        GzipSourceStream::Create(std::move(gzip_source),
+                                 SourceStream::TYPE_GZIP_FALLBACK);
+    std::unique_ptr<SdchSourceStream> sdch_possible(new SdchSourceStream(
+        std::move(gzip_fallback_source), std::move(delegate),
+        SourceStream::TYPE_SDCH_POSSIBLE));
+    std::string actual_output;
+    while (true) {
+      TestCompletionCallback callback;
+      int rv = sdch_possible->Read(out_buffer(), out_buffer_size,
+                                   callback.callback());
+      if (rv == ERR_IO_PENDING)
+        rv = CompleteReadIfAsync(rv, &callback, source);
+      if (rv == OK)
+        break;
+      ASSERT_GT(rv, OK);
+      if (out_buffer_size == kSmallBufferSize)
+        EXPECT_GE(kSmallBufferSize, static_cast<size_t>(rv));
+
+      actual_output.append(out_data(), rv);
+    }
+    EXPECT_TRUE(raw_delegate_pointer->dictionary_id_error_handled());
+    EXPECT_EQ(plain_data, actual_output);
+    EXPECT_EQ("GZIP,GZIP_FALLBACK,SDCH_POSSIBLE", sdch_possible->Description());
   }
 }
 

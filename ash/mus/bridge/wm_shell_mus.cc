@@ -64,7 +64,7 @@ class SessionStateDelegateStub : public SessionStateDelegate {
   bool IsActiveUserSessionStarted() const override { return true; }
   bool CanLockScreen() const override { return true; }
   bool IsScreenLocked() const override { return screen_locked_; }
-  bool ShouldLockScreenBeforeSuspending() const override { return false; }
+  bool ShouldLockScreenAutomatically() const override { return false; }
   void LockScreen() override {
     screen_locked_ = true;
     NOTIMPLEMENTED();
@@ -292,11 +292,6 @@ void WmShellMus::SetPinnedWindow(WmWindow* window) {
   NOTIMPLEMENTED();
 }
 
-bool WmShellMus::CanShowWindowForUser(WmWindow* window) {
-  NOTIMPLEMENTED();
-  return true;
-}
-
 void WmShellMus::LockCursor() {
   // TODO: http::/crbug.com/637853
   NOTIMPLEMENTED();
@@ -420,6 +415,10 @@ void WmShellMus::AddPointerWatcher(views::PointerWatcher* watcher,
 
 void WmShellMus::RemovePointerWatcher(views::PointerWatcher* watcher) {
   pointer_watcher_event_router_->RemovePointerWatcher(watcher);
+}
+
+void WmShellMus::RequestShutdown() {
+  NOTIMPLEMENTED();
 }
 
 bool WmShellMus::IsTouchDown() {

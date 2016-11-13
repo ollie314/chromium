@@ -12,7 +12,7 @@
 #include "ash/common/system/tray/system_tray_delegate.h"
 #include "ash/common/system/tray/system_tray_item.h"
 #include "ash/common/system/tray/tray_constants.h"
-#include "ash/common/system/tray/tray_utils.h"
+#include "ash/common/system/tray/tray_popup_utils.h"
 #include "ash/common/wm_shell.h"
 #include "ash/resources/vector_icons/vector_icons.h"
 #include "grit/ash_strings.h"
@@ -70,17 +70,19 @@ void TilesDefaultView::Init() {
   // Show the buttons in this row as disabled if the user is at the login
   // screen, lock screen, or in a secondary account flow. The exception is
   // |power_button_| which is always shown as enabled.
-  const bool disable_buttons = !CanOpenWebUISettings(login_);
+  const bool disable_buttons = !TrayPopupUtils::CanOpenWebUISettings(login_);
 
-  settings_button_ = new SystemMenuButton(this, kSystemMenuSettingsIcon,
-                                          IDS_ASH_STATUS_TRAY_SETTINGS);
+  settings_button_ = new SystemMenuButton(
+      this, SystemMenuButton::InkDropStyle::FLOOD_FILL, kSystemMenuSettingsIcon,
+      IDS_ASH_STATUS_TRAY_SETTINGS);
   if (disable_buttons || !shell->system_tray_delegate()->ShouldShowSettings())
     settings_button_->SetState(views::Button::STATE_DISABLED);
   AddChildView(settings_button_);
-  AddSeparator();
+  AddChildView(TrayPopupUtils::CreateVerticalSeparator());
 
   help_button_ =
-      new SystemMenuButton(this, kSystemMenuHelpIcon, IDS_ASH_STATUS_TRAY_HELP);
+      new SystemMenuButton(this, SystemMenuButton::InkDropStyle::FLOOD_FILL,
+                           kSystemMenuHelpIcon, IDS_ASH_STATUS_TRAY_HELP);
   if (base::i18n::IsRTL() &&
       base::i18n::GetConfiguredLocale() == kHebrewLocale) {
     // The asset for the help button is a question mark '?'. Normally this asset
@@ -91,19 +93,21 @@ void TilesDefaultView::Init() {
   if (disable_buttons)
     help_button_->SetState(views::Button::STATE_DISABLED);
   AddChildView(help_button_);
-  AddSeparator();
+  AddChildView(TrayPopupUtils::CreateVerticalSeparator());
 
 #if !defined(OS_WIN)
   lock_button_ =
-      new SystemMenuButton(this, kSystemMenuLockIcon, IDS_ASH_STATUS_TRAY_LOCK);
+      new SystemMenuButton(this, SystemMenuButton::InkDropStyle::FLOOD_FILL,
+                           kSystemMenuLockIcon, IDS_ASH_STATUS_TRAY_LOCK);
   if (disable_buttons || !shell->GetSessionStateDelegate()->CanLockScreen())
     lock_button_->SetState(views::Button::STATE_DISABLED);
 
   AddChildView(lock_button_);
-  AddSeparator();
+  AddChildView(TrayPopupUtils::CreateVerticalSeparator());
 
-  power_button_ = new SystemMenuButton(this, kSystemMenuPowerIcon,
-                                       IDS_ASH_STATUS_TRAY_SHUTDOWN);
+  power_button_ =
+      new SystemMenuButton(this, SystemMenuButton::InkDropStyle::FLOOD_FILL,
+                           kSystemMenuPowerIcon, IDS_ASH_STATUS_TRAY_SHUTDOWN);
   AddChildView(power_button_);
   SystemTrayDelegate* system_tray_delegate = shell->system_tray_delegate();
   system_tray_delegate->AddShutdownPolicyObserver(this);
@@ -131,7 +135,7 @@ void TilesDefaultView::ButtonPressed(views::Button* sender,
 #endif
   } else if (sender == power_button_) {
     shell->RecordUserMetricsAction(UMA_TRAY_SHUT_DOWN);
-    shell->system_tray_delegate()->RequestShutdown();
+    shell->RequestShutdown();
   }
 
   owner_->system_tray()->CloseSystemBubble();
@@ -146,12 +150,13 @@ void TilesDefaultView::OnShutdownPolicyChanged(bool reboot_on_shutdown) {
                          : IDS_ASH_STATUS_TRAY_SHUTDOWN));
 }
 
-void TilesDefaultView::AddSeparator() {
-  views::Separator* separator =
-      new views::Separator(views::Separator::HORIZONTAL);
-  separator->SetPreferredSize(kHorizontalSeparatorHeight);
-  separator->SetColor(kHorizontalSeparatorColor);
-  AddChildView(separator);
+views::View* TilesDefaultView::GetHelpButtonView() const {
+  return help_button_;
+}
+
+const views::CustomButton* TilesDefaultView::GetShutdownButtonViewForTest()
+    const {
+  return power_button_;
 }
 
 }  // namespace ash

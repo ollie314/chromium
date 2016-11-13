@@ -1,10 +1,13 @@
 include_rules = [
   # Allow inclusion of specific components that we depend on.
   # See comment in content/DEPS for which components are allowed.
+  "+components/discardable_memory/common",
+  "+components/discardable_memory/service",
   "+components/filesystem",
   "+components/leveldb",
   "+components/link_header_util",
   "+components/mime_util",
+  "+components/payments",
   "+components/profile_service",
   "+components/scheduler/common",
   "+components/tracing",
@@ -17,6 +20,7 @@ include_rules = [
   "+device/generic_sensor",  # For sensors service.
   "+device/geolocation",
   "+device/nfc",
+  "+device/power_monitor",
   "+device/power_save_blocker",
   "+device/sensors/public",
   "+device/time_zone_monitor",  # For TimeZoneMonitor creation.
@@ -93,6 +97,7 @@ include_rules = [
   "+third_party/WebKit/public/platform/modules/serviceworker/service_worker_event_status.mojom.h",
   "+third_party/WebKit/public/platform/modules/vr/WebVR.h",
   "+third_party/WebKit/public/platform/modules/websockets/websocket.mojom.h",
+  "+third_party/WebKit/public/public_features.h",
   "+third_party/WebKit/public/web/WebAXEnums.h",
   "+third_party/WebKit/public/web/WebCompositionUnderline.h",
   "+third_party/WebKit/public/web/WebConsoleMessage.h",

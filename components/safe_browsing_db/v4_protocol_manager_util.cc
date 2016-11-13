@@ -89,8 +89,20 @@ const ListIdentifier GetChromeUrlApiId() {
   return ListIdentifier(CHROME_PLATFORM, URL, API_ABUSE);
 }
 
+const ListIdentifier GetChromeUrlClientIncidentId() {
+  return ListIdentifier(CHROME_PLATFORM, URL, CLIENT_INCIDENT);
+}
+
+const ListIdentifier GetChromeUrlMalwareId() {
+  return ListIdentifier(CHROME_PLATFORM, URL, MALWARE_THREAT);
+}
+
 const ListIdentifier GetUrlMalwareId() {
   return ListIdentifier(GetCurrentPlatformType(), URL, MALWARE_THREAT);
+}
+
+const ListIdentifier GetUrlMalBinId() {
+  return ListIdentifier(GetCurrentPlatformType(), URL, MALICIOUS_BINARY);
 }
 
 const ListIdentifier GetUrlSocEngId() {
@@ -163,7 +175,14 @@ ListIdentifier::ListIdentifier(const ListUpdateResponse& response)
                      response.threat_entry_type(),
                      response.threat_type()) {}
 
-V4ProtocolConfig::V4ProtocolConfig() : disable_auto_update(false) {}
+V4ProtocolConfig::V4ProtocolConfig(const std::string& client_name,
+                                   bool disable_auto_update,
+                                   const std::string& key_param,
+                                   const std::string& version)
+    : client_name(client_name),
+      disable_auto_update(disable_auto_update),
+      key_param(key_param),
+      version(version) {}
 
 V4ProtocolConfig::V4ProtocolConfig(const V4ProtocolConfig& other) = default;
 
@@ -241,7 +260,7 @@ void V4ProtocolManagerUtil::UpdateHeaders(net::HttpRequestHeaders* headers) {
 // static
 void V4ProtocolManagerUtil::UrlToFullHashes(
     const GURL& url,
-    std::unordered_set<FullHash>* full_hashes) {
+    std::vector<FullHash>* full_hashes) {
   std::string canon_host, canon_path, canon_query;
   CanonicalizeUrl(url, &canon_host, &canon_path, &canon_query);
 
@@ -256,7 +275,7 @@ void V4ProtocolManagerUtil::UrlToFullHashes(
   GeneratePathVariantsToCheck(canon_path, canon_query, &paths);
   for (const std::string& host : hosts) {
     for (const std::string& path : paths) {
-      full_hashes->insert(crypto::SHA256HashString(host + path));
+      full_hashes->push_back(crypto::SHA256HashString(host + path));
     }
   }
 }

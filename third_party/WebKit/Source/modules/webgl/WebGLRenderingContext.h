@@ -32,7 +32,18 @@
 
 namespace blink {
 
+class ANGLEInstancedArrays;
 class CanvasContextCreationAttributes;
+class EXTBlendMinMax;
+class EXTFragDepth;
+class EXTShaderTextureLOD;
+class EXTTextureFilterAnisotropic;
+class OESElementIndexUint;
+class OESStandardDerivatives;
+class OESTextureFloatLinear;
+class OESTextureHalfFloatLinear;
+class WebGLDebugRendererInfo;
+class WebGLLoseContext;
 
 class WebGLRenderingContext final : public WebGLRenderingContextBase {
   DEFINE_WRAPPERTYPEINFO();
@@ -63,7 +74,7 @@ class WebGLRenderingContext final : public WebGLRenderingContextBase {
   CanvasRenderingContext::ContextType getContextType() const override {
     return CanvasRenderingContext::ContextWebgl;
   }
-  ImageBitmap* transferToImageBitmap(ExceptionState&) final;
+  ImageBitmap* transferToImageBitmap(ScriptState*) final;
   String contextName() const override { return "WebGLRenderingContext"; }
   void registerContextExtensions() override;
   void setCanvasGetContextResult(RenderingContext&) final;

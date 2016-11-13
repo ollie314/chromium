@@ -68,12 +68,9 @@ class DocumentTimeline;
 class AXObjectCache;
 class Attr;
 class CDATASection;
-class CSSStyleDeclaration;
 class CSSStyleSheet;
 class CancellableTaskFactory;
 class CanvasFontCache;
-class CanvasRenderingContext2D;
-class CanvasRenderingContext2DOrWebGLRenderingContext;
 class CharacterData;
 class ChromeClient;
 class CompositorPendingAnimations;
@@ -103,13 +100,11 @@ class ExceptionState;
 class FloatQuad;
 class FloatRect;
 class FormController;
-class Frame;
 class FrameHost;
 class FrameRequestCallback;
 class FrameView;
 class HTMLAllCollection;
 class HTMLBodyElement;
-class HTMLCanvasElement;
 class HTMLCollection;
 class HTMLDialogElement;
 class HTMLElement;
@@ -122,7 +117,6 @@ class HTMLScriptElementOrSVGScriptElement;
 class HitTestRequest;
 class IdleRequestCallback;
 class IdleRequestOptions;
-class InputDeviceCapabilities;
 class IntersectionObserverController;
 class LayoutPoint;
 class LayoutView;
@@ -155,16 +149,15 @@ class ScriptRunner;
 class ScriptableDocumentParser;
 class ScriptedAnimationController;
 class ScriptedIdleTaskController;
-class ScrollStateCallback;
 class SecurityOrigin;
 class SegmentedString;
 class SelectorQueryCache;
 class SerializedScriptValue;
 class Settings;
 class SnapCoordinator;
+class StringOrDictionary;
 class StyleEngine;
 class StyleResolver;
-class StyleSheet;
 class StyleSheetList;
 class Text;
 class TextAutosizer;
@@ -173,8 +166,6 @@ class TouchList;
 class TransformSource;
 class TreeWalker;
 class VisitedLinkState;
-class VisualViewport;
-class WebGLRenderingContext;
 enum class SelectionBehaviorOnFocus;
 struct AnnotatedRegionValue;
 struct FocusParams;
@@ -247,10 +238,11 @@ enum WouldLoadReason {
   // if the inner frame is visible, so just load it.
   // TODO(dgrogan): Revisit after https://crbug.com/650433 is fixed.
   WouldLoadOutOfProcess,
-  // The next four indicate frames that are probably used for cross-origin
+  // The next five indicate frames that are probably used for cross-origin
   // communication.
   WouldLoadDisplayNone,
   WouldLoadZeroByZero,
+  WouldLoadAboveAndLeft,
   WouldLoadAbove,
   WouldLoadLeft,
   // We have to load documents in visible frames.
@@ -478,11 +470,6 @@ class CORE_EXPORT Document : public ContainerNode,
 
   void scheduleUseShadowTreeUpdate(SVGUseElement&);
   void unscheduleUseShadowTreeUpdate(SVGUseElement&);
-
-  // FIXME: SVG filters should change to store the filter on the ComputedStyle
-  // instead of the LayoutObject so we can get rid of this hack.
-  void scheduleSVGFilterLayerUpdateHack(Element&);
-  void unscheduleSVGFilterLayerUpdateHack(Element&);
 
   void evaluateMediaQueryList();
 
@@ -732,7 +719,9 @@ class CORE_EXPORT Document : public ContainerNode,
   void hoveredNodeDetached(Element&);
   void activeChainNodeDetached(Element&);
 
-  void updateHoverActiveState(const HitTestRequest&, Element*);
+  void updateHoverActiveState(const HitTestRequest&,
+                              Element*,
+                              bool hitScrollbar);
 
   // Updates for :target (CSS3 selector).
   void setCSSTarget(Element*);
@@ -1144,11 +1133,11 @@ class CORE_EXPORT Document : public ContainerNode,
   TextAutosizer* textAutosizer();
 
   Element* createElement(const AtomicString& localName,
-                         const AtomicString& typeExtension,
+                         const StringOrDictionary&,
                          ExceptionState&);
   Element* createElementNS(const AtomicString& namespaceURI,
                            const AtomicString& qualifiedName,
-                           const AtomicString& typeExtension,
+                           const StringOrDictionary&,
                            ExceptionState&);
   ScriptValue registerElement(
       ScriptState*,
@@ -1241,10 +1230,6 @@ class CORE_EXPORT Document : public ContainerNode,
 
   DECLARE_VIRTUAL_TRACE_WRAPPERS();
 
-  bool hasSVGFilterElementsRequiringLayerUpdate() const {
-    return m_layerUpdateSVGFilterElements.size();
-  }
-
   AtomicString convertLocalName(const AtomicString&);
 
   void platformColorsChanged();
@@ -1314,6 +1299,17 @@ class CORE_EXPORT Document : public ContainerNode,
 
   PropertyRegistry* propertyRegistry();
 
+  // Indicates whether the user has interacted with this particular Document.
+  void setHasReceivedUserGesture() { m_hasReceivedUserGesture = true; }
+  bool hasReceivedUserGesture() const { return m_hasReceivedUserGesture; }
+
+  // Document maintains a counter of visible non-secure password
+  // fields in the page. Used to notify the embedder when all visible
+  // non-secure passwords fields are no longer visible.
+  void incrementPasswordCount();
+  void decrementPasswordCount();
+  unsigned passwordCount() const;
+
  protected:
   Document(const DocumentInit&, DocumentClassFlags = DefaultDocumentClass);
 
@@ -1359,8 +1355,6 @@ class CORE_EXPORT Document : public ContainerNode,
   bool needsFullLayoutTreeUpdate() const;
 
   void inheritHtmlAndBodyElementStyles(StyleRecalcChange);
-
-  bool dirtyElementsForLayerUpdate();
 
   void updateUseShadowTreesIfNeeded();
   void evaluateMediaQueryListIfNeeded();
@@ -1479,7 +1473,7 @@ class CORE_EXPORT Document : public ContainerNode,
       m_executeScriptsWaitingForResourcesTask;
 
   bool m_hasAutofocused;
-  Timer<Document> m_clearFocusedElementTimer;
+  TaskRunnerTimer<Document> m_clearFocusedElementTimer;
   Member<Element> m_autofocusElement;
   Member<Element> m_focusedElement;
   Member<Range> m_sequentialFocusNavigationStartingPoint;
@@ -1533,7 +1527,7 @@ class CORE_EXPORT Document : public ContainerNode,
   Member<AXObjectCache> m_axObjectCache;
   Member<DocumentMarkerController> m_markers;
 
-  Timer<Document> m_updateFocusAppearanceTimer;
+  TaskRunnerTimer<Document> m_updateFocusAppearanceTimer;
 
   Member<Element> m_cssTarget;
 
@@ -1558,6 +1552,7 @@ class CORE_EXPORT Document : public ContainerNode,
 
   bool m_designMode;
   bool m_isRunningExecCommand;
+  bool m_hasReceivedUserGesture;
 
   HeapHashSet<WeakMember<const LiveNodeListBase>> m_listsInvalidatedAtDocument;
   // Oilpan keeps track of all registered NodeLists.
@@ -1601,8 +1596,8 @@ class CORE_EXPORT Document : public ContainerNode,
   HeapVector<Member<Element>> m_topLayerElements;
 
   int m_loadEventDelayCount;
-  Timer<Document> m_loadEventDelayTimer;
-  Timer<Document> m_pluginLoadingTimer;
+  TaskRunnerTimer<Document> m_loadEventDelayTimer;
+  TaskRunnerTimer<Document> m_pluginLoadingTimer;
 
   ViewportDescription m_viewportDescription;
   ViewportDescription m_legacyViewportDescription;
@@ -1624,7 +1619,7 @@ class CORE_EXPORT Document : public ContainerNode,
   Member<V0CustomElementMicrotaskRunQueue> m_customElementMicrotaskRunQueue;
 
   void elementDataCacheClearTimerFired(TimerBase*);
-  Timer<Document> m_elementDataCacheClearTimer;
+  TaskRunnerTimer<Document> m_elementDataCacheClearTimer;
 
   Member<ElementDataCache> m_elementDataCache;
 
@@ -1638,10 +1633,9 @@ class CORE_EXPORT Document : public ContainerNode,
   Member<Document> m_templateDocument;
   Member<Document> m_templateDocumentHost;
 
-  Timer<Document> m_didAssociateFormControlsTimer;
+  TaskRunnerTimer<Document> m_didAssociateFormControlsTimer;
 
   HeapHashSet<Member<SVGUseElement>> m_useElementsNeedingUpdate;
-  HeapHashSet<Member<Element>> m_layerUpdateSVGFilterElements;
 
   DOMTimerCoordinator m_timers;
 
@@ -1668,6 +1662,8 @@ class CORE_EXPORT Document : public ContainerNode,
   WouldLoadReason m_wouldLoadReason;
 
   Member<PropertyRegistry> m_propertyRegistry;
+
+  unsigned m_passwordCount;
 };
 
 extern template class CORE_EXTERN_TEMPLATE_EXPORT Supplement<Document>;

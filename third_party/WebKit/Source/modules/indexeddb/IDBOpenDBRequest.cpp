@@ -112,7 +112,7 @@ void IDBOpenDBRequest::onUpgradeNeeded(int64_t oldVersion,
       metadata.name, metadata.id, oldVersion, metadata.maxObjectStoreId);
 
   m_transaction = IDBTransaction::createVersionChange(
-      getScriptState(), m_transactionId, idbDatabase, this,
+      getExecutionContext(), m_transactionId, idbDatabase, this,
       oldDatabaseMetadata);
   setResult(IDBAny::create(idbDatabase));
 
@@ -161,7 +161,7 @@ void IDBOpenDBRequest::onSuccess(int64_t oldVersion) {
 }
 
 bool IDBOpenDBRequest::shouldEnqueueEvent() const {
-  if (m_contextStopped || !getExecutionContext())
+  if (!getExecutionContext())
     return false;
   DCHECK(m_readyState == PENDING || m_readyState == DONE);
   if (m_requestAborted)

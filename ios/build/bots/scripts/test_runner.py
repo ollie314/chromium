@@ -19,6 +19,15 @@ import gtest_utils
 import xctest_utils
 
 
+XCTEST_PROJECT = os.path.abspath(os.path.join(
+  os.path.dirname(__file__),
+  'TestProject',
+  'TestProject.xcodeproj',
+))
+
+XCTEST_SCHEME = 'TestProject'
+
+
 class Error(Exception):
   """Base class for errors."""
   pass
@@ -145,6 +154,7 @@ class TestRunner(object):
       XcodeVersionNotFoundError: If the given Xcode version does not exist.
       XCTestPlugInNotFoundError: If the .xctest PlugIn does not exist.
     """
+    app_path = os.path.abspath(app_path)
     if not os.path.exists(app_path):
       raise AppNotFoundError(app_path)
 
@@ -191,6 +201,14 @@ class TestRunner(object):
     """
     raise NotImplementedError
 
+  def get_launch_env(self):
+    """Returns a dict of environment variables to use to launch the test app.
+
+    Returns:
+      A dict of environment variables.
+    """
+    return os.environ.copy()
+
   def set_up(self):
     """Performs setup actions which must occur prior to every test launch."""
     raise NotImplementedError
@@ -225,7 +243,11 @@ class TestRunner(object):
       parser = gtest_utils.GTestLogParser()
 
     proc = subprocess.Popen(
-        cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        cmd,
+        env=self.get_launch_env(),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
 
     while True:
       line = proc.stdout.readline()
@@ -234,8 +256,10 @@ class TestRunner(object):
       line = line.rstrip()
       parser.ProcessLine(line)
       print line
+      sys.stdout.flush()
 
     proc.wait()
+    sys.stdout.flush()
 
     for test in parser.FailedTests(include_flaky=True):
       # Test cases are named as <test group>.<test case>. If the test case
@@ -353,6 +377,7 @@ class SimulatorTestRunner(TestRunner):
         xctest=xctest,
     )
 
+    iossim_path = os.path.abspath(iossim_path)
     if not os.path.exists(iossim_path):
       raise SimulatorNotFoundError(iossim_path)
 
@@ -373,17 +398,39 @@ class SimulatorTestRunner(TestRunner):
           # The simulator's name varies by Xcode version.
           'iPhone Simulator', # Xcode 5
           'iOS Simulator', # Xcode 6
-          'Simulator', # Xcode 7
+          'Simulator', # Xcode 7+
+          'simctl', # https://crbug.com/637429
       ])
+      # If a signal was sent, wait for the simulators to actually be killed.
+      time.sleep(5)
     except subprocess.CalledProcessError as e:
       if e.returncode != 1:
         # Ignore a 1 exit code (which means there were no simulators to kill).
         raise
 
+  def wipe_simulator(self):
+    """Wipes the simulator."""
+    subprocess.check_call([
+        self.iossim_path,
+        '-d', self.platform,
+        '-s', self.version,
+        '-w',
+    ])
+
+  def get_home_directory(self):
+    """Returns the simulator's home directory."""
+    return subprocess.check_output([
+        self.iossim_path,
+        '-d', self.platform,
+        '-p',
+        '-s', self.version,
+    ]).rstrip()
+
   def set_up(self):
     """Performs setup actions which must occur prior to every test launch."""
     self.kill_simulators()
-    self.homedir = tempfile.mkdtemp()
+    self.wipe_simulator()
+    self.homedir = self.get_home_directory()
     # Crash reports have a timestamp in their file name, formatted as
     # YYYY-MM-DD-HHMMSS. Save the current time in the same format so
     # we can compare and fetch crash reports from this run later on.
@@ -391,21 +438,11 @@ class SimulatorTestRunner(TestRunner):
 
   def extract_test_data(self):
     """Extracts data emitted by the test."""
-    # Find the directory named after the unique device ID of the simulator we
-    # started. We expect only one because we use a new homedir each time.
-    udid_dir = os.path.join(
-        self.homedir, 'Library', 'Developer', 'CoreSimulator', 'Devices')
-    if not os.path.exists(udid_dir):
-      return
-    udids = os.listdir(udid_dir)
-    if len(udids) != 1:
-      return
-
     # Find the Documents directory of the test app. The app directory names
     # don't correspond with any known information, so we have to examine them
     # all until we find one with a matching CFBundleIdentifier.
     apps_dir = os.path.join(
-        udid_dir, udids[0], 'data', 'Containers', 'Data', 'Application')
+        self.homedir, 'Containers', 'Data', 'Application')
     if os.path.exists(apps_dir):
       for appid_dir in os.listdir(apps_dir):
         docs_dir = os.path.join(apps_dir, appid_dir, 'Documents')
@@ -452,6 +489,7 @@ class SimulatorTestRunner(TestRunner):
     self.retrieve_crash_reports()
     self.screenshot_desktop()
     self.kill_simulators()
+    self.wipe_simulator()
     if os.path.exists(self.homedir):
       shutil.rmtree(self.homedir, ignore_errors=True)
       self.homedir = ''
@@ -471,8 +509,6 @@ class SimulatorTestRunner(TestRunner):
         self.iossim_path,
         '-d', self.platform,
         '-s', self.version,
-        '-t', '120',
-        '-u', self.homedir,
     ]
     args = []
 
@@ -496,12 +532,30 @@ class SimulatorTestRunner(TestRunner):
     cmd.extend(args)
     return cmd
 
+  def get_launch_env(self):
+    """Returns a dict of environment variables to use to launch the test app.
+
+    Returns:
+      A dict of environment variables.
+    """
+    env = super(SimulatorTestRunner, self).get_launch_env()
+    if self.xctest_path:
+      env['NSUnbufferedIO'] = 'YES'
+    return env
+
 
 class DeviceTestRunner(TestRunner):
   """Class for running tests on devices."""
 
   def __init__(
-    self, app_path, xcode_version, out_dir, env_vars=None, test_args=None):
+    self,
+    app_path,
+    xcode_version,
+    out_dir,
+    env_vars=None,
+    test_args=None,
+    xctest=False,
+  ):
     """Initializes a new instance of this class.
 
     Args:
@@ -511,13 +565,22 @@ class DeviceTestRunner(TestRunner):
       env_vars: List of environment variables to pass to the test itself.
       test_args: List of strings to pass as arguments to the test when
         launching.
+      xctest: Whether or not this is an XCTest.
 
     Raises:
       AppNotFoundError: If the given app does not exist.
+      PlugInsNotFoundError: If the PlugIns directory does not exist for XCTests.
       XcodeVersionNotFoundError: If the given Xcode version does not exist.
+      XCTestPlugInNotFoundError: If the .xctest PlugIn does not exist.
     """
     super(DeviceTestRunner, self).__init__(
-      app_path, xcode_version, out_dir, env_vars=env_vars, test_args=test_args)
+      app_path,
+      xcode_version,
+      out_dir,
+      env_vars=env_vars,
+      test_args=test_args,
+      xctest=xctest,
+    )
 
     self.udid = subprocess.check_output(['idevice_id', '--list']).rstrip()
     if len(self.udid.splitlines()) != 1:
@@ -567,6 +630,16 @@ class DeviceTestRunner(TestRunner):
     Returns:
       A list of strings forming the command to launch the test.
     """
+    if self.xctest_path:
+      return [
+        'xcodebuild',
+        'test-without-building',
+        'BUILT_PRODUCTS_DIR=%s' % os.path.dirname(self.app_path),
+        '-destination', 'id=%s' % self.udid,
+        '-project', XCTEST_PROJECT,
+        '-scheme', XCTEST_SCHEME,
+      ]
+
     cmd = [
       'idevice-app-runner',
       '--udid', self.udid,
@@ -589,3 +662,19 @@ class DeviceTestRunner(TestRunner):
       cmd.extend(args)
 
     return cmd
+
+  def get_launch_env(self):
+    """Returns a dict of environment variables to use to launch the test app.
+
+    Returns:
+      A dict of environment variables.
+    """
+    env = super(DeviceTestRunner, self).get_launch_env()
+    if self.xctest_path:
+      env['NSUnbufferedIO'] = 'YES'
+      # e.g. ios_web_shell_egtests
+      env['APP_TARGET_NAME'] = os.path.splitext(
+          os.path.basename(self.app_path))[0]
+      # e.g. ios_web_shell_egtests_module
+      env['TEST_TARGET_NAME'] = env['APP_TARGET_NAME'] + '_module'
+    return env

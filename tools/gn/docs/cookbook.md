@@ -204,7 +204,6 @@ places are noted in the table below.
 | `arm_version`                                   | `arm_version`                              | `//build/config/arm.gni`                       |
 | `asan` (0/1)                                    | `is_asan` (true/false)                     | `//build/config/sanitizers/sanitizers.gni`     |
 | `branding` ("Chromium"/"Chrome")                | `is_chrome_branded` (true/false)           | `//build/config/chrome_build.gni`              |
-| `build_for_tool=="drmemory"`                    | `enable_iterator_debugging=false`          | (internal to `//build/config/BUILD.gn`)        |
 | `build_for_tool=="tsan"`                        | `enable_iterator_debugging=false`          | (internal to `//build/config/BUILD.gn`)        |
 | `buildtype` ("Official"/"Dev")                  | `is_official_build` (true/false)           | `//build/config/chrome_build.gni`              |
 | `chrome_multiple_dll` (0/1)                     | `is_multi_dll_chrome` (true/false)         | `//build/config/chrome_build.gni`              |
@@ -275,7 +274,6 @@ places are noted in the table below.
 | `use_ash` (0/1)                         | `use_ash` (true/false)                         | `//build/config/ui.gni`       |
 | `use_athena` (0/1)                      | `use_athena` (true/false)                      | `//build/config/ui.gni`       |
 | `use_aura` (0/1)                        | `use_aura` (true/false)                        | `//build/config/ui.gni`       |
-| `use_brlapi` (0/1)                      | `use_brlapi` (true/false)                      | `//build/config/features.gni` |
 | `use_cairo` (0/1)                       | `use_cairo` (true/false)                       | `//build/config/ui.gni`       |
 | `use_clipboard_aurax11` (0/1)           | `use_aura && use_x11`                          |                               |
 | `use_cups` (0/1)                        | `use_cups` (true/false)                        | `//build/config/features.gni` |

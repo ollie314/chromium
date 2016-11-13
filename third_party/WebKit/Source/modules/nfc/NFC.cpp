@@ -4,9 +4,9 @@
 
 #include "modules/nfc/NFC.h"
 
-#include "bindings/core/v8/JSONValuesForV8.h"
 #include "bindings/core/v8/ScriptPromiseResolver.h"
 #include "bindings/core/v8/V8ArrayBuffer.h"
+#include "bindings/core/v8/V8StringResource.h"
 #include "core/dom/DOMArrayBuffer.h"
 #include "core/dom/DOMException.h"
 #include "core/dom/Document.h"
@@ -17,6 +17,7 @@
 #include "modules/nfc/NFCPushOptions.h"
 #include "platform/mojo/MojoHelper.h"
 #include "public/platform/InterfaceProvider.h"
+#include "public/platform/Platform.h"
 
 namespace mojom = device::nfc::mojom::blink;
 
@@ -172,11 +173,14 @@ struct TypeConverter<mojo::WTFArray<uint8_t>, blink::ScriptValue> {
         return mojo::WTFArray<uint8_t>::From<WTF::String>(stringResource);
     }
 
-    if (value->IsObject() && !value->IsArrayBuffer()) {
-      std::unique_ptr<blink::JSONValue> jsonResult =
-          blink::toJSONValue(scriptValue.context(), value);
-      if (jsonResult && (jsonResult->getType() == blink::JSONValue::TypeObject))
-        return mojo::WTFArray<uint8_t>::From(jsonResult->toJSONString());
+    if (value->IsObject() && !value->IsArray() && !value->IsArrayBuffer()) {
+      v8::Local<v8::String> jsonString;
+      if (v8::JSON::Stringify(scriptValue.context(), value.As<v8::Object>())
+              .ToLocal(&jsonString)) {
+        WTF::String wtfString = blink::v8StringToWebCoreString<WTF::String>(
+            jsonString, blink::DoNotExternalize);
+        return mojo::WTFArray<uint8_t>::From(wtfString);
+      }
     }
 
     if (value->IsArrayBuffer())
@@ -561,6 +565,11 @@ void NFC::OnRequestCompleted(ScriptPromiseResolver* resolver,
 }
 
 void NFC::OnConnectionError() {
+  if (!Platform::current()) {
+    // TODO(rockot): Clean this up once renderer shutdown sequence is fixed.
+    return;
+  }
+
   m_nfc.reset();
 
   // If NFCService is not available or disappears when NFC hardware is

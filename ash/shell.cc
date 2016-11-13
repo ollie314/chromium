@@ -40,7 +40,6 @@
 #include "ash/common/wm_shell.h"
 #include "ash/display/cursor_window_controller.h"
 #include "ash/display/display_configuration_controller.h"
-#include "ash/display/display_manager.h"
 #include "ash/display/event_transformation_handler.h"
 #include "ash/display/mouse_cursor_event_filter.h"
 #include "ash/display/screen_ash.h"
@@ -90,6 +89,7 @@
 #include "ui/compositor/layer.h"
 #include "ui/compositor/layer_animator.h"
 #include "ui/display/display.h"
+#include "ui/display/manager/display_manager.h"
 #include "ui/display/screen.h"
 #include "ui/events/event_target_iterator.h"
 #include "ui/gfx/geometry/size.h"
@@ -724,7 +724,8 @@ void Shell::Init(const ShellInitParams& init_params) {
   screen_pinning_controller_.reset(
       new ScreenPinningController(window_tree_host_manager_.get()));
 
-  lock_state_controller_.reset(new LockStateController);
+  lock_state_controller_ = base::MakeUnique<LockStateController>(
+      wm_shell_->delegate()->GetShellConnector());
   power_button_controller_.reset(
       new PowerButtonController(lock_state_controller_.get()));
 #if defined(OS_CHROMEOS)

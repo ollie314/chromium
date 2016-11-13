@@ -5,6 +5,7 @@
 #include "modules/payments/PaymentsValidators.h"
 
 #include "bindings/core/v8/ScriptRegexp.h"
+#include "platform/weborigin/KURL.h"
 #include "wtf/text/StringImpl.h"
 
 namespace blink {
@@ -100,7 +101,7 @@ bool PaymentsValidators::isValidScriptCodeFormat(const String& code,
 }
 
 bool PaymentsValidators::isValidShippingAddress(
-    const mojom::blink::PaymentAddressPtr& address,
+    const payments::mojom::blink::PaymentAddressPtr& address,
     String* optionalErrorMessage) {
   if (!isValidCountryCodeFormat(address->country, optionalErrorMessage))
     return false;

@@ -33,6 +33,7 @@
 #include "core/frame/FrameTypes.h"
 #include "core/loader/FrameLoaderTypes.h"
 #include "core/page/FrameTree.h"
+#include "platform/feature_policy/FeaturePolicy.h"
 #include "platform/heap/Handle.h"
 #include "wtf/Forward.h"
 
@@ -88,6 +89,8 @@ class CORE_EXPORT Frame : public GarbageCollectedFinalized<Frame> {
   virtual void detach(FrameDetachType);
   void disconnectOwnerElement();
   virtual bool shouldClose() = 0;
+
+  virtual void setDocumentHasReceivedUserGesture() = 0;
 
   FrameClient* client() const;
 

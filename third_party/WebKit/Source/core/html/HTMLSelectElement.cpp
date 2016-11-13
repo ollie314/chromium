@@ -667,7 +667,7 @@ void HTMLSelectElement::listBoxOnChange() {
   // FIXME: Why? This looks unreasonable.
   if (m_lastOnChangeSelection.isEmpty() ||
       m_lastOnChangeSelection.size() != items.size()) {
-    dispatchFormControlChangeEvent();
+    dispatchChangeEvent();
     return;
   }
 
@@ -684,7 +684,7 @@ void HTMLSelectElement::listBoxOnChange() {
 
   if (fireOnChange) {
     dispatchInputEvent();
-    dispatchFormControlChangeEvent();
+    dispatchChangeEvent();
   }
 }
 
@@ -695,7 +695,7 @@ void HTMLSelectElement::dispatchInputAndChangeEventForMenuList() {
   if (m_lastOnChangeOption.get() != selectedOption) {
     m_lastOnChangeOption = selectedOption;
     dispatchInputEvent();
-    dispatchFormControlChangeEvent();
+    dispatchChangeEvent();
   }
 }
 
@@ -722,11 +722,10 @@ const HTMLSelectElement::ListItems& HTMLSelectElement::listItems() const {
   if (m_shouldRecalcListItems) {
     recalcListItems();
   } else {
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
     HeapVector<Member<HTMLElement>> items = m_listItems;
     recalcListItems();
-    // TODO(tkent): Add a stream printer for HeapVector. DCHECK requires it.
-    ASSERT(items == m_listItems);
+    DCHECK(items == m_listItems);
 #endif
   }
 
@@ -1041,7 +1040,7 @@ void HTMLSelectElement::selectOption(HTMLOptionElement* element,
   if (usesMenuList()) {
     if (shouldDispatchEvents) {
       dispatchInputEvent();
-      dispatchFormControlChangeEvent();
+      dispatchChangeEvent();
     }
     if (LayoutObject* layoutObject = this->layoutObject()) {
       // Need to check usesMenuList() again because event handlers might

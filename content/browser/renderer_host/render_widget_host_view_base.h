@@ -42,7 +42,6 @@
 
 class SkBitmap;
 
-struct AccessibilityHostMsg_EventParams;
 struct ViewHostMsg_SelectionBounds_Params;
 
 namespace media {
@@ -91,6 +90,7 @@ class CONTENT_EXPORT RenderWidgetHostViewBase : public RenderWidgetHostView,
   // RenderWidgetHostView implementation.
   RenderWidgetHost* GetRenderWidgetHost() const override;
   void SetBackgroundColor(SkColor color) override;
+  SkColor background_color() override;
   void SetBackgroundColorToDefault() final;
   bool GetBackgroundOpaque() override;
   ui::TextInputClient* GetTextInputClient() override;
@@ -161,9 +161,9 @@ class CONTENT_EXPORT RenderWidgetHostViewBase : public RenderWidgetHostView,
 
   // Whether or not Blink's viewport size should be shrunk by the height of the
   // URL-bar.
-  virtual bool DoTopControlsShrinkBlinkSize() const;
+  virtual bool DoBrowserControlsShrinkBlinkSize() const;
 
-  // The height of the URL-bar top controls.
+  // The height of the URL-bar browser controls.
   virtual float GetTopControlsHeight() const;
 
   // The height of the bottom bar.

@@ -29,6 +29,7 @@
 #include "modules/accessibility/AXNodeObject.h"
 
 #include "core/InputTypeNames.h"
+#include "core/dom/DocumentUserGestureToken.h"
 #include "core/dom/Element.h"
 #include "core/dom/NodeTraversal.h"
 #include "core/dom/Text.h"
@@ -87,48 +88,6 @@ AXNodeObject::~AXNodeObject() {
   ASSERT(!m_node);
 }
 
-// This function implements the ARIA accessible name as described by the Mozilla
-// ARIA Implementer's Guide.
-static String accessibleNameForNode(Node* node) {
-  if (!node)
-    return String();
-
-  if (node->isTextNode())
-    return toText(node)->data();
-
-  if (isHTMLInputElement(*node))
-    return toHTMLInputElement(*node).value();
-
-  if (node->isHTMLElement()) {
-    const AtomicString& alt = toHTMLElement(node)->getAttribute(altAttr);
-    if (!alt.isEmpty())
-      return alt;
-
-    const AtomicString& title = toHTMLElement(node)->getAttribute(titleAttr);
-    if (!title.isEmpty())
-      return title;
-  }
-
-  return String();
-}
-
-String AXNodeObject::accessibilityDescriptionForElements(
-    HeapVector<Member<Element>>& elements) const {
-  StringBuilder builder;
-  unsigned size = elements.size();
-  for (unsigned i = 0; i < size; ++i) {
-    Element* idElement = elements[i];
-
-    builder.append(accessibleNameForNode(idElement));
-    for (Node& n : NodeTraversal::descendantsOf(*idElement))
-      builder.append(accessibleNameForNode(&n));
-
-    if (i != size - 1)
-      builder.append(' ');
-  }
-  return builder.toString();
-}
-
 void AXNodeObject::alterSliderValue(bool increase) {
   if (roleValue() != SliderRole)
     return;
@@ -160,18 +119,6 @@ AXObject* AXNodeObject::activeDescendant() {
 
   AXObject* axDescendant = axObjectCache().getOrCreate(descendant);
   return axDescendant;
-}
-
-String AXNodeObject::ariaAccessibilityDescription() const {
-  String ariaLabelledby = ariaLabelledbyAttribute();
-  if (!ariaLabelledby.isEmpty())
-    return ariaLabelledby;
-
-  const AtomicString& ariaLabel = getAttribute(aria_labelAttr);
-  if (!ariaLabel.isEmpty())
-    return ariaLabel;
-
-  return String();
 }
 
 bool AXNodeObject::computeAccessibilityIsIgnored(
@@ -1311,7 +1258,7 @@ AccessibilityOrientation AXNodeObject::orientation() const {
 String AXNodeObject::text() const {
   // If this is a user defined static text, use the accessible name computation.
   if (ariaRoleAttribute() == StaticTextRole)
-    return ariaAccessibilityDescription();
+    return computedName();
 
   if (!isTextControl())
     return String();
@@ -1543,20 +1490,6 @@ String AXNodeObject::stringValue() const {
   }
 
   return String();
-}
-
-String AXNodeObject::ariaDescribedByAttribute() const {
-  HeapVector<Member<Element>> elements;
-  elementsFromAttribute(elements, aria_describedbyAttr);
-
-  return accessibilityDescriptionForElements(elements);
-}
-
-String AXNodeObject::ariaLabelledbyAttribute() const {
-  HeapVector<Member<Element>> elements;
-  ariaLabelledbyElementVector(elements);
-
-  return accessibilityDescriptionForElements(elements);
 }
 
 AccessibilityRole AXNodeObject::ariaRoleAttribute() const {
@@ -2154,14 +2087,14 @@ void AXNodeObject::setFocused(bool on) {
 }
 
 void AXNodeObject::increment() {
-  UserGestureIndicator gestureIndicator(
-      UserGestureToken::create(UserGestureToken::NewGesture));
+  UserGestureIndicator gestureIndicator(DocumentUserGestureToken::create(
+      getDocument(), UserGestureToken::NewGesture));
   alterSliderValue(true);
 }
 
 void AXNodeObject::decrement() {
-  UserGestureIndicator gestureIndicator(
-      UserGestureToken::create(UserGestureToken::NewGesture));
+  UserGestureIndicator gestureIndicator(DocumentUserGestureToken::create(
+      getDocument(), UserGestureToken::NewGesture));
   alterSliderValue(false);
 }
 
@@ -2169,6 +2102,7 @@ void AXNodeObject::setSequentialFocusNavigationStartingPoint() {
   if (!getNode())
     return;
 
+  getNode()->document().clearFocusedElement();
   getNode()->document().setSequentialFocusNavigationStartingPoint(getNode());
 }
 

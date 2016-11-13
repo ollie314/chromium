@@ -110,15 +110,7 @@ class PLATFORM_EXPORT DisplayItem {
     kTableCellBackgroundFromColumn,
     kTableCellBackgroundFromSection,
     kTableCellBackgroundFromRow,
-    // Table collapsed borders can be painted together (e.g., left & top) but
-    // there are at most 4 phases of collapsed border painting for a single
-    // cell. To disambiguate these phases of collapsed border painting, a mask
-    // is used. TableCollapsedBorderBase can be larger than
-    // TableCollapsedBorderUnalignedBase to ensure the base lower bits are 0's.
-    kTableCollapsedBorderUnalignedBase,
-    kTableCollapsedBorderBase =
-        (((kTableCollapsedBorderUnalignedBase - 1) >> 4) + 1) << 4,
-    kTableCollapsedBorderLast = kTableCollapsedBorderBase + 0x0f,
+    kTableCollapsedBorders,
     kTableSectionBoxShadowInset,
     kTableSectionBoxShadowNormal,
     kTableRowBoxShadowInset,
@@ -202,19 +194,6 @@ class PLATFORM_EXPORT DisplayItem {
     kTypeLast = kUninitializedType
   };
 
-  static_assert(kTableCollapsedBorderBase >= kTableCollapsedBorderUnalignedBase,
-                "TableCollapsedBorder types overlap with other types");
-  static_assert((kTableCollapsedBorderBase & 0xf) == 0,
-                "The lowest 4 bits of TableCollapsedBorderBase should be zero");
-  // Bits or'ed onto TableCollapsedBorderBase to generate a real table collapsed
-  // border type.
-  enum TableCollapsedBorderSides {
-    TableCollapsedBorderTop = 1 << 0,
-    TableCollapsedBorderRight = 1 << 1,
-    TableCollapsedBorderBottom = 1 << 2,
-    TableCollapsedBorderLeft = 1 << 3,
-  };
-
   DisplayItem(const DisplayItemClient& client, Type type, size_t derivedSize)
       : m_client(&client),
         m_type(type),
@@ -227,8 +206,8 @@ class PLATFORM_EXPORT DisplayItem {
   {
     // derivedSize must fit in m_derivedSize.
     // If it doesn't, enlarge m_derivedSize and fix this assert.
-    ASSERT_WITH_SECURITY_IMPLICATION(derivedSize < (1 << 8));
-    ASSERT_WITH_SECURITY_IMPLICATION(derivedSize >= sizeof(*this));
+    SECURITY_DCHECK(derivedSize < (1 << 8));
+    SECURITY_DCHECK(derivedSize >= sizeof(*this));
   }
 
   virtual ~DisplayItem() {}

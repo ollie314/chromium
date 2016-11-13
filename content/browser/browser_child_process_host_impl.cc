@@ -38,14 +38,16 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/child_process_data.h"
 #include "content/public/browser/content_browser_client.h"
+#include "content/public/common/connection_filter.h"
 #include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/mojo_channel_switches.h"
 #include "content/public/common/process_type.h"
 #include "content/public/common/result_codes.h"
-#include "ipc/attachment_broker.h"
-#include "ipc/attachment_broker_privileged.h"
+#include "content/public/common/service_manager_connection.h"
+#include "device/power_monitor/power_monitor_message_broadcaster.h"
 #include "mojo/edk/embedder/embedder.h"
+#include "services/service_manager/public/cpp/interface_registry.h"
 
 #if defined(OS_MACOSX)
 #include "content/browser/mach_broker_mac.h"
@@ -84,6 +86,23 @@ void NotifyProcessKilled(const ChildProcessData& data, int exit_code) {
   for (auto& observer : g_observers.Get())
     observer.BrowserChildProcessKilled(data, exit_code);
 }
+
+class ConnectionFilterImpl : public ConnectionFilter {
+ public:
+  ConnectionFilterImpl() {}
+
+ private:
+  // ConnectionFilter:
+  bool OnConnect(const service_manager::Identity& remote_identity,
+                 service_manager::InterfaceRegistry* registry,
+                 service_manager::Connector* connector) override {
+    registry->AddInterface(
+        base::Bind(&device::PowerMonitorMessageBroadcaster::Create));
+    return true;
+  }
+
+  DISALLOW_COPY_AND_ASSIGN(ConnectionFilterImpl);
+};
 
 }  // namespace
 
@@ -144,24 +163,10 @@ BrowserChildProcessHostImpl::BrowserChildProcessHostImpl(
     : data_(process_type),
       delegate_(delegate),
       child_token_(mojo::edk::GenerateRandomToken()),
-      power_monitor_message_broadcaster_(this),
       is_channel_connected_(false),
       notify_child_disconnected_(false),
       weak_factory_(this) {
   data_.id = ChildProcessHostImpl::GenerateChildProcessUniqueId();
-
-#if USE_ATTACHMENT_BROKER
-  // Construct the privileged attachment broker early in the life cycle of a
-  // child process. This ensures that when a test is being run in one of the
-  // single process modes, the global attachment broker is the privileged
-  // attachment broker, rather than an unprivileged attachment broker.
-#if defined(OS_MACOSX)
-  IPC::AttachmentBrokerPrivileged::CreateBrokerIfNeeded(
-      MachBroker::GetInstance());
-#else
-  IPC::AttachmentBrokerPrivileged::CreateBrokerIfNeeded();
-#endif  // defined(OS_MACOSX)
-#endif  // USE_ATTACHMENT_BROKER
 
   child_process_host_.reset(ChildProcessHost::Create(this));
   AddFilter(new TraceMessageFilter(data_.id));
@@ -172,14 +177,18 @@ BrowserChildProcessHostImpl::BrowserChildProcessHostImpl(
   g_child_process_list.Get().push_back(this);
   GetContentClient()->browser()->BrowserChildProcessHostCreated(this);
 
-  power_monitor_message_broadcaster_.Init();
-
   if (!service_name.empty()) {
     DCHECK_CURRENTLY_ON(BrowserThread::IO);
     child_connection_.reset(new ChildConnection(
         service_name, base::StringPrintf("%d", data_.id), child_token_,
         ServiceManagerContext::GetConnectorForIOThread(),
         base::ThreadTaskRunnerHandle::Get()));
+  }
+
+  // May be null during test execution.
+  if (ServiceManagerConnection::GetForProcess()) {
+    ServiceManagerConnection::GetForProcess()->AddConnectionFilter(
+        base::MakeUnique<ConnectionFilterImpl>());
   }
 
   // Create a persistent memory segment for subprocess histograms.
@@ -208,8 +217,7 @@ void BrowserChildProcessHostImpl::TerminateAll() {
 }
 
 // static
-std::unique_ptr<base::SharedMemory>
-BrowserChildProcessHostImpl::CopyFeatureAndFieldTrialFlags(
+void BrowserChildProcessHostImpl::CopyFeatureAndFieldTrialFlags(
     base::CommandLine* cmd_line) {
   std::string enabled_features;
   std::string disabled_features;
@@ -222,14 +230,13 @@ BrowserChildProcessHostImpl::CopyFeatureAndFieldTrialFlags(
 
   // If we run base::FieldTrials, we want to pass to their state to the
   // child process so that it can act in accordance with each state.
-  return base::FieldTrialList::CopyFieldTrialStateToFlags(
-      switches::kFieldTrialHandle, cmd_line);
+  base::FieldTrialList::CopyFieldTrialStateToFlags(switches::kFieldTrialHandle,
+                                                   cmd_line);
 }
 
 void BrowserChildProcessHostImpl::Launch(
     SandboxedProcessLauncherDelegate* delegate,
     base::CommandLine* cmd_line,
-    const base::SharedMemory* field_trial_state,
     bool terminate_on_shutdown) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
@@ -257,7 +264,7 @@ void BrowserChildProcessHostImpl::Launch(
 
   notify_child_disconnected_ = true;
   child_process_.reset(new ChildProcessLauncher(
-      delegate, cmd_line, data_.id, this, field_trial_state, child_token_,
+      delegate, cmd_line, data_.id, this, child_token_,
       base::Bind(&BrowserChildProcessHostImpl::OnMojoError,
                  weak_factory_.GetWeakPtr(),
                  base::ThreadTaskRunnerHandle::Get()),

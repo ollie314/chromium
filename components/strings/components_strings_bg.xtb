@@ -10,7 +10,6 @@
 <translation id="10614374240317010">Незапазвани никога</translation>
 <translation id="106701514854093668">Настолни отметки</translation>
 <translation id="1080116354587839789">Побиране на ширина</translation>
-<translation id="1103124106085518534">Готово засега</translation>
 <translation id="1103523840287552314">Винаги да се превежда от <ph name="LANGUAGE" /></translation>
 <translation id="1107591249535594099">Ако поставите отметка, Chrome ще съхранява копие на картата ви на това устройство с цел по-бързо попълване на формуляри.</translation>
 <translation id="1111153019813902504">Скорошни отметки</translation>
@@ -51,6 +50,7 @@
 <translation id="1491663344921578213">В момента не можете да посетите <ph name="SITE" />, защото уебсайтът използва фиксиране на сертификатите. Обикновено мрежовите грешки и атаки са временни, така че тази страница вероятно ще работи по-късно. <ph name="BEGIN_LEARN_MORE_LINK" />Научете повече<ph name="END_LEARN_MORE_LINK" />.</translation>
 <translation id="1506687042165942984">Показване на запазено копие на тази страница (за което е известно, че не е актуално).</translation>
 <translation id="1519264250979466059">Дата на версията</translation>
+<translation id="153384715582417236">Това е всичко засега</translation>
 <translation id="1549470594296187301">Трябва да активирате JavaScript, за да използвате тази функция.</translation>
 <translation id="1559528461873125649">Няма такъв файл или директория</translation>
 <translation id="1559572115229829303">&lt;p&gt;Не може да се установи частна връзка с/ъс <ph name="BEGIN_BOLD" /><ph name="DOMAIN" /><ph name="END_BOLD" />, тъй като датата и часът на устройството ви (<ph name="DATE_AND_TIME" />) са неправилни.&lt;/p&gt;
@@ -74,7 +74,6 @@
 <translation id="1768211456781949159"><ph name="BEGIN_LINK" />Опитайте да стартирате мрежова диагностика в Windows<ph name="END_LINK" />.</translation>
 <translation id="1783075131180517613">Моля, актуализирайте пропуска си за синхронизиране.</translation>
 <translation id="1791429645902722292">Google Smart Lock</translation>
-<translation id="1815084229389833348">Наскоро посетените от вас отметки ще се показват тук.</translation>
 <translation id="1821930232296380041">Заявката или параметрите й са невалидни</translation>
 <translation id="1838667051080421715">Преглеждате изходния код на уеб страницата.</translation>
 <translation id="1871208020102129563">За прокси сървъра е зададено да използва фиксирани прокси сървъри, а не URL адрес на скрипт във формат .pac.</translation>
@@ -352,7 +351,6 @@
 <translation id="4728558894243024398">Платформа</translation>
 <translation id="4744603770635761495">Път към изпълнимия файл</translation>
 <translation id="4756388243121344051">&amp;История</translation>
-<translation id="4759238208242260848">Изтегляния</translation>
 <translation id="4764776831041365478">До уеб страницата на адрес <ph name="URL" /> може временно да няма достъп или да е преместена за постоянно на нов уеб адрес.</translation>
 <translation id="4771973620359291008">Възникна неизвестна грешка.</translation>
 <translation id="4782449893814226250">Попитахте родителите си дали може да посетите тази страница.</translation>
@@ -361,7 +359,6 @@
 <translation id="4816492930507672669">Да се побере в страницата</translation>
 <translation id="4850886885716139402">Изглед</translation>
 <translation id="4880827082731008257">Търсене в историята</translation>
-<translation id="4884656795097055129">В подходящия момент ще се покажат още статии.</translation>
 <translation id="4895877746940133817"><ph name="TYPE_1" />, <ph name="TYPE_2" /> и <ph name="TYPE_3" /></translation>
 <translation id="4914479371620770914">{URL_count,plural, =1{и още 1 уеб страница}other{и още # уеб страници}}</translation>
 <translation id="4923417429809017348">Тази страница е преведена от непознат език на <ph name="LANGUAGE_LANGUAGE" /></translation>
@@ -390,8 +387,10 @@
 <translation id="5171045022955879922">Търсете или въведете URL адрес</translation>
 <translation id="5172758083709347301">Машината</translation>
 <translation id="5179510805599951267">Не е на <ph name="ORIGINAL_LANGUAGE" />? Подайте сигнал за тази грешка</translation>
+<translation id="5181140330217080051">Изтегля се</translation>
 <translation id="5190835502935405962">Лента на отметките</translation>
 <translation id="5199729219167945352">Експерименти</translation>
+<translation id="5199841536747119669">Предложенията за вас ще се показват тук</translation>
 <translation id="5251803541071282808">Облак</translation>
 <translation id="5277279256032773186">Използвате Chrome на работното си място? Бизнесите могат да управляват настройките на браузъра за служителите си. Научете повече</translation>
 <translation id="5299298092464848405">Грешка при синтактичния анализ на правилото</translation>
@@ -471,6 +470,7 @@
 <translation id="6263376278284652872">Отметки от <ph name="DOMAIN" /></translation>
 <translation id="6264485186158353794">Назад към безопасната страница</translation>
 <translation id="6282194474023008486">Пощенски код</translation>
+<translation id="6290238015253830360">Предложените ви статии ще се показват тук</translation>
 <translation id="6305205051461490394">Няма достъп до <ph name="URL" />.</translation>
 <translation id="6321917430147971392">Проверете настройките си за DNS</translation>
 <translation id="6328639280570009161">Опитайте да деактивирате предвижданията за мрежата</translation>
@@ -654,6 +654,7 @@
 <translation id="8363502534493474904">Изключете самолетния режим.</translation>
 <translation id="8364627913115013041">Не е зададено.</translation>
 <translation id="8380941800586852976">Опасно</translation>
+<translation id="8382348898565613901">Наскоро посетените от вас отметки ще се показват тук</translation>
 <translation id="8412145213513410671">Сривове (<ph name="CRASH_COUNT" />)</translation>
 <translation id="8412392972487953978">Трябва да въведете един и същи пропуск два пъти.</translation>
 <translation id="8428213095426709021">Настройки</translation>
@@ -665,7 +666,6 @@
 <translation id="8498891568109133222"><ph name="HOST_NAME" /> не отговаря твърде дълго време.</translation>
 <translation id="852346902619691059">Сървърът не можа да докаже, че е <ph name="DOMAIN" />. Сертификатът му за сигурност не се счита за надежден от операционната система на устройството ви. Това може да се дължи на неправилно конфигуриране или на прехващане на връзката ви от извършител на атака. <ph name="BEGIN_LEARN_MORE_LINK" />Научете повече<ph name="END_LEARN_MORE_LINK" />.</translation>
 <translation id="8530504477309582336">Този тип карта не се поддържа от Google Payments. Моля, изберете друга.</translation>
-<translation id="8550022383519221471">Услугата за синхронизиране не е налице за вашия домейн.</translation>
 <translation id="8553075262323480129">Преводът не бе успешен, защото езикът на страницата не можа да бъде определен.</translation>
 <translation id="8559762987265718583">Не може да се установи частна връзка с/ъс <ph name="BEGIN_BOLD" /><ph name="DOMAIN" /><ph name="END_BOLD" />, тъй като датата и часът на устройството ви (<ph name="DATE_AND_TIME" />) са неправилни.</translation>
 <translation id="856992080682148">Валидността на сертификата за този сайт изтича през 2017 г. или по-късно, а съответната верига съдържа сертификат, подписан с SHA-1.</translation>
@@ -673,7 +673,6 @@
 <translation id="8591846766485502580">Виждате това съобщение, защото ваш родител е блокирал сайта.</translation>
 <translation id="859285277496340001">Сертификатът не посочва механизъм за проверка дали е бил анулиран.</translation>
 <translation id="8647750283161643317">Възстановяване на всичко към стандартното състояние</translation>
-<translation id="8680787084697685621">Данните за вход в профила ви не са актуални.</translation>
 <translation id="8703575177326907206">Връзката ви с <ph name="DOMAIN" /> не е шифрована.</translation>
 <translation id="8725066075913043281">Опитайте отново</translation>
 <translation id="8728672262656704056">Преминахте в режим „инкогнито“</translation>

@@ -40,6 +40,7 @@ import org.chromium.payments.mojom.PaymentItem;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
@@ -78,6 +79,7 @@ abstract class PaymentRequestTestBase extends ChromeActivityTestCaseBase<ChromeT
     protected final CallbackHelper mUnableToAbort;
     protected final CallbackHelper mBillingAddressChangeProcessed;
     protected final CallbackHelper mShowFailed;
+    protected final CallbackHelper mExpirationMonthChange;
     protected PaymentRequestUI mUI;
 
     private final AtomicReference<ContentViewCore> mViewCoreRef;
@@ -99,6 +101,7 @@ abstract class PaymentRequestTestBase extends ChromeActivityTestCaseBase<ChromeT
         mDismissed = new CallbackHelper();
         mUnableToAbort = new CallbackHelper();
         mBillingAddressChangeProcessed = new CallbackHelper();
+        mExpirationMonthChange = new CallbackHelper();
         mShowFailed = new CallbackHelper();
         mViewCoreRef = new AtomicReference<>();
         mWebContentsRef = new AtomicReference<>();
@@ -145,6 +148,13 @@ abstract class PaymentRequestTestBase extends ChromeActivityTestCaseBase<ChromeT
         });
         assertWaitForPageScaleFactorMatch(1);
         clickNodeAndWait(nodeId, helper);
+    }
+
+    protected void reTriggerUIAndWait(
+            String nodeId, PaymentsCallbackHelper<PaymentRequestUI> helper)
+            throws InterruptedException, ExecutionException, TimeoutException {
+        clickNodeAndWait(nodeId, helper);
+        mUI = helper.getTarget();
     }
 
     /** Clicks on an HTML node. */
@@ -396,6 +406,18 @@ abstract class PaymentRequestTestBase extends ChromeActivityTestCaseBase<ChromeT
         });
     }
 
+    /** Returns the number of items offered by the spinner in the editor UI for credit cards. */
+    protected int getSpinnerItemCountInCardEditor(final int dropdownIndex)
+            throws ExecutionException {
+        return ThreadUtils.runOnUiThreadBlocking(new Callable<Integer>() {
+            @Override
+            public Integer call() {
+                return mUI.getCardEditorView().getDropdownFieldsForTest().get(dropdownIndex)
+                        .getCount();
+            }
+        });
+    }
+
     /** Selects the spinner value in the editor UI for credit cards. */
     protected void setSpinnerSelectionsInCardEditorAndWait(final int[] selections,
             CallbackHelper helper) throws InterruptedException, TimeoutException {
@@ -489,6 +511,24 @@ abstract class PaymentRequestTestBase extends ChromeActivityTestCaseBase<ChromeT
         helper.waitForCallback(callCount);
     }
 
+    /** Directly sets the text in the expired card unmask UI. */
+    protected void setTextInExpiredCardUnmaskDialogAndWait(
+            final int[] resourceIds, final String[] values, CallbackHelper helper)
+            throws InterruptedException, TimeoutException {
+        assert resourceIds.length == values.length;
+        int callCount = helper.getCallCount();
+        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
+            @Override
+            public void run() {
+                for (int i = 0; i < resourceIds.length; ++i) {
+                    ((EditText) mCardUnmaskPrompt.getDialogForTest().findViewById(resourceIds[i]))
+                            .setText(values[i]);
+                }
+            }
+        });
+        helper.waitForCallback(callCount);
+    }
+
     /** Verifies the contents of the test webpage. */
     protected void expectResultContains(final String[] contents) throws InterruptedException {
         CriteriaHelper.pollInstrumentationThread(new Criteria() {
@@ -577,6 +617,12 @@ abstract class PaymentRequestTestBase extends ChromeActivityTestCaseBase<ChromeT
     public void onPaymentRequestServiceBillingAddressChangeProcessed() {
         ThreadUtils.assertOnUiThread();
         mBillingAddressChangeProcessed.notifyCalled();
+    }
+
+    @Override
+    public void onPaymentRequestServiceExpirationMonthChange() {
+        ThreadUtils.assertOnUiThread();
+        mExpirationMonthChange.notifyCalled();
     }
 
     @Override
@@ -677,7 +723,7 @@ abstract class PaymentRequestTestBase extends ChromeActivityTestCaseBase<ChromeT
 
         @Override
         public void getInstruments(
-                JSONObject details, final InstrumentsCallback instrumentsCallback) {
+                Map<String, JSONObject> methodData, final InstrumentsCallback instrumentsCallback) {
             mCallback = instrumentsCallback;
             respond();
         }
@@ -702,14 +748,14 @@ abstract class PaymentRequestTestBase extends ChromeActivityTestCaseBase<ChromeT
         }
 
         @Override
-        public Set<String> getSupportedMethodNames() {
+        public Set<String> getAppMethodNames() {
             Set<String> methodNames = new HashSet<>();
             methodNames.add(mMethodName);
             return methodNames;
         }
 
         @Override
-        public String getIdentifier() {
+        public String getAppIdentifier() {
             return mMethodName;
         }
     }
@@ -724,18 +770,19 @@ abstract class PaymentRequestTestBase extends ChromeActivityTestCaseBase<ChromeT
         }
 
         @Override
-        public String getMethodName() {
+        public String getInstrumentMethodName() {
             return mMethodName;
         }
 
         @Override
-        public void getDetails(String merchantName, String origin, PaymentItem total,
-                List<PaymentItem> cart, JSONObject details, DetailsCallback detailsCallback) {
+        public void getInstrumentDetails(String merchantName, String origin, PaymentItem total,
+                List<PaymentItem> cart, JSONObject details,
+                InstrumentDetailsCallback detailsCallback) {
             detailsCallback.onInstrumentDetailsReady(
                     mMethodName, "{\"transaction\": 1337}");
         }
 
         @Override
-        public void dismiss() {}
+        public void dismissInstrument() {}
     }
 }

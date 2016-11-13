@@ -5,7 +5,9 @@
 #include "modules/webaudio/BaseAudioContext.h"
 
 #include "core/dom/Document.h"
+#include "core/dom/DocumentUserGestureToken.h"
 #include "core/frame/FrameOwner.h"
+#include "core/frame/FrameTypes.h"
 #include "core/frame/FrameView.h"
 #include "core/frame/Settings.h"
 #include "core/loader/DocumentLoader.h"
@@ -101,7 +103,7 @@ class BaseAudioContextTest : public ::testing::Test {
     m_childFrame->init();
     m_childDocumentLoader = DocumentLoader::create(
         m_childFrame.get(), ResourceRequest("https://www.example.com"),
-        SubstituteData());
+        SubstituteData(), ClientRedirectPolicy::NotClientRedirect);
 
     childDocument().updateSecurityOrigin(
         SecurityOrigin::create("https", "cross-origin.com", 80));
@@ -180,8 +182,8 @@ TEST_F(BaseAudioContextTest, AutoplayMetrics_CreateGesture) {
   createChildFrame();
   childDocument().settings()->setMediaPlaybackRequiresUserGesture(true);
 
-  UserGestureIndicator userGestureScope(
-      UserGestureToken::create(UserGestureToken::NewGesture));
+  UserGestureIndicator userGestureScope(DocumentUserGestureToken::create(
+      &childDocument(), UserGestureToken::NewGesture));
 
   BaseAudioContext* audioContext =
       BaseAudioContext::create(childDocument(), ASSERT_NO_EXCEPTION);
@@ -202,8 +204,8 @@ TEST_F(BaseAudioContextTest, AutoplayMetrics_CallResumeGesture) {
   BaseAudioContext* audioContext =
       BaseAudioContext::create(childDocument(), ASSERT_NO_EXCEPTION);
 
-  UserGestureIndicator userGestureScope(
-      UserGestureToken::create(UserGestureToken::NewGesture));
+  UserGestureIndicator userGestureScope(DocumentUserGestureToken::create(
+      &childDocument(), UserGestureToken::NewGesture));
 
   audioContext->resumeContext(getScriptStateFrom(childDocument()));
   rejectPendingResolvers(audioContext);
@@ -237,8 +239,8 @@ TEST_F(BaseAudioContextTest, AutoplayMetrics_NodeStartGesture) {
   BaseAudioContext* audioContext =
       BaseAudioContext::create(childDocument(), ASSERT_NO_EXCEPTION);
 
-  UserGestureIndicator userGestureScope(
-      UserGestureToken::create(UserGestureToken::NewGesture));
+  UserGestureIndicator userGestureScope(DocumentUserGestureToken::create(
+      &childDocument(), UserGestureToken::NewGesture));
   audioContext->maybeRecordStartAttempt();
   recordAutoplayStatus(audioContext);
 
@@ -258,8 +260,8 @@ TEST_F(BaseAudioContextTest, AutoplayMetrics_NodeStartNoGestureThenSuccess) {
       BaseAudioContext::create(childDocument(), ASSERT_NO_EXCEPTION);
   audioContext->maybeRecordStartAttempt();
 
-  UserGestureIndicator userGestureScope(
-      UserGestureToken::create(UserGestureToken::NewGesture));
+  UserGestureIndicator userGestureScope(DocumentUserGestureToken::create(
+      &childDocument(), UserGestureToken::NewGesture));
   audioContext->resumeContext(getScriptStateFrom(childDocument()));
   rejectPendingResolvers(audioContext);
   recordAutoplayStatus(audioContext);
@@ -279,8 +281,8 @@ TEST_F(BaseAudioContextTest, AutoplayMetrics_NodeStartGestureThenSucces) {
   BaseAudioContext* audioContext =
       BaseAudioContext::create(childDocument(), ASSERT_NO_EXCEPTION);
 
-  UserGestureIndicator userGestureScope(
-      UserGestureToken::create(UserGestureToken::NewGesture));
+  UserGestureIndicator userGestureScope(DocumentUserGestureToken::create(
+      &childDocument(), UserGestureToken::NewGesture));
   audioContext->maybeRecordStartAttempt();
   audioContext->resumeContext(getScriptStateFrom(childDocument()));
   rejectPendingResolvers(audioContext);

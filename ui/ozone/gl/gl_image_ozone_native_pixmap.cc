@@ -198,10 +198,6 @@ unsigned GLImageOzoneNativePixmap::GetInternalFormat() {
   return internalformat_;
 }
 
-void GLImageOzoneNativePixmap::Destroy(bool have_context) {
-  GLImageEGL::Destroy(have_context);
-}
-
 bool GLImageOzoneNativePixmap::CopyTexImage(unsigned target) {
   if (egl_image_ == EGL_NO_IMAGE_KHR) {
     // Pass-through image type fails to bind and copy; make sure we
@@ -265,13 +261,14 @@ unsigned GLImageOzoneNativePixmap::GetInternalFormatForTesting(
       return GL_BGRA_EXT;
     case gfx::BufferFormat::YVU_420:
       return GL_RGB_YCRCB_420_CHROMIUM;
+    case gfx::BufferFormat::YUV_420_BIPLANAR:
+      return GL_RGB_YCBCR_420V_CHROMIUM;
     case gfx::BufferFormat::ATC:
     case gfx::BufferFormat::ATCIA:
     case gfx::BufferFormat::DXT1:
     case gfx::BufferFormat::DXT5:
     case gfx::BufferFormat::ETC1:
     case gfx::BufferFormat::RGBA_4444:
-    case gfx::BufferFormat::YUV_420_BIPLANAR:
     case gfx::BufferFormat::UYVY_422:
       NOTREACHED();
       return GL_NONE;

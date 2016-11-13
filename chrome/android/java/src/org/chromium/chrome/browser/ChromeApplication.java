@@ -14,13 +14,13 @@ import android.os.SystemClock;
 import android.util.Log;
 
 import org.chromium.base.ActivityState;
-import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.ApplicationStatus;
 import org.chromium.base.CommandLineInitUtil;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.TraceEvent;
 import org.chromium.base.annotations.CalledByNative;
+import org.chromium.base.annotations.MainDex;
 import org.chromium.base.annotations.SuppressFBWarnings;
 import org.chromium.base.library_loader.ProcessInitException;
 import org.chromium.chrome.browser.banners.AppDetailsDelegate;
@@ -50,7 +50,6 @@ import org.chromium.chrome.browser.preferences.PreferencesLauncher;
 import org.chromium.chrome.browser.preferences.autofill.AutofillPreferences;
 import org.chromium.chrome.browser.preferences.password.SavePasswordsPreferences;
 import org.chromium.chrome.browser.preferences.privacy.ClearBrowsingDataPreferences;
-import org.chromium.chrome.browser.printing.PrintingControllerFactory;
 import org.chromium.chrome.browser.rlz.RevenueStats;
 import org.chromium.chrome.browser.services.AndroidEduOwnerCheckCallback;
 import org.chromium.chrome.browser.signin.GoogleActivityController;
@@ -67,12 +66,12 @@ import org.chromium.content.app.ContentApplication;
 import org.chromium.content.browser.ChildProcessCreationParams;
 import org.chromium.policy.AppRestrictionsProvider;
 import org.chromium.policy.CombinedPolicyProvider;
-import org.chromium.printing.PrintingController;
 
 /**
  * Basic application functionality that should be shared among all browser applications that use
  * chrome layer.
  */
+@MainDex
 public class ChromeApplication extends ContentApplication {
     public static final String COMMAND_LINE_FILE = "chrome-command-line";
 
@@ -82,8 +81,6 @@ public class ChromeApplication extends ContentApplication {
     private static final long BOOT_TIMESTAMP_MARGIN_MS = 1000;
 
     private static DocumentTabModelSelector sDocumentTabModelSelector;
-
-    private PrintingController mPrintingController;
 
     @Override
     protected void attachBaseContext(Context base) {
@@ -316,19 +313,6 @@ public class ChromeApplication extends ContentApplication {
      */
     public PhysicalWebEnvironment createPhysicalWebEnvironment() {
         return new PhysicalWebEnvironment();
-    }
-
-    /**
-     * @return Instance of printing controller that is shared among all chromium activities. May
-     *         return null if printing is not supported on the platform.
-     */
-    public PrintingController getPrintingController() {
-        if (mPrintingController != null) return mPrintingController;
-        if (ApiCompatibilityUtils.isPrintingSupported()) {
-            mPrintingController = PrintingControllerFactory.create(this);
-            assert mPrintingController != null;
-        }
-        return mPrintingController;
     }
 
     public InstantAppsHandler createInstantAppsHandler() {

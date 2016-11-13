@@ -78,12 +78,12 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_media_capture_id.h"
 #include "media/base/bind_to_current_loop.h"
-#include "media/base/video_capture_types.h"
 #include "media/base/video_frame_metadata.h"
 #include "media/base/video_util.h"
 #include "media/capture/content/screen_capture_device_core.h"
 #include "media/capture/content/thread_safe_capture_oracle.h"
 #include "media/capture/content/video_capture_oracle.h"
+#include "media/capture/video_capture_types.h"
 #include "skia/ext/image_operations.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkColor.h"
@@ -136,7 +136,7 @@ class FrameSubscriber : public RenderWidgetHostViewFrameSubscriber {
       base::WeakPtr<FrameSubscriber> frame_subscriber_,
       const media::ThreadSafeCaptureOracle::CaptureFrameCallback&
           capture_frame_cb,
-      const scoped_refptr<media::VideoFrame>& frame,
+      scoped_refptr<media::VideoFrame> frame,
       base::TimeTicks timestamp,
       const gfx::Rect& region_in_frame,
       bool success);
@@ -358,7 +358,7 @@ void FrameSubscriber::DidCaptureFrame(
     base::WeakPtr<FrameSubscriber> frame_subscriber_,
     const media::ThreadSafeCaptureOracle::CaptureFrameCallback&
         capture_frame_cb,
-    const scoped_refptr<media::VideoFrame>& frame,
+    scoped_refptr<media::VideoFrame> frame,
     base::TimeTicks timestamp,
     const gfx::Rect& region_in_frame,
     bool success) {
@@ -380,7 +380,7 @@ void FrameSubscriber::DidCaptureFrame(
           frame_subscriber_->IsUserInteractingWithContent());
     }
   }
-  capture_frame_cb.Run(frame, timestamp, success);
+  capture_frame_cb.Run(std::move(frame), timestamp, success);
 }
 
 bool FrameSubscriber::IsUserInteractingWithContent() {

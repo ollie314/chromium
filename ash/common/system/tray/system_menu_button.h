@@ -7,13 +7,9 @@
 
 #include "ash/resources/vector_icons/vector_icons.h"
 #include "base/macros.h"
+#include "ui/gfx/image/image_skia.h"
 #include "ui/views/controls/button/button.h"
 #include "ui/views/controls/button/image_button.h"
-
-namespace views {
-class InkDropHighlight;
-class InkDropRipple;
-}
 
 namespace ash {
 
@@ -24,21 +20,52 @@ namespace ash {
 // crbug.com/614453.
 class SystemMenuButton : public views::ImageButton {
  public:
+  // The different ink drop styles that can be used.
+  enum class InkDropStyle {
+    // Despite the poor name this style actually displays as a circle. It is
+    // typically used for buttons that the user doesn't need to know the exact
+    // targetable rect and they are expected to target an icon centered in the
+    // targetable space.
+    SQUARE,
+    // Typically used for buttons that should indicate to the user what the
+    // actual targetable bounds are. e.g. a row of buttons separated with
+    // separators.
+    FLOOD_FILL
+  };
+
   // Constructs the button with |listener| and a centered icon corresponding to
-  // |icon|. |accessible_name_id| corresponds to the string in
-  // ui::ResourceBundle to use for the button's accessible and tooltip text.
+  // |normal_icon| when button is enabled and |disabled_icon| when it is
+  // disabled. |ink_drop_style| specifies which flavor of the ink drop should be
+  // used. |accessible_name_id| corresponds to the string in ui::ResourceBundle
+  // to use for the button's accessible and tooltip text.
   SystemMenuButton(views::ButtonListener* listener,
+                   InkDropStyle ink_drop_style,
+                   gfx::ImageSkia normal_icon,
+                   gfx::ImageSkia disabled_icon,
+                   int accessible_name_id);
+
+  // Similar to the above constructor. Just gets a single vector icon and
+  // creates the normal and disabled icons based on that using default menu icon
+  // colors.
+  SystemMenuButton(views::ButtonListener* listener,
+                   InkDropStyle ink_drop_style,
                    const gfx::VectorIcon& icon,
                    int accessible_name_id);
   ~SystemMenuButton() override;
 
   // views::ImageButton:
+  std::unique_ptr<views::InkDrop> CreateInkDrop() override;
   std::unique_ptr<views::InkDropRipple> CreateInkDropRipple() const override;
   std::unique_ptr<views::InkDropHighlight> CreateInkDropHighlight()
       const override;
-  bool ShouldShowInkDropForFocus() const override;
 
  private:
+  // Returns the size that the ink drop should be constructed with.
+  gfx::Size GetInkDropSize() const;
+
+  // Defines the flavor of ink drop ripple/highlight that should be constructed.
+  InkDropStyle ink_drop_style_;
+
   DISALLOW_COPY_AND_ASSIGN(SystemMenuButton);
 };
 

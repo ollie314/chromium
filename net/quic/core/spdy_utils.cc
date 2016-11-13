@@ -63,8 +63,8 @@ bool SpdyUtils::ExtractContentLengthFromHeaders(int64_t* content_length,
     return false;
   } else {
     // Check whether multiple values are consistent.
-    base::StringPiece content_length_header = it->second;
-    vector<string> values =
+    StringPiece content_length_header = it->second;
+    std::vector<string> values =
         base::SplitString(content_length_header, base::StringPiece("\0", 1),
                           base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
     for (const string& value : values) {
@@ -251,7 +251,9 @@ bool SpdyUtils::PopulateHeaderBlockFromUrl(const string url,
   size_t start = pos + 3;
   pos = url.find("/", start);
   if (pos == string::npos) {
-    return false;
+    (*headers)[":authority"] = url.substr(start);
+    (*headers)[":path"] = "/";
+    return true;
   }
   (*headers)[":authority"] = url.substr(start, pos - start);
   (*headers)[":path"] = url.substr(pos);

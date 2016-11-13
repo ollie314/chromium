@@ -29,7 +29,10 @@ void EmbeddedWorkerInstanceClientImpl::Create(
 void EmbeddedWorkerInstanceClientImpl::ExposeInterfacesToBrowser(
     service_manager::InterfaceRegistry* interface_registry) {
   DCHECK(renderer_request_.is_pending());
-  interface_registry->Bind(std::move(renderer_request_));
+  interface_registry->Bind(
+      std::move(renderer_request_), service_manager::Identity(),
+      service_manager::InterfaceProviderSpec(), service_manager::Identity(),
+      service_manager::InterfaceProviderSpec());
 }
 
 void EmbeddedWorkerInstanceClientImpl::StopWorkerCompleted() {
@@ -41,6 +44,7 @@ void EmbeddedWorkerInstanceClientImpl::StopWorkerCompleted() {
   TRACE_EVENT0("ServiceWorker",
                "EmbeddedWorkerInstanceClientImpl::StopWorkerCompleted");
   stop_callback_.Reset();
+  wrapper_ = nullptr;
 }
 
 void EmbeddedWorkerInstanceClientImpl::StartWorker(
@@ -70,7 +74,7 @@ void EmbeddedWorkerInstanceClientImpl::StopWorker(
   DCHECK(ChildThreadImpl::current());
   DCHECK(embedded_worker_id_);
   // StopWorker is possible to be called twice.
-  if (stop_callback_) {
+  if (stop_callback_ || !wrapper_) {
     LOG(WARNING) << "Got StopWorker for stopping worker";
     return;
   }

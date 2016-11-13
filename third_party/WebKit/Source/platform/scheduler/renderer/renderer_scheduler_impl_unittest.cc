@@ -1302,14 +1302,17 @@ TEST_F(RendererSchedulerImplTest, EventConsumedOnCompositorThread_MouseWheel) {
       FakeInputEvent(blink::WebInputEvent::MouseWheel),
       RendererScheduler::InputEventState::EVENT_CONSUMED_BY_COMPOSITOR);
   RunUntilIdle();
-  // Note compositor tasks are prioritized.
+  // Note compositor tasks are not prioritized.
   EXPECT_THAT(run_order,
-              testing::ElementsAre(std::string("C1"), std::string("C2"),
-                                   std::string("D1"), std::string("D2"),
-                                   std::string("I1")));
+              testing::ElementsAre(std::string("D1"), std::string("D2"),
+                                   std::string("I1"), std::string("C1"),
+                                   std::string("C2")));
+  EXPECT_EQ(RendererSchedulerImpl::UseCase::COMPOSITOR_GESTURE,
+            CurrentUseCase());
 }
 
-TEST_F(RendererSchedulerImplTest, EventForwardedToMainThread_MouseWheel) {
+TEST_F(RendererSchedulerImplTest,
+       EventForwardedToMainThread_MouseWheel_PreventDefault) {
   std::vector<std::string> run_order;
   PostTestTasks(&run_order, "I1 D1 C1 D2 C2");
 
@@ -1318,12 +1321,68 @@ TEST_F(RendererSchedulerImplTest, EventForwardedToMainThread_MouseWheel) {
       FakeInputEvent(blink::WebInputEvent::MouseWheel),
       RendererScheduler::InputEventState::EVENT_FORWARDED_TO_MAIN_THREAD);
   RunUntilIdle();
-  // Note compositor tasks are prioritized.
+  // Note compositor tasks are prioritized (since they are fast).
   EXPECT_THAT(run_order,
               testing::ElementsAre(std::string("C1"), std::string("C2"),
                                    std::string("D1"), std::string("D2"),
                                    std::string("I1")));
   EXPECT_EQ(RendererSchedulerImpl::UseCase::MAIN_THREAD_CUSTOM_INPUT_HANDLING,
+            CurrentUseCase());
+}
+
+TEST_F(RendererSchedulerImplTest, EventForwardedToMainThread_NoPreventDefault) {
+  std::vector<std::string> run_order;
+  PostTestTasks(&run_order, "I1 D1 C1 D2 C2");
+
+  EnableIdleTasks();
+  scheduler_->DidHandleInputEventOnCompositorThread(
+      FakeInputEvent(blink::WebInputEvent::MouseWheel),
+      RendererScheduler::InputEventState::EVENT_FORWARDED_TO_MAIN_THREAD);
+  scheduler_->DidHandleInputEventOnCompositorThread(
+      FakeInputEvent(blink::WebInputEvent::GestureScrollBegin),
+      RendererScheduler::InputEventState::EVENT_FORWARDED_TO_MAIN_THREAD);
+  scheduler_->DidHandleInputEventOnCompositorThread(
+      FakeInputEvent(blink::WebInputEvent::GestureScrollUpdate),
+      RendererScheduler::InputEventState::EVENT_FORWARDED_TO_MAIN_THREAD);
+  scheduler_->DidHandleInputEventOnCompositorThread(
+      FakeInputEvent(blink::WebInputEvent::GestureScrollUpdate),
+      RendererScheduler::InputEventState::EVENT_FORWARDED_TO_MAIN_THREAD);
+  RunUntilIdle();
+  // Note compositor tasks are prioritized.
+  EXPECT_THAT(run_order,
+              testing::ElementsAre(std::string("C1"), std::string("C2"),
+                                   std::string("D1"), std::string("D2"),
+                                   std::string("I1")));
+  EXPECT_EQ(RendererSchedulerImpl::UseCase::MAIN_THREAD_GESTURE,
+            CurrentUseCase());
+}
+
+TEST_F(
+    RendererSchedulerImplTest,
+    EventForwardedToMainThreadAndBackToCompositor_MouseWheel_NoPreventDefault) {
+  std::vector<std::string> run_order;
+  PostTestTasks(&run_order, "I1 D1 C1 D2 C2");
+
+  EnableIdleTasks();
+  scheduler_->DidHandleInputEventOnCompositorThread(
+      FakeInputEvent(blink::WebInputEvent::MouseWheel),
+      RendererScheduler::InputEventState::EVENT_FORWARDED_TO_MAIN_THREAD);
+  scheduler_->DidHandleInputEventOnCompositorThread(
+      FakeInputEvent(blink::WebInputEvent::GestureScrollBegin),
+      RendererScheduler::InputEventState::EVENT_CONSUMED_BY_COMPOSITOR);
+  scheduler_->DidHandleInputEventOnCompositorThread(
+      FakeInputEvent(blink::WebInputEvent::GestureScrollUpdate),
+      RendererScheduler::InputEventState::EVENT_CONSUMED_BY_COMPOSITOR);
+  scheduler_->DidHandleInputEventOnCompositorThread(
+      FakeInputEvent(blink::WebInputEvent::GestureScrollUpdate),
+      RendererScheduler::InputEventState::EVENT_CONSUMED_BY_COMPOSITOR);
+  RunUntilIdle();
+  // Note compositor tasks are not prioritized.
+  EXPECT_THAT(run_order,
+              testing::ElementsAre(std::string("D1"), std::string("D2"),
+                                   std::string("I1"), std::string("C1"),
+                                   std::string("C2")));
+  EXPECT_EQ(RendererSchedulerImpl::UseCase::COMPOSITOR_GESTURE,
             CurrentUseCase());
 }
 
@@ -2191,6 +2250,55 @@ TEST_F(RendererSchedulerImplTest, SuspendRenderer) {
               testing::ElementsAre(std::string("L1"), std::string("T1")));
 }
 
+TEST_F(RendererSchedulerImplTest, ResumeRenderer) {
+  // Assume that the renderer is backgrounded.
+  scheduler_->OnRendererBackgrounded();
+
+  // Tasks in some queues don't fire when the renderer is suspended.
+  std::vector<std::string> run_order;
+  PostTestTasks(&run_order, "D1 C1 L1 I1 T1");
+  scheduler_->SuspendRenderer();
+  EnableIdleTasks();
+  RunUntilIdle();
+  EXPECT_THAT(run_order,
+              testing::ElementsAre(std::string("D1"), std::string("C1"),
+                                   std::string("I1")));
+
+  // The rest queued tasks fire when the renderer is resumed.
+  run_order.clear();
+  scheduler_->ResumeRenderer();
+  RunUntilIdle();
+  EXPECT_THAT(run_order,
+              testing::ElementsAre(std::string("L1"), std::string("T1")));
+
+  run_order.clear();
+  // No crash occurs when the renderer is suspended again, and
+  // tasks in some queues don't fire because of suspended.
+  PostTestTasks(&run_order, "D2 C2 L2 I2 T2");
+  scheduler_->SuspendRenderer();
+  EnableIdleTasks();
+  RunUntilIdle();
+  EXPECT_THAT(run_order,
+              testing::ElementsAre(std::string("D2"), std::string("C2"),
+                                   std::string("I2")));
+
+  // The rest queued tasks fire when the renderer is resumed.
+  run_order.clear();
+  scheduler_->ResumeRenderer();
+  RunUntilIdle();
+  EXPECT_THAT(run_order,
+              testing::ElementsAre(std::string("L2"), std::string("T2")));
+
+  run_order.clear();
+  PostTestTasks(&run_order, "D3 T3");
+  // No crash occurs when the resumed renderer goes foregrounded.
+  // Posted tasks while the renderer is resumed fire.
+  scheduler_->OnRendererForegrounded();
+  RunUntilIdle();
+  EXPECT_THAT(run_order,
+              testing::ElementsAre(std::string("D3"), std::string("T3")));
+}
+
 TEST_F(RendererSchedulerImplTest, UseCaseToString) {
   CheckAllUseCaseToString();
 }
@@ -2787,7 +2895,7 @@ TEST_F(RendererSchedulerImplTest,
 class WebViewSchedulerImplForTest : public WebViewSchedulerImpl {
  public:
   WebViewSchedulerImplForTest(RendererSchedulerImpl* scheduler)
-      : WebViewSchedulerImpl(nullptr, scheduler, false) {}
+      : WebViewSchedulerImpl(nullptr, nullptr, scheduler, false) {}
   ~WebViewSchedulerImplForTest() override {}
 
   void ReportIntervention(const std::string& message) override {

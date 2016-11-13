@@ -10,12 +10,13 @@
 namespace blink {
 
 class ScriptPromiseResolver;
+struct WebNavigationPreloadState;
 struct WebServiceWorkerError;
 
 class EnableNavigationPreloadCallbacks final
     : public WebServiceWorkerRegistration::WebEnableNavigationPreloadCallbacks {
  public:
-  EnableNavigationPreloadCallbacks(ScriptPromiseResolver*);
+  explicit EnableNavigationPreloadCallbacks(ScriptPromiseResolver*);
   ~EnableNavigationPreloadCallbacks() override;
 
   // WebEnableNavigationPreloadCallbacks interface.
@@ -27,20 +28,36 @@ class EnableNavigationPreloadCallbacks final
   WTF_MAKE_NONCOPYABLE(EnableNavigationPreloadCallbacks);
 };
 
-class DisableNavigationPreloadCallbacks final
+class GetNavigationPreloadStateCallbacks final
     : public WebServiceWorkerRegistration::
-          WebDisableNavigationPreloadCallbacks {
+          WebGetNavigationPreloadStateCallbacks {
  public:
-  DisableNavigationPreloadCallbacks(ScriptPromiseResolver*);
-  ~DisableNavigationPreloadCallbacks() override;
+  explicit GetNavigationPreloadStateCallbacks(ScriptPromiseResolver*);
+  ~GetNavigationPreloadStateCallbacks() override;
 
-  // WebDisableNavigationPreloadCallbacks interface.
-  void onSuccess() override;
+  // WebGetNavigationPreloadStateCallbacks interface.
+  void onSuccess(const WebNavigationPreloadState&) override;
   void onError(const WebServiceWorkerError&) override;
 
  private:
   Persistent<ScriptPromiseResolver> m_resolver;
-  WTF_MAKE_NONCOPYABLE(DisableNavigationPreloadCallbacks);
+  WTF_MAKE_NONCOPYABLE(GetNavigationPreloadStateCallbacks);
+};
+
+class SetNavigationPreloadHeaderCallbacks final
+    : public WebServiceWorkerRegistration::
+          WebSetNavigationPreloadHeaderCallbacks {
+ public:
+  explicit SetNavigationPreloadHeaderCallbacks(ScriptPromiseResolver*);
+  ~SetNavigationPreloadHeaderCallbacks() override;
+
+  // WebSetNavigationPreloadHeaderCallbacks interface.
+  void onSuccess(void) override;
+  void onError(const WebServiceWorkerError&) override;
+
+ private:
+  Persistent<ScriptPromiseResolver> m_resolver;
+  WTF_MAKE_NONCOPYABLE(SetNavigationPreloadHeaderCallbacks);
 };
 
 }  // namespace blink

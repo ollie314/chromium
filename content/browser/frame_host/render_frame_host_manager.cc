@@ -85,7 +85,8 @@ RenderFrameHostManager::~RenderFrameHostManager() {
 void RenderFrameHostManager::Init(SiteInstance* site_instance,
                                   int32_t view_routing_id,
                                   int32_t frame_routing_id,
-                                  int32_t widget_routing_id) {
+                                  int32_t widget_routing_id,
+                                  bool renderer_initiated_creation) {
   DCHECK(site_instance);
   // TODO(avi): While RenderViewHostImpl is-a RenderWidgetHostImpl, this must
   // hold true to avoid having two RenderWidgetHosts for the top-level frame.
@@ -94,7 +95,8 @@ void RenderFrameHostManager::Init(SiteInstance* site_instance,
          view_routing_id == widget_routing_id);
   SetRenderFrameHost(CreateRenderFrameHost(site_instance, view_routing_id,
                                            frame_routing_id, widget_routing_id,
-                                           delegate_->IsHidden()));
+                                           delegate_->IsHidden(),
+                                           renderer_initiated_creation));
 
   // Notify the delegate of the creation of the current RenderFrameHost.
   // Do this only for subframes, as the main frame case is taken care of by
@@ -1487,7 +1489,7 @@ bool RenderFrameHostManager::IsRendererTransferNeededForNavigation(
 
   if (SiteIsolationPolicy::IsTopDocumentIsolationEnabled() &&
       (!frame_tree_node_->IsMainFrame() ||
-       rfh->GetSiteInstance()->is_default_subframe_site_instance())) {
+       rfh->GetSiteInstance()->IsDefaultSubframeSiteInstance())) {
     // Always attempt a transfer in these cases.
     return true;
   }
@@ -1641,11 +1643,13 @@ void RenderFrameHostManager::CreateProxiesForNewNamedFrame() {
 }
 
 std::unique_ptr<RenderFrameHostImpl>
-RenderFrameHostManager::CreateRenderFrameHost(SiteInstance* site_instance,
-                                              int32_t view_routing_id,
-                                              int32_t frame_routing_id,
-                                              int32_t widget_routing_id,
-                                              bool hidden) {
+RenderFrameHostManager::CreateRenderFrameHost(
+    SiteInstance* site_instance,
+    int32_t view_routing_id,
+    int32_t frame_routing_id,
+    int32_t widget_routing_id,
+    bool hidden,
+    bool renderer_initiated_creation) {
   if (frame_routing_id == MSG_ROUTING_NONE)
     frame_routing_id = site_instance->GetProcess()->GetNextRoutingID();
 
@@ -1677,7 +1681,7 @@ RenderFrameHostManager::CreateRenderFrameHost(SiteInstance* site_instance,
   return RenderFrameHostFactory::Create(
       site_instance, render_view_host, render_frame_delegate_,
       render_widget_delegate_, frame_tree, frame_tree_node_, frame_routing_id,
-      widget_routing_id, hidden);
+      widget_routing_id, hidden, renderer_initiated_creation);
 }
 
 // PlzNavigate
@@ -1732,7 +1736,8 @@ std::unique_ptr<RenderFrameHostImpl> RenderFrameHostManager::CreateRenderFrame(
   }
 
   new_render_frame_host = CreateRenderFrameHost(
-      instance, MSG_ROUTING_NONE, MSG_ROUTING_NONE, widget_routing_id, hidden);
+      instance, MSG_ROUTING_NONE, MSG_ROUTING_NONE, widget_routing_id, hidden,
+      false);
   RenderViewHostImpl* render_view_host =
       new_render_frame_host->render_view_host();
 
@@ -2161,6 +2166,14 @@ void RenderFrameHostManager::CommitPending() {
     render_frame_host_->ResetLoadingState();
     delegate_->RenderProcessGoneFromRenderManager(
         render_frame_host_->render_view_host());
+  }
+
+  // For top-level frames, also hide the old RenderViewHost's view.
+  // TODO(creis): As long as show/hide are on RVH, we don't want to hide on
+  // subframe navigations or we will interfere with the top-level frame.
+  if (is_main_frame &&
+      old_render_frame_host->render_view_host()->GetWidget()->GetView()) {
+    old_render_frame_host->render_view_host()->GetWidget()->GetView()->Hide();
   }
 
   // Make sure the size is up to date.  (Fix for bug 1079768.)

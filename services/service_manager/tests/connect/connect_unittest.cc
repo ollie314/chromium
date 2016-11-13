@@ -11,13 +11,17 @@
 #include "base/bind.h"
 #include "base/guid.h"
 #include "base/macros.h"
+#include "base/process/process.h"
 #include "base/run_loop.h"
 #include "base/test/test_suite.h"
 #include "mojo/public/cpp/bindings/binding_set.h"
+#include "services/service_manager/public/cpp/interface_factory.h"
+#include "services/service_manager/public/cpp/interface_registry.h"
 #include "services/service_manager/public/cpp/names.h"
 #include "services/service_manager/public/cpp/service_test.h"
 #include "services/service_manager/public/interfaces/service_manager.mojom.h"
 #include "services/service_manager/tests/connect/connect_test.mojom.h"
+#include "services/service_manager/tests/util.h"
 
 // Tests that multiple services can be packaged in a single service by
 // implementing ServiceFactory; that these services can be specified by
@@ -33,7 +37,6 @@ const char kTestAppAName[] = "service:connect_test_a";
 const char kTestAppBName[] = "service:connect_test_b";
 const char kTestClassAppName[] = "service:connect_test_class_app";
 const char kTestSingletonAppName[] = "service:connect_test_singleton_app";
-const char kTestDriverName[] = "exe:connect_test_driver";
 
 void ReceiveOneString(std::string* out_string,
                       base::RunLoop* loop,
@@ -107,7 +110,7 @@ class ConnectTest : public test::ServiceTest,
     ~TestService() override {}
 
    private:
-    bool OnConnect(const Identity& remote_identity,
+    bool OnConnect(const ServiceInfo& remote_info,
                    InterfaceRegistry* registry) override {
       registry->AddInterface<test::mojom::ExposedInterface>(connect_test_);
       return true;
@@ -206,32 +209,6 @@ TEST_F(ConnectTest, Instances) {
   }
 
   EXPECT_NE(instance_a1, instance_b);
-}
-
-// When both the unresolved and resolved instance names are their default
-// values, the instance name from the unresolved name must be used.
-// (The case where the instance names differ is covered by
-// LifecycleTest.PackagedApp_CrashCrashesOtherProvidedApp).
-TEST_F(ConnectTest, PreferUnresolvedDefaultInstanceName) {
-  // Connect to an app with no manifest-supplied instance name provided by a
-  // package, the instance name must be derived from the application instance
-  // name, not the package.
-  std::unique_ptr<Connection> connection = connector()->Connect(kTestAppName);
-  {
-    base::RunLoop loop;
-    connection->AddConnectionCompletedClosure(base::Bind(&QuitLoop, &loop));
-    loop.Run();
-  }
-
-  std::string instance;
-  {
-    test::mojom::ConnectTestServicePtr service;
-    connection->GetInterface(&service);
-    base::RunLoop loop;
-    service->GetInstance(base::Bind(&ReceiveOneString, &instance, &loop));
-    loop.Run();
-  }
-  EXPECT_EQ(GetNamePath(kTestAppName), instance);
 }
 
 // BlockedInterface should not be exposed to this application because it is not
@@ -369,19 +346,18 @@ TEST_F(ConnectTest, ConnectAsDifferentUser_Blocked) {
 // client
 // process specifications. This is the only one for blocking.
 TEST_F(ConnectTest, ConnectToClientProcess_Blocked) {
-  std::unique_ptr<Connection> connection =
-      connector()->Connect(kTestDriverName);
-  test::mojom::ClientProcessTestPtr client_process_test;
-  connection->GetInterface(&client_process_test);
-  mojom::ConnectResult result;
-  Identity result_identity;
-  {
-    base::RunLoop loop;
-    client_process_test->LaunchAndConnectToProcess(
-        base::Bind(&ReceiveConnectionResult, &result, &result_identity, &loop));
-    loop.Run();
-  }
-  EXPECT_EQ(mojom::ConnectResult::ACCESS_DENIED, result);
+  base::Process process;
+  std::unique_ptr<service_manager::Connection> connection =
+      service_manager::test::LaunchAndConnectToProcess(
+#if defined(OS_WIN)
+          "connect_test_exe.exe",
+#else
+          "connect_test_exe",
+#endif
+          service_manager::Identity("service:connect_test_exe",
+                                    service_manager::mojom::kInheritUserID),
+          connector(), &process);
+  EXPECT_EQ(connection->GetResult(), mojom::ConnectResult::ACCESS_DENIED);
 }
 
 // Verifies that a client with the "all_users" capability class can receive

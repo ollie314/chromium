@@ -13,6 +13,7 @@
 #include "base/feature_list.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
+#include "base/memory/ptr_util.h"
 #include "base/metrics/statistics_recorder.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
@@ -38,7 +39,7 @@
 namespace offline_pages {
 
 namespace {
-const char kTestClientNamespace[] = "CLIENT_NAMESPACE";
+const char kTestClientNamespace[] = "default";
 const char kUserRequestedNamespace[] = "download";
 const GURL kTestUrl("http://example.com");
 const GURL kTestUrl2("http://other.page.com");
@@ -89,8 +90,9 @@ class OfflinePageModelImplTest
   void OnCheckPagesExistOfflineDone(const CheckPagesExistOfflineResult& result);
   void OnGetOfflineIdsForClientIdDone(MultipleOfflineIdResult* storage,
                                       const MultipleOfflineIdResult& result);
-  void OnGetSingleOfflinePageItemResult(const OfflinePageItem** storage,
-                                        const OfflinePageItem* result);
+  void OnGetSingleOfflinePageItemResult(
+      std::unique_ptr<OfflinePageItem>* storage,
+      const OfflinePageItem* result);
   void OnGetMultipleOfflinePageItemsResult(
       MultipleOfflinePageItemResult* storage,
       const MultipleOfflinePageItemResult& result);
@@ -143,7 +145,7 @@ class OfflinePageModelImplTest
 
   MultipleOfflineIdResult GetOfflineIdsForClientId(const ClientId& client_id);
 
-  const OfflinePageItem* GetPageByOfflineId(int64_t offline_id);
+  std::unique_ptr<OfflinePageItem> GetPageByOfflineId(int64_t offline_id);
 
   MultipleOfflinePageItemResult GetPagesByOnlineURL(const GURL& online_url);
 
@@ -378,9 +380,9 @@ void OfflinePageModelImplTest::OnGetOfflineIdsForClientIdDone(
   *storage = result;
 }
 
-const OfflinePageItem* OfflinePageModelImplTest::GetPageByOfflineId(
+std::unique_ptr<OfflinePageItem> OfflinePageModelImplTest::GetPageByOfflineId(
     int64_t offline_id) {
-  const OfflinePageItem* result = nullptr;
+  std::unique_ptr<OfflinePageItem> result = nullptr;
   model()->GetPageByOfflineId(
       offline_id,
       base::Bind(&OfflinePageModelImplTest::OnGetSingleOfflinePageItemResult,
@@ -390,9 +392,14 @@ const OfflinePageItem* OfflinePageModelImplTest::GetPageByOfflineId(
 }
 
 void OfflinePageModelImplTest::OnGetSingleOfflinePageItemResult(
-    const OfflinePageItem** storage,
+    std::unique_ptr<OfflinePageItem>* storage,
     const OfflinePageItem* result) {
-  *storage = result;
+  if (result == nullptr) {
+    storage->reset(nullptr);
+    return;
+  }
+
+  *storage = base::MakeUnique<OfflinePageItem>(*result);
 }
 
 void OfflinePageModelImplTest::OnGetMultipleOfflinePageItemsResult(
@@ -775,7 +782,7 @@ TEST_F(OfflinePageModelImplTest, DetectThatOfflineCopyIsMissing) {
 
   ResetResults();
 
-  const OfflinePageItem* page = GetPageByOfflineId(offline_id);
+  std::unique_ptr<OfflinePageItem> page = GetPageByOfflineId(offline_id);
 
   // Delete the offline copy of the page.
   base::DeleteFile(page->file_path, false);
@@ -797,7 +804,7 @@ TEST_F(OfflinePageModelImplTest, DetectThatOfflineCopyIsMissingAfterLoad) {
 
   ResetResults();
 
-  const OfflinePageItem* page = GetPageByOfflineId(offline_id);
+  std::unique_ptr<OfflinePageItem> page = GetPageByOfflineId(offline_id);
   // Delete the offline copy of the page and check the metadata.
   base::DeleteFile(page->file_path, false);
   // Reseting the model should trigger the metadata consistency check as well.
@@ -815,7 +822,7 @@ TEST_F(OfflinePageModelImplTest, DetectThatHeadlessPageIsDeleted) {
   int64_t offline_id = last_save_offline_id();
 
   ResetResults();
-  const OfflinePageItem* page = GetPageByOfflineId(offline_id);
+  std::unique_ptr<OfflinePageItem> page = GetPageByOfflineId(offline_id);
   base::FilePath path = page->file_path;
   EXPECT_TRUE(base::PathExists(path));
   GetStore()->ClearAllPages();
@@ -881,14 +888,14 @@ TEST_F(OfflinePageModelImplTest, GetPageByOfflineId) {
   SavePage(kTestUrl2, kTestClientId2);
   int64_t offline2 = last_save_offline_id();
 
-  const OfflinePageItem* page = GetPageByOfflineId(offline1);
-  EXPECT_TRUE(page);
+  std::unique_ptr<OfflinePageItem> page = GetPageByOfflineId(offline1);
+  ASSERT_TRUE(page);
   EXPECT_EQ(kTestUrl, page->url);
   EXPECT_EQ(kTestClientId1, page->client_id);
   EXPECT_EQ(kTestFileSize, page->file_size);
 
   page = GetPageByOfflineId(offline2);
-  EXPECT_TRUE(page);
+  ASSERT_TRUE(page);
   EXPECT_EQ(kTestUrl2, page->url);
   EXPECT_EQ(kTestClientId2, page->client_id);
   EXPECT_EQ(kTestFileSize, page->file_size);
@@ -1206,25 +1213,6 @@ TEST(CommandLineFlagsTest, OffliningRecentPages) {
   EXPECT_TRUE(offline_pages::IsOffliningRecentPagesEnabled());
 }
 
-TEST(CommandLineFlagsTest, OfflinePagesBackgroundLoading) {
-  // Enable offline bookmarks feature first.
-  // TODO(dimich): once offline pages are enabled by default, remove this.
-  std::unique_ptr<base::test::ScopedFeatureList> scoped_feature_list(
-      new base::test::ScopedFeatureList);
-  scoped_feature_list->InitAndEnableFeature(kOfflineBookmarksFeature);
-
-  // This feature is still disabled by default.
-  EXPECT_FALSE(offline_pages::IsOfflinePagesBackgroundLoadingEnabled());
-
-  // Check if feature is correctly enabled by command-line flag.
-  scoped_feature_list.reset(new base::test::ScopedFeatureList);
-  scoped_feature_list->InitFromCommandLine(
-      std::string(kOfflineBookmarksFeature.name) + "," +
-          kOfflinePagesBackgroundLoadingFeature.name,
-      "");
-  EXPECT_TRUE(offline_pages::IsOfflinePagesBackgroundLoadingEnabled());
-}
-
 TEST(CommandLineFlagsTest, OfflinePagesSharing) {
   // Enable offline bookmarks feature first.
   // TODO(dimich): once offline pages are enabled by default, remove this.
@@ -1242,6 +1230,17 @@ TEST(CommandLineFlagsTest, OfflinePagesSharing) {
           kOfflinePagesSharingFeature.name,
       "");
   EXPECT_TRUE(offline_pages::IsOfflinePagesSharingEnabled());
+}
+
+TEST(CommandLineFlagsTest, OfflinePagesSvelteConcurrentLoading) {
+  // This feature is disabled by default.
+  EXPECT_FALSE(offline_pages::IsOfflinePagesSvelteConcurrentLoadingEnabled());
+
+  // Check if feature is correctly enabled by command-line flag.
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndEnableFeature(
+      kOfflinePagesSvelteConcurrentLoadingFeature);
+  EXPECT_TRUE(offline_pages::IsOfflinePagesSvelteConcurrentLoadingEnabled());
 }
 
 }  // namespace offline_pages

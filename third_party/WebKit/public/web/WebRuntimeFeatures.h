@@ -83,12 +83,12 @@ class WebRuntimeFeatures {
   BLINK_EXPORT static void enableGamepadExtensions(bool);
   BLINK_EXPORT static void enableGenericSensor(bool);
   BLINK_EXPORT static void enableInputMultipleFieldsUI(bool);
+  BLINK_EXPORT static void enableLazyParseCSS(bool);
   BLINK_EXPORT static void enableMediaCapture(bool);
   BLINK_EXPORT static void enableMediaDocumentDownloadButton(bool);
   BLINK_EXPORT static void enableMiddleClickAutoscroll(bool);
   BLINK_EXPORT static void enableNavigatorContentUtils(bool);
   BLINK_EXPORT static void enableNetworkInformation(bool);
-  BLINK_EXPORT static void enableNewMediaPlaybackUi(bool);
   BLINK_EXPORT static void enableNotificationConstructor(bool);
   BLINK_EXPORT static void enableNotifications(bool);
   BLINK_EXPORT static void enableOrientationEvent(bool);
@@ -117,7 +117,6 @@ class WebRuntimeFeatures {
   BLINK_EXPORT static void enableSlimmingPaintV2(bool);
   BLINK_EXPORT static void enableSpeculativeLaunchServiceWorker(bool);
   BLINK_EXPORT static void enableTouch(bool);
-  BLINK_EXPORT static void enableUnsafeES3APIs(bool);
   BLINK_EXPORT static void enableV8IdleTasks(bool);
   BLINK_EXPORT static void enableWebAssemblySerialization(bool);
   BLINK_EXPORT static void enableWebBluetooth(bool);

@@ -72,7 +72,7 @@ namespace syncer {
 class BackendMigrator;
 class BaseTransaction;
 class DataTypeManager;
-class DeviceInfoService;
+class DeviceInfoSyncBridge;
 class DeviceInfoSyncService;
 class DeviceInfoTracker;
 class LocalDeviceInfoProvider;
@@ -245,8 +245,6 @@ class ProfileSyncService : public syncer::SyncService,
     scoped_refptr<net::URLRequestContextGetter> url_request_context;
     std::string debug_identifier;
     version_info::Channel channel = version_info::Channel::UNKNOWN;
-    scoped_refptr<base::SingleThreadTaskRunner> db_thread;
-    scoped_refptr<base::SingleThreadTaskRunner> file_thread;
     base::SequencedWorkerPool* blocking_pool = nullptr;
 
    private:
@@ -345,8 +343,8 @@ class ProfileSyncService : public syncer::SyncService,
   // Returns the SyncableService for syncer::DEVICE_INFO.
   virtual syncer::SyncableService* GetDeviceInfoSyncableService();
 
-  // Returns the ModelTypeService for syncer::DEVICE_INFO.
-  virtual syncer::ModelTypeService* GetDeviceInfoService();
+  // Returns the ModelTypeSyncBridge for syncer::DEVICE_INFO.
+  virtual syncer::ModelTypeSyncBridge* GetDeviceInfoSyncBridge();
 
   // Returns synced devices tracker.
   virtual syncer::DeviceInfoTracker* GetDeviceInfoTracker() const;
@@ -468,7 +466,7 @@ class ProfileSyncService : public syncer::SyncService,
   // server.
   bool HasUnsyncedItems() const;
 
-  // Used by ProfileSyncServiceHarness.  May return NULL.
+  // Used by ProfileSyncServiceHarness.  May return null.
   syncer::BackendMigrator* GetBackendMigratorForTest();
 
   // Used by tests to inspect interaction with OAuth2TokenService.
@@ -826,8 +824,6 @@ class ProfileSyncService : public syncer::SyncService,
   version_info::Channel channel_;
 
   // Threading context.
-  scoped_refptr<base::SingleThreadTaskRunner> db_thread_;
-  scoped_refptr<base::SingleThreadTaskRunner> file_thread_;
   base::SequencedWorkerPool* blocking_pool_;
 
   // Indicates if this is the first time sync is being configured.  This value
@@ -921,11 +917,10 @@ class ProfileSyncService : public syncer::SyncService,
   // and association information.
   syncer::WeakHandle<syncer::DataTypeDebugInfoListener> debug_info_listener_;
 
-  // A thread where all the sync operations happen.
-  // OWNERSHIP Notes:
-  //     * Created when backend starts for the first time.
-  //     * If sync is disabled, PSS claims ownership from backend.
-  //     * If sync is reenabled, PSS passes ownership to new backend.
+  // The thread where all the sync operations happen. This thread is kept alive
+  // until browser shutdown and reused if sync is turned off and on again. It is
+  // joined during the shutdown process, but there is an abort mechanism in
+  // place to prevent slow HTTP requests from blocking browser shutdown.
   std::unique_ptr<base::Thread> sync_thread_;
 
   // ProfileSyncService uses this service to get access tokens.
@@ -958,10 +953,10 @@ class ProfileSyncService : public syncer::SyncService,
 
   std::unique_ptr<syncer::LocalDeviceInfoProvider> local_device_;
 
-  // Locally owned SyncableService and ModelTypeService implementations.
+  // Locally owned SyncableService and ModelTypeSyncBridge implementations.
   std::unique_ptr<sync_sessions::SessionsSyncManager> sessions_sync_manager_;
   std::unique_ptr<syncer::DeviceInfoSyncService> device_info_sync_service_;
-  std::unique_ptr<syncer::DeviceInfoService> device_info_service_;
+  std::unique_ptr<syncer::DeviceInfoSyncBridge> device_info_service_;
 
   std::unique_ptr<syncer::NetworkResources> network_resources_;
 

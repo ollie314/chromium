@@ -70,7 +70,8 @@ var api = (function() {
     'HISTORY_FORWARD': 1,
     'RELOAD': 2,
     'ZOOM_OUT': 3,
-    'ZOOM_IN': 4
+    'ZOOM_IN': 4,
+    'RELOAD_UI': 5,
   });
 
   /**
@@ -105,6 +106,10 @@ var api = (function() {
    * Properties that are not set on this object are left unchanged.
    */
   class UiElementUpdate {
+
+    setIsContentQuad() {
+      this.contentQuad = true;
+    }
 
     /**
      * Specify a parent for this element. If set, this element is positioned

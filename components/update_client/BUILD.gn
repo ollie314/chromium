@@ -39,6 +39,7 @@ static_library("update_client") {
     "update_checker.h",
     "update_client.cc",
     "update_client.h",
+    "update_client_errors.h",
     "update_client_internal.h",
     "update_engine.cc",
     "update_engine.h",
@@ -117,6 +118,7 @@ source_set("unit_tests") {
   testonly = true
   sources = [
     "component_patcher_unittest.cc",
+    "component_unpacker_unittest.cc",
     "persisted_data_unittest.cc",
     "ping_manager_unittest.cc",
     "request_sender_unittest.cc",

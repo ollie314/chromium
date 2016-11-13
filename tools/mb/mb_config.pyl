@@ -130,6 +130,7 @@
       'CrWinGoma(dll)': 'shared_release_bot_x86',
       'ClangToTAndroidASan': 'android_clang_tot_asan',
       'ClangToTAndroid (dbg)': 'android_clang_tot_dbg',
+      'ClangToTAndroid x64': 'android_clang_tot_x64',
       'ClangToTLinux': 'clang_tot_linux_full_symbols_shared_release',
       'ClangToTLinux (dbg)': 'clang_tot_shared_debug',
       'ClangToTLinuxASan': 'clang_tot_asan_lsan_static_release',
@@ -152,7 +153,7 @@
       'CrWinAsanCov': 'asan_clang_edge_fuzzer_static_v8_heap_x86_full_symbols_release',
       'CrWinClang(shared)': 'clang_minimal_symbols_shared_release_bot_x86',
       'CrWinClang64(dbg)': 'win_clang_debug_bot',
-      'CrWinClangLLD': 'clang_tot_minimal_symbols_shared_release_use_lld_x86',
+      'CrWinClangLLD': 'clang_tot_official_minimal_symbols_static_use_lld_x86',
       'CrWinClangLLD64': 'clang_tot_minimal_symbols_shared_release_use_lld',
       'CrWinClngLLD64dbg': 'clang_tot_minimal_symbols_shared_debug_use_lld',
       'CrWinClngLLDdbg': 'clang_tot_minimal_symbols_shared_debug_use_lld_x86',
@@ -180,6 +181,7 @@
       'Mac deterministic (dbg)': 'debug_bot',
       'Mojo ChromiumOS': 'chromeos_with_codecs_ozone_release_trybot',
       'Mojo Windows': 'release_bot_x86',
+      'Ozone Linux': 'release_bot_ozone_linux',
       'Site Isolation Android': 'android_release_bot_minimal_symbols_arm64',
       'Site Isolation Linux': 'release_trybot',
       'Site Isolation Win': 'release_trybot_x86',
@@ -189,11 +191,10 @@
       'WebKit Linux - WPTServe': 'release_bot',
       'WebKit Mac - WPTServe': 'release_bot',
       'WebKit Win - WPTServe': 'release_bot_x86',
+      'WebKit Linux - RandomOrder': 'release_bot',
       'Win 10 Fast Ring': 'release_trybot',
       'Windows deterministic': 'release_bot_x86',
       'Windows Clang deterministic': 'clang_release_bot_minimal_symbols_x86',
-      'Win LKGR (DrM 64)': 'release_drmemory_drfuzz',
-      'Win LKGR (DrM)': 'release_drmemory_drfuzz_x86',
     },
 
     'chromium.goma': {
@@ -280,11 +281,9 @@
       'Mac Builder': 'gpu_tests_release_bot',
       'Mac Builder (dbg)': 'debug_bot',
       'ios-device': 'ios',
-      'ios-device-gn': 'ios',
       'ios-simulator': 'ios',
       'ios-simulator-cronet': 'ios',
-      'ios-simulator-gn': 'ios',
-      'ios-simulator-swarming': 'ios',
+      'ios-simulator-xcode-clang': 'ios',
     },
 
     'chromium.memory': {
@@ -297,20 +296,17 @@
       'Chromium Linux ChromeOS MSan Builder': 'chromeos_msan_release_bot',
       'Chromium Linux MSan Builder': 'msan_release_bot',
       'Chromium Linux TSan Builder': 'tsan_disable_nacl_release_bot',
-      'Chromium Windows Builder (DrMemory x64)': 'drmemory_shared_release',
-      'Chromium Windows Builder (DrMemory)': 'drmemory_shared_release_x86',
     },
 
     'chromium.memory.full': {
       'Chromium Linux ChromeOS MSan Builder': 'chromeos_msan_release_bot',
       'Chromium Linux MSan Builder': 'msan_release_bot',
       'Chromium Linux TSan Builder': 'tsan_disable_nacl_release_bot',
-      'Chromium Windows Builder (DrMemory x64)': 'drmemory_shared_release',
-      'Chromium Windows Builder (DrMemory)': 'drmemory_shared_release_x86',
     },
 
     'chromium.perf': {
       'Android Builder': 'official_goma_minimal_symbols_android',
+      'Android Compile': 'official_goma_minimal_symbols_android',
       'Android arm64 Builder': 'official_goma_minimal_symbols_android_arm64',
       'Linux Builder': 'official_goma',
       'Mac Builder': 'official_goma',
@@ -353,12 +349,16 @@
 
     'chromium.webkit': {
       'Android Builder': 'android_release_bot_minimal_symbols',
-      'WebKit Linux Precise (dbg)': 'debug_bot',
       'WebKit Linux Precise ASAN': 'asan_lsan_release_bot',
+      'WebKit Linux Precise (dbg)': 'debug_bot',
       'WebKit Linux Precise Leak': 'release_bot',
       'WebKit Linux Precise MSAN': 'msan_release_bot',
-      'WebKit Linux Trusty': 'release_bot',
       'WebKit Linux Precise': 'release_bot',
+      'WebKit Linux Trusty ASAN': 'asan_lsan_release_bot',
+      'WebKit Linux Trusty (dbg)': 'debug_bot',
+      'WebKit Linux Trusty Leak': 'release_bot',
+      'WebKit Linux Trusty MSAN': 'msan_release_bot',
+      'WebKit Linux Trusty': 'release_bot',
       'WebKit Mac Builder (dbg)': 'debug_bot',
       'WebKit Mac Builder': 'release_bot',
       'WebKit Mac10.11 (retina)': 'release_bot',
@@ -447,6 +447,9 @@
       'linux_precise_blink_compile_rel': 'release_bot_minimal_symbols',
       'linux_precise_blink_dbg': 'debug_trybot',
       'linux_precise_blink_rel': 'release_bot_minimal_symbols',
+      'linux_trusty_blink_compile_dbg': 'debug_trybot',
+      'linux_trusty_blink_compile_rel': 'release_bot_minimal_symbols',
+      'linux_trusty_blink_dbg': 'debug_trybot',
       'linux_trusty_blink_rel': 'release_bot_minimal_symbols',
       'mac10.9_blink_compile_dbg': 'debug_trybot',
       'mac10.9_blink_compile_rel': 'release_bot_minimal_symbols',
@@ -529,6 +532,7 @@
       'linux_chromium_gn_upload': 'gn_linux_upload',
       'linux_chromium_headless_dbg': '//build/args/bots/tryserver.chromium.linux/linux_chromium_headless_dbg.gn',
       'linux_chromium_headless_rel': '//build/args/bots/tryserver.chromium.linux/linux_chromium_headless_rel.gn',
+      'linux_chromium_ozone_compile_only_ng': 'ozone_linux_release_trybot',
 
       # This is intentionally a release_bot and not a release_trybot;
       # enabling DCHECKs seems to cause flaky failures that don't show up
@@ -537,6 +541,7 @@
 
       'linux_chromium_rel_ng': 'gpu_tests_release_trybot',
       'linux_chromium_tsan_rel_ng': 'tsan_disable_nacl_release_trybot',
+      'linux_chromium_ubsan_rel_ng': 'ubsan_vptr_release_trybot',
 
       # This is 'release_bot' rather than 'release_trybot' because
       # 'release_trybot' includes 'dcheck_always_on', which might cause
@@ -574,11 +579,9 @@
 
     'tryserver.chromium.mac': {
       'ios-device': 'ios',
-      'ios-device-gn': 'ios',
       'ios-simulator': 'ios',
       'ios-simulator-cronet': 'ios',
-      'ios-simulator-gn': 'ios',
-      'ios-simulator-swarming': 'ios',
+      'ios-simulator-xcode-clang': 'ios',
       'mac_chromium_10.10_rel_ng': 'gpu_tests_release_trybot',
       'mac_chromium_10.10_macviews': 'mac_views_browser_release_trybot',
       'mac_chromium_archive_rel_ng': 'release_bot_mac_strip',
@@ -694,6 +697,11 @@
       'android_without_codecs', 'clang_tot', 'shared', 'debug',
     ],
 
+    'android_clang_tot_x64': [
+      'android_without_codecs', 'clang_tot', 'shared', 'x64', 'release',
+      'dcheck_always_on',
+    ],
+
     'android_cronet_data_reduction_proxy_release_bot_minimal_symbols_arm_no_neon': [
       'android', 'cronet', 'data_reduction_proxy', 'release_bot', 'minimal_symbols', 'arm_no_neon',
     ],
@@ -799,7 +807,7 @@
     ],
 
     'android_debug_static_bot_vr_shell': [
-      'android', 'debug_shared_bot', 'vr_shell',
+      'android', 'debug_static_bot', 'vr_shell',
     ],
 
     'android_debug_static_minimal_symbols_mipsel': [
@@ -1068,8 +1076,8 @@
       'clang_tot', 'minimal_symbols', 'shared', 'release', 'use_lld',
     ],
 
-    'clang_tot_minimal_symbols_shared_release_use_lld_x86': [
-      'clang_tot', 'minimal_symbols', 'shared', 'release', 'use_lld', 'x86',
+    'clang_tot_official_minimal_symbols_static_use_lld_x86': [
+      'clang_tot', 'official', 'minimal_symbols', 'static', 'release', 'use_lld', 'x86',
     ],
 
     'clang_tot_minimal_symbols_shared_release': [
@@ -1124,14 +1132,6 @@
 
     'debug_libfuzzer_asan': [
       'debug', 'libfuzzer', 'asan', 'chromeos_codecs', 'pdf_xfa', 'disable_nacl',
-    ],
-
-    'drmemory_shared_release': [
-      'drmemory', 'shared', 'release',
-    ],
-
-    'drmemory_shared_release_x86': [
-      'drmemory', 'shared', 'release', 'x86',
     ],
 
     'debug_trybot': [
@@ -1317,6 +1317,14 @@
       'official', 'x86',
     ],
 
+    'release_bot_ozone_linux': [
+      'release_bot', 'ozone', 'ozone_linux',
+    ],
+
+    'ozone_linux_release_trybot': [
+      'release_trybot', 'ozone', 'ozone_linux',
+    ],
+
     'release_afl_asan': [
       'release', 'afl', 'asan', 'chromeos_codecs', 'pdf_xfa', 'disable_nacl',
     ],
@@ -1348,14 +1356,6 @@
     'release_bot_x86': [
       'release_bot', 'x86',
     ],
-
-    'release_drmemory_drfuzz': [
-      'release', 'drmemory', 'drfuzz', 'chrome_with_codecs',
-    ],
-
-    'release_drmemory_drfuzz_x86': [
-      'release', 'drmemory', 'drfuzz', 'x86', 'chrome_with_codecs',
-     ],
 
     'release_libfuzzer_asan': [
       'release', 'libfuzzer', 'asan', 'chromeos_codecs', 'pdf_xfa', 'disable_nacl', 'optimize_for_fuzzing',
@@ -1423,6 +1423,10 @@
 
     'ubsan_vptr_release_bot': [
       'ubsan_vptr', 'ubsan_no_recover_hack', 'release_bot',
+    ],
+
+    'ubsan_vptr_release_trybot': [
+      'ubsan_vptr', 'ubsan_no_recover_hack', 'release_trybot',
     ],
 
     'win_clang_debug_bot': [
@@ -1575,10 +1579,6 @@
       'mixins': ['debug', 'static', 'goma'],
     },
 
-    'debug_shared_bot': {
-      'mixins': ['debug', 'shared', 'minimal_symbols', 'goma'],
-    },
-
     'debug_static_bot': {
       'mixins': ['debug', 'static', 'minimal_symbols', 'goma'],
     },
@@ -1721,6 +1721,12 @@
       'gn_args': 'use_ozone=true',
     },
 
+    'ozone_linux': {
+      'gn_args': ('ozone_auto_platforms=false ozone_platform_wayland=true '
+                  'ozone_platform_x11=true ozone_platform_gbm=true '
+                  'enable_package_mash_services=true use_ash=false'),
+    },
+
     'pdf_xfa': {
       'gn_args': 'pdf_enable_xfa=true',
     },
@@ -1813,12 +1819,6 @@
 
     'x86': {
       'gn_args': 'target_cpu="x86"',
-    },
-
-    'drfuzz': { 'gn_args': 'use_drfuzz=true' },
-
-    'drmemory': {
-      'gn_args': 'is_component_build=true enable_iterator_debugging=false',
     },
   },
 }

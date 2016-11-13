@@ -6,6 +6,7 @@
 
 #include "base/macros.h"
 #include "base/run_loop.h"
+#include "mojo/public/cpp/bindings/binding.h"
 #include "services/navigation/public/interfaces/view.mojom.h"
 #include "services/service_manager/public/cpp/service.h"
 #include "services/service_manager/public/cpp/service_test.h"
@@ -43,7 +44,7 @@ class NavigationTest : public service_manager::test::ServiceTest,
       loop_->Quit();
   }
   void NavigationStateChanged(const GURL& url,
-                              const mojo::String& title,
+                              const std::string& title,
                               bool can_go_back,
                               bool can_go_forward) override {}
   void LoadProgressChanged(double progress) override {}

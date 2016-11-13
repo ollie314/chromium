@@ -69,6 +69,7 @@ cr.define('settings_people_page', function() {
     suite('ProfileInfoTests', function() {
       var peoplePage = null;
       var browserProxy = null;
+      var syncBrowserProxy = null;
 
       suiteSetup(function() {
         // Force easy unlock off. Those have their own ChromeOS-only tests.
@@ -81,6 +82,9 @@ cr.define('settings_people_page', function() {
         browserProxy = new TestProfileInfoBrowserProxy();
         settings.ProfileInfoBrowserProxyImpl.instance_ = browserProxy;
 
+        syncBrowserProxy = new TestSyncBrowserProxy();
+        settings.SyncBrowserProxyImpl.instance_ = syncBrowserProxy;
+
         PolymerTest.clearBody();
         peoplePage = document.createElement('settings-people-page');
         document.body.appendChild(peoplePage);
@@ -89,7 +93,9 @@ cr.define('settings_people_page', function() {
       teardown(function() { peoplePage.remove(); });
 
       test('GetProfileInfo', function() {
-        return browserProxy.whenCalled('getProfileInfo').then(function() {
+        return Promise.all([browserProxy.whenCalled('getProfileInfo'),
+                            syncBrowserProxy.whenCalled('getSyncStatus')])
+            .then(function() {
           Polymer.dom.flush();
           assertEquals(browserProxy.fakeProfileInfo.name,
                        peoplePage.$$('#profile-name').textContent.trim());
@@ -224,8 +230,8 @@ cr.define('settings_people_page', function() {
         });
       });
 
-      test('CustomizeSyncDisabledForManagedSignin', function() {
-        assertFalse(!!peoplePage.$$('#customize-sync'));
+      test('syncStatusNotActionableForManagedAccounts', function() {
+        assertFalse(!!peoplePage.$$('#sync-status'));
 
         return browserProxy.whenCalled('getSyncStatus').then(function() {
           cr.webUIListenerCallback('sync-status-changed', {
@@ -234,9 +240,9 @@ cr.define('settings_people_page', function() {
           });
           Polymer.dom.flush();
 
-          var customizeSync = peoplePage.$$('#customize-sync');
-          assertTrue(!!customizeSync);
-          assertTrue(customizeSync.hasAttribute('actionable'));
+          var syncStatusContainer = peoplePage.$$('#sync-status');
+          assertTrue(!!syncStatusContainer);
+          assertTrue(syncStatusContainer.hasAttribute('actionable'));
 
           cr.webUIListenerCallback('sync-status-changed', {
             managed: true,
@@ -245,9 +251,39 @@ cr.define('settings_people_page', function() {
           });
           Polymer.dom.flush();
 
-          var customizeSync = peoplePage.$$('#customize-sync');
-          assertTrue(!!customizeSync);
-          assertFalse(customizeSync.hasAttribute('actionable'));
+          var syncStatusContainer = peoplePage.$$('#sync-status');
+          assertTrue(!!syncStatusContainer);
+          assertFalse(syncStatusContainer.hasAttribute('actionable'));
+        });
+      });
+
+      test('syncStatusNotActionableForPassiveErrors', function() {
+        assertFalse(!!peoplePage.$$('#sync-status'));
+
+        return browserProxy.whenCalled('getSyncStatus').then(function() {
+          cr.webUIListenerCallback('sync-status-changed', {
+            hasError: true,
+            statusAction: settings.StatusAction.NO_ACTION,
+            signedIn: true,
+            syncSystemEnabled: true,
+          });
+          Polymer.dom.flush();
+
+          var syncStatusContainer = peoplePage.$$('#sync-status');
+          assertTrue(!!syncStatusContainer);
+          assertFalse(syncStatusContainer.hasAttribute('actionable'));
+
+          cr.webUIListenerCallback('sync-status-changed', {
+            hasError: true,
+            statusAction: settings.StatusAction.UPGRADE_CLIENT,
+            signedIn: true,
+            syncSystemEnabled: true,
+          });
+          Polymer.dom.flush();
+
+          var syncStatusContainer = peoplePage.$$('#sync-status');
+          assertTrue(!!syncStatusContainer);
+          assertTrue(syncStatusContainer.hasAttribute('actionable'));
         });
       });
     });

@@ -15,7 +15,6 @@
 #include "base/files/file_path.h"
 #include "base/i18n/time_formatting.h"
 #include "base/strings/string16.h"
-#include "ui/gfx/image/image_skia.h"
 
 class AccountId;
 
@@ -39,22 +38,6 @@ class SystemTrayItem;
 
 using IMEInfoList = std::vector<IMEInfo>;
 using IMEPropertyInfoList = std::vector<IMEPropertyInfo>;
-
-struct ASH_EXPORT NetworkIconInfo {
-  NetworkIconInfo();
-  ~NetworkIconInfo();
-
-  bool highlight() const { return connected || connecting; }
-
-  bool connecting;
-  bool connected;
-  bool tray_icon_visible;
-  gfx::ImageSkia image;
-  base::string16 name;
-  base::string16 description;
-  std::string service_path;
-  bool is_cellular;
-};
 
 struct ASH_EXPORT BluetoothDeviceInfo {
   BluetoothDeviceInfo();
@@ -121,6 +104,10 @@ class ASH_EXPORT SystemTrayDelegate {
   // Returns the domain that manages the device, if it is enterprise-enrolled.
   virtual std::string GetEnterpriseDomain() const;
 
+  // Returns the realm that manages the device, if it is enterprise enrolled
+  // with Active Directory and joined the realm (Active Directory domain).
+  virtual std::string GetEnterpriseRealm() const;
+
   // Returns notification for enterprise enrolled devices.
   virtual base::string16 GetEnterpriseMessage() const;
 
@@ -149,9 +136,6 @@ class ASH_EXPORT SystemTrayDelegate {
   // Returns true if settings menu item should appear.
   virtual bool ShouldShowSettings();
 
-  // Shows the dialog to set system time, date, and timezone.
-  virtual void ShowSetTimeDialog();
-
   // Shows information about enterprise enrolled devices.
   virtual void ShowEnterpriseInfo();
 
@@ -163,9 +147,6 @@ class ASH_EXPORT SystemTrayDelegate {
 
   // Attempts to restart the system for update.
   virtual void RequestRestartForUpdate();
-
-  // Attempts to shut down the system.
-  virtual void RequestShutdown();
 
   // Returns a list of available bluetooth devices.
   virtual void GetAvailableBluetoothDevices(BluetoothDeviceList* devices);
@@ -202,10 +183,6 @@ class ASH_EXPORT SystemTrayDelegate {
 
   // Toggles bluetooth.
   virtual void ToggleBluetooth();
-
-  // Shows UI to connect to an unlisted network of type |type|. On Chrome OS
-  // |type| corresponds to a Shill network type.
-  virtual void ShowOtherNetworkDialog(const std::string& type);
 
   // Returns whether bluetooth capability is available.
   virtual bool GetBluetoothAvailable();

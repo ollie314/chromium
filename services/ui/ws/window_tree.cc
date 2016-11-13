@@ -585,10 +585,6 @@ void WindowTree::ProcessWindowHierarchyChanged(const ServerWindow* window,
                                                const ServerWindow* old_parent,
                                                bool originated_change) {
   const bool knows_new = new_parent && IsWindowKnown(new_parent);
-  if (originated_change && !IsWindowKnown(window) && knows_new) {
-    std::vector<const ServerWindow*> unused;
-    GetUnknownWindowsFrom(window, &unused);
-  }
   if (originated_change || (window_server_->current_operation_type() ==
                             OperationType::DELETE_WINDOW) ||
       (window_server_->current_operation_type() == OperationType::EMBED) ||
@@ -773,13 +769,8 @@ void WindowTree::ProcessWindowSurfaceChanged(ServerWindow* window,
     return;
   }
 
-  ServerWindowCompositorFrameSinkManager* compositor_frame_sink_manager =
-      window->GetOrCreateCompositorFrameSinkManager();
-  ServerWindowCompositorFrameSink* compositor_frame_sink =
-      compositor_frame_sink_manager->GetDefaultCompositorFrameSink();
-  cc::SurfaceSequence sequence = compositor_frame_sink->CreateSurfaceSequence();
-  client()->OnWindowSurfaceChanged(client_window_id.id, surface_id, sequence,
-                                   frame_size, device_scale_factor);
+  client()->OnWindowSurfaceChanged(client_window_id.id, surface_id, frame_size,
+                                   device_scale_factor);
 }
 
 void WindowTree::SendToPointerWatcher(const ui::Event& event,
@@ -899,9 +890,16 @@ bool WindowTree::DeleteWindowImpl(WindowTree* source, ServerWindow* window) {
 void WindowTree::GetUnknownWindowsFrom(
     const ServerWindow* window,
     std::vector<const ServerWindow*>* windows) {
-  if (IsWindowKnown(window) || !access_policy_->CanGetWindowTree(window))
+  if (!access_policy_->CanGetWindowTree(window))
     return;
+
+  // This function is called in the context of a hierarchy change when the
+  // parent wasn't known. We need to tell the client about the window so that
+  // it can set the parent correctly.
   windows->push_back(window);
+  if (IsWindowKnown(window))
+    return;
+
   // There are two cases where this gets hit:
   // . During init, in which case using the window id as the client id is
   //   fine.
@@ -1053,7 +1051,8 @@ void WindowTree::DestroyWindows() {
   // If we get here from the destructor we're not going to get
   // ProcessWindowDeleted(). Copy the map and delete from the copy so that we
   // don't have to worry about whether |created_window_map_| changes or not.
-  base::hash_map<WindowId, ServerWindow*> created_window_map_copy;
+  std::unordered_map<WindowId, ServerWindow*, WindowIdHash>
+      created_window_map_copy;
   created_window_map_.swap(created_window_map_copy);
   // A sibling can be a transient parent of another window so we detach windows
   // from their transient parents to avoid double deletes.
@@ -1353,7 +1352,7 @@ void WindowTree::SetWindowOpacity(uint32_t change_id,
 void WindowTree::AttachCompositorFrameSink(
     Id transport_window_id,
     mojom::CompositorFrameSinkType type,
-    mojo::InterfaceRequest<cc::mojom::MojoCompositorFrameSink> surface,
+    cc::mojom::MojoCompositorFrameSinkRequest compositor_frame_sink,
     cc::mojom::MojoCompositorFrameSinkClientPtr client) {
   ServerWindow* window =
       GetWindowByClientId(ClientWindowId(transport_window_id));
@@ -1363,17 +1362,9 @@ void WindowTree::AttachCompositorFrameSink(
     DVLOG(1) << "request to AttachCompositorFrameSink failed";
     return;
   }
-  window->CreateCompositorFrameSink(type, std::move(surface),
+  window->CreateCompositorFrameSink(type, gfx::kNullAcceleratedWidget, nullptr,
+                                    nullptr, std::move(compositor_frame_sink),
                                     std::move(client));
-}
-
-void WindowTree::OnWindowSurfaceDetached(Id transport_window_id,
-                                         const cc::SurfaceSequence& sequence) {
-  ServerWindow* window =
-      GetWindowByClientId(ClientWindowId(transport_window_id));
-  if (!window)
-    return;
-  window_server_->GetDisplayCompositor()->ReturnSurfaceReference(sequence);
 }
 
 void WindowTree::SetWindowTextInputState(Id transport_window_id,

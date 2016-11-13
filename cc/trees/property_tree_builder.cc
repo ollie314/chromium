@@ -9,8 +9,6 @@
 #include <map>
 #include <set>
 
-#include "cc/animation/animation_host.h"
-#include "cc/animation/mutable_properties.h"
 #include "cc/base/math_util.h"
 #include "cc/layers/layer.h"
 #include "cc/layers/layer_impl.h"
@@ -20,6 +18,8 @@
 #include "cc/trees/effect_node.h"
 #include "cc/trees/layer_tree_impl.h"
 #include "cc/trees/layer_tree_settings.h"
+#include "cc/trees/mutable_properties.h"
+#include "cc/trees/mutator_host.h"
 #include "cc/trees/scroll_node.h"
 #include "cc/trees/transform_node.h"
 #include "ui/gfx/geometry/point_f.h"
@@ -244,56 +244,56 @@ static const gfx::Transform& Transform(LayerImpl* layer) {
 // Methods to query state from the AnimationHost ----------------------
 template <typename LayerType>
 bool OpacityIsAnimating(LayerType* layer) {
-  return layer->GetAnimationHost()->IsAnimatingOpacityProperty(
+  return layer->GetMutatorHost()->IsAnimatingOpacityProperty(
       layer->element_id(), layer->GetElementTypeForAnimation());
 }
 
 template <typename LayerType>
 bool HasPotentiallyRunningOpacityAnimation(LayerType* layer) {
-  return layer->GetAnimationHost()->HasPotentiallyRunningOpacityAnimation(
+  return layer->GetMutatorHost()->HasPotentiallyRunningOpacityAnimation(
       layer->element_id(), layer->GetElementTypeForAnimation());
 }
 
 template <typename LayerType>
 bool FilterIsAnimating(LayerType* layer) {
-  return layer->GetAnimationHost()->IsAnimatingFilterProperty(
+  return layer->GetMutatorHost()->IsAnimatingFilterProperty(
       layer->element_id(), layer->GetElementTypeForAnimation());
 }
 
 template <typename LayerType>
 bool HasPotentiallyRunningFilterAnimation(LayerType* layer) {
-  return layer->GetAnimationHost()->HasPotentiallyRunningFilterAnimation(
+  return layer->GetMutatorHost()->HasPotentiallyRunningFilterAnimation(
       layer->element_id(), layer->GetElementTypeForAnimation());
 }
 
 template <typename LayerType>
 bool TransformIsAnimating(LayerType* layer) {
-  return layer->GetAnimationHost()->IsAnimatingTransformProperty(
+  return layer->GetMutatorHost()->IsAnimatingTransformProperty(
       layer->element_id(), layer->GetElementTypeForAnimation());
 }
 
 template <typename LayerType>
 bool HasPotentiallyRunningTransformAnimation(LayerType* layer) {
-  return layer->GetAnimationHost()->HasPotentiallyRunningTransformAnimation(
+  return layer->GetMutatorHost()->HasPotentiallyRunningTransformAnimation(
       layer->element_id(), layer->GetElementTypeForAnimation());
 }
 
 template <typename LayerType>
 bool HasOnlyTranslationTransforms(LayerType* layer) {
-  return layer->GetAnimationHost()->HasOnlyTranslationTransforms(
+  return layer->GetMutatorHost()->HasOnlyTranslationTransforms(
       layer->element_id(), layer->GetElementTypeForAnimation());
 }
 
 template <typename LayerType>
 bool AnimationsPreserveAxisAlignment(LayerType* layer) {
-  return layer->GetAnimationHost()->AnimationsPreserveAxisAlignment(
+  return layer->GetMutatorHost()->AnimationsPreserveAxisAlignment(
       layer->element_id());
 }
 
 template <typename LayerType>
 bool HasAnyAnimationTargetingProperty(LayerType* layer,
                                       TargetProperty::Type property) {
-  return layer->GetAnimationHost()->HasAnyAnimationTargetingProperty(
+  return layer->GetMutatorHost()->HasAnyAnimationTargetingProperty(
       layer->element_id(), property);
 }
 
@@ -369,7 +369,7 @@ void AddClipNodeIfNeeded(const DataForRecursion<LayerType>& data_from_ancestor,
       // of its own, but clips from ancestor nodes don't need to be considered
       // when computing clip rects or visibility.
       has_unclipped_surface = true;
-      DCHECK(!parent->applies_local_clip);
+      DCHECK_NE(parent->clip_type, ClipNode::ClipType::APPLIES_LOCAL_CLIP);
     }
     // A surface with unclipped descendants cannot be clipped by its ancestor
     // clip at draw time since the unclipped descendants aren't affected by the
@@ -429,7 +429,10 @@ void AddClipNodeIfNeeded(const DataForRecursion<LayerType>& data_from_ancestor,
       node.layer_clipping_uses_only_local_clip = false;
     }
 
-    node.applies_local_clip = layer_clips_subtree;
+    if (layer_clips_subtree)
+      node.clip_type = ClipNode::ClipType::APPLIES_LOCAL_CLIP;
+    else
+      node.clip_type = ClipNode::ClipType::NONE;
     node.resets_clip = has_unclipped_surface;
     node.target_is_clipped = data_for_children->target_is_clipped;
     node.layers_are_clipped = layers_are_clipped;
@@ -490,6 +493,7 @@ bool AddTransformNodeIfNeeded(
   const bool is_scrollable = layer->scrollable();
   const bool is_fixed = PositionConstraint(layer).is_fixed_position();
   const bool is_sticky = StickyPositionConstraint(layer).is_sticky;
+  const bool is_snapped = layer->IsSnapped();
 
   const bool has_significant_transform =
       !Transform(layer).IsIdentityOr2DTranslation();
@@ -520,7 +524,8 @@ bool AddTransformNodeIfNeeded(
   const bool is_at_boundary_of_3d_rendering_context =
       IsAtBoundaryOf3dRenderingContext(layer);
 
-  bool requires_node = is_root || is_scrollable || has_significant_transform ||
+  DCHECK(!is_scrollable || is_snapped);
+  bool requires_node = is_root || is_snapped || has_significant_transform ||
                        has_any_transform_animation || has_surface || is_fixed ||
                        is_page_scale_layer || is_overscroll_elasticity_layer ||
                        has_proxied_transform_related_property ||
@@ -596,6 +601,7 @@ bool AddTransformNodeIfNeeded(
       node->id;
 
   node->scrolls = is_scrollable;
+  node->should_be_snapped = is_snapped;
   node->flattens_inherited_transform = data_for_children->should_flatten;
 
   node->sorting_context_id = layer->sorting_context_id();
@@ -630,26 +636,25 @@ bool AddTransformNodeIfNeeded(
   }
 
   float post_local_scale_factor = 1.0f;
-  if (is_root)
-    post_local_scale_factor =
-        data_for_children->property_trees->transform_tree.device_scale_factor();
 
   if (is_page_scale_layer) {
-    post_local_scale_factor *= data_from_ancestor.page_scale_factor;
+    if (!is_root)
+      post_local_scale_factor *= data_from_ancestor.page_scale_factor;
     data_for_children->property_trees->transform_tree.set_page_scale_factor(
         data_from_ancestor.page_scale_factor);
   }
 
-  if (has_surface && !is_root)
-    node->needs_surface_contents_scale = true;
-
   node->source_node_id = source_index;
   node->post_local_scale_factor = post_local_scale_factor;
   if (is_root) {
-    data_for_children->property_trees->transform_tree.SetDeviceTransform(
-        *data_from_ancestor.device_transform, layer->position());
+    float page_scale_factor_for_root =
+        is_page_scale_layer ? data_from_ancestor.page_scale_factor : 1.f;
     data_for_children->property_trees->transform_tree
-        .SetDeviceTransformScaleFactor(*data_from_ancestor.device_transform);
+        .SetRootTransformsAndScales(data_for_children->property_trees
+                                        ->transform_tree.device_scale_factor(),
+                                    page_scale_factor_for_root,
+                                    *data_from_ancestor.device_transform,
+                                    layer->position());
   } else {
     node->source_offset = source_offset;
     node->update_post_local_transform(layer->position(),
@@ -666,22 +671,22 @@ bool AddTransformNodeIfNeeded(
 
   if (is_fixed) {
     if (data_from_ancestor.affected_by_inner_viewport_bounds_delta) {
-      node->affected_by_inner_viewport_bounds_delta_x =
+      node->moved_by_inner_viewport_bounds_delta_x =
           PositionConstraint(layer).is_fixed_to_right_edge();
-      node->affected_by_inner_viewport_bounds_delta_y =
+      node->moved_by_inner_viewport_bounds_delta_y =
           PositionConstraint(layer).is_fixed_to_bottom_edge();
-      if (node->affected_by_inner_viewport_bounds_delta_x ||
-          node->affected_by_inner_viewport_bounds_delta_y) {
+      if (node->moved_by_inner_viewport_bounds_delta_x ||
+          node->moved_by_inner_viewport_bounds_delta_y) {
         data_for_children->property_trees->transform_tree
             .AddNodeAffectedByInnerViewportBoundsDelta(node->id);
       }
     } else if (data_from_ancestor.affected_by_outer_viewport_bounds_delta) {
-      node->affected_by_outer_viewport_bounds_delta_x =
+      node->moved_by_outer_viewport_bounds_delta_x =
           PositionConstraint(layer).is_fixed_to_right_edge();
-      node->affected_by_outer_viewport_bounds_delta_y =
+      node->moved_by_outer_viewport_bounds_delta_y =
           PositionConstraint(layer).is_fixed_to_bottom_edge();
-      if (node->affected_by_outer_viewport_bounds_delta_x ||
-          node->affected_by_outer_viewport_bounds_delta_y) {
+      if (node->moved_by_outer_viewport_bounds_delta_x ||
+          node->moved_by_outer_viewport_bounds_delta_y) {
         data_for_children->property_trees->transform_tree
             .AddNodeAffectedByOuterViewportBoundsDelta(node->id);
       }
@@ -700,9 +705,19 @@ bool AddTransformNodeIfNeeded(
     ScrollNode* scroll_ancestor =
         data_for_children->property_trees->scroll_tree.Node(
             sticky_data->scroll_ancestor);
-    if (scroll_ancestor->is_inner_viewport_scroll_layer) {
-      data_for_children->property_trees->transform_tree
-          .AddNodeAffectedByInnerViewportBoundsDelta(node->id);
+    if (sticky_data->constraints.is_anchored_right ||
+        sticky_data->constraints.is_anchored_bottom) {
+      // Sticky nodes whose ancestor scroller is the inner / outer viewport
+      // need to have their local transform updated when the inner / outer
+      // viewport bounds change, but do not unconditionally move by that delta
+      // like fixed position nodes.
+      if (scroll_ancestor->is_inner_viewport_scroll_layer) {
+        data_for_children->property_trees->transform_tree
+            .AddNodeAffectedByInnerViewportBoundsDelta(node->id);
+      } else if (scroll_ancestor->is_outer_viewport_scroll_layer) {
+        data_for_children->property_trees->transform_tree
+            .AddNodeAffectedByOuterViewportBoundsDelta(node->id);
+      }
     }
     sticky_data->main_thread_offset =
         layer->position().OffsetFromOrigin() -
@@ -1346,8 +1361,11 @@ void BuildPropertyTreesTopLevelInternal(
     draw_property_utils::UpdateElasticOverscroll(
         property_trees, overscroll_elasticity_layer, elastic_overscroll);
     property_trees->clip_tree.SetViewportClip(gfx::RectF(viewport));
-    property_trees->transform_tree.SetDeviceTransform(device_transform,
-                                                      root_layer->position());
+    float page_scale_factor_for_root =
+        page_scale_layer == root_layer ? page_scale_factor : 1.f;
+    property_trees->transform_tree.SetRootTransformsAndScales(
+        device_scale_factor, page_scale_factor_for_root, device_transform,
+        root_layer->position());
     return;
   }
 
@@ -1388,9 +1406,10 @@ void BuildPropertyTreesTopLevelInternal(
 
   ClipNode root_clip;
   root_clip.resets_clip = true;
-  root_clip.applies_local_clip = true;
+  root_clip.clip_type = ClipNode::ClipType::APPLIES_LOCAL_CLIP;
   root_clip.clip = gfx::RectF(viewport);
   root_clip.transform_id = kRootPropertyTreeNodeId;
+  root_clip.target_transform_id = kRootPropertyTreeNodeId;
   data_for_recursion.clip_tree_parent =
       data_for_recursion.property_trees->clip_tree.Insert(
           root_clip, kRootPropertyTreeNodeId);

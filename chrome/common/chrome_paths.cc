@@ -16,6 +16,7 @@
 #include "build/build_config.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths_internal.h"
+#include "chrome/common/features.h"
 #include "media/cdm/cdm_paths.h"
 #include "ppapi/features/features.h"
 
@@ -68,8 +69,7 @@ const base::FilePath::CharType kComponentUpdatedFlashHint[] =
 
 #if defined(OS_CHROMEOS)
 const base::FilePath::CharType kChromeOSComponentFlash[] = FILE_PATH_LITERAL(
-    "/mnt/stateful_partition/imageloader_mounts/PepperFlashPlayer/"
-    "libpepflashplayer.so");
+    "/run/imageloader/PepperFlashPlayer/libpepflashplayer.so");
 #endif  // defined(OS_CHROMEOS)
 
 static base::LazyInstance<base::FilePath>
@@ -259,10 +259,11 @@ bool PathProvider(int key, base::FilePath* result) {
       cur = cur.Append(FILE_PATH_LITERAL("resources"));
 #endif
       break;
-    case chrome::DIR_INSPECTOR:
+    case chrome::DIR_INSPECTOR_DEBUG:
       if (!PathService::Get(chrome::DIR_RESOURCES, &cur))
         return false;
-      cur = cur.Append(FILE_PATH_LITERAL("inspector"));
+      cur = cur.Append(FILE_PATH_LITERAL("inspector"))
+               .Append(FILE_PATH_LITERAL("debug"));
       break;
     case chrome::DIR_APP_DICTIONARIES:
 #if defined(OS_POSIX)
@@ -429,8 +430,13 @@ bool PathProvider(int key, base::FilePath* result) {
         return false;
       cur = cur.Append(FILE_PATH_LITERAL("custom_wallpapers"));
       break;
+    case chrome::DIR_CHROMEOS_PPD_CACHE:
+      if (!PathService::Get(chrome::DIR_USER_DATA, &cur))
+        return false;
+      cur = cur.Append(FILE_PATH_LITERAL("ppd_cache"));
+      break;
 #endif
-#if defined(ENABLE_SUPERVISED_USERS)
+#if BUILDFLAG(ENABLE_SUPERVISED_USERS)
 #if defined(OS_LINUX)
     case chrome::DIR_SUPERVISED_USERS_DEFAULT_APPS:
       if (!PathService::Get(chrome::DIR_STANDALONE_EXTERNAL_EXTENSIONS, &cur))

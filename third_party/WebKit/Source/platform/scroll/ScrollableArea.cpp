@@ -44,19 +44,6 @@ static const float kMinFractionToStepWhenPaging = 0.875f;
 
 namespace blink {
 
-struct SameSizeAsScrollableArea {
-  virtual ~SameSizeAsScrollableArea();
-#if ENABLE(ASSERT)
-  VerifyEagerFinalization verifyEager;
-#endif
-  Member<void*> pointer[2];
-  unsigned bitfields : 16;
-  IntPoint origin;
-};
-
-static_assert(sizeof(ScrollableArea) == sizeof(SameSizeAsScrollableArea),
-              "ScrollableArea should stay small");
-
 int ScrollableArea::pixelsPerLineStep(HostWindow* host) {
   if (!host)
     return kPixelsPerLineStep;
@@ -74,21 +61,25 @@ int ScrollableArea::maxOverlapBetweenPages() {
 }
 
 ScrollableArea::ScrollableArea()
-    : m_scrollbarOverlayStyle(ScrollbarOverlayStyleDefault),
+    : m_scrollbarOverlayColorTheme(ScrollbarOverlayColorThemeDark),
       m_scrollOriginChanged(false),
       m_horizontalScrollbarNeedsPaintInvalidation(false),
       m_verticalScrollbarNeedsPaintInvalidation(false),
-      m_scrollCornerNeedsPaintInvalidation(false) {}
+      m_scrollCornerNeedsPaintInvalidation(false),
+      m_scrollbarsHidden(false),
+      m_scrollbarCaptured(false) {}
 
 ScrollableArea::~ScrollableArea() {}
 
-void ScrollableArea::clearScrollAnimators() {
+void ScrollableArea::clearScrollableArea() {
 #if OS(MACOSX)
   if (m_scrollAnimator)
     m_scrollAnimator->dispose();
 #endif
   m_scrollAnimator.clear();
   m_programmaticScrollAnimator.clear();
+  if (m_fadeOverlayScrollbarsTimer)
+    m_fadeOverlayScrollbarsTimer->stop();
 }
 
 ScrollAnimatorBase& ScrollableArea::scrollAnimator() const {
@@ -184,6 +175,7 @@ void ScrollableArea::setScrollOffset(const ScrollOffset& offset,
 
   switch (scrollType) {
     case CompositorScroll:
+    case ClampingScroll:
       scrollOffsetChanged(clampedOffset, scrollType);
       break;
     case AnchoringScroll:
@@ -330,12 +322,27 @@ void ScrollableArea::mouseMovedInContentArea() const {
     scrollAnimator->mouseMovedInContentArea();
 }
 
-void ScrollableArea::mouseEnteredScrollbar(Scrollbar& scrollbar) const {
+void ScrollableArea::mouseEnteredScrollbar(Scrollbar& scrollbar) {
   scrollAnimator().mouseEnteredScrollbar(scrollbar);
+  // Restart the fade out timer.
+  showOverlayScrollbars();
 }
 
-void ScrollableArea::mouseExitedScrollbar(Scrollbar& scrollbar) const {
+void ScrollableArea::mouseExitedScrollbar(Scrollbar& scrollbar) {
   scrollAnimator().mouseExitedScrollbar(scrollbar);
+}
+
+void ScrollableArea::mouseCapturedScrollbar() {
+  m_scrollbarCaptured = true;
+  showOverlayScrollbars();
+  if (m_fadeOverlayScrollbarsTimer)
+    m_fadeOverlayScrollbarsTimer->stop();
+}
+
+void ScrollableArea::mouseReleasedScrollbar() {
+  m_scrollbarCaptured = false;
+  // This will kick off the fade out timer.
+  showOverlayScrollbars();
 }
 
 void ScrollableArea::contentAreaDidShow() const {
@@ -362,7 +369,7 @@ void ScrollableArea::didAddScrollbar(Scrollbar& scrollbar,
 
   // <rdar://problem/9797253> AppKit resets the scrollbar's style when you
   // attach a scrollbar
-  setScrollbarOverlayStyle(getScrollbarOverlayStyle());
+  setScrollbarOverlayColorTheme(getScrollbarOverlayColorTheme());
 }
 
 void ScrollableArea::willRemoveScrollbar(Scrollbar& scrollbar,
@@ -376,36 +383,36 @@ void ScrollableArea::willRemoveScrollbar(Scrollbar& scrollbar,
 }
 
 void ScrollableArea::contentsResized() {
+  showOverlayScrollbars();
   if (ScrollAnimatorBase* scrollAnimator = existingScrollAnimator())
     scrollAnimator->contentsResized();
 }
 
 bool ScrollableArea::hasOverlayScrollbars() const {
-  Scrollbar* vScrollbar = verticalScrollbar();
-  if (vScrollbar && vScrollbar->isOverlayScrollbar())
-    return true;
-  Scrollbar* hScrollbar = horizontalScrollbar();
-  return hScrollbar && hScrollbar->isOverlayScrollbar();
+  return (horizontalScrollbar() &&
+          horizontalScrollbar()->isOverlayScrollbar()) ||
+         (verticalScrollbar() && verticalScrollbar()->isOverlayScrollbar());
 }
 
-void ScrollableArea::setScrollbarOverlayStyle(
-    ScrollbarOverlayStyle overlayStyle) {
-  m_scrollbarOverlayStyle = overlayStyle;
+void ScrollableArea::setScrollbarOverlayColorTheme(
+    ScrollbarOverlayColorTheme overlayTheme) {
+  m_scrollbarOverlayColorTheme = overlayTheme;
 
   if (Scrollbar* scrollbar = horizontalScrollbar()) {
-    ScrollbarTheme::theme().updateScrollbarOverlayStyle(*scrollbar);
+    ScrollbarTheme::theme().updateScrollbarOverlayColorTheme(*scrollbar);
     scrollbar->setNeedsPaintInvalidation(AllParts);
   }
 
   if (Scrollbar* scrollbar = verticalScrollbar()) {
-    ScrollbarTheme::theme().updateScrollbarOverlayStyle(*scrollbar);
+    ScrollbarTheme::theme().updateScrollbarOverlayColorTheme(*scrollbar);
     scrollbar->setNeedsPaintInvalidation(AllParts);
   }
 }
 
-void ScrollableArea::recalculateScrollbarOverlayStyle(Color backgroundColor) {
-  ScrollbarOverlayStyle oldOverlayStyle = getScrollbarOverlayStyle();
-  ScrollbarOverlayStyle overlayStyle = ScrollbarOverlayStyleDefault;
+void ScrollableArea::recalculateScrollbarOverlayColorTheme(
+    Color backgroundColor) {
+  ScrollbarOverlayColorTheme oldOverlayTheme = getScrollbarOverlayColorTheme();
+  ScrollbarOverlayColorTheme overlayTheme = ScrollbarOverlayColorThemeDark;
 
   // Reduce the background color from RGB to a lightness value
   // and determine which scrollbar style to use based on a lightness
@@ -413,10 +420,10 @@ void ScrollableArea::recalculateScrollbarOverlayStyle(Color backgroundColor) {
   double hue, saturation, lightness;
   backgroundColor.getHSL(hue, saturation, lightness);
   if (lightness <= .5)
-    overlayStyle = ScrollbarOverlayStyleLight;
+    overlayTheme = ScrollbarOverlayColorThemeLight;
 
-  if (oldOverlayStyle != overlayStyle)
-    setScrollbarOverlayStyle(overlayStyle);
+  if (oldOverlayTheme != overlayTheme)
+    setScrollbarOverlayColorTheme(overlayTheme);
 }
 
 void ScrollableArea::setScrollbarNeedsPaintInvalidation(
@@ -528,6 +535,49 @@ bool ScrollableArea::shouldScrollOnMainThread() const {
   return true;
 }
 
+bool ScrollableArea::scrollbarsHidden() const {
+  return hasOverlayScrollbars() && m_scrollbarsHidden;
+}
+
+void ScrollableArea::setScrollbarsHidden(bool hidden) {
+  if (m_scrollbarsHidden == static_cast<unsigned>(hidden))
+    return;
+
+  m_scrollbarsHidden = hidden;
+  scrollbarVisibilityChanged();
+}
+
+void ScrollableArea::fadeOverlayScrollbarsTimerFired(TimerBase*) {
+  setScrollbarsHidden(true);
+}
+
+void ScrollableArea::showOverlayScrollbars() {
+  if (!ScrollbarTheme::theme().usesOverlayScrollbars())
+    return;
+
+  setScrollbarsHidden(false);
+
+  const double timeUntilDisable =
+      ScrollbarTheme::theme().overlayScrollbarFadeOutDelaySeconds() +
+      ScrollbarTheme::theme().overlayScrollbarFadeOutDurationSeconds();
+
+  // If the overlay scrollbars don't fade out, don't do anything. This is the
+  // case for the mock overlays used in tests and on Mac, where the fade-out is
+  // animated in ScrollAnimatorMac.
+  if (!timeUntilDisable)
+    return;
+
+  if (!m_fadeOverlayScrollbarsTimer) {
+    m_fadeOverlayScrollbarsTimer.reset(new Timer<ScrollableArea>(
+        this, &ScrollableArea::fadeOverlayScrollbarsTimerFired));
+  }
+
+  if (!m_scrollbarCaptured) {
+    m_fadeOverlayScrollbarsTimer->startOneShot(timeUntilDisable,
+                                               BLINK_FROM_HERE);
+  }
+}
+
 IntRect ScrollableArea::visibleContentRect(
     IncludeScrollbarsInRect scrollbarInclusion) const {
   int scrollbarWidth =
@@ -574,16 +624,28 @@ float ScrollableArea::pixelStep(ScrollbarOrientation) const {
   return 1;
 }
 
-int ScrollableArea::verticalScrollbarWidth() const {
+int ScrollableArea::verticalScrollbarWidth(
+    OverlayScrollbarClipBehavior behavior) const {
+  DCHECK_EQ(behavior, IgnoreOverlayScrollbarSize);
   if (Scrollbar* verticalBar = verticalScrollbar())
     return !verticalBar->isOverlayScrollbar() ? verticalBar->width() : 0;
   return 0;
 }
 
-int ScrollableArea::horizontalScrollbarHeight() const {
+int ScrollableArea::horizontalScrollbarHeight(
+    OverlayScrollbarClipBehavior behavior) const {
+  DCHECK_EQ(behavior, IgnoreOverlayScrollbarSize);
   if (Scrollbar* horizontalBar = horizontalScrollbar())
     return !horizontalBar->isOverlayScrollbar() ? horizontalBar->height() : 0;
   return 0;
+}
+
+FloatQuad ScrollableArea::localToVisibleContentQuad(const FloatQuad& quad,
+                                                    const LayoutObject*,
+                                                    unsigned) const {
+  FloatQuad result(quad);
+  result.move(-scrollOffset());
+  return result;
 }
 
 IntSize ScrollableArea::excludeScrollbars(const IntSize& size) const {

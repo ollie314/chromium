@@ -8,17 +8,27 @@
 #include <memory>
 #include <utility>
 
+#include "base/base_switches.h"
 #include "base/bind.h"
+#include "base/callback.h"
+#include "base/command_line.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
+#include "base/path_service.h"
+#include "base/process/process.h"
 #include "base/process/process_handle.h"
 #include "base/run_loop.h"
+#include "mojo/edk/embedder/embedder.h"
+#include "mojo/edk/embedder/platform_channel_pair.h"
+#include "mojo/edk/embedder/scoped_platform_handle.h"
 #include "mojo/public/cpp/bindings/binding_set.h"
 #include "services/service_manager/public/cpp/interface_factory.h"
+#include "services/service_manager/public/cpp/interface_registry.h"
 #include "services/service_manager/public/cpp/service.h"
 #include "services/service_manager/public/cpp/service_test.h"
 #include "services/service_manager/public/interfaces/service_manager.mojom.h"
+#include "services/service_manager/runner/common/client_util.h"
 #include "services/service_manager/tests/service_manager/service_manager_unittest.mojom.h"
 
 namespace service_manager {
@@ -36,9 +46,14 @@ class ServiceManagerTestClient
 
   const Identity& target_identity() const { return target_identity_; }
 
+  void WaitForTargetIdentityCall() {
+    wait_for_target_identity_loop_ = base::MakeUnique<base::RunLoop>();
+    wait_for_target_identity_loop_->Run();
+  }
+
  private:
   // test::ServiceTestClient:
-  bool OnConnect(const Identity& remote_identity,
+  bool OnConnect(const ServiceInfo& remote_info,
                  InterfaceRegistry* registry) override {
     registry->AddInterface<test::mojom::CreateInstanceTest>(this);
     return true;
@@ -53,10 +68,14 @@ class ServiceManagerTestClient
   // test::mojom::CreateInstanceTest:
   void SetTargetIdentity(const service_manager::Identity& identity) override {
     target_identity_ = identity;
-    base::MessageLoop::current()->QuitWhenIdle();
+    if (!wait_for_target_identity_loop_)
+      LOG(ERROR) << "SetTargetIdentity call received when not waiting for it.";
+    else
+      wait_for_target_identity_loop_->Quit();
   }
 
   service_manager::Identity target_identity_;
+  std::unique_ptr<base::RunLoop> wait_for_target_identity_loop_;
 
   mojo::Binding<test::mojom::CreateInstanceTest> binding_;
 
@@ -74,8 +93,6 @@ class ServiceManagerTest : public test::ServiceTest,
         binding_(this) {}
   ~ServiceManagerTest() override {}
 
-  void OnDriverQuit() { base::MessageLoop::current()->QuitNow(); }
-
  protected:
   struct InstanceInfo {
     explicit InstanceInfo(const Identity& identity)
@@ -92,7 +109,7 @@ class ServiceManagerTest : public test::ServiceTest,
 
     service_manager->AddListener(binding_.CreateInterfacePtrAndBind());
 
-    wait_for_instances_loop_.reset(new base::RunLoop);
+    wait_for_instances_loop_ = base::MakeUnique<base::RunLoop>();
     wait_for_instances_loop_->Run();
   }
 
@@ -108,12 +125,90 @@ class ServiceManagerTest : public test::ServiceTest,
     return false;
   }
 
+  void WaitForTargetIdentityCall() {
+    service_->WaitForTargetIdentityCall();
+  }
+
   const Identity& target_identity() const {
     DCHECK(service_);
     return service_->target_identity();
   }
 
   const std::vector<InstanceInfo>& instances() const { return instances_; }
+
+  using ServiceStartedCallback =
+      base::Callback<void(const service_manager::Identity&)>;
+  void set_service_started_callback(const ServiceStartedCallback& callback) {
+    service_started_callback_ = callback;
+  }
+
+  using ServiceFailedToStartCallback =
+      base::Callback<void(const service_manager::Identity&)>;
+  void set_service_failed_to_start_callback(
+      const ServiceFailedToStartCallback& callback) {
+    service_failed_to_start_callback_ = callback;
+  }
+
+  void StartTarget() {
+    base::FilePath target_path;
+    CHECK(base::PathService::Get(base::DIR_EXE, &target_path));
+#if defined(OS_WIN)
+    target_path = target_path.Append(
+        FILE_PATH_LITERAL("service_manager_unittest_target.exe"));
+#else
+    target_path = target_path.Append(
+        FILE_PATH_LITERAL("service_manager_unittest_target"));
+#endif
+
+    base::CommandLine child_command_line(target_path);
+    // Forward the wait-for-debugger flag but nothing else - we don't want to
+    // stamp on the platform-channel flag.
+    if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+            switches::kWaitForDebugger)) {
+      child_command_line.AppendSwitch(switches::kWaitForDebugger);
+    }
+
+    // Create the channel to be shared with the target process. Pass one end
+    // on the command line.
+    mojo::edk::PlatformChannelPair platform_channel_pair;
+    mojo::edk::HandlePassingInformation handle_passing_info;
+    platform_channel_pair.PrepareToPassClientHandleToChildProcess(
+        &child_command_line, &handle_passing_info);
+
+    std::string child_token = mojo::edk::GenerateRandomToken();
+    service_manager::mojom::ServicePtr client =
+        service_manager::PassServiceRequestOnCommandLine(&child_command_line,
+                                                         child_token);
+    service_manager::mojom::PIDReceiverPtr receiver;
+
+    service_manager::Identity target("service:service_manager_unittest_target",
+                                     service_manager::mojom::kInheritUserID);
+    service_manager::Connector::ConnectParams params(target);
+    params.set_client_process_connection(std::move(client),
+                                         GetProxy(&receiver));
+    std::unique_ptr<service_manager::Connection> connection =
+        connector()->Connect(&params);
+    connection->AddConnectionCompletedClosure(
+        base::Bind(&ServiceManagerTest::OnConnectionCompleted,
+                   base::Unretained(this)));
+
+    base::LaunchOptions options;
+#if defined(OS_WIN)
+    options.handles_to_inherit = &handle_passing_info;
+#elif defined(OS_POSIX)
+    options.fds_to_remap = &handle_passing_info;
+#endif
+    target_ = base::LaunchProcess(child_command_line, options);
+    DCHECK(target_.IsValid());
+    receiver->SetPID(target_.Pid());
+    mojo::edk::ChildProcessLaunched(target_.Handle(),
+                                    platform_channel_pair.PassServerHandle(),
+                                    child_token);
+  }
+
+  void KillTarget() {
+    target_.Terminate(0, false);
+  }
 
  private:
   // test::ServiceTest:
@@ -123,14 +218,14 @@ class ServiceManagerTest : public test::ServiceTest,
   }
 
   // mojom::ServiceManagerListener:
-  void OnInit(std::vector<mojom::ServiceInfoPtr> instances) override {
+  void OnInit(std::vector<mojom::RunningServiceInfoPtr> instances) override {
     for (size_t i = 0; i < instances.size(); ++i)
       initial_instances_.push_back(InstanceInfo(instances[i]->identity));
 
     DCHECK(wait_for_instances_loop_);
     wait_for_instances_loop_->Quit();
   }
-  void OnServiceCreated(mojom::ServiceInfoPtr instance) override {
+  void OnServiceCreated(mojom::RunningServiceInfoPtr instance) override {
     instances_.push_back(InstanceInfo(instance->identity));
   }
   void OnServiceStarted(const service_manager::Identity& identity,
@@ -141,6 +236,13 @@ class ServiceManagerTest : public test::ServiceTest,
         break;
       }
     }
+    if (!service_started_callback_.is_null())
+        service_started_callback_.Run(identity);
+  }
+  void OnServiceFailedToStart(
+      const service_manager::Identity& identity) override {
+    if (!service_failed_to_start_callback_.is_null())
+        service_failed_to_start_callback_.Run(identity);
   }
   void OnServiceStopped(const service_manager::Identity& identity) override {
     for (auto it = instances_.begin(); it != instances_.end(); ++it) {
@@ -152,11 +254,16 @@ class ServiceManagerTest : public test::ServiceTest,
     }
   }
 
+  void OnConnectionCompleted() {}
+
   ServiceManagerTestClient* service_;
   mojo::Binding<mojom::ServiceManagerListener> binding_;
   std::vector<InstanceInfo> instances_;
   std::vector<InstanceInfo> initial_instances_;
   std::unique_ptr<base::RunLoop> wait_for_instances_loop_;
+  ServiceStartedCallback service_started_callback_;
+  ServiceFailedToStartCallback service_failed_to_start_callback_;
+  base::Process target_;
 
   DISALLOW_COPY_AND_ASSIGN(ServiceManagerTest);
 };
@@ -164,19 +271,12 @@ class ServiceManagerTest : public test::ServiceTest,
 TEST_F(ServiceManagerTest, CreateInstance) {
   AddListenerAndWaitForApplications();
 
-  // 1. Launch a process. (Actually, have the runner launch a process that
-  //    launches a process.)
-  test::mojom::DriverPtr driver;
-  std::unique_ptr<Connection> connection =
-      connector()->Connect("exe:service_manager_unittest_driver");
-  connection->GetInterface(&driver);
+  // 1. Launch a process.
+  StartTarget();
 
   // 2. Wait for the target to connect to us. (via
   //    service:service_manager_unittest)
-  base::RunLoop().Run();
-
-  EXPECT_FALSE(connection->IsPending());
-  Identity remote_identity = connection->GetRemoteIdentity();
+  WaitForTargetIdentityCall();
 
   // 3. Validate that this test suite's name was received from the application
   //    manager.
@@ -185,25 +285,83 @@ TEST_F(ServiceManagerTest, CreateInstance) {
   // 4. Validate that the right applications/processes were created.
   //    Note that the target process will be created even if the tests are
   //    run with --single-process.
-  EXPECT_EQ(2u, instances().size());
-  {
-    auto& instance = instances().front();
-    EXPECT_EQ(remote_identity, instance.identity);
-    EXPECT_EQ("exe:service_manager_unittest_driver", instance.identity.name());
-    EXPECT_NE(base::kNullProcessId, instance.pid);
-  }
+  EXPECT_EQ(1u, instances().size());
   {
     auto& instance = instances().back();
     // We learn about the target process id via a ping from it.
     EXPECT_EQ(target_identity(), instance.identity);
-    EXPECT_EQ("exe:service_manager_unittest_target", instance.identity.name());
+    EXPECT_EQ("service:service_manager_unittest_target",
+              instance.identity.name());
     EXPECT_NE(base::kNullProcessId, instance.pid);
   }
 
-  driver.set_connection_error_handler(
-      base::Bind(&ServiceManagerTest::OnDriverQuit, base::Unretained(this)));
-  driver->QuitDriver();
-  base::RunLoop().Run();
+  KillTarget();
+}
+
+void OnServiceStartedCallback(int* start_count,
+                              std::string* service_name,
+                              const base::Closure& continuation,
+                              const service_manager::Identity& identity) {
+  (*start_count)++;
+  *service_name = identity.name();
+  continuation.Run();
+}
+
+void OnServiceFailedToStartCallback(
+      bool* run,
+      const base::Closure& continuation,
+      const service_manager::Identity& identity) {
+  *run = true;
+  continuation.Run();
+}
+
+// Tests that creating connecting to a singleton packaged service work.
+TEST_F(ServiceManagerTest, CreatePackagedSingletonInstance) {
+  AddListenerAndWaitForApplications();
+
+  // Connect to the embedder service first.
+  {
+    base::RunLoop loop;
+    int start_count = 0;
+    std::string service_name;
+    set_service_started_callback(base::BindRepeating(
+        &OnServiceStartedCallback,
+        &start_count, &service_name, loop.QuitClosure()));
+    bool failed_to_start = false;
+    set_service_failed_to_start_callback(base::BindRepeating(
+        &OnServiceFailedToStartCallback,
+        &failed_to_start, loop.QuitClosure()));
+
+    std::unique_ptr<Connection> embedder_connection =
+        connector()->Connect("service:service_manager_unittest_embedder");
+    loop.Run();
+    EXPECT_FALSE(failed_to_start);
+    EXPECT_FALSE(embedder_connection->IsPending());
+    EXPECT_EQ(1, start_count);
+    EXPECT_EQ("service:service_manager_unittest_embedder", service_name);
+  }
+
+  {
+    base::RunLoop loop;
+    int start_count = 0;
+    std::string service_name;
+    set_service_started_callback(base::BindRepeating(
+        &OnServiceStartedCallback,
+        &start_count, &service_name, loop.QuitClosure()));
+    bool failed_to_start = false;
+    set_service_failed_to_start_callback(base::BindRepeating(
+        &OnServiceFailedToStartCallback,
+        &failed_to_start, loop.QuitClosure()));
+
+    // Connect to the packaged singleton service.
+    std::unique_ptr<Connection> singleton_connection =
+        connector()->Connect("service:service_manager_unittest_singleton");
+    loop.Run();
+    EXPECT_FALSE(failed_to_start);
+    EXPECT_FALSE(singleton_connection->IsPending());
+    EXPECT_EQ(1, start_count);
+    EXPECT_EQ("service:service_manager_unittest_singleton", service_name);
+  }
 }
 
 }  // namespace service_manager

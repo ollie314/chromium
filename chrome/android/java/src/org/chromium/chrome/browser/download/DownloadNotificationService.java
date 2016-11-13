@@ -40,12 +40,10 @@ import org.chromium.chrome.browser.init.EmptyBrowserParts;
 import org.chromium.chrome.browser.offlinepages.downloads.OfflinePageDownloadBridge;
 import org.chromium.chrome.browser.util.IntentUtils;
 
-import java.text.NumberFormat;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Locale;
 import java.util.Set;
 
 /**
@@ -60,6 +58,7 @@ public class DownloadNotificationService extends Service {
     static final String EXTRA_NOTIFICATION_DISMISSED = "NotificationDismissed";
     static final String EXTRA_DOWNLOAD_IS_OFF_THE_RECORD = "DownloadIsOffTheRecord";
     static final String EXTRA_DOWNLOAD_IS_OFFLINE_PAGE = "DownloadIsOfflinePage";
+    static final String EXTRA_IS_SUPPORTED_MIME_TYPE = "IsSupportedMimeType";
     static final String ACTION_DOWNLOAD_CANCEL =
             "org.chromium.chrome.browser.download.DOWNLOAD_CANCEL";
     static final String ACTION_DOWNLOAD_PAUSE =
@@ -114,11 +113,11 @@ public class DownloadNotificationService extends Service {
             // activity should be pause the notification.
             if (tasks.size() > 0) return;
         }
-        mStopPostingProgressNotifications = true;
         // This funcion is called when Chrome is swiped away from the recent apps
         // drawer. So it doesn't catch all scenarios that chrome can get killed.
         // This will only help Android 4.4.2.
         onBrowserKilled();
+        mStopPostingProgressNotifications = true;
     }
 
     @Override
@@ -230,20 +229,19 @@ public class DownloadNotificationService extends Service {
             boolean canDownloadWhileMetered, boolean isOfflinePage) {
         if (mStopPostingProgressNotifications) return;
         boolean indeterminate = percentage == INVALID_DOWNLOAD_PERCENTAGE;
+        String contentText = mContext.getResources().getString(
+                indeterminate ? R.string.download_notification_pending : R.string.download_started);
         NotificationCompat.Builder builder = buildNotification(
-                android.R.drawable.stat_sys_download, fileName, null);
+                android.R.drawable.stat_sys_download, fileName, contentText);
         builder.setOngoing(true).setProgress(100, percentage, indeterminate);
         builder.setPriority(Notification.PRIORITY_HIGH);
         if (!indeterminate) {
-            NumberFormat formatter = NumberFormat.getPercentInstance(Locale.getDefault());
-            String percentText = formatter.format(percentage / 100.0);
             String duration = formatRemainingTime(mContext, timeRemainingInMillis);
-            builder.setContentText(duration);
             if (Build.VERSION.CODENAME.equals("N")
                     || Build.VERSION.SDK_INT > Build.VERSION_CODES.M) {
-                builder.setSubText(percentText);
+                builder.setSubText(duration);
             } else {
-                builder.setContentInfo(percentText);
+                builder.setContentInfo(duration);
             }
         }
         int notificationId = getNotificationId(downloadGuid);
@@ -259,7 +257,7 @@ public class DownloadNotificationService extends Service {
                 buildPendingIntent(cancelIntent, notificationId));
         Intent pauseIntent = buildActionIntent(
                 ACTION_DOWNLOAD_PAUSE, notificationId, downloadGuid, fileName, isOfflinePage);
-        builder.addAction(R.drawable.ic_vidcontrol_pause,
+        builder.addAction(R.drawable.ic_media_control_pause,
                 mContext.getResources().getString(R.string.download_notification_pause_button),
                 buildPendingIntent(pauseIntent, notificationId));
         updateNotification(notificationId, builder.build());
@@ -304,9 +302,18 @@ public class DownloadNotificationService extends Service {
             notifyDownloadFailed(downloadGuid, entry.fileName);
             return;
         }
+        // If download is interrupted due to network disconnection, show download pending state.
+        if (isAutoResumable) {
+            notifyDownloadProgress(entry.downloadGuid, entry.fileName, INVALID_DOWNLOAD_PERCENTAGE,
+                    0, 0, entry.isOffTheRecord, entry.canDownloadWhileMetered,
+                    entry.isOfflinePage());
+            mDownloadsInProgress.remove(downloadGuid);
+            return;
+        }
+        String contentText = mContext.getResources().getString(
+                R.string.download_notification_paused);
         NotificationCompat.Builder builder = buildNotification(
-                android.R.drawable.ic_media_pause, entry.fileName,
-                mContext.getResources().getString(R.string.download_notification_paused));
+                android.R.drawable.ic_media_pause, entry.fileName, contentText);
         Intent cancelIntent = buildActionIntent(
                 ACTION_DOWNLOAD_CANCEL, entry.notificationId, entry.downloadGuid, entry.fileName,
                 entry.isOfflinePage());
@@ -327,7 +334,7 @@ public class DownloadNotificationService extends Service {
         // If download is not auto resumable, there is no need to keep it in SharedPreferences.
         // Keep off the record downloads in SharedPreferences so we can cancel it when browser is
         // killed.
-        if (!isAutoResumable && !entry.isOffTheRecord) {
+        if (!entry.isOffTheRecord) {
             removeSharedPreferenceEntry(downloadGuid);
         }
         mDownloadsInProgress.remove(downloadGuid);
@@ -339,12 +346,14 @@ public class DownloadNotificationService extends Service {
      * @param filePath Full path to the download.
      * @param fileName Filename of the download.
      * @param systemDownloadId Download ID assigned by system DownloadManager.
+     * @param isOfflinePage Whether the download is for offline page.
+     * @param isSupportedMimeType Whether the MIME type can be viewed inside browser.
      * @return ID of the successful download notification. Used for removing the notification when
      *         user click on the snackbar.
      */
     public int notifyDownloadSuccessful(
             String downloadGuid, String filePath, String fileName, long systemDownloadId,
-            boolean isOfflinePage) {
+            boolean isOfflinePage, boolean isSupportedMimeType) {
         int notificationId = getNotificationId(downloadGuid);
         NotificationCompat.Builder builder = buildNotification(
                 R.drawable.offline_pin, fileName,
@@ -360,6 +369,7 @@ public class DownloadNotificationService extends Service {
             long[] idArray = {systemDownloadId};
             intent.putExtra(DownloadManager.EXTRA_NOTIFICATION_CLICK_DOWNLOAD_IDS, idArray);
             intent.putExtra(EXTRA_DOWNLOAD_FILE_PATH, filePath);
+            intent.putExtra(EXTRA_IS_SUPPORTED_MIME_TYPE, isSupportedMimeType);
         }
         intent.setComponent(component);
         builder.setContentIntent(PendingIntent.getBroadcast(

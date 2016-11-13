@@ -949,8 +949,13 @@ TEST_F(RenderWidgetHostViewMacTest, ScrollWheelEndEventDelivery) {
   [view->cocoa_view() scrollWheel:event1];
   ASSERT_EQ(1U, process_host->sink().message_count());
 
+  // Flush and clear other messages (e.g. begin frames) the RWHVMac also sends.
+  base::RunLoop().RunUntilIdle();
+  process_host->sink().ClearMessages();
+
   // Send an ACK for the first wheel event, so that the queue will be flushed.
-  InputEventAck ack(blink::WebInputEvent::MouseWheel,
+  InputEventAck ack(InputEventAckSource::COMPOSITOR_THREAD,
+                    blink::WebInputEvent::MouseWheel,
                     INPUT_EVENT_ACK_STATE_CONSUMED);
   std::unique_ptr<IPC::Message> response(
       new InputHostMsg_HandleInputEvent_ACK(0, ack));
@@ -961,7 +966,7 @@ TEST_F(RenderWidgetHostViewMacTest, ScrollWheelEndEventDelivery) {
   NSEvent* event2 = MockScrollWheelEventWithPhase(@selector(phaseEnded), 0);
   [NSApp postEvent:event2 atStart:NO];
   base::RunLoop().RunUntilIdle();
-  ASSERT_EQ(2U, process_host->sink().message_count());
+  ASSERT_EQ(1U, process_host->sink().message_count());
 
   // Clean up.
   host->ShutdownAndDestroyWidget(true);
@@ -995,7 +1000,8 @@ TEST_F(RenderWidgetHostViewMacTest,
   process_host->sink().ClearMessages();
 
   // Indicate that the wheel event was unhandled.
-  InputEventAck unhandled_ack(blink::WebInputEvent::MouseWheel,
+  InputEventAck unhandled_ack(InputEventAckSource::COMPOSITOR_THREAD,
+                              blink::WebInputEvent::MouseWheel,
                               INPUT_EVENT_ACK_STATE_NOT_CONSUMED);
   std::unique_ptr<IPC::Message> response1(
       new InputHostMsg_HandleInputEvent_ACK(0, unhandled_ack));
@@ -1003,7 +1009,8 @@ TEST_F(RenderWidgetHostViewMacTest,
   ASSERT_EQ(2U, process_host->sink().message_count());
   process_host->sink().ClearMessages();
 
-  InputEventAck unhandled_scroll_ack(blink::WebInputEvent::GestureScrollUpdate,
+  InputEventAck unhandled_scroll_ack(InputEventAckSource::COMPOSITOR_THREAD,
+                                     blink::WebInputEvent::GestureScrollUpdate,
                                      INPUT_EVENT_ACK_STATE_NOT_CONSUMED);
   std::unique_ptr<IPC::Message> scroll_response1(
       new InputHostMsg_HandleInputEvent_ACK(0, unhandled_scroll_ack));
@@ -1164,7 +1171,8 @@ TEST_F(RenderWidgetHostViewMacPinchTest, PinchThresholding) {
   process_host_->sink().ClearMessages();
 
   // We'll use this IPC message to ack events.
-  InputEventAck ack(blink::WebInputEvent::GesturePinchUpdate,
+  InputEventAck ack(InputEventAckSource::COMPOSITOR_THREAD,
+                    blink::WebInputEvent::GesturePinchUpdate,
                     INPUT_EVENT_ACK_STATE_CONSUMED);
   std::unique_ptr<IPC::Message> response(
       new InputHostMsg_HandleInputEvent_ACK(0, ack));

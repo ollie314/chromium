@@ -80,7 +80,6 @@ class CONTENT_EXPORT ChildProcessLauncher : public base::NonThreadSafe {
       base::CommandLine* cmd_line,
       int child_process_id,
       Client* client,
-      const base::SharedMemory* field_trial_state,
       const std::string& mojo_child_token,
       const mojo::edk::ProcessErrorCallback& process_error_callback,
       bool terminate_on_shutdown = true);
@@ -118,8 +117,7 @@ class CONTENT_EXPORT ChildProcessLauncher : public base::NonThreadSafe {
   // Posts a task to the launcher thread to do the actual work.
   void Launch(SandboxedProcessLauncherDelegate* delegate,
               base::CommandLine* cmd_line,
-              int child_process_id,
-              const base::SharedMemory* field_trial_state);
+              int child_process_id);
 
   void UpdateTerminationStatus(bool known_dead);
 
@@ -132,7 +130,6 @@ class CONTENT_EXPORT ChildProcessLauncher : public base::NonThreadSafe {
                         mojo::edk::ScopedPlatformHandle server_handle,
                         ZygoteHandle zygote,
 #if defined(OS_ANDROID)
-                        base::ScopedFD ipcfd,
                         base::ScopedFD mojo_fd,
 #endif
                         base::Process process,
@@ -141,9 +138,6 @@ class CONTENT_EXPORT ChildProcessLauncher : public base::NonThreadSafe {
   // Notifies the client about the result of the operation.
   void Notify(ZygoteHandle zygote,
               mojo::edk::ScopedPlatformHandle server_handle,
-#if defined(OS_ANDROID)
-              base::ScopedFD ipcfd,
-#endif
               base::Process process,
               int error_code);
 

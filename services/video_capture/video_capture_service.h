@@ -8,13 +8,14 @@
 #include <memory>
 
 #include "mojo/public/cpp/bindings/binding_set.h"
+#include "services/service_manager/public/cpp/interface_factory.h"
 #include "services/service_manager/public/cpp/service.h"
 #include "services/video_capture/public/interfaces/video_capture_service.mojom.h"
 
 namespace video_capture {
 
-class VideoCaptureDeviceFactoryImpl;
-class FakeVideoCaptureDeviceFactoryConfiguratorImpl;
+class DeviceFactoryMediaToMojoAdapter;
+class MockDeviceFactory;
 
 // Implementation of mojom::VideoCaptureService as a Service Manager service.
 class VideoCaptureService
@@ -26,7 +27,7 @@ class VideoCaptureService
   ~VideoCaptureService() override;
 
   // service_manager::Service:
-  bool OnConnect(const service_manager::Identity& remote_identity,
+  bool OnConnect(const service_manager::ServiceInfo& remote_info,
                  service_manager::InterfaceRegistry* registry) override;
 
   // service_manager::InterfaceFactory<mojom::VideoCaptureService>:
@@ -42,7 +43,7 @@ class VideoCaptureService
       mojom::VideoCaptureDeviceFactoryRequest request) override;
   void AddDeviceToMockFactory(
       mojom::MockVideoCaptureDevicePtr device,
-      mojom::VideoCaptureDeviceDescriptorPtr descriptor,
+      const media::VideoCaptureDeviceDescriptor& descriptor,
       const AddDeviceToMockFactoryCallback& callback) override;
 
  private:
@@ -54,9 +55,10 @@ class VideoCaptureService
   mojo::BindingSet<mojom::VideoCaptureDeviceFactory> factory_bindings_;
   mojo::BindingSet<mojom::VideoCaptureDeviceFactory> fake_factory_bindings_;
   mojo::BindingSet<mojom::VideoCaptureDeviceFactory> mock_factory_bindings_;
-  std::unique_ptr<VideoCaptureDeviceFactoryImpl> device_factory_;
-  std::unique_ptr<VideoCaptureDeviceFactoryImpl> fake_device_factory_;
-  std::unique_ptr<VideoCaptureDeviceFactoryImpl> mock_device_factory_;
+  std::unique_ptr<DeviceFactoryMediaToMojoAdapter> device_factory_;
+  std::unique_ptr<DeviceFactoryMediaToMojoAdapter> fake_device_factory_;
+  std::unique_ptr<DeviceFactoryMediaToMojoAdapter> mock_device_factory_adapter_;
+  MockDeviceFactory* mock_device_factory_;
 };
 
 }  // namespace video_capture

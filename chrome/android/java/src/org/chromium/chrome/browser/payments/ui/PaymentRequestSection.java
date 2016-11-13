@@ -12,6 +12,8 @@ import android.graphics.drawable.Drawable;
 import android.text.SpannableStringBuilder;
 import android.text.TextUtils;
 import android.text.TextUtils.TruncateAt;
+import android.text.style.AbsoluteSizeSpan;
+import android.text.style.ForegroundColorSpan;
 import android.text.style.StyleSpan;
 import android.view.Gravity;
 import android.view.LayoutInflater;
@@ -603,8 +605,9 @@ public abstract class PaymentRequestSection extends LinearLayout implements View
                 LineItem item = cart.getContents().get(i);
 
                 TextView description = new TextView(context);
-                ApiCompatibilityUtils.setTextAppearance(
-                        description, R.style.PaymentsUiSectionDescriptiveTextEndAligned);
+                ApiCompatibilityUtils.setTextAppearance(description, item.getIsPending()
+                                ? R.style.PaymentsUiSectionPendingTextEndAligned
+                                : R.style.PaymentsUiSectionDescriptiveTextEndAligned);
                 description.setText(item.getLabel());
                 description.setEllipsize(TruncateAt.END);
                 description.setMaxLines(2);
@@ -613,8 +616,9 @@ public abstract class PaymentRequestSection extends LinearLayout implements View
                 }
 
                 TextView amount = new TextView(context);
-                ApiCompatibilityUtils.setTextAppearance(
-                        amount, R.style.PaymentsUiSectionDescriptiveTextEndAligned);
+                ApiCompatibilityUtils.setTextAppearance(amount, item.getIsPending()
+                                ? R.style.PaymentsUiSectionPendingTextEndAligned
+                                : R.style.PaymentsUiSectionDescriptiveTextEndAligned);
                 amount.setText(createValueString(item.getCurrency(), item.getPrice(), false));
 
                 // Each item is represented by a row in the GridLayout.
@@ -1129,6 +1133,18 @@ public abstract class PaymentRequestSection extends LinearLayout implements View
             if (!TextUtils.isEmpty(item.getTertiaryLabel())) {
                 if (builder.length() > 0) builder.append("\n");
                 builder.append(item.getTertiaryLabel());
+            }
+
+            if (!item.isComplete() && !TextUtils.isEmpty(item.getEditMessage())) {
+                if (builder.length() > 0) builder.append("\n");
+                String editMessage = item.getEditMessage();
+                builder.append(editMessage);
+                Object foregroundSpanner = new ForegroundColorSpan(ApiCompatibilityUtils.getColor(
+                        getContext().getResources(), R.color.google_blue_700));
+                Object sizeSpanner = new AbsoluteSizeSpan(14, true);
+                int startIndex = builder.length() - editMessage.length();
+                builder.setSpan(foregroundSpanner, startIndex, builder.length(), 0);
+                builder.setSpan(sizeSpanner, startIndex, builder.length(), 0);
             }
 
             return builder;

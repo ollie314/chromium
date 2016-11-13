@@ -28,7 +28,6 @@ class DeviceManager;
 class DrmDeviceHandle;
 class DrmDisplayHost;
 class DrmDisplayHostManager;
-class DrmGpuPlatformSupportHost;
 class DrmNativeDisplayDelegate;
 class GpuThreadAdapter;
 
@@ -57,6 +56,7 @@ class DrmDisplayHostManager : public DeviceEventObserver, GpuThreadObserver {
   void OnDeviceEvent(const DeviceEvent& event) override;
 
   // GpuThreadObserver overrides:
+  void OnGpuProcessLaunched() override;
   void OnGpuThreadReady() override;
   void OnGpuThreadRetired() override;
 

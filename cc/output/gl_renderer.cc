@@ -2408,7 +2408,7 @@ void GLRenderer::DrawYUVVideoQuad(const DrawingFrame* frame,
 
   if (lut_texture_location != -1) {
     unsigned int lut_texture = color_lut_cache_.GetLUT(
-        quad->video_color_space, frame->device_color_space, 32);
+        quad->video_color_space, frame->device_color_space, 17);
     gl_->ActiveTexture(GL_TEXTURE5);
     gl_->BindTexture(GL_TEXTURE_2D, lut_texture);
     gl_->Uniform1i(lut_texture_location, 5);
@@ -4042,9 +4042,10 @@ void GLRenderer::ScheduleRenderPassDrawQuad(
   transform.asColMajorf(gl_transform);
   unsigned filter = ca_layer_overlay->filter;
 
-  gl_->ScheduleCALayerSharedStateCHROMIUM(
-      ca_layer_overlay->shared_state->opacity, is_clipped, clip_rect,
-      sorting_context_id, gl_transform);
+  // The alpha has already been applied when copying the RPDQ to an IOSurface.
+  GLfloat alpha = 1;
+  gl_->ScheduleCALayerSharedStateCHROMIUM(alpha, is_clipped, clip_rect,
+                                          sorting_context_id, gl_transform);
   gl_->ScheduleCALayerCHROMIUM(
       texture_id, contents_rect, ca_layer_overlay->background_color,
       ca_layer_overlay->edge_aa_mask, bounds_rect, filter);

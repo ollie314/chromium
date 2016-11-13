@@ -279,6 +279,29 @@
     ]
   },
 
+  "NativePrinters": {
+    "os": ["chromeos"],
+    "test_policy": {
+      "NativePrinters": [
+        {
+          "display_name": "Break Room",
+          "description": "The blue one",
+          "manufacturer": "PrtrMfgr",
+          "model": "MegaLazer",
+          "uri": "ipps://192.168.2.14",
+          "uuid": "aaaa-aaaa-eeee-eeee-1234",
+          "ppd_resource": {
+            "effective_manufacturer": "Printers, Ink",
+            "effective_model": "LaserMaster 2100"
+          }
+        }
+      ]
+    },
+    "pref_mappings": [
+      { "pref": "native_printing.recommended_printers" }
+    ]
+  },
+
   "SafeBrowsingEnabled": {
     "os": ["win", "linux", "mac", "chromeos"],
     "can_be_recommended": true,
@@ -2635,6 +2658,22 @@
     ]
   },
 
+  "QuickUnlockModeWhitelist": {
+    "os": ["chromeos"],
+    "test_policy": { "QuickUnlockModeWhitelist": ["PIN"] },
+    "pref_mappings": [
+      { "pref": "quick_unlock_mode_whitelist"}
+    ]
+  },
+
+  "QuickUnlockTimeout": {
+    "os": ["chromeos"],
+    "test_policy": { "QuickUnlockTimeout": 0 },
+    "pref_mappings": [
+      { "pref": "quick_unlock_timeout"}
+    ]
+  },
+
   "ArcCertificatesSyncMode": {
     "os": ["chromeos"],
     "can_be_recommended": false,
@@ -2922,6 +2961,16 @@
     "pref_mappings": [
       {
         "pref": "task_manager.end_process_enabled",
+        "local_state": true
+      }
+    ]
+  },
+
+  "NetworkThrottlingEnabled": {
+    "os": ["chromeos"],
+    "test_policy": { "NetworkThrottlingEnabled": {"enabled": "true", "upload_rate_kbits": "5600", "download_rate_kbits": "5600"} },
+    "pref_mappings": [
+      { "pref": "net.throttling_enabled",
         "local_state": true
       }
     ]

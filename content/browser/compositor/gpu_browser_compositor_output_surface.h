@@ -19,6 +19,7 @@ class CompositorOverlayCandidateValidator;
 
 namespace gpu {
 class CommandBufferProxyImpl;
+struct GpuProcessHostedCALayerTreeParamsMac;
 }
 
 namespace ui {
@@ -26,6 +27,7 @@ class CompositorVSyncManager;
 }
 
 namespace content {
+class ContextProviderCommandBuffer;
 class ReflectorTexture;
 
 // Adapts a WebGraphicsContext3DCommandBufferImpl into a
@@ -60,7 +62,7 @@ class GpuBrowserCompositorOutputSurface
 #endif
 
   // cc::OutputSurface implementation.
-  bool BindToClient(cc::OutputSurfaceClient* client) override;
+  void BindToClient(cc::OutputSurfaceClient* client) override;
   void EnsureBackbuffer() override;
   void DiscardBackbuffer() override;
   void BindFramebuffer() override;
@@ -77,6 +79,7 @@ class GpuBrowserCompositorOutputSurface
  protected:
   gpu::CommandBufferProxyImpl* GetCommandBufferProxy();
 
+  cc::OutputSurfaceClient* client_ = nullptr;
   std::unique_ptr<ReflectorTexture> reflector_texture_;
   base::WeakPtrFactory<GpuBrowserCompositorOutputSurface> weak_ptr_factory_;
 

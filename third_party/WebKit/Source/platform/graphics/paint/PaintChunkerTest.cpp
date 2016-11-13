@@ -17,7 +17,7 @@ namespace {
 // bots.
 #if defined(NDEBUG) || !OS(WIN)
 
-static PaintChunkProperties rootPaintChunkProperties() {
+PaintChunkProperties rootPaintChunkProperties() {
   return PaintChunkProperties();
 }
 
@@ -147,8 +147,9 @@ TEST_F(PaintChunkerTest, BuildMultipleChunksWithDifferentPropertyChanges) {
 
   PaintChunkProperties simpleTransformAndEffect;
   simpleTransformAndEffect.transform = simpleTransform.transform;
-  simpleTransformAndEffect.effect =
-      EffectPaintPropertyNode::create(nullptr, 0.5f);
+  simpleTransformAndEffect.effect = EffectPaintPropertyNode::create(
+      EffectPaintPropertyNode::root(), TransformPaintPropertyNode::root(),
+      ClipPaintPropertyNode::root(), CompositorFilterOperations(), 0.5f);
   chunker.updateCurrentPaintChunkProperties(nullptr, simpleTransformAndEffect);
   chunker.incrementDisplayItemIndex(NormalTestDisplayItem());
   chunker.incrementDisplayItemIndex(NormalTestDisplayItem());
@@ -160,7 +161,9 @@ TEST_F(PaintChunkerTest, BuildMultipleChunksWithDifferentPropertyChanges) {
                                          FloatPoint3D(9, 8, 7));
   simpleTransformAndEffectWithUpdatedTransform.effect =
       EffectPaintPropertyNode::create(
-          nullptr, simpleTransformAndEffect.effect->opacity());
+          EffectPaintPropertyNode::root(), TransformPaintPropertyNode::root(),
+          ClipPaintPropertyNode::root(), CompositorFilterOperations(),
+          simpleTransformAndEffect.effect->opacity());
   chunker.updateCurrentPaintChunkProperties(
       nullptr, simpleTransformAndEffectWithUpdatedTransform);
   chunker.incrementDisplayItemIndex(NormalTestDisplayItem());

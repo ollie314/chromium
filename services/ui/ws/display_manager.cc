@@ -91,7 +91,7 @@ void DisplayManager::OnDisplayUpdate(Display* display) {
     pair.second->OnDisplayUpdate(display);
 }
 
-Display* DisplayManager::GetDisplayContaining(ServerWindow* window) {
+Display* DisplayManager::GetDisplayContaining(const ServerWindow* window) {
   return const_cast<Display*>(
       static_cast<const DisplayManager*>(this)->GetDisplayContaining(window));
 }
@@ -175,7 +175,6 @@ void DisplayManager::OnDisplayAdded(int64_t id,
   PlatformDisplayInitParams params;
   params.display_id = id;
   params.metrics = metrics;
-  params.display_compositor = window_server_->GetDisplayCompositor();
 
   ws::Display* display = new ws::Display(window_server_, params);
   display->Init(nullptr);
@@ -210,8 +209,17 @@ void DisplayManager::OnDisplayModified(
       factory->window_tree()->OnWmDisplayModified(display->ToDisplay());
   }
 
+  // Change the root ServerWindow size after sending IPC to WM.
   display->OnViewportMetricsChanged(metrics);
   OnDisplayUpdate(display);
+}
+
+void DisplayManager::OnPrimaryDisplayChanged(int64_t primary_display_id) {
+  // TODO(kylechar): Send IPCs to WM clients first.
+
+  // Send IPCs to any DisplayManagerObservers.
+  for (const auto& pair : user_display_managers_)
+    pair.second->OnPrimaryDisplayChanged(primary_display_id);
 }
 
 }  // namespace ws

@@ -33,26 +33,32 @@ namespace {
 const base::Feature* kFeaturesExposedToJava[] = {
     &autofill::kAutofillScanCardholderName,
     &features::kAutoplayMutedVideos,
+    &features::kConsistentOmniboxGeolocation,
     &features::kCredentialManagementAPI,
     &features::kSimplifiedFullscreenUI,
+    &features::kVrShell,
     &features::kWebPayments,
     &kAndroidPayIntegrationV1,
+    &kCCTExternalLinkHandling,
     &kChromeHomeFeature,
+    &kContextualSearchSingleActions,
     &kDownloadsUiFeature,
     &kImportantSitesInCBD,
-    &ntp_snippets::kContentSuggestionsFeature,
-    &ntp_snippets::kSaveToOfflineFeature,
-    &ntp_snippets::kSectionDismissalFeature,
+    &kNoCreditCardAbort,
     &kNTPFakeOmniboxTextFeature,
     &kNTPOfflinePagesFeature,
     &kPhysicalWebFeature,
     &kPhysicalWebIgnoreOtherClientsFeature,
-    &kScanCardsInWebPayments,
     &kSpecialLocaleFeature,
     &kSpecialLocaleWrapper,
     &kTabReparenting,
-    &kCCTExternalLinkHandling,
-    &offline_pages::kOfflinePagesBackgroundLoadingFeature,
+    &kWebApks,
+    &ntp_snippets::kContentSuggestionsFeature,
+    &ntp_snippets::kIncreasedVisibility,
+    &ntp_snippets::kForeignSessionsSuggestionsFeature,
+    &ntp_snippets::kOfflineBadgeFeature,
+    &ntp_snippets::kSaveToOfflineFeature,
+    &ntp_snippets::kSectionDismissalFeature,
     &offline_pages::kBackgroundLoaderForDownloadsFeature,
     &offline_pages::kOfflinePagesCTFeature,  // See crbug.com/620421.
     &offline_pages::kOfflinePagesSharingFeature,
@@ -61,17 +67,27 @@ const base::Feature* kFeaturesExposedToJava[] = {
 
 }  // namespace
 
+// Alphabetical:
 const base::Feature kAndroidPayIntegrationV1{"AndroidPayIntegrationV1",
+                                             base::FEATURE_ENABLED_BY_DEFAULT};
+
+const base::Feature kCCTExternalLinkHandling{"CCTExternalLinkHandling",
                                              base::FEATURE_ENABLED_BY_DEFAULT};
 
 const base::Feature kChromeHomeFeature{"ChromeHome",
                                        base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kContextualSearchSingleActions{
+    "ContextualSearchSingleActions", base::FEATURE_DISABLED_BY_DEFAULT};
 
 const base::Feature kDownloadsUiFeature{"DownloadsUi",
                                          base::FEATURE_DISABLED_BY_DEFAULT};
 
 const base::Feature kImportantSitesInCBD{"ImportantSitesInCBD",
                                          base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kNoCreditCardAbort{"NoCreditCardAbort",
+                                       base::FEATURE_DISABLED_BY_DEFAULT};
 
 const base::Feature kNTPOfflinePagesFeature{"NTPOfflinePages",
                                             base::FEATURE_DISABLED_BY_DEFAULT};
@@ -85,9 +101,6 @@ const base::Feature kPhysicalWebFeature{"PhysicalWeb",
 const base::Feature kPhysicalWebIgnoreOtherClientsFeature{
     "PhysicalWebIgnoreOtherClients", base::FEATURE_DISABLED_BY_DEFAULT};
 
-const base::Feature kScanCardsInWebPayments{"ScanCardsInWebPayments",
-                                            base::FEATURE_DISABLED_BY_DEFAULT};
-
 const base::Feature kSpecialLocaleFeature{"SpecialLocale",
                                           base::FEATURE_DISABLED_BY_DEFAULT};
 
@@ -97,11 +110,12 @@ const base::Feature kSpecialLocaleWrapper{"SpecialLocaleWrapper",
 const base::Feature kTabReparenting{"TabReparenting",
                                     base::FEATURE_ENABLED_BY_DEFAULT};
 
-const base::Feature kCCTExternalLinkHandling{"CCTExternalLinkHandling",
-                                    base::FEATURE_ENABLED_BY_DEFAULT};
-
 const base::Feature kUserMediaScreenCapturing{
     "UserMediaScreenCapturing", base::FEATURE_DISABLED_BY_DEFAULT};
+
+// Makes "Add to Home screen" in the app menu generate an APK for the shortcut
+// URL which opens Chrome in fullscreen.
+const base::Feature kWebApks{"WebApks", base::FEATURE_DISABLED_BY_DEFAULT};
 
 static jboolean IsEnabled(JNIEnv* env,
                           const JavaParamRef<jclass>& clazz,

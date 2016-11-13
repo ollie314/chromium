@@ -17,7 +17,6 @@
 #include "base/timer/elapsed_timer.h"
 #include "base/trace_event/trace_event.h"
 #include "base/trace_event/trace_event_argument.h"
-#include "cc/animation/animation_host.h"
 #include "cc/base/histograms.h"
 #include "cc/base/math_util.h"
 #include "cc/base/synced_property.h"
@@ -40,6 +39,7 @@
 #include "cc/trees/effect_node.h"
 #include "cc/trees/layer_tree_host_common.h"
 #include "cc/trees/layer_tree_host_impl.h"
+#include "cc/trees/mutator_host.h"
 #include "cc/trees/occlusion_tracker.h"
 #include "cc/trees/property_tree.h"
 #include "cc/trees/property_tree_builder.h"
@@ -56,7 +56,7 @@ namespace cc {
 LayerTreeImpl::LayerTreeImpl(
     LayerTreeHostImpl* layer_tree_host_impl,
     scoped_refptr<SyncedProperty<ScaleGroup>> page_scale_factor,
-    scoped_refptr<SyncedTopControls> top_controls_shown_ratio,
+    scoped_refptr<SyncedBrowserControls> top_controls_shown_ratio,
     scoped_refptr<SyncedElasticOverscroll> elastic_overscroll)
     : layer_tree_host_impl_(layer_tree_host_impl),
       source_frame_number_(-1),
@@ -84,7 +84,7 @@ LayerTreeImpl::LayerTreeImpl(
       has_ever_been_drawn_(false),
       have_scroll_event_handlers_(false),
       event_listener_properties_(),
-      top_controls_shrink_blink_size_(false),
+      browser_controls_shrink_blink_size_(false),
       top_controls_height_(0),
       bottom_controls_height_(0),
       top_controls_shown_ratio_(top_controls_shown_ratio) {
@@ -124,10 +124,17 @@ void LayerTreeImpl::ReleaseResources() {
   }
 }
 
-void LayerTreeImpl::RecreateResources() {
+void LayerTreeImpl::ReleaseTileResources() {
   if (!LayerListIsEmpty()) {
     LayerTreeHostCommon::CallFunctionForEveryLayer(
-        this, [](LayerImpl* layer) { layer->RecreateResources(); });
+        this, [](LayerImpl* layer) { layer->ReleaseTileResources(); });
+  }
+}
+
+void LayerTreeImpl::RecreateTileResources() {
+  if (!LayerListIsEmpty()) {
+    LayerTreeHostCommon::CallFunctionForEveryLayer(
+        this, [](LayerImpl* layer) { layer->RecreateTileResources(); });
   }
 }
 
@@ -419,7 +426,7 @@ void LayerTreeImpl::PushPropertiesTo(LayerTreeImpl* target_tree) {
 
   // This needs to be called early so that we don't clamp with incorrect max
   // offsets when UpdateViewportContainerSizes is called from e.g.
-  // PushTopControls
+  // PushBrowserControls
   target_tree->UpdatePropertyTreesForBoundsDelta();
 
   if (next_activation_forces_redraw_) {
@@ -430,11 +437,11 @@ void LayerTreeImpl::PushPropertiesTo(LayerTreeImpl* target_tree) {
   target_tree->PassSwapPromises(std::move(swap_promise_list_));
   swap_promise_list_.clear();
 
-  target_tree->set_top_controls_shrink_blink_size(
-      top_controls_shrink_blink_size_);
+  target_tree->set_browser_controls_shrink_blink_size(
+      browser_controls_shrink_blink_size_);
   target_tree->set_top_controls_height(top_controls_height_);
   target_tree->set_bottom_controls_height(bottom_controls_height_);
-  target_tree->PushTopControls(nullptr);
+  target_tree->PushBrowserControls(nullptr);
 
   // Active tree already shares the page_scale_factor object with pending
   // tree so only the limits need to be provided.
@@ -541,7 +548,7 @@ void LayerTreeImpl::AddToElementMap(LayerImpl* layer) {
 
   element_layers_map_[layer->element_id()] = layer->id();
 
-  layer_tree_host_impl_->animation_host()->RegisterElement(
+  layer_tree_host_impl_->mutator_host()->RegisterElement(
       layer->element_id(),
       IsActiveTree() ? ElementListType::ACTIVE : ElementListType::PENDING);
 }
@@ -555,7 +562,7 @@ void LayerTreeImpl::RemoveFromElementMap(LayerImpl* layer) {
                layer->element_id().AsValue().release(), "layer_id",
                layer->id());
 
-  layer_tree_host_impl_->animation_host()->UnregisterElement(
+  layer_tree_host_impl_->mutator_host()->UnregisterElement(
       layer->element_id(),
       IsActiveTree() ? ElementListType::ACTIVE : ElementListType::PENDING);
 
@@ -769,11 +776,11 @@ void LayerTreeImpl::PushPageScaleFactorAndLimits(const float* page_scale_factor,
   }
 }
 
-void LayerTreeImpl::set_top_controls_shrink_blink_size(bool shrink) {
-  if (top_controls_shrink_blink_size_ == shrink)
+void LayerTreeImpl::set_browser_controls_shrink_blink_size(bool shrink) {
+  if (browser_controls_shrink_blink_size_ == shrink)
     return;
 
-  top_controls_shrink_blink_size_ = shrink;
+  browser_controls_shrink_blink_size_ = shrink;
   if (IsActiveTree())
     layer_tree_host_impl_->UpdateViewportContainerSizes();
 }
@@ -796,25 +803,25 @@ void LayerTreeImpl::set_bottom_controls_height(float bottom_controls_height) {
     layer_tree_host_impl_->UpdateViewportContainerSizes();
 }
 
-bool LayerTreeImpl::ClampTopControlsShownRatio() {
+bool LayerTreeImpl::ClampBrowserControlsShownRatio() {
   float ratio = top_controls_shown_ratio_->Current(true);
   ratio = std::max(ratio, 0.f);
   ratio = std::min(ratio, 1.f);
   return top_controls_shown_ratio_->SetCurrent(ratio);
 }
 
-bool LayerTreeImpl::SetCurrentTopControlsShownRatio(float ratio) {
+bool LayerTreeImpl::SetCurrentBrowserControlsShownRatio(float ratio) {
   bool changed = top_controls_shown_ratio_->SetCurrent(ratio);
-  changed |= ClampTopControlsShownRatio();
+  changed |= ClampBrowserControlsShownRatio();
   return changed;
 }
 
-void LayerTreeImpl::PushTopControlsFromMainThread(
+void LayerTreeImpl::PushBrowserControlsFromMainThread(
     float top_controls_shown_ratio) {
-  PushTopControls(&top_controls_shown_ratio);
+  PushBrowserControls(&top_controls_shown_ratio);
 }
 
-void LayerTreeImpl::PushTopControls(const float* top_controls_shown_ratio) {
+void LayerTreeImpl::PushBrowserControls(const float* top_controls_shown_ratio) {
   DCHECK(top_controls_shown_ratio || IsActiveTree());
 
   if (top_controls_shown_ratio) {
@@ -823,9 +830,9 @@ void LayerTreeImpl::PushTopControls(const float* top_controls_shown_ratio) {
   }
   if (IsActiveTree()) {
     bool changed_active = top_controls_shown_ratio_->PushPendingToActive();
-    changed_active |= ClampTopControlsShownRatio();
+    changed_active |= ClampBrowserControlsShownRatio();
     if (changed_active)
-      layer_tree_host_impl_->DidChangeTopControlsPosition();
+      layer_tree_host_impl_->DidChangeBrowserControlsPosition();
   }
 }
 
@@ -1030,18 +1037,9 @@ bool LayerTreeImpl::UpdateDrawProperties(
           // We are calculating transform between two render surfaces. So, we
           // need to apply the surface contents scale at target and remove the
           // surface contents scale at source.
-          property_trees()->ComputeTransformToTarget(
+          property_trees()->GetToTarget(
               it->render_surface()->TransformTreeIndex(),
               occlusion_surface->EffectTreeIndex(), &draw_transform);
-          // We don't have to apply surface contents scale when target is root.
-          if (occlusion_surface->EffectTreeIndex() !=
-              EffectTree::kContentsRootNodeId) {
-            const EffectNode* occlusion_effect_node =
-                property_trees()->effect_tree.Node(
-                    occlusion_surface->EffectTreeIndex());
-            draw_property_utils::PostConcatSurfaceContentsScale(
-                occlusion_effect_node, &draw_transform);
-          }
           const EffectNode* effect_node = property_trees()->effect_tree.Node(
               it->render_surface()->EffectTreeIndex());
           draw_property_utils::ConcatInverseSurfaceContentsScale(
@@ -1781,7 +1779,7 @@ static bool PointIsClippedByAncestorClipNode(
 
   for (const ClipNode* clip_node = clip_tree.Node(layer->clip_tree_index());
        clip_node->id > 1; clip_node = clip_tree.parent(clip_node)) {
-    if (clip_node->applies_local_clip) {
+    if (clip_node->clip_type == ClipNode::ClipType::APPLIES_LOCAL_CLIP) {
       const TransformNode* transform_node =
           transform_tree.Node(clip_node->target_transform_id);
       gfx::Rect combined_clip_in_target_space =
@@ -2070,8 +2068,7 @@ LayerTreeImpl::TakePendingPageScaleAnimation() {
 }
 
 void LayerTreeImpl::ScrollAnimationAbort(bool needs_completion) {
-  layer_tree_host_impl_->animation_host()->ScrollAnimationAbort(
-      needs_completion);
+  layer_tree_host_impl_->mutator_host()->ScrollAnimationAbort(needs_completion);
 }
 
 void LayerTreeImpl::ResetAllChangeTracking() {

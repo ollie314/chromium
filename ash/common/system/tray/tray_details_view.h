@@ -13,7 +13,9 @@
 #include "ui/views/view.h"
 
 namespace views {
+class BoxLayout;
 class ScrollView;
+class ProgressBar;
 }  // namespace views
 
 namespace ash {
@@ -33,10 +35,12 @@ class ASH_EXPORT TrayDetailsView : public views::View,
   ~TrayDetailsView() override;
 
   // ViewClickListener:
-  void OnViewClicked(views::View* sender) override;
+  // Don't override this --- override HandleViewClicked.
+  void OnViewClicked(views::View* sender) final;
 
   // views::ButtonListener:
-  void ButtonPressed(views::Button* sender, const ui::Event& event) override;
+  // Don't override this --- override HandleButtonPressed.
+  void ButtonPressed(views::Button* sender, const ui::Event& event) final;
 
   SystemTrayItem* owner() { return owner_; }
   SpecialPopupRow* title_row() { return title_row_; }
@@ -46,6 +50,7 @@ class ASH_EXPORT TrayDetailsView : public views::View,
  protected:
   // views::View:
   void Layout() override;
+  int GetHeightForWidth(int width) const override;
   void OnPaintBorder(gfx::Canvas* canvas) override;
 
   // Creates the row containing the back button and title. For material design
@@ -62,6 +67,11 @@ class ASH_EXPORT TrayDetailsView : public views::View,
 
   // Removes (and destroys) all child views.
   void Reset();
+
+  // Shows or hides the progress bar below the title row. It occupies the same
+  // space as the separator, so when shown the separator is hidden. If
+  // |progress_bar_| doesn't already exist it will be created.
+  void ShowProgress(double value, bool visible);
 
  private:
   friend class test::TrayDetailsViewTest;
@@ -82,9 +92,12 @@ class ASH_EXPORT TrayDetailsView : public views::View,
   void TransitionToDefaultView();
 
   SystemTrayItem* owner_;
+  views::BoxLayout* box_layout_;
   SpecialPopupRow* title_row_;
   FixedSizedScrollView* scroller_;
   views::View* scroll_content_;
+  views::ProgressBar* progress_bar_;
+
   ScrollBorder* scroll_border_;  // Weak reference
 
   // The back button that appears in the material design title row. Not owned.

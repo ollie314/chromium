@@ -18,15 +18,48 @@
         ],
         "ash": [
           "ash::mojom::LocaleNotificationController",
+          "ash::mojom::NewWindowClient",
           "ash::mojom::ShelfController",
+          "ash::mojom::ShutdownClient",
           "ash::mojom::SystemTray",
           "ash::mojom::SystemTrayClient",
           "ash::mojom::WallpaperController",
           "ash::mojom::WallpaperManager",
-          "ash::mojom::VolumeController"
+          "ash::mojom::VolumeController",
+          "keyboard::mojom::Keyboard"
         ],
         "mash:launchable": [
           "mash::mojom::Launchable"
+        ]
+      },
+      "requires": {
+        "service:ash": [ "ash" ],
+        "service:image_decoder": [ "decode" ]
+      }
+    },
+    "navigation:frame": {
+      "provides": {
+        "renderer": [
+          "autofill::mojom::AutofillDriver",
+          "autofill::mojom::PasswordManagerDriver",
+          "blink::mojom::ShareService",
+          "bluetooth::mojom::AdapterFactory",
+          "device::usb::ChooserService",
+          "device::usb::DeviceManager",
+          "dom_distiller::mojom::DistillabilityService",
+          "dom_distiller::mojom::DistillerJavaScriptService",
+          "extensions::KeepAlive",
+          "extensions::mime_handler::MimeHandlerService",
+          "media_router::mojom::MediaRouter",
+          "mojom::OmniboxPageHandler",
+          "password_manager::mojom::CredentialManager",
+          "translate::mojom::ContentTranslateDriver",
+
+          // TODO(beng): These should be moved to a separate capability.
+          "mojom::OmniboxPageHandler",
+          "mojom::PluginsPageHandler",
+          "mojom::SiteEngagementUIHandler",
+          "mojom::UsbInternalsPageHandler"
         ]
       }
     }

@@ -30,6 +30,8 @@ class OfflinePageEvaluationBridge : public OfflinePageModel::Observer,
                                     public RequestCoordinator::Observer {
  public:
   static bool Register(JNIEnv* env);
+  static std::unique_ptr<KeyedService> GetTestingRequestCoordinator(
+      content::BrowserContext* context);
 
   OfflinePageEvaluationBridge(JNIEnv* env,
                               content::BrowserContext* browser_context,
@@ -55,9 +57,24 @@ class OfflinePageEvaluationBridge : public OfflinePageModel::Observer,
                    const base::android::JavaParamRef<jobject>& j_result_obj,
                    const base::android::JavaParamRef<jobject>& j_callback_obj);
 
-  void PushRequestProcessing(
+  // Return true if processing starts and callback is expected to be called.
+  // False otherwise.
+  bool PushRequestProcessing(
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj,
+      const base::android::JavaParamRef<jobject>& j_callback_obj);
+
+  // Gets all the requests in the queue.
+  void GetRequestsInQueue(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj,
+      const base::android::JavaParamRef<jobject>& j_callback_obj);
+
+  // Removes the requests from the queue.
+  void RemoveRequestsFromQueue(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj,
+      const base::android::JavaParamRef<jlongArray>& j_request_ids,
       const base::android::JavaParamRef<jobject>& j_callback_obj);
 
   void SavePageLater(JNIEnv* env,

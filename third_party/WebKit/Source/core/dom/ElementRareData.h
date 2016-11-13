@@ -37,15 +37,13 @@
 #include "core/dom/custom/V0CustomElementDefinition.h"
 #include "core/dom/shadow/ElementShadow.h"
 #include "core/html/ClassList.h"
-#include "core/layout/LayoutObject.h"
-#include "core/style/StyleInheritedData.h"
 #include "platform/heap/Handle.h"
 #include "wtf/HashSet.h"
 #include <memory>
 
 namespace blink {
 
-class HTMLElement;
+class LayoutObject;
 class CompositorProxiedPropertySet;
 class ResizeObservation;
 class ResizeObserver;
@@ -61,15 +59,11 @@ class ElementRareData : public NodeRareData {
   void setPseudoElement(PseudoId, PseudoElement*);
   PseudoElement* pseudoElement(PseudoId) const;
 
-  short tabIndex() const { return m_tabindex; }
-
-  void setTabIndexExplicitly(short index) {
-    m_tabindex = index;
+  void setTabIndexExplicitly() {
     setElementFlag(TabIndexWasSetExplicitly, true);
   }
 
   void clearTabIndexExplicitly() {
-    m_tabindex = 0;
     clearElementFlag(TabIndexWasSetExplicitly);
   }
 
@@ -162,6 +156,10 @@ class ElementRareData : public NodeRareData {
   AttrNodeList& ensureAttrNodeList();
   AttrNodeList* attrNodeList() { return m_attrNodeList.get(); }
   void removeAttrNodeList() { m_attrNodeList.clear(); }
+  void addAttr(Attr* attr) {
+    ensureAttrNodeList().append(attr);
+    ScriptWrappableVisitor::writeBarrier(this, attr);
+  }
 
   NodeIntersectionObserverData* intersectionObserverData() const {
     return m_intersectionObserverData.get();
@@ -183,14 +181,11 @@ class ElementRareData : public NodeRareData {
   ResizeObserverDataMap& ensureResizeObserverData();
 
   DECLARE_TRACE_AFTER_DISPATCH();
-
   DECLARE_TRACE_WRAPPERS_AFTER_DISPATCH();
 
  private:
   CompositorProxiedPropertySet& ensureCompositorProxiedPropertySet();
   void clearCompositorProxiedPropertySet() { m_proxiedProperties = nullptr; }
-
-  short m_tabindex;
 
   LayoutSize m_minimumSizeForResizing;
   ScrollOffset m_savedLayerScrollOffset;
@@ -224,7 +219,6 @@ inline LayoutSize defaultMinimumSizeForResizing() {
 
 inline ElementRareData::ElementRareData(LayoutObject* layoutObject)
     : NodeRareData(layoutObject),
-      m_tabindex(0),
       m_minimumSizeForResizing(defaultMinimumSizeForResizing()),
       m_classList(nullptr) {
   m_isElementRareData = true;

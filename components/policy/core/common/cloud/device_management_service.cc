@@ -10,7 +10,7 @@
 #include "base/compiler_specific.h"
 #include "base/location.h"
 #include "base/macros.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "components/data_use_measurement/core/data_use_user_data.h"
@@ -470,6 +470,11 @@ void DeviceManagementRequestJob::SetDMToken(const std::string& dm_token) {
 
 void DeviceManagementRequestJob::SetClientID(const std::string& client_id) {
   AddParameter(dm_protocol::kParamDeviceID, client_id);
+}
+
+void DeviceManagementRequestJob::SetCritical(bool critical) {
+  if (critical)
+    AddParameter(dm_protocol::kParamCritical, "true");
 }
 
 em::DeviceManagementRequest* DeviceManagementRequestJob::GetRequest() {

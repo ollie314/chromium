@@ -1019,8 +1019,9 @@ TEST_P(PaintControllerTest, CachedSubsequenceSwapOrder) {
   {
     if (RuntimeEnabledFeatures::slimmingPaintV2Enabled()) {
       PaintChunk::Id id(container1, backgroundDrawingType);
-      container1Properties.effect =
-          EffectPaintPropertyNode::create(nullptr, 0.5);
+      container1Properties.effect = EffectPaintPropertyNode::create(
+          EffectPaintPropertyNode::root(), TransformPaintPropertyNode::root(),
+          ClipPaintPropertyNode::root(), CompositorFilterOperations(), 0.5);
       getPaintController().updateCurrentPaintChunkProperties(
           &id, container1Properties);
     }
@@ -1037,8 +1038,9 @@ TEST_P(PaintControllerTest, CachedSubsequenceSwapOrder) {
   {
     if (RuntimeEnabledFeatures::slimmingPaintV2Enabled()) {
       PaintChunk::Id id(container2, backgroundDrawingType);
-      container2Properties.effect =
-          EffectPaintPropertyNode::create(nullptr, 0.5);
+      container2Properties.effect = EffectPaintPropertyNode::create(
+          EffectPaintPropertyNode::root(), TransformPaintPropertyNode::root(),
+          ClipPaintPropertyNode::root(), CompositorFilterOperations(), 0.5);
       getPaintController().updateCurrentPaintChunkProperties(
           &id, container2Properties);
     }
@@ -1189,8 +1191,9 @@ TEST_P(PaintControllerTest, UpdateSwapOrderCrossingChunks) {
   {
     if (RuntimeEnabledFeatures::slimmingPaintV2Enabled()) {
       PaintChunk::Id id(container1, backgroundDrawingType);
-      container1Properties.effect =
-          EffectPaintPropertyNode::create(nullptr, 0.5);
+      container1Properties.effect = EffectPaintPropertyNode::create(
+          EffectPaintPropertyNode::root(), TransformPaintPropertyNode::root(),
+          ClipPaintPropertyNode::root(), CompositorFilterOperations(), 0.5);
       getPaintController().updateCurrentPaintChunkProperties(
           &id, container1Properties);
     }
@@ -1202,8 +1205,9 @@ TEST_P(PaintControllerTest, UpdateSwapOrderCrossingChunks) {
   {
     if (RuntimeEnabledFeatures::slimmingPaintV2Enabled()) {
       PaintChunk::Id id(container2, backgroundDrawingType);
-      container2Properties.effect =
-          EffectPaintPropertyNode::create(nullptr, 0.5);
+      container2Properties.effect = EffectPaintPropertyNode::create(
+          EffectPaintPropertyNode::root(), TransformPaintPropertyNode::root(),
+          ClipPaintPropertyNode::root(), CompositorFilterOperations(), 0.5);
       getPaintController().updateCurrentPaintChunkProperties(
           &id, container2Properties);
     }
@@ -1326,8 +1330,9 @@ TEST_P(PaintControllerTest, CachedNestedSubsequenceUpdate) {
   {
     if (RuntimeEnabledFeatures::slimmingPaintV2Enabled()) {
       PaintChunk::Id id(container1, backgroundDrawingType);
-      container1BackgroundProperties.effect =
-          EffectPaintPropertyNode::create(nullptr, 0.5);
+      container1BackgroundProperties.effect = EffectPaintPropertyNode::create(
+          EffectPaintPropertyNode::root(), TransformPaintPropertyNode::root(),
+          ClipPaintPropertyNode::root(), CompositorFilterOperations(), 0.5);
       getPaintController().updateCurrentPaintChunkProperties(
           &id, container1BackgroundProperties);
     }
@@ -1337,8 +1342,9 @@ TEST_P(PaintControllerTest, CachedNestedSubsequenceUpdate) {
     {
       if (RuntimeEnabledFeatures::slimmingPaintV2Enabled()) {
         PaintChunk::Id id(content1, backgroundDrawingType);
-        content1Properties.effect =
-            EffectPaintPropertyNode::create(nullptr, 0.6);
+        content1Properties.effect = EffectPaintPropertyNode::create(
+            EffectPaintPropertyNode::root(), TransformPaintPropertyNode::root(),
+            ClipPaintPropertyNode::root(), CompositorFilterOperations(), 0.6);
         getPaintController().updateCurrentPaintChunkProperties(
             &id, content1Properties);
       }
@@ -1350,8 +1356,9 @@ TEST_P(PaintControllerTest, CachedNestedSubsequenceUpdate) {
     }
     if (RuntimeEnabledFeatures::slimmingPaintV2Enabled()) {
       PaintChunk::Id id(container1, foregroundDrawingType);
-      container1ForegroundProperties.effect =
-          EffectPaintPropertyNode::create(nullptr, 0.5);
+      container1ForegroundProperties.effect = EffectPaintPropertyNode::create(
+          EffectPaintPropertyNode::root(), TransformPaintPropertyNode::root(),
+          ClipPaintPropertyNode::root(), CompositorFilterOperations(), 0.5);
       getPaintController().updateCurrentPaintChunkProperties(
           &id, container1ForegroundProperties);
     }
@@ -1361,8 +1368,9 @@ TEST_P(PaintControllerTest, CachedNestedSubsequenceUpdate) {
   {
     if (RuntimeEnabledFeatures::slimmingPaintV2Enabled()) {
       PaintChunk::Id id(container2, backgroundDrawingType);
-      container2BackgroundProperties.effect =
-          EffectPaintPropertyNode::create(nullptr, 0.7);
+      container2BackgroundProperties.effect = EffectPaintPropertyNode::create(
+          EffectPaintPropertyNode::root(), TransformPaintPropertyNode::root(),
+          ClipPaintPropertyNode::root(), CompositorFilterOperations(), 0.7);
       getPaintController().updateCurrentPaintChunkProperties(
           &id, container2BackgroundProperties);
     }
@@ -1372,8 +1380,9 @@ TEST_P(PaintControllerTest, CachedNestedSubsequenceUpdate) {
     {
       if (RuntimeEnabledFeatures::slimmingPaintV2Enabled()) {
         PaintChunk::Id id(content2, backgroundDrawingType);
-        content2Properties.effect =
-            EffectPaintPropertyNode::create(nullptr, 0.8);
+        content2Properties.effect = EffectPaintPropertyNode::create(
+            EffectPaintPropertyNode::root(), TransformPaintPropertyNode::root(),
+            ClipPaintPropertyNode::root(), CompositorFilterOperations(), 0.8);
         getPaintController().updateCurrentPaintChunkProperties(
             &id, content2Properties);
       }
@@ -2179,8 +2188,7 @@ class PaintControllerUnderInvalidationTest : public PaintControllerTestBase {
 
     {
       SubsequenceRecorder subsequence(context, container);
-      CompositingRecorder compositing(context, content, SkXfermode::kSrc_Mode,
-                                      0.5);
+      CompositingRecorder compositing(context, content, SkBlendMode::kSrc, 0.5);
       drawRect(context, content, backgroundDrawingType,
                FloatRect(100, 100, 300, 300));
     }
@@ -2192,8 +2200,7 @@ class PaintControllerUnderInvalidationTest : public PaintControllerTestBase {
       EXPECT_FALSE(SubsequenceRecorder::useCachedSubsequenceIfPossible(
           context, container));
       SubsequenceRecorder subsequence(context, container);
-      CompositingRecorder compositing(context, content, SkXfermode::kSrc_Mode,
-                                      0.5);
+      CompositingRecorder compositing(context, content, SkBlendMode::kSrc, 0.5);
       drawRect(context, content, backgroundDrawingType,
                FloatRect(100, 100, 300, 300));
     }

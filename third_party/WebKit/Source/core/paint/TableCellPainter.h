@@ -17,7 +17,6 @@ class LayoutPoint;
 class LayoutRect;
 class LayoutTableCell;
 class LayoutObject;
-class ComputedStyle;
 
 class TableCellPainter {
   STACK_ALLOCATED();
@@ -40,7 +39,6 @@ class TableCellPainter {
   void paintMask(const PaintInfo&, const LayoutPoint& paintOffset);
 
  private:
-  const DisplayItemClient& displayItemClientForBorders() const;
   LayoutRect paintRectNotIncludingVisualOverflow(
       const LayoutPoint& paintOffset);
   void paintBackground(const PaintInfo&,

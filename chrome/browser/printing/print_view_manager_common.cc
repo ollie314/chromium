@@ -4,20 +4,23 @@
 
 #include "chrome/browser/printing/print_view_manager_common.h"
 
-#if defined(ENABLE_EXTENSIONS)
+#include "extensions/features/features.h"
+#include "printing/features/features.h"
+
+#if BUILDFLAG(ENABLE_EXTENSIONS)
 #include "components/guest_view/browser/guest_view_manager.h"
 #include "extensions/browser/guest_view/mime_handler_view/mime_handler_view_guest.h"
-#endif  // defined(ENABLE_EXTENSIONS)
+#endif  // BUILDFLAG(ENABLE_EXTENSIONS)
 
-#if defined(ENABLE_PRINT_PREVIEW)
+#if BUILDFLAG(ENABLE_PRINT_PREVIEW)
 #include "chrome/browser/printing/print_view_manager.h"
 #else
 #include "chrome/browser/printing/print_view_manager_basic.h"
-#endif  // defined(ENABLE_PRINT_PREVIEW)
+#endif  // BUILDFLAG(ENABLE_PRINT_PREVIEW)
 
 namespace printing {
 namespace {
-#if defined(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
 // Stores |guest_contents| in |result| and returns true if |guest_contents| is a
 // full page MimeHandlerViewGuest plugin. Otherwise, returns false.
 bool StoreFullPagePlugin(content::WebContents** result,
@@ -30,12 +33,12 @@ bool StoreFullPagePlugin(content::WebContents** result,
   }
   return false;
 }
-#endif  // defined(ENABLE_EXTENSIONS)
+#endif  // BUILDFLAG(ENABLE_EXTENSIONS)
 
 // If we have a single full-page embedded mime handler view guest, print the
 // guest's WebContents instead.
 content::WebContents* GetWebContentsToUse(content::WebContents* contents) {
-#if defined(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
   guest_view::GuestViewManager* guest_view_manager =
       guest_view::GuestViewManager::FromBrowserContext(
           contents->GetBrowserContext());
@@ -44,7 +47,7 @@ content::WebContents* GetWebContentsToUse(content::WebContents* contents) {
         contents,
         base::Bind(&StoreFullPagePlugin, &contents));
   }
-#endif  // defined(ENABLE_EXTENSIONS)
+#endif  // BUILDFLAG(ENABLE_EXTENSIONS)
   return contents;
 }
 
@@ -53,31 +56,31 @@ content::WebContents* GetWebContentsToUse(content::WebContents* contents) {
 void StartPrint(content::WebContents* contents,
                 bool print_preview_disabled,
                 bool selection_only) {
-#if defined(ENABLE_PRINT_PREVIEW)
+#if BUILDFLAG(ENABLE_PRINT_PREVIEW)
   using PrintViewManagerImpl = PrintViewManager;
 #else
   using PrintViewManagerImpl = PrintViewManagerBasic;
-#endif  // defined(ENABLE_PRINT_PREVIEW)
+#endif  // BUILDFLAG(ENABLE_PRINT_PREVIEW)
 
   auto* print_view_manager =
       PrintViewManagerImpl::FromWebContents(GetWebContentsToUse(contents));
   if (!print_view_manager)
     return;
-#if defined(ENABLE_PRINT_PREVIEW)
+#if BUILDFLAG(ENABLE_PRINT_PREVIEW)
   if (!print_preview_disabled) {
     print_view_manager->PrintPreviewNow(selection_only);
     return;
   }
 #endif  // ENABLE_PRINT_PREVIEW
 
-#if defined(ENABLE_BASIC_PRINTING)
+#if BUILDFLAG(ENABLE_BASIC_PRINTING)
   print_view_manager->PrintNow();
 #endif  // ENABLE_BASIC_PRINTING
 }
 
-#if defined(ENABLE_BASIC_PRINTING)
+#if BUILDFLAG(ENABLE_BASIC_PRINTING)
 void StartBasicPrint(content::WebContents* contents) {
-#if defined(ENABLE_PRINT_PREVIEW)
+#if BUILDFLAG(ENABLE_PRINT_PREVIEW)
   PrintViewManager* print_view_manager =
       PrintViewManager::FromWebContents(GetWebContentsToUse(contents));
   if (!print_view_manager)

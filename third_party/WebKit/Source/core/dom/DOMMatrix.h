@@ -80,7 +80,7 @@ class CORE_EXPORT DOMMatrix : public DOMMatrixReadOnly {
 
   DOMMatrix* multiplySelf(DOMMatrixInit&, ExceptionState&);
   DOMMatrix* preMultiplySelf(DOMMatrixInit&, ExceptionState&);
-  DOMMatrix* translateSelf(double tx, double ty, double tz = 0);
+  DOMMatrix* translateSelf(double tx = 0, double ty = 0, double tz = 0);
   DOMMatrix* scaleSelf(double sx = 1);
   DOMMatrix* scaleSelf(double sx,
                        double sy,
@@ -88,10 +88,14 @@ class CORE_EXPORT DOMMatrix : public DOMMatrixReadOnly {
                        double ox = 0,
                        double oy = 0,
                        double oz = 0);
-  DOMMatrix* scale3dSelf(double scale,
+  DOMMatrix* scale3dSelf(double scale = 1,
                          double ox = 0,
                          double oy = 0,
                          double oz = 0);
+  DOMMatrix* rotateSelf(double rotX);
+  DOMMatrix* rotateSelf(double rotX, double rotY);
+  DOMMatrix* rotateSelf(double rotX, double rotY, double rotZ);
+  DOMMatrix* rotateFromVectorSelf(double x, double y);
   DOMMatrix* rotateAxisAngleSelf(double x = 0,
                                  double y = 0,
                                  double z = 0,
@@ -99,6 +103,8 @@ class CORE_EXPORT DOMMatrix : public DOMMatrixReadOnly {
   DOMMatrix* skewXSelf(double sx = 0);
   DOMMatrix* skewYSelf(double sy = 0);
   DOMMatrix* invertSelf();
+
+  DOMMatrix* setMatrixValue(const String&, ExceptionState&);
 
  private:
   DOMMatrix(const TransformationMatrix&, bool is2D = true);

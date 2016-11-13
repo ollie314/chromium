@@ -81,6 +81,7 @@ class SynchronousCompositorFrameSink::SoftwareOutputSurface
       : cc::OutputSurface(std::move(software_device)) {}
 
   // cc::OutputSurface implementation.
+  void BindToClient(cc::OutputSurfaceClient* client) override {}
   void EnsureBackbuffer() override {}
   void DiscardBackbuffer() override {}
   void BindFramebuffer() override {}
@@ -103,13 +104,16 @@ class SynchronousCompositorFrameSink::SoftwareOutputSurface
 SynchronousCompositorFrameSink::SynchronousCompositorFrameSink(
     scoped_refptr<cc::ContextProvider> context_provider,
     scoped_refptr<cc::ContextProvider> worker_context_provider,
+    gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
     int routing_id,
     uint32_t compositor_frame_sink_id,
     std::unique_ptr<cc::BeginFrameSource> begin_frame_source,
     SynchronousCompositorRegistry* registry,
     scoped_refptr<FrameSwapMessageQueue> frame_swap_message_queue)
     : cc::CompositorFrameSink(std::move(context_provider),
-                              std::move(worker_context_provider)),
+                              std::move(worker_context_provider),
+                              gpu_memory_buffer_manager,
+                              nullptr),
       routing_id_(routing_id),
       compositor_frame_sink_id_(compositor_frame_sink_id),
       registry_(registry),
@@ -180,9 +184,9 @@ bool SynchronousCompositorFrameSink::BindToClient(
   display_.reset(new cc::Display(
       nullptr /* shared_bitmap_manager */,
       nullptr /* gpu_memory_buffer_manager */, software_renderer_settings,
-      nullptr /* begin_frame_source */, std::move(output_surface),
+      kFrameSinkId, nullptr /* begin_frame_source */, std::move(output_surface),
       nullptr /* scheduler */, nullptr /* texture_mailbox_deleter */));
-  display_->Initialize(&display_client_, surface_manager_.get(), kFrameSinkId);
+  display_->Initialize(&display_client_, surface_manager_.get());
   display_->SetVisible(true);
   return true;
 }
@@ -194,7 +198,7 @@ void SynchronousCompositorFrameSink::DetachFromClient() {
   begin_frame_source_ = nullptr;
   registry_->UnregisterCompositorFrameSink(routing_id_, this);
   client_->SetTreeActivationCallback(base::Closure());
-  if (!root_local_frame_id_.is_null()) {
+  if (root_local_frame_id_.is_valid()) {
     surface_factory_->Destroy(root_local_frame_id_);
     surface_factory_->Destroy(child_local_frame_id_);
   }
@@ -217,7 +221,7 @@ void SynchronousCompositorFrameSink::SubmitCompositorFrame(
   DCHECK(sync_client_);
 
   if (fallback_tick_running_) {
-    DCHECK(frame.delegated_frame_data->resource_list.empty());
+    DCHECK(frame.resource_list.empty());
     cc::ReturnedResourceArray return_resources;
     ReturnResources(return_resources);
     did_submit_frame_ = true;
@@ -231,21 +235,20 @@ void SynchronousCompositorFrameSink::SubmitCompositorFrame(
     // the |frame| for the software path below.
     submit_frame.metadata = frame.metadata.Clone();
 
-    if (root_local_frame_id_.is_null()) {
+    if (!root_local_frame_id_.is_valid()) {
       root_local_frame_id_ = surface_id_allocator_->GenerateId();
       surface_factory_->Create(root_local_frame_id_);
       child_local_frame_id_ = surface_id_allocator_->GenerateId();
       surface_factory_->Create(child_local_frame_id_);
     }
 
-    display_->SetSurfaceId(cc::SurfaceId(kFrameSinkId, root_local_frame_id_),
-                           frame.metadata.device_scale_factor);
+    display_->SetLocalFrameId(root_local_frame_id_,
+                              frame.metadata.device_scale_factor);
 
     // The layer compositor should be giving a frame that covers the
     // |sw_viewport_for_current_draw_| but at 0,0.
     gfx::Size child_size = sw_viewport_for_current_draw_.size();
-    DCHECK(gfx::Rect(child_size) ==
-           frame.delegated_frame_data->render_pass_list.back()->output_rect);
+    DCHECK(gfx::Rect(child_size) == frame.render_pass_list.back()->output_rect);
 
     // Make a size that covers from 0,0 and includes the area coming from the
     // layer compositor.
@@ -265,14 +268,10 @@ void SynchronousCompositorFrameSink::SubmitCompositorFrame(
     // the CompositorFrameSink client too? (We'd have to do the same for
     // hardware frames in SurfacesInstance?)
     cc::CompositorFrame embed_frame;
-    embed_frame.delegated_frame_data =
-        base::MakeUnique<cc::DelegatedFrameData>();
-    embed_frame.delegated_frame_data->render_pass_list.push_back(
-        cc::RenderPass::Create());
+    embed_frame.render_pass_list.push_back(cc::RenderPass::Create());
 
     // The embedding RenderPass covers the entire Display's area.
-    const auto& embed_render_pass =
-        embed_frame.delegated_frame_data->render_pass_list.back();
+    const auto& embed_render_pass = embed_frame.render_pass_list.back();
     embed_render_pass->SetAll(cc::RenderPassId(1, 1), gfx::Rect(display_size),
                               gfx::Rect(display_size), gfx::Transform(), false);
 

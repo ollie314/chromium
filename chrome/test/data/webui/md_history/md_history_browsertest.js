@@ -116,7 +116,8 @@ TEST_F('MaterialHistoryBrowserTest', 'RoutingTest', function() {
   mocha.run();
 });
 
-TEST_F('MaterialHistoryBrowserTest', 'SyncedTabsTest', function() {
+// Fails on Mac, http://crbug.com/640862
+TEST_F('MaterialHistoryBrowserTest', 'DISABLED_SyncedTabsTest', function() {
   md_history.history_synced_tabs_test.registerTests();
   mocha.run();
 });

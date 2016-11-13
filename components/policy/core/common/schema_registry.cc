@@ -5,6 +5,7 @@
 #include "components/policy/core/common/schema_registry.h"
 
 #include "base/logging.h"
+#include "extensions/features/features.h"
 
 namespace policy {
 
@@ -15,8 +16,8 @@ SchemaRegistry::InternalObserver::~InternalObserver() {}
 SchemaRegistry::SchemaRegistry() : schema_map_(new SchemaMap) {
   for (int i = 0; i < POLICY_DOMAIN_SIZE; ++i)
     domains_ready_[i] = false;
-#if !defined(ENABLE_EXTENSIONS)
-  domains_ready_[POLICY_DOMAIN_EXTENSIONS] = true;
+#if !BUILDFLAG(ENABLE_EXTENSIONS)
+  SetExtensionsDomainsReady();
 #endif
 }
 
@@ -66,7 +67,7 @@ bool SchemaRegistry::IsReady() const {
   return true;
 }
 
-void SchemaRegistry::SetReady(PolicyDomain domain) {
+void SchemaRegistry::SetDomainReady(PolicyDomain domain) {
   if (domains_ready_[domain])
     return;
   domains_ready_[domain] = true;
@@ -74,6 +75,16 @@ void SchemaRegistry::SetReady(PolicyDomain domain) {
     for (auto& observer : observers_)
       observer.OnSchemaRegistryReady();
   }
+}
+
+void SchemaRegistry::SetAllDomainsReady() {
+  for (int i = 0; i < POLICY_DOMAIN_SIZE; ++i)
+    SetDomainReady(static_cast<PolicyDomain>(i));
+}
+
+void SchemaRegistry::SetExtensionsDomainsReady() {
+  SetDomainReady(POLICY_DOMAIN_EXTENSIONS);
+  SetDomainReady(POLICY_DOMAIN_SIGNIN_EXTENSIONS);
 }
 
 void SchemaRegistry::AddObserver(Observer* observer) {
@@ -102,8 +113,7 @@ CombinedSchemaRegistry::CombinedSchemaRegistry()
   // The combined registry is always ready, since it can always start tracking
   // another registry that is not ready yet and going from "ready" to "not
   // ready" is not allowed.
-  for (int i = 0; i < POLICY_DOMAIN_SIZE; ++i)
-    SetReady(static_cast<PolicyDomain>(i));
+  SetAllDomainsReady();
 }
 
 CombinedSchemaRegistry::~CombinedSchemaRegistry() {}
@@ -190,6 +200,7 @@ ForwardingSchemaRegistry::ForwardingSchemaRegistry(SchemaRegistry* wrapped)
   schema_map_ = wrapped_->schema_map();
   wrapped_->AddObserver(this);
   wrapped_->AddInternalObserver(this);
+  UpdateReadiness();
 }
 
 ForwardingSchemaRegistry::~ForwardingSchemaRegistry() {
@@ -221,6 +232,10 @@ void ForwardingSchemaRegistry::OnSchemaRegistryUpdated(bool has_new_schemas) {
   Notify(has_new_schemas);
 }
 
+void ForwardingSchemaRegistry::OnSchemaRegistryReady() {
+  UpdateReadiness();
+}
+
 void ForwardingSchemaRegistry::OnSchemaRegistryShuttingDown(
     SchemaRegistry* registry) {
   DCHECK_EQ(wrapped_, registry);
@@ -228,6 +243,11 @@ void ForwardingSchemaRegistry::OnSchemaRegistryShuttingDown(
   wrapped_->RemoveInternalObserver(this);
   wrapped_ = NULL;
   // Keep serving the same |schema_map_|.
+}
+
+void ForwardingSchemaRegistry::UpdateReadiness() {
+  if (wrapped_->IsReady())
+    SetAllDomainsReady();
 }
 
 }  // namespace policy

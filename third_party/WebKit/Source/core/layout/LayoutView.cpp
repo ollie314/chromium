@@ -90,7 +90,6 @@ LayoutView::LayoutView(Document* document)
       m_selectionEnd(nullptr),
       m_selectionStartPos(-1),
       m_selectionEndPos(-1),
-      m_pageLogicalHeightChanged(false),
       m_layoutState(nullptr),
       m_layoutQuoteHead(nullptr),
       m_layoutCounterCount(0),
@@ -205,7 +204,9 @@ void LayoutView::checkLayoutState() {
 }
 #endif
 
-void LayoutView::setShouldDoFullPaintInvalidationOnResizeIfNeeded() {
+void LayoutView::setShouldDoFullPaintInvalidationOnResizeIfNeeded(
+    bool widthChanged,
+    bool heightChanged) {
   // When background-attachment is 'fixed', we treat the viewport (instead of
   // the 'root' i.e. html or body) as the background positioning area, and we
   // should fully invalidate on viewport resize if the background image is not
@@ -214,15 +215,10 @@ void LayoutView::setShouldDoFullPaintInvalidationOnResizeIfNeeded() {
   if (style()->hasFixedBackgroundImage() &&
       (!m_compositor ||
        !m_compositor->needsFixedRootBackgroundLayer(layer()))) {
-    IncludeScrollbarsInRect includeScrollbars =
-        RuntimeEnabledFeatures::rootLayerScrollingEnabled() ? IncludeScrollbars
-                                                            : ExcludeScrollbars;
-    if ((offsetWidth() != viewWidth(includeScrollbars) &&
-         mustInvalidateFillLayersPaintOnWidthChange(
-             style()->backgroundLayers())) ||
-        (offsetHeight() != viewHeight(includeScrollbars) &&
-         mustInvalidateFillLayersPaintOnHeightChange(
-             style()->backgroundLayers())))
+    if ((widthChanged && mustInvalidateFillLayersPaintOnWidthChange(
+                             style()->backgroundLayers())) ||
+        (heightChanged && mustInvalidateFillLayersPaintOnHeightChange(
+                              style()->backgroundLayers())))
       setShouldDoFullPaintInvalidation(PaintInvalidationBoundsChange);
   }
 }
@@ -231,19 +227,25 @@ void LayoutView::layout() {
   if (!document().paginated())
     setPageLogicalHeight(LayoutUnit());
 
-  setShouldDoFullPaintInvalidationOnResizeIfNeeded();
+  IncludeScrollbarsInRect includeScrollbars =
+      RuntimeEnabledFeatures::rootLayerScrollingEnabled() ? IncludeScrollbars
+                                                          : ExcludeScrollbars;
+  FloatSize viewSize(frameView()->visibleContentSize(includeScrollbars));
+  setShouldDoFullPaintInvalidationOnResizeIfNeeded(
+      offsetWidth() != viewSize.width(), offsetHeight() != viewSize.height());
 
   if (pageLogicalHeight() && shouldUsePrintingLayout()) {
     m_minPreferredLogicalWidth = m_maxPreferredLogicalWidth = logicalWidth();
-    if (!m_fragmentationContext)
+    if (!m_fragmentationContext) {
       m_fragmentationContext = wrapUnique(new ViewFragmentationContext(*this));
+      m_paginationStateChanged = true;
+    }
   } else if (m_fragmentationContext) {
     m_fragmentationContext.reset();
+    m_paginationStateChanged = true;
   }
 
   SubtreeLayoutScope layoutScope(*this);
-
-  LayoutRect oldLayoutOverflowRect = layoutOverflowRect();
 
   // Use calcWidth/Height to get the new width/height, since this will take the
   // full page zoom factor into account.
@@ -275,23 +277,9 @@ void LayoutView::layout() {
   if (!needsLayout())
     return;
 
-  LayoutState rootLayoutState(pageLogicalHeight(), pageLogicalHeightChanged(),
-                              *this);
-
-  m_pageLogicalHeightChanged = false;
+  LayoutState rootLayoutState(pageLogicalHeight(), *this);
 
   layoutContent();
-
-  if (layoutOverflowRect() != oldLayoutOverflowRect) {
-    // The document element paints the viewport background, so we need to
-    // invalidate it when layout overflow changes.
-    // FIXME: Improve viewport background styling/invalidation/painting.
-    // crbug.com/475115
-    if (Element* documentElement = document().documentElement()) {
-      if (LayoutObject* rootObject = documentElement->layoutObject())
-        rootObject->setShouldDoFullPaintInvalidation();
-    }
-  }
 
 #if ENABLE(ASSERT)
   checkLayoutState();
@@ -315,7 +303,7 @@ LayoutRect LayoutView::visualOverflowRect() const {
   return layoutOverflowRect();
 }
 
-LayoutRect LayoutView::localOverflowRectForPaintInvalidation() const {
+LayoutRect LayoutView::localVisualRect() const {
   // TODO(wangxianzhu): This is only required without rootLayerScrolls (though
   // it is also correct but unnecessary with rootLayerScrolls) because of the
   // special LayoutView overflow model.
@@ -332,9 +320,7 @@ void LayoutView::mapLocalToAncestor(const LayoutBoxModelObject* ancestor,
   }
 
   if ((mode & IsFixed) && m_frameView) {
-    transformState.move(LayoutSize(m_frameView->scrollOffset()));
-    if (hasOverflowClip())
-      transformState.move(scrolledContentOffset());
+    transformState.move(offsetForFixedPosition());
     // IsFixed flag is only applicable within this LayoutView.
     mode &= ~IsFixed;
   }
@@ -362,15 +348,8 @@ void LayoutView::mapLocalToAncestor(const LayoutBoxModelObject* ancestor,
 const LayoutObject* LayoutView::pushMappingToContainer(
     const LayoutBoxModelObject* ancestorToStopAt,
     LayoutGeometryMap& geometryMap) const {
-  LayoutSize offsetForFixedPosition;
   LayoutSize offset;
   LayoutObject* container = nullptr;
-
-  if (m_frameView) {
-    offsetForFixedPosition = LayoutSize(m_frameView->scrollOffset());
-    if (hasOverflowClip())
-      offsetForFixedPosition = LayoutSize(scrolledContentOffset());
-  }
 
   if (geometryMap.getMapCoordinatesFlags() & TraverseDocumentBoundaries) {
     if (LayoutPart* parentDocLayoutObject = toLayoutPart(
@@ -389,9 +368,9 @@ const LayoutObject* LayoutView::pushMappingToContainer(
       shouldUseTransformFromContainer(container)) {
     TransformationMatrix t;
     getTransformFromContainer(container, LayoutSize(), t);
-    geometryMap.push(this, t, ContainsFixedPosition, offsetForFixedPosition);
+    geometryMap.push(this, t, ContainsFixedPosition, offsetForFixedPosition());
   } else {
-    geometryMap.push(this, offset, 0, offsetForFixedPosition);
+    geometryMap.push(this, offset, 0, offsetForFixedPosition());
   }
 
   return container;
@@ -400,10 +379,7 @@ const LayoutObject* LayoutView::pushMappingToContainer(
 void LayoutView::mapAncestorToLocal(const LayoutBoxModelObject* ancestor,
                                     TransformState& transformState,
                                     MapCoordinatesFlags mode) const {
-  if (this == ancestor)
-    return;
-
-  if (mode & TraverseDocumentBoundaries) {
+  if (this != ancestor && (mode & TraverseDocumentBoundaries)) {
     if (LayoutPart* parentDocLayoutObject = toLayoutPart(
             LayoutAPIShim::layoutObjectFrom(frame()->ownerLayoutItem()))) {
       // A LayoutView is a containing block for fixed-position elements, so
@@ -415,11 +391,11 @@ void LayoutView::mapAncestorToLocal(const LayoutBoxModelObject* ancestor,
       transformState.move(LayoutSize(-frame()->view()->scrollOffset()));
     }
   } else {
-    ASSERT(!ancestor);
+    DCHECK(this == ancestor || !ancestor);
   }
 
   if (mode & IsFixed)
-    transformState.move(LayoutSize(frame()->view()->scrollOffset()));
+    transformState.move(offsetForFixedPosition());
 }
 
 void LayoutView::computeSelfHitTestRects(Vector<LayoutRect>& rects,
@@ -479,7 +455,7 @@ bool LayoutView::mapToVisualRectInAncestorSpace(
     MapCoordinatesFlags mode,
     VisualRectFlags visualRectFlags) const {
   if (mode & IsFixed)
-    adjustOffsetForFixedPosition(rect);
+    rect.move(offsetForFixedPosition(true));
 
   // Apply our transform if we have one (because of full page zooming).
   if (!ancestor && layer() && layer()->transform())
@@ -495,7 +471,7 @@ bool LayoutView::mapToVisualRectInAncestorSpace(
 
   if (LayoutBox* obj = owner->layoutBox()) {
     if (!(mode & InputIsInFrameCoordinates)) {
-      // Intersect the viewport with the paint invalidation rect.
+      // Intersect the viewport with the visual rect.
       LayoutRect viewRectangle = viewRect();
       if (visualRectFlags & EdgeInclusive) {
         if (!rect.inclusiveIntersect(viewRectangle))
@@ -523,11 +499,10 @@ bool LayoutView::mapToVisualRectInAncestorSpace(
   return false;
 }
 
-void LayoutView::adjustOffsetForFixedPosition(LayoutRect& rect) const {
+LayoutSize LayoutView::offsetForFixedPosition(bool includePendingScroll) const {
+  FloatSize adjustment;
   if (m_frameView) {
-    rect.move(LayoutSize(m_frameView->scrollOffset()));
-    if (hasOverflowClip())
-      rect.move(scrolledContentOffset());
+    adjustment += m_frameView->scrollOffset();
 
     // FIXME: Paint invalidation should happen after scroll updates, so there
     // should be no pending scroll delta.
@@ -535,9 +510,14 @@ void LayoutView::adjustOffsetForFixedPosition(LayoutRect& rect) const {
     // ASSERT for now. crbug.com/434950.
     // ASSERT(m_frameView->pendingScrollDelta().isZero());
     // If we have a pending scroll, invalidate the previous scroll position.
-    if (!m_frameView->pendingScrollDelta().isZero())
-      rect.move(-LayoutSize(m_frameView->pendingScrollDelta()));
+    if (includePendingScroll && !m_frameView->pendingScrollDelta().isZero())
+      adjustment -= m_frameView->pendingScrollDelta();
   }
+
+  if (hasOverflowClip())
+    adjustment += FloatSize(scrolledContentOffset());
+
+  return roundedLayoutSize(adjustment);
 }
 
 void LayoutView::absoluteRects(Vector<IntRect>& rects,
@@ -683,9 +663,9 @@ void LayoutView::setSelection(
 
   // Blocks contain selected objects and fill gaps between them, either on the
   // left, right, or in between lines and blocks.
-  // In order to get the paint invalidation rect right, we have to examine left,
-  // middle, and right rects individually, since otherwise the union of those
-  // rects might remain the same even when changes have occurred.
+  // In order to get the visual rect right, we have to examine left, middle, and
+  // right rects individually, since otherwise the union of those rects might
+  // remain the same even when changes have occurred.
   typedef HashMap<LayoutBlock*, SelectionState> SelectedBlockMap;
   SelectedBlockMap oldSelectedBlocks;
   // FIXME: |newSelectedBlocks| doesn't really need to store the SelectionState,
@@ -891,10 +871,6 @@ IntRect LayoutView::documentRect() const {
 
 bool LayoutView::rootBackgroundIsEntirelyFixed() const {
   return style()->hasEntirelyFixedBackground();
-}
-
-LayoutRect LayoutView::backgroundRect(LayoutBox* backgroundLayoutObject) const {
-  return LayoutRect(documentRect());
 }
 
 IntSize LayoutView::layoutSize(

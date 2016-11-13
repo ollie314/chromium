@@ -5,8 +5,10 @@
 #include "modules/sensor/SensorProviderProxy.h"
 
 #include "modules/sensor/SensorProxy.h"
+#include "modules/sensor/SensorReading.h"
 #include "platform/mojo/MojoHelper.h"
 #include "public/platform/InterfaceProvider.h"
+#include "public/platform/Platform.h"
 
 namespace blink {
 
@@ -40,7 +42,18 @@ DEFINE_TRACE(SensorProviderProxy) {
   Supplement<LocalFrame>::trace(visitor);
 }
 
-SensorProxy* SensorProviderProxy::getOrCreateSensor(
+SensorProxy* SensorProviderProxy::createSensor(
+    device::mojom::blink::SensorType type,
+    std::unique_ptr<SensorReadingFactory> readingFactory) {
+  DCHECK(!getSensor(type));
+
+  SensorProxy* sensor = new SensorProxy(type, this, std::move(readingFactory));
+  m_sensors.add(sensor);
+
+  return sensor;
+}
+
+SensorProxy* SensorProviderProxy::getSensor(
     device::mojom::blink::SensorType type) {
   for (SensorProxy* sensor : m_sensors) {
     // TODO(Mikhail) : Hash sensors by type for efficiency.
@@ -48,13 +61,15 @@ SensorProxy* SensorProviderProxy::getOrCreateSensor(
       return sensor;
   }
 
-  SensorProxy* sensor = new SensorProxy(type, this);
-  m_sensors.add(sensor);
-
-  return sensor;
+  return nullptr;
 }
 
 void SensorProviderProxy::onSensorProviderConnectionError() {
+  if (!Platform::current()) {
+    // TODO(rockot): Clean this up once renderer shutdown sequence is fixed.
+    return;
+  }
+
   m_sensorProvider.reset();
   for (SensorProxy* sensor : m_sensors)
     sensor->handleSensorError();

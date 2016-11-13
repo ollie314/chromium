@@ -167,7 +167,9 @@ scoped_refptr<GbmBuffer> GbmBuffer::CreateBufferFromFds(
 
   // Use scanout if supported.
   bool use_scanout = gbm_device_is_format_supported(
-      gbm->device(), fourcc_format, GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
+                         gbm->device(), fourcc_format,
+                         GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING) &&
+                     (planes.size() == 1);
 
   gbm_bo* bo = nullptr;
   if (use_scanout) {

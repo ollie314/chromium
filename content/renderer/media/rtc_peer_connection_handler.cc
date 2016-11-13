@@ -204,14 +204,14 @@ void GetNativeRtcConfiguration(
     webrtc_config->servers.push_back(server);
   }
 
-  switch (blink_config.iceTransports) {
-    case blink::WebRTCIceTransports::kNone:
+  switch (blink_config.iceTransportPolicy) {
+    case blink::WebRTCIceTransportPolicy::kNone:
       webrtc_config->type = webrtc::PeerConnectionInterface::kNone;
       break;
-    case blink::WebRTCIceTransports::kRelay:
+    case blink::WebRTCIceTransportPolicy::kRelay:
       webrtc_config->type = webrtc::PeerConnectionInterface::kRelay;
       break;
-    case blink::WebRTCIceTransports::kAll:
+    case blink::WebRTCIceTransportPolicy::kAll:
       webrtc_config->type = webrtc::PeerConnectionInterface::kAll;
       break;
     default:
@@ -744,6 +744,14 @@ class PeerConnectionUMAObserver : public webrtc::UMAObserver {
         break;
       case webrtc::kEnumCounterDtlsHandshakeError:
         UMA_HISTOGRAM_ENUMERATION("WebRTC.PeerConnection.DtlsHandshakeError",
+                                  counter, counter_max);
+        break;
+      case webrtc::kEnumCounterIceRestart:
+        UMA_HISTOGRAM_ENUMERATION("WebRTC.PeerConnection.IceRestartState",
+                                  counter, counter_max);
+        break;
+      case webrtc::kEnumCounterIceRegathering:
+        UMA_HISTOGRAM_ENUMERATION("WebRTC.PeerConnection.IceRegatheringReason",
                                   counter, counter_max);
         break;
       default:

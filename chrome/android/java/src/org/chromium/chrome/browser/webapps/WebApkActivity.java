@@ -47,6 +47,11 @@ public class WebApkActivity extends WebappActivity {
     }
 
     @Override
+    protected WebappInfo createWebappInfo(Intent intent) {
+        return (intent == null) ? WebApkInfo.createEmpty() : WebApkInfo.create(intent);
+    }
+
+    @Override
     protected void onStorageIsNull(final int backgroundColor) {
         // Register the WebAPK. It is possible that a WebAPK's meta data was deleted when user
         // cleared Chrome's data. When it is launched again, we know that the WebAPK is still
@@ -138,7 +143,7 @@ public class WebApkActivity extends WebappActivity {
         super.onDeferredStartup();
 
         mUpdateManager = new WebApkUpdateManager();
-        mUpdateManager.updateIfNeeded(getActivityTab(), mWebappInfo);
+        mUpdateManager.updateIfNeeded(getActivityTab(), (WebApkInfo) mWebappInfo);
     }
 
     @Override
@@ -154,12 +159,13 @@ public class WebApkActivity extends WebappActivity {
      *                     WebAPK renderer process.
      */
     private void initializeChildProcessCreationParams(boolean isForWebApk) {
+        // TODO(hanxi): crbug.com/664530. WebAPKs shouldn't use a global ChildProcessCreationParams.
         ChromeApplication chrome = (ChromeApplication) ContextUtils.getApplicationContext();
         ChildProcessCreationParams params = chrome.getChildProcessCreationParams();
         if (isForWebApk) {
-            int extraBindFlag = params == null ? 0 : params.getExtraBindFlags();
+            boolean isExternalService = false;
             params = new ChildProcessCreationParams(getWebappInfo().webApkPackageName(),
-                    extraBindFlag, LibraryProcessType.PROCESS_CHILD);
+                    isExternalService, LibraryProcessType.PROCESS_CHILD);
         }
         ChildProcessCreationParams.set(params);
     }

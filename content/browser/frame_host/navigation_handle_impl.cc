@@ -11,6 +11,7 @@
 #include "content/browser/browsing_data/clear_site_data_throttle.h"
 #include "content/browser/child_process_security_policy_impl.h"
 #include "content/browser/devtools/render_frame_devtools_agent_host.h"
+#include "content/browser/frame_host/debug_urls.h"
 #include "content/browser/frame_host/frame_tree_node.h"
 #include "content/browser/frame_host/navigator.h"
 #include "content/browser/frame_host/navigator_delegate.h"
@@ -46,13 +47,13 @@ std::unique_ptr<NavigationHandleImpl> NavigationHandleImpl::Create(
     const GURL& url,
     FrameTreeNode* frame_tree_node,
     bool is_renderer_initiated,
-    bool is_synchronous,
+    bool is_same_page,
     bool is_srcdoc,
     const base::TimeTicks& navigation_start,
     int pending_nav_entry_id,
     bool started_from_context_menu) {
   return std::unique_ptr<NavigationHandleImpl>(new NavigationHandleImpl(
-      url, frame_tree_node, is_renderer_initiated, is_synchronous, is_srcdoc,
+      url, frame_tree_node, is_renderer_initiated, is_same_page, is_srcdoc,
       navigation_start, pending_nav_entry_id, started_from_context_menu));
 }
 
@@ -60,7 +61,7 @@ NavigationHandleImpl::NavigationHandleImpl(
     const GURL& url,
     FrameTreeNode* frame_tree_node,
     bool is_renderer_initiated,
-    bool is_synchronous,
+    bool is_same_page,
     bool is_srcdoc,
     const base::TimeTicks& navigation_start,
     int pending_nav_entry_id,
@@ -72,10 +73,10 @@ NavigationHandleImpl::NavigationHandleImpl(
       net_error_code_(net::OK),
       render_frame_host_(nullptr),
       is_renderer_initiated_(is_renderer_initiated),
-      is_same_page_(false),
-      is_synchronous_(is_synchronous),
+      is_same_page_(is_same_page),
       is_srcdoc_(is_srcdoc),
       was_redirected_(false),
+      connection_info_(net::HttpResponseInfo::CONNECTION_INFO_UNKNOWN),
       original_url_(url),
       state_(INITIAL),
       is_transferring_(false),
@@ -95,7 +96,8 @@ NavigationHandleImpl::NavigationHandleImpl(
   starting_site_instance_ =
       frame_tree_node_->current_frame_host()->GetSiteInstance();
 
-  GetDelegate()->DidStartNavigation(this);
+  if (!IsRendererDebugURL(url_))
+    GetDelegate()->DidStartNavigation(this);
 
   if (IsInMainFrame()) {
     TRACE_EVENT_ASYNC_BEGIN_WITH_TIMESTAMP1(
@@ -105,7 +107,8 @@ NavigationHandleImpl::NavigationHandleImpl(
 }
 
 NavigationHandleImpl::~NavigationHandleImpl() {
-  GetDelegate()->DidFinishNavigation(this);
+  if (!IsRendererDebugURL(url_))
+    GetDelegate()->DidFinishNavigation(this);
 
   // Cancel the navigation on the IO thread if the NavigationHandle is being
   // destroyed in the middle of the NavigationThrottles checks.
@@ -149,10 +152,6 @@ bool NavigationHandleImpl::IsParentMainFrame() {
 
 bool NavigationHandleImpl::IsRendererInitiated() {
   return is_renderer_initiated_;
-}
-
-bool NavigationHandleImpl::IsSynchronousNavigation() {
-  return is_synchronous_;
 }
 
 bool NavigationHandleImpl::IsSrcdoc() {
@@ -223,14 +222,16 @@ RenderFrameHostImpl* NavigationHandleImpl::GetRenderFrameHost() {
 }
 
 bool NavigationHandleImpl::IsSamePage() {
-  DCHECK(state_ == DID_COMMIT || state_ == DID_COMMIT_ERROR_PAGE)
-      << "This accessor should not be called before the navigation has "
-         "committed.";
   return is_same_page_;
 }
 
 const net::HttpResponseHeaders* NavigationHandleImpl::GetResponseHeaders() {
   return response_headers_.get();
+}
+
+net::HttpResponseInfo::ConnectionInfo
+NavigationHandleImpl::GetConnectionInfo() {
+  return connection_info_;
 }
 
 bool NavigationHandleImpl::HasCommitted() {
@@ -322,6 +323,7 @@ NavigationHandleImpl::CallWillRedirectRequestForTesting(
   WillRedirectRequest(new_url, new_method_is_post ? "POST" : "GET",
                       new_referrer_url, new_is_external_protocol,
                       scoped_refptr<net::HttpResponseHeaders>(),
+                      net::HttpResponseInfo::CONNECTION_INFO_UNKNOWN,
                       base::Bind(&UpdateThrottleCheckResult, &result));
 
   // Reset the callback to ensure it will not be called later.
@@ -337,8 +339,9 @@ NavigationHandleImpl::CallWillProcessResponseForTesting(
       new net::HttpResponseHeaders(raw_response_headers);
   NavigationThrottle::ThrottleCheckResult result = NavigationThrottle::DEFER;
   WillProcessResponse(static_cast<RenderFrameHostImpl*>(render_frame_host),
-                      headers, SSLStatus(), GlobalRequestID(), false, false,
-                      false, base::Closure(),
+                      headers, net::HttpResponseInfo::CONNECTION_INFO_UNKNOWN,
+                      SSLStatus(), GlobalRequestID(), false, false, false,
+                      base::Closure(),
                       base::Bind(&UpdateThrottleCheckResult, &result));
 
   // Reset the callback to ensure it will not be called later.
@@ -424,6 +427,7 @@ void NavigationHandleImpl::WillRedirectRequest(
     const GURL& new_referrer_url,
     bool new_is_external_protocol,
     scoped_refptr<net::HttpResponseHeaders> response_headers,
+    net::HttpResponseInfo::ConnectionInfo connection_info,
     const ThrottleChecksFinishedCallback& callback) {
   // Update the navigation parameters.
   url_ = new_url;
@@ -432,6 +436,7 @@ void NavigationHandleImpl::WillRedirectRequest(
   sanitized_referrer_ = Referrer::SanitizeForRequest(url_, sanitized_referrer_);
   is_external_protocol_ = new_is_external_protocol;
   response_headers_ = response_headers;
+  connection_info_ = connection_info;
   was_redirected_ = true;
   redirect_chain_.push_back(new_url);
   if (new_method != "POST")
@@ -451,6 +456,7 @@ void NavigationHandleImpl::WillRedirectRequest(
 void NavigationHandleImpl::WillProcessResponse(
     RenderFrameHostImpl* render_frame_host,
     scoped_refptr<net::HttpResponseHeaders> response_headers,
+    net::HttpResponseInfo::ConnectionInfo connection_info,
     const SSLStatus& ssl_status,
     const GlobalRequestID& request_id,
     bool should_replace_current_entry,
@@ -461,6 +467,7 @@ void NavigationHandleImpl::WillProcessResponse(
   DCHECK(!render_frame_host_ || render_frame_host_ == render_frame_host);
   render_frame_host_ = render_frame_host;
   response_headers_ = response_headers;
+  connection_info_ = connection_info;
   request_id_ = request_id;
   should_replace_current_entry_ = should_replace_current_entry;
   is_download_ = is_download;
@@ -492,7 +499,8 @@ void NavigationHandleImpl::ReadyToCommitNavigation(
   render_frame_host_ = render_frame_host;
   state_ = READY_TO_COMMIT;
 
-  GetDelegate()->ReadyToCommitNavigation(this);
+  if (!IsRendererDebugURL(url_))
+    GetDelegate()->ReadyToCommitNavigation(this);
 }
 
 void NavigationHandleImpl::DidCommitNavigation(
@@ -507,7 +515,6 @@ void NavigationHandleImpl::DidCommitNavigation(
   has_user_gesture_ = (params.gesture == NavigationGestureUser);
   transition_ = params.transition;
   render_frame_host_ = render_frame_host;
-  is_same_page_ = same_page;
 
   // If an error page reloads, net_error_code might be 200 but we still want to
   // count it as an error page.

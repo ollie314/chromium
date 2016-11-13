@@ -82,6 +82,7 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/resource_context.h"
 #include "content/public/common/content_switches.h"
+#include "extensions/features/features.h"
 #include "net/base/keygen_handler.h"
 #include "net/cert/cert_verifier.h"
 #include "net/cert/ct_log_verifier.h"
@@ -91,6 +92,7 @@
 #include "net/http/http_transaction_factory.h"
 #include "net/http/http_util.h"
 #include "net/http/transport_security_persister.h"
+#include "net/net_features.h"
 #include "net/nqe/network_quality_estimator.h"
 #include "net/proxy/proxy_config_service_fixed.h"
 #include "net/proxy/proxy_script_fetcher_impl.h"
@@ -109,8 +111,9 @@
 #include "net/url_request/url_request_intercepting_job_factory.h"
 #include "net/url_request/url_request_interceptor.h"
 #include "net/url_request/url_request_job_factory_impl.h"
+#include "third_party/WebKit/public/public_features.h"
 
-#if defined(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
 #include "chrome/browser/extensions/extension_cookie_monster_delegate.h"
 #include "chrome/browser/extensions/extension_resource_protocols.h"
 #include "extensions/browser/extension_protocols.h"
@@ -120,7 +123,7 @@
 #include "extensions/common/constants.h"
 #endif
 
-#if defined(ENABLE_SUPERVISED_USERS)
+#if BUILDFLAG(ENABLE_SUPERVISED_USERS)
 #include "chrome/browser/supervised_user/supervised_user_service.h"
 #include "chrome/browser/supervised_user/supervised_user_service_factory.h"
 #include "chrome/browser/supervised_user/supervised_user_url_filter.h"
@@ -177,7 +180,7 @@ namespace {
 
 net::CertVerifier* g_cert_verifier_for_testing = nullptr;
 
-#if defined(DEBUG_DEVTOOLS)
+#if BUILDFLAG(DEBUG_DEVTOOLS)
 bool IsSupportedDevToolsURL(const GURL& url, base::FilePath* path) {
   std::string bundled_path_prefix(chrome::kChromeUIDevToolsBundledPath);
   bundled_path_prefix = "/" + bundled_path_prefix + "/";
@@ -216,15 +219,13 @@ bool IsSupportedDevToolsURL(const GURL& url, base::FilePath* path) {
   if (p.IsAbsolute())
     return false;
 
-  base::FilePath inspector_dir;
-  if (!PathService::Get(chrome::DIR_INSPECTOR, &inspector_dir))
+  base::FilePath inspector_debug_dir;
+  if (!PathService::Get(chrome::DIR_INSPECTOR_DEBUG, &inspector_debug_dir))
     return false;
 
-  if (inspector_dir.empty())
-    return false;
+  DCHECK(!inspector_debug_dir.empty());
 
-  // Use the non-bundled and non-minified devtools app for development
-  *path = inspector_dir.AppendASCII("debug").AppendASCII(relative_path);
+  *path = inspector_debug_dir.AppendASCII(relative_path);
   return true;
 }
 
@@ -245,7 +246,7 @@ class DebugDevToolsInterceptor : public net::URLRequestInterceptor {
     return NULL;
   }
 };
-#endif  // defined(DEBUG_DEVTOOLS)
+#endif  // BUILDFLAG(DEBUG_DEVTOOLS)
 
 #if defined(OS_CHROMEOS)
 // The following four functions are responsible for initializing NSS for each
@@ -402,7 +403,7 @@ void ProfileIOData::InitializeOnUIThread(Profile* profile) {
       HostContentSettingsMapFactory::GetForProfile(profile);
   params->ssl_config_service = profile->GetSSLConfigService();
 
-#if defined(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
   params->extension_info_map =
       extensions::ExtensionSystem::Get(profile)->info_map();
   params->cookie_monster_delegate = new ExtensionCookieMonsterDelegate(profile);
@@ -434,7 +435,7 @@ void ProfileIOData::InitializeOnUIThread(Profile* profile) {
 
   params->proxy_config_service = ProxyServiceFactory::CreateProxyConfigService(
       profile->GetProxyConfigTracker());
-#if defined(ENABLE_SUPERVISED_USERS)
+#if BUILDFLAG(ENABLE_SUPERVISED_USERS)
   SupervisedUserService* supervised_user_service =
       SupervisedUserServiceFactory::GetForProfile(profile);
   params->supervised_user_url_filter =
@@ -731,7 +732,7 @@ bool ProfileIOData::IsHandledProtocol(const std::string& scheme) {
     url::kFileScheme,
     content::kChromeDevToolsScheme,
     dom_distiller::kDomDistillerScheme,
-#if defined(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
     extensions::kExtensionScheme,
     extensions::kExtensionResourceScheme,
 #endif
@@ -740,10 +741,13 @@ bool ProfileIOData::IsHandledProtocol(const std::string& scheme) {
 #if defined(OS_CHROMEOS)
     content::kExternalFileScheme,
 #endif  // defined(OS_CHROMEOS)
+#if defined(OS_ANDROID)
+    url::kContentScheme,
+#endif  // defined(OS_ANDROID)
     url::kAboutScheme,
-#if !defined(DISABLE_FTP_SUPPORT)
+#if !BUILDFLAG(DISABLE_FTP_SUPPORT)
     url::kFtpScheme,
-#endif  // !defined(DISABLE_FTP_SUPPORT)
+#endif  // !BUILDFLAG(DISABLE_FTP_SUPPORT)
     url::kBlobScheme,
     url::kFileSystemScheme,
     chrome::kChromeSearchScheme,
@@ -848,7 +852,7 @@ net::URLRequestContext* ProfileIOData::GetIsolatedMediaRequestContext(
 
 extensions::InfoMap* ProfileIOData::GetExtensionInfoMap() const {
   DCHECK(initialized_) << "ExtensionSystem not initialized";
-#if defined(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
   return extension_info_map_.get();
 #else
   return nullptr;
@@ -858,7 +862,7 @@ extensions::InfoMap* ProfileIOData::GetExtensionInfoMap() const {
 extensions::ExtensionThrottleManager*
 ProfileIOData::GetExtensionThrottleManager() const {
   DCHECK(initialized_) << "ExtensionSystem not initialized";
-#if defined(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
   return extension_throttle_manager_.get();
 #else
   return nullptr;
@@ -1024,13 +1028,13 @@ void ProfileIOData::Init(
 
   std::unique_ptr<ChromeNetworkDelegate> network_delegate(
       new ChromeNetworkDelegate(
-#if defined(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
           io_thread_globals->extension_event_router_forwarder.get(),
 #else
           NULL,
 #endif
           &enable_referrers_, io_thread->GetMetricsDataUseForwarder()));
-#if defined(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
   network_delegate->set_extension_info_map(
       profile_params_->extension_info_map.get());
   if (!command_line.HasSwitch(switches::kDisableExtensionsHttpThrottling)) {
@@ -1084,7 +1088,7 @@ void ProfileIOData::Init(
   // Take ownership over these parameters.
   cookie_settings_ = profile_params_->cookie_settings;
   host_content_settings_map_ = profile_params_->host_content_settings_map;
-#if defined(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
   extension_info_map_ = profile_params_->extension_info_map;
 #endif
 
@@ -1096,7 +1100,7 @@ void ProfileIOData::Init(
         profile_params_->resource_prefetch_predictor_observer_.release());
   }
 
-#if defined(ENABLE_SUPERVISED_USERS)
+#if BUILDFLAG(ENABLE_SUPERVISED_USERS)
   supervised_user_url_filter_ = profile_params_->supervised_user_url_filter;
 #endif
 
@@ -1186,7 +1190,7 @@ ProfileIOData::SetUpJobFactoryDefaults(
                   base::SequencedWorkerPool::SKIP_ON_SHUTDOWN)));
   DCHECK(set_protocol);
 
-#if defined(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
   DCHECK(extension_info_map_.get());
   // Check only for incognito (and not Chrome OS guest mode GUEST_PROFILE).
   bool is_incognito = profile_type() == Profile::INCOGNITO_PROFILE;
@@ -1225,12 +1229,12 @@ ProfileIOData::SetUpJobFactoryDefaults(
       url::kAboutScheme,
       base::MakeUnique<about_handler::AboutProtocolHandler>());
 
-#if !defined(DISABLE_FTP_SUPPORT)
+#if !BUILDFLAG(DISABLE_FTP_SUPPORT)
   job_factory->SetProtocolHandler(
       url::kFtpScheme, net::FtpProtocolHandler::Create(host_resolver));
-#endif  // !defined(DISABLE_FTP_SUPPORT)
+#endif  // !BUILDFLAG(DISABLE_FTP_SUPPORT)
 
-#if defined(DEBUG_DEVTOOLS)
+#if BUILDFLAG(DEBUG_DEVTOOLS)
   request_interceptors.push_back(new DebugDevToolsInterceptor);
 #endif
 

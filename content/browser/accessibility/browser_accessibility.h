@@ -48,11 +48,6 @@
 
 namespace content {
 class BrowserAccessibilityManager;
-#if defined(OS_WIN)
-class BrowserAccessibilityWin;
-#elif defined(OS_LINUX) && !defined(OS_CHROMEOS) && defined(USE_X11)
-class BrowserAccessibilityAuraLinux;
-#endif
 
 ////////////////////////////////////////////////////////////////////////////////
 //
@@ -161,6 +156,12 @@ class CONTENT_EXPORT BrowserAccessibility {
   // Same as GetPageBoundsForRange, in screen coordinates. Only valid when
   // the role is WebAXRoleStaticText.
   gfx::Rect GetScreenBoundsForRange(int start, int len) const;
+
+  // Convert a bounding rectangle from this node's coordinate system
+  // (which is relative to its nearest scrollable ancestor) to
+  // absolute bounds, either in page coordinates (when |frameOnly| is
+  // false), or in frame coordinates (when |frameOnly| is true).
+  gfx::Rect RelativeToAbsoluteBounds(gfx::RectF bounds, bool frame_only) const;
 
   // This is to handle the cases such as ARIA textbox, where the value should
   // be calculated from the object's inner text.
@@ -375,12 +376,6 @@ class CONTENT_EXPORT BrowserAccessibility {
   // bounds, but "virtual" elements in the accessibility tree that don't
   // correspond to a layed-out element sometimes don't have bounds.
   void FixEmptyBounds(gfx::RectF* bounds) const;
-
-  // Convert the bounding rectangle of an element (which is relative to
-  // its nearest scrollable ancestor) to absolute bounds, either in
-  // page coordinates (when |frameOnly| is false), or in frame coordinates
-  // (when |frameOnly| is true).
-  gfx::Rect RelativeToAbsoluteBounds(gfx::RectF bounds, bool frame_only) const;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserAccessibility);
 };

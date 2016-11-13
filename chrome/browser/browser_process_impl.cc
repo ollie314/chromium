@@ -117,8 +117,10 @@
 #include "content/public/browser/storage_partition.h"
 #include "content/public/common/content_switches.h"
 #include "extensions/common/constants.h"
+#include "extensions/features/features.h"
 #include "net/socket/client_socket_pool_manager.h"
 #include "net/url_request/url_request_context_getter.h"
+#include "printing/features/features.h"
 #include "ui/base/idle/idle.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/message_center/message_center.h"
@@ -142,7 +144,7 @@
 #include "chrome/browser/background/background_mode_manager.h"
 #endif
 
-#if defined(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
 #include "chrome/browser/extensions/chrome_extensions_browser_client.h"
 #include "chrome/browser/extensions/event_router_forwarder.h"
 #include "chrome/browser/media_galleries/media_file_system_registry.h"
@@ -214,7 +216,7 @@ BrowserProcessImpl::BrowserProcessImpl(
   g_browser_process = this;
   platform_part_.reset(new BrowserProcessPlatformPart());
 
-#if defined(ENABLE_PRINTING)
+#if BUILDFLAG(ENABLE_PRINTING)
   // Must be created after the NotificationService.
   print_job_manager_.reset(new printing::PrintJobManager);
 #endif
@@ -235,7 +237,7 @@ BrowserProcessImpl::BrowserProcessImpl(
 
   device_client_.reset(new ChromeDeviceClient);
 
-#if defined(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
   // Athena sets its own instance during Athena's init process.
   extensions::AppWindowClient::Set(ChromeAppWindowClient::GetInstance());
 
@@ -260,7 +262,7 @@ BrowserProcessImpl::BrowserProcessImpl(
 }
 
 BrowserProcessImpl::~BrowserProcessImpl() {
-#if defined(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
   extensions::ExtensionsBrowserClient::Set(nullptr);
 #endif
 
@@ -304,11 +306,12 @@ void BrowserProcessImpl::StartTearDown() {
   // so it needs to be shut down before the ProfileManager.
   supervised_user_whitelist_installer_.reset();
 
-#if !defined(OS_ANDROID)
   // Debugger must be cleaned up before ProfileManager.
   remote_debugging_server_.reset();
   devtools_auto_opener_.reset();
-#endif
+
+  // ChromeDeviceClient must be shutdown when the FILE thread is still alive.
+  device_client_->Shutdown();
 
   // Need to clear profiles (download managers) before the io_thread_.
   {
@@ -322,7 +325,7 @@ void BrowserProcessImpl::StartTearDown() {
 
   child_process_watcher_.reset();
 
-#if defined(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
   media_file_system_registry_.reset();
   // Remove the global instance of the Storage Monitor now. Otherwise the
   // FILE thread would be gone when we try to release it in the dtor and
@@ -570,7 +573,7 @@ BrowserProcessPlatformPart* BrowserProcessImpl::platform_part() {
 
 extensions::EventRouterForwarder*
 BrowserProcessImpl::extension_event_router_forwarder() {
-#if defined(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
   return extension_event_router_forwarder_.get();
 #else
   return NULL;
@@ -677,7 +680,7 @@ printing::PrintJobManager* BrowserProcessImpl::print_job_manager() {
 
 printing::PrintPreviewDialogController*
     BrowserProcessImpl::print_preview_dialog_controller() {
-#if defined(ENABLE_PRINT_PREVIEW)
+#if BUILDFLAG(ENABLE_PRINT_PREVIEW)
   DCHECK(CalledOnValidThread());
   if (!print_preview_dialog_controller_.get())
     CreatePrintPreviewDialogController();
@@ -690,7 +693,7 @@ printing::PrintPreviewDialogController*
 
 printing::BackgroundPrintingManager*
     BrowserProcessImpl::background_printing_manager() {
-#if defined(ENABLE_PRINT_PREVIEW)
+#if BUILDFLAG(ENABLE_PRINT_PREVIEW)
   DCHECK(CalledOnValidThread());
   if (!background_printing_manager_.get())
     CreateBackgroundPrintingManager();
@@ -715,7 +718,7 @@ const std::string& BrowserProcessImpl::GetApplicationLocale() {
 
 void BrowserProcessImpl::SetApplicationLocale(const std::string& locale) {
   locale_ = locale;
-#if defined(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
   extension_l10n_util::SetProcessLocale(locale);
 #endif
   ChromeContentBrowserClient::SetApplicationLocale(locale);
@@ -728,7 +731,7 @@ DownloadStatusUpdater* BrowserProcessImpl::download_status_updater() {
 }
 
 MediaFileSystemRegistry* BrowserProcessImpl::media_file_system_registry() {
-#if defined(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
   if (!media_file_system_registry_)
     media_file_system_registry_.reset(new MediaFileSystemRegistry());
   return media_file_system_registry_.get();
@@ -1034,7 +1037,7 @@ void BrowserProcessImpl::CreateLocalState() {
 }
 
 void BrowserProcessImpl::PreCreateThreads() {
-#if defined(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
   // Register the chrome-extension scheme to reflect the extension process
   // model. Controlled by a field trial, so we can't do this earlier.
   base::FieldTrialList::FindFullName("SiteIsolationExtensions");
@@ -1158,7 +1161,7 @@ void BrowserProcessImpl::CreateStatusTray() {
 }
 
 void BrowserProcessImpl::CreatePrintPreviewDialogController() {
-#if defined(ENABLE_PRINT_PREVIEW)
+#if BUILDFLAG(ENABLE_PRINT_PREVIEW)
   DCHECK(!print_preview_dialog_controller_);
   print_preview_dialog_controller_ =
       new printing::PrintPreviewDialogController();
@@ -1168,7 +1171,7 @@ void BrowserProcessImpl::CreatePrintPreviewDialogController() {
 }
 
 void BrowserProcessImpl::CreateBackgroundPrintingManager() {
-#if defined(ENABLE_PRINT_PREVIEW)
+#if BUILDFLAG(ENABLE_PRINT_PREVIEW)
   DCHECK(!background_printing_manager_);
   background_printing_manager_.reset(new printing::BackgroundPrintingManager());
 #else
@@ -1312,7 +1315,7 @@ void BrowserProcessImpl::Unpin() {
   release_last_reference_callstack_ = base::debug::StackTrace();
 
   shutting_down_ = true;
-#if defined(ENABLE_PRINTING)
+#if BUILDFLAG(ENABLE_PRINTING)
   // Wait for the pending print jobs to finish. Don't do this later, since
   // this might cause a nested message loop to run, and we don't want pending
   // tasks to run once teardown has started.

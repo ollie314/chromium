@@ -454,9 +454,6 @@ TEST_P(CompositedLayerMappingTest,
 }
 
 TEST_P(CompositedLayerMappingTest, InterestRectChangeOnViewportScroll) {
-  if (RuntimeEnabledFeatures::rootLayerScrollingEnabled())
-    return;
-
   setBodyInnerHTML(
       "<style>"
       "  ::-webkit-scrollbar { width: 0; height: 0; }"
@@ -470,7 +467,8 @@ TEST_P(CompositedLayerMappingTest, InterestRectChangeOnViewportScroll) {
   EXPECT_RECT_EQ(IntRect(0, 0, 800, 4600),
                  previousInterestRect(rootScrollingLayer));
 
-  document().view()->setScrollOffset(ScrollOffset(0, 300), ProgrammaticScroll);
+  document().view()->layoutViewportScrollableArea()->setScrollOffset(
+      ScrollOffset(0, 300), ProgrammaticScroll);
   document().view()->updateAllLifecyclePhases();
   // Still use the previous interest rect because the recomputed rect hasn't
   // changed enough.
@@ -479,7 +477,8 @@ TEST_P(CompositedLayerMappingTest, InterestRectChangeOnViewportScroll) {
   EXPECT_RECT_EQ(IntRect(0, 0, 800, 4600),
                  previousInterestRect(rootScrollingLayer));
 
-  document().view()->setScrollOffset(ScrollOffset(0, 600), ProgrammaticScroll);
+  document().view()->layoutViewportScrollableArea()->setScrollOffset(
+      ScrollOffset(0, 600), ProgrammaticScroll);
   document().view()->updateAllLifecyclePhases();
   // Use recomputed interest rect because it changed enough.
   EXPECT_RECT_EQ(IntRect(0, 0, 800, 5200),
@@ -487,14 +486,16 @@ TEST_P(CompositedLayerMappingTest, InterestRectChangeOnViewportScroll) {
   EXPECT_RECT_EQ(IntRect(0, 0, 800, 5200),
                  previousInterestRect(rootScrollingLayer));
 
-  document().view()->setScrollOffset(ScrollOffset(0, 5400), ProgrammaticScroll);
+  document().view()->layoutViewportScrollableArea()->setScrollOffset(
+      ScrollOffset(0, 5400), ProgrammaticScroll);
   document().view()->updateAllLifecyclePhases();
   EXPECT_RECT_EQ(IntRect(0, 1400, 800, 8600),
                  recomputeInterestRect(rootScrollingLayer));
   EXPECT_RECT_EQ(IntRect(0, 1400, 800, 8600),
                  previousInterestRect(rootScrollingLayer));
 
-  document().view()->setScrollOffset(ScrollOffset(0, 9000), ProgrammaticScroll);
+  document().view()->layoutViewportScrollableArea()->setScrollOffset(
+      ScrollOffset(0, 9000), ProgrammaticScroll);
   document().view()->updateAllLifecyclePhases();
   // Still use the previous interest rect because it contains the recomputed
   // interest rect.
@@ -503,7 +504,8 @@ TEST_P(CompositedLayerMappingTest, InterestRectChangeOnViewportScroll) {
   EXPECT_RECT_EQ(IntRect(0, 1400, 800, 8600),
                  previousInterestRect(rootScrollingLayer));
 
-  document().view()->setScrollOffset(ScrollOffset(0, 2000), ProgrammaticScroll);
+  document().view()->layoutViewportScrollableArea()->setScrollOffset(
+      ScrollOffset(0, 2000), ProgrammaticScroll);
   // Use recomputed interest rect because it changed enough.
   document().view()->updateAllLifecyclePhases();
   EXPECT_RECT_EQ(IntRect(0, 0, 800, 6600),
@@ -787,47 +789,6 @@ TEST_P(CompositedLayerMappingTest, InterestRectOfIframeWithContentBoxOffset) {
                                 ->layoutViewItem()
                                 .enclosingLayer()
                                 ->graphicsLayerBackingForScrolling()));
-}
-
-TEST_P(CompositedLayerMappingTest, PromoteOpaqueFixedPosition) {
-  const bool preferCompositing =
-      document().frame()->settings()->preferCompositingToLCDTextEnabled();
-  document().frame()->settings()->setPreferCompositingToLCDTextEnabled(false);
-  ScopedCompositeFixedPositionForTest compositeFixedPosition(true);
-
-  setBodyInnerHTML(
-      "<div id='translucent' style='width: 20px; height: 20px; position: "
-      "fixed; top: 100px; left: 100px;'></div>"
-      "<div id='opaque' style='width: 20px; height: 20px; position: fixed; "
-      "top: 100px; left: 200px; background: white;'></div>"
-      "<div id='opaque-with-shadow' style='width: 20px; height: 20px; "
-      "position: fixed; top: 100px; left: 300px; background: white; "
-      "box-shadow: 10px 10px 5px #888888;'></div>"
-      "<div id='spacer' style='height: 2000px'></div>");
-
-  document().view()->updateAllLifecyclePhases();
-
-  // The translucent fixed box should not be promoted.
-  Element* element = document().getElementById("translucent");
-  PaintLayer* paintLayer =
-      toLayoutBoxModelObject(element->layoutObject())->layer();
-  EXPECT_EQ(NotComposited, paintLayer->compositingState());
-
-  // The opaque fixed box should be promoted and be opaque so that text will be
-  // drawn with subpixel anti-aliasing.
-  element = document().getElementById("opaque");
-  paintLayer = toLayoutBoxModelObject(element->layoutObject())->layer();
-  EXPECT_EQ(PaintsIntoOwnBacking, paintLayer->compositingState());
-  EXPECT_TRUE(paintLayer->graphicsLayerBacking()->contentsOpaque());
-
-  // The opaque fixed box with shadow should not be promoted because the layer
-  // will include the shadow which is not opaque.
-  element = document().getElementById("opaque-with-shadow");
-  paintLayer = toLayoutBoxModelObject(element->layoutObject())->layer();
-  EXPECT_EQ(NotComposited, paintLayer->compositingState());
-
-  document().frame()->settings()->setPreferCompositingToLCDTextEnabled(
-      preferCompositing);
 }
 
 TEST_P(CompositedLayerMappingTest,

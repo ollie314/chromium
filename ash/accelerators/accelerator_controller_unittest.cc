@@ -19,11 +19,10 @@
 #include "ash/common/wm/window_state.h"
 #include "ash/common/wm/wm_event.h"
 #include "ash/common/wm_shell.h"
-#include "ash/display/display_manager.h"
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
-#include "ash/test/display_manager_test_api.h"
+#include "ash/test/lock_state_controller_test_api.h"
 #include "ash/test/test_screenshot_delegate.h"
 #include "ash/test/test_session_state_animator.h"
 #include "ash/wm/lock_state_controller.h"
@@ -34,6 +33,7 @@
 #include "ui/aura/test/test_window_delegate.h"
 #include "ui/aura/test/test_windows.h"
 #include "ui/aura/window.h"
+#include "ui/display/manager/display_manager.h"
 #include "ui/display/screen.h"
 #include "ui/events/event.h"
 #include "ui/events/event_processor.h"
@@ -1115,7 +1115,7 @@ TEST_F(PreferredReservedAcceleratorsTest, AcceleratorsWithFullscreen) {
   ui::test::EventGenerator& generator = GetEventGenerator();
 #if defined(OS_CHROMEOS)
   // Power key (reserved) should always be handled.
-  LockStateController::TestApi test_api(
+  test::LockStateControllerTestApi test_api(
       Shell::GetInstance()->lock_state_controller());
   EXPECT_FALSE(test_api.is_animating_lock());
   generator.PressKey(ui::VKEY_POWER, ui::EF_NONE);
@@ -1165,7 +1165,7 @@ TEST_F(PreferredReservedAcceleratorsTest, AcceleratorsWithPinned) {
   ui::test::EventGenerator& generator = GetEventGenerator();
 #if defined(OS_CHROMEOS)
   // Power key (reserved) should always be handled.
-  LockStateController::TestApi test_api(
+  test::LockStateControllerTestApi test_api(
       Shell::GetInstance()->lock_state_controller());
   EXPECT_FALSE(test_api.is_animating_lock());
   generator.PressKey(ui::VKEY_POWER, ui::EF_NONE);

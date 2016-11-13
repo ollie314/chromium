@@ -4,6 +4,7 @@
 
 #include "content/browser/loader/test_url_loader_client.h"
 
+#include "base/memory/ref_counted.h"
 #include "base/run_loop.h"
 
 namespace content {
@@ -17,6 +18,15 @@ void TestURLLoaderClient::OnReceiveResponse(
   response_head_ = response_head;
   if (quit_closure_for_on_received_response_)
     quit_closure_for_on_received_response_.Run();
+}
+
+void TestURLLoaderClient::OnDataDownloaded(int64_t data_length,
+                                           int64_t encoded_data_length) {
+  has_data_downloaded_ = true;
+  download_data_length_ += data_length;
+  encoded_download_data_length_ += encoded_data_length;
+  if (quit_closure_for_on_data_downloaded_)
+    quit_closure_for_on_data_downloaded_.Run();
 }
 
 void TestURLLoaderClient::OnStartLoadingResponseBody(
@@ -34,8 +44,12 @@ void TestURLLoaderClient::OnComplete(
     quit_closure_for_on_complete_.Run();
 }
 
-mojom::URLLoaderClientPtr TestURLLoaderClient::CreateInterfacePtrAndBind() {
-  return binding_.CreateInterfacePtrAndBind();
+mojom::URLLoaderClientAssociatedPtrInfo
+TestURLLoaderClient::CreateRemoteAssociatedPtrInfo(
+    mojo::AssociatedGroup* associated_group) {
+  mojom::URLLoaderClientAssociatedPtrInfo client_ptr_info;
+  binding_.Bind(&client_ptr_info, associated_group);
+  return client_ptr_info;
 }
 
 void TestURLLoaderClient::Unbind() {
@@ -48,6 +62,13 @@ void TestURLLoaderClient::RunUntilResponseReceived() {
   quit_closure_for_on_received_response_ = run_loop.QuitClosure();
   run_loop.Run();
   quit_closure_for_on_received_response_.Reset();
+}
+
+void TestURLLoaderClient::RunUntilDataDownloaded() {
+  base::RunLoop run_loop;
+  quit_closure_for_on_data_downloaded_ = run_loop.QuitClosure();
+  run_loop.Run();
+  quit_closure_for_on_data_downloaded_.Reset();
 }
 
 void TestURLLoaderClient::RunUntilResponseBodyArrived() {

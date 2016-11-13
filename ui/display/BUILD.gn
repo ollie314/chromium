@@ -48,6 +48,8 @@ component("display") {
     "manager/display_layout_builder.h",
     "manager/display_layout_store.cc",
     "manager/display_layout_store.h",
+    "manager/display_manager.cc",
+    "manager/display_manager.h",
     "manager/display_manager_utilities.cc",
     "manager/display_manager_utilities.h",
     "manager/managed_display_info.cc",
@@ -126,26 +128,24 @@ component("display") {
   }
 }
 
-if (is_chromeos) {
-  component("test_util") {
-    output_name = "display_test_util"
-    sources = [
-      "chromeos/test/test_display_snapshot.cc",
-      "chromeos/test/test_display_snapshot.h",
-    ]
+component("display_manager_test_api") {
+  testonly = true
+  sources = [
+    "test/display_manager_test_api.cc",
+    "test/display_manager_test_api.h",
+  ]
 
-    defines = [ "DISPLAY_IMPLEMENTATION" ]
+  defines = [ "DISPLAY_IMPLEMENTATION" ]
 
-    public_deps = [
-      ":display",
-    ]
-    deps = [
-      "//base",
-      "//ui/display/types",
-      "//ui/gfx",
-      "//ui/gfx/geometry",
-    ]
-  }
+  public_deps = [
+    ":display",
+  ]
+
+  deps = [
+    "//base",
+    "//ui/display",
+    "//ui/display/types",
+  ]
 }
 
 static_library("test_support") {
@@ -219,10 +219,6 @@ test("display_unittests") {
     "//ui/gfx:test_support",
     "//ui/gfx/geometry",
   ]
-
-  if (is_chromeos) {
-    deps += [ ":test_util" ]
-  }
 
   if (use_aura) {
     sources -= [ "screen_unittest.cc" ]

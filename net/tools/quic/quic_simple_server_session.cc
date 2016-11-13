@@ -12,7 +12,6 @@
 #include "net/quic/core/quic_connection.h"
 #include "net/quic/core/quic_flags.h"
 #include "net/quic/core/quic_spdy_session.h"
-#include "net/quic/core/reliable_quic_stream.h"
 #include "net/tools/quic/quic_simple_server_stream.h"
 #include "url/gurl.h"
 
@@ -23,7 +22,7 @@ namespace net {
 QuicSimpleServerSession::QuicSimpleServerSession(
     const QuicConfig& config,
     QuicConnection* connection,
-    QuicServerSessionBase::Visitor* visitor,
+    QuicSession::Visitor* visitor,
     QuicCryptoServerStream::Helper* helper,
     const QuicCryptoServerConfig* crypto_config,
     QuicCompressedCertsCache* compressed_certs_cache)

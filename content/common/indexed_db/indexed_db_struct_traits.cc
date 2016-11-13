@@ -4,9 +4,20 @@
 
 #include "content/common/indexed_db/indexed_db_param_traits.h"
 #include "content/common/indexed_db/indexed_db_struct_traits.h"
+#include "mojo/common/common_custom_types_struct_traits.h"
 
 namespace mojo {
 
+// static
+bool StructTraits<indexed_db::mojom::IndexKeysDataView,
+                  content::IndexedDBIndexKeys>::
+    Read(indexed_db::mojom::IndexKeysDataView data,
+         content::IndexedDBIndexKeys* out) {
+  out->first = data.index_id();
+  return data.ReadIndexKeys(&out->second);
+}
+
+// static
 bool StructTraits<indexed_db::mojom::IndexMetadataDataView,
                   content::IndexedDBIndexMetadata>::
     Read(indexed_db::mojom::IndexMetadataDataView data,
@@ -21,6 +32,7 @@ bool StructTraits<indexed_db::mojom::IndexMetadataDataView,
   return true;
 }
 
+// static
 bool StructTraits<indexed_db::mojom::ObjectStoreMetadataDataView,
                   content::IndexedDBObjectStoreMetadata>::
     Read(indexed_db::mojom::ObjectStoreMetadataDataView data,
@@ -47,6 +59,7 @@ bool StructTraits<indexed_db::mojom::ObjectStoreMetadataDataView,
   return true;
 }
 
+// static
 bool StructTraits<indexed_db::mojom::DatabaseMetadataDataView,
                   content::IndexedDBDatabaseMetadata>::
     Read(indexed_db::mojom::DatabaseMetadataDataView data,

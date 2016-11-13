@@ -53,7 +53,7 @@ MIDIPort::MIDIPort(MIDIAccess* access,
       m_name(name),
       m_type(type),
       m_version(version),
-      m_access(access),
+      m_access(this, access),
       m_connection(ConnectionStateClosed) {
   DCHECK(access);
   DCHECK(type == TypeInput || type == TypeOutput);
@@ -169,6 +169,7 @@ DEFINE_TRACE(MIDIPort) {
 
 DEFINE_TRACE_WRAPPERS(MIDIPort) {
   visitor->traceWrappers(m_access);
+  EventTargetWithInlineData::traceWrappers(visitor);
 }
 
 void MIDIPort::open() {

@@ -137,12 +137,12 @@ cr.define('settings', function() {
   r.PRIVACY = r.ADVANCED.createSection('/privacy', 'privacy');
   r.CERTIFICATES = r.PRIVACY.createChild('/certificates');
 
-  r.SITE_SETTINGS = r.PRIVACY.createChild('/siteSettings');
+  r.SITE_SETTINGS = r.PRIVACY.createChild('/content');
   r.SITE_SETTINGS_ALL = r.SITE_SETTINGS.createChild('all');
   r.SITE_SETTINGS_SITE_DETAILS =
-      r.SITE_SETTINGS_ALL.createChild('/siteSettings/siteDetails');
+      r.SITE_SETTINGS_ALL.createChild('/content/siteDetails');
 
-  r.SITE_SETTINGS_HANDLERS = r.SITE_SETTINGS.createChild('handlers');
+  r.SITE_SETTINGS_HANDLERS = r.SITE_SETTINGS.createChild('/handlers');
 
   // TODO(tommycli): Find a way to refactor these repetitive category routes.
   r.SITE_SETTINGS_AUTOMATIC_DOWNLOADS =
@@ -151,6 +151,8 @@ cr.define('settings', function() {
       r.SITE_SETTINGS.createChild('backgroundSync');
   r.SITE_SETTINGS_CAMERA = r.SITE_SETTINGS.createChild('camera');
   r.SITE_SETTINGS_COOKIES = r.SITE_SETTINGS.createChild('cookies');
+  r.SITE_SETTINGS_DATA_DETAILS =
+      r.SITE_SETTINGS_COOKIES.createChild('/cookies/detail');
   r.SITE_SETTINGS_IMAGES = r.SITE_SETTINGS.createChild('images');
   r.SITE_SETTINGS_JAVASCRIPT = r.SITE_SETTINGS.createChild('javascript');
   r.SITE_SETTINGS_KEYGEN = r.SITE_SETTINGS.createChild('keygen');
@@ -166,19 +168,15 @@ cr.define('settings', function() {
 
 <if expr="chromeos">
   r.DATETIME = r.ADVANCED.createSection('/dateTime', 'dateTime');
-
   r.BLUETOOTH = r.ADVANCED.createSection('/bluetooth', 'bluetooth');
-  r.BLUETOOTH_ADD_DEVICE = r.BLUETOOTH.createChild('/bluetoothAddDevice');
-  r.BLUETOOTH_PAIR_DEVICE =
-      r.BLUETOOTH_ADD_DEVICE.createChild('bluetoothPairDevice');
 </if>
 
-  r.PASSWORDS = r.ADVANCED.createSection('/passwords', 'passwordsAndForms');
+  r.PASSWORDS =
+      r.ADVANCED.createSection('/passwordsAndForms', 'passwordsAndForms');
   r.AUTOFILL = r.PASSWORDS.createChild('/autofill');
-  r.MANAGE_PASSWORDS = r.PASSWORDS.createChild('/managePasswords');
+  r.MANAGE_PASSWORDS = r.PASSWORDS.createChild('/passwords');
 
   r.LANGUAGES = r.ADVANCED.createSection('/languages', 'languages');
-  r.LANGUAGES_DETAIL = r.LANGUAGES.createChild('edit');
 <if expr="chromeos">
   r.INPUT_METHODS = r.LANGUAGES.createChild('/inputMethods');
 </if>
@@ -320,17 +318,24 @@ cr.define('settings', function() {
    * Navigates to a canonical route and pushes a new history entry.
    * @param {!settings.Route} route
    * @param {URLSearchParams=} opt_dynamicParameters Navigations to the same
-   *     search parameters in a different order will still push to history.
+   *     URL parameters in a different order will still push to history.
+   * @param {boolean=} opt_removeSearch Whether to strip the 'search' URL
+   *     parameter during navigation. Defaults to false.
    */
-  var navigateTo = function(route, opt_dynamicParameters) {
+  var navigateTo = function(route, opt_dynamicParameters, opt_removeSearch) {
     var params = opt_dynamicParameters || new URLSearchParams();
+    var removeSearch = !!opt_removeSearch;
+
+    var oldSearchParam = getQueryParameters().get('search') || '';
+    var newSearchParam = params.get('search') || '';
+
+    if (!removeSearch && oldSearchParam && !newSearchParam)
+      params.append('search', oldSearchParam);
 
     var url = route.path;
-    if (opt_dynamicParameters) {
-      var queryString = opt_dynamicParameters.toString();
-      if (queryString)
-        url += '?' + queryString;
-    }
+    var queryString = params.toString();
+    if (queryString)
+      url += '?' + queryString;
 
     // History serializes the state, so we don't push the actual route object.
     window.history.pushState(currentRoute_.path, '', url);

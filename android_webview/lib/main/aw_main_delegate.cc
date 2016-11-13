@@ -15,7 +15,6 @@
 #include "android_webview/common/aw_switches.h"
 #include "android_webview/crash_reporter/aw_microdump_crash_reporter.h"
 #include "android_webview/gpu/aw_content_gpu_client.h"
-#include "android_webview/lib/aw_browser_dependency_factory_impl.h"
 #include "android_webview/native/aw_locale_manager_impl.h"
 #include "android_webview/native/aw_media_url_interceptor.h"
 #include "android_webview/native/aw_quota_manager_bridge_impl.h"
@@ -39,8 +38,8 @@
 #include "content/public/common/content_switches.h"
 #include "gin/public/isolate_holder.h"
 #include "gin/v8_initializer.h"
-#include "gpu/command_buffer/client/gl_in_process_context.h"
 #include "gpu/command_buffer/service/gpu_switches.h"
+#include "gpu/ipc/gl_in_process_context.h"
 #include "media/base/media_switches.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/events/gesture_detection/gesture_configuration.h"
@@ -193,8 +192,6 @@ int AwMainDelegate::RunProcess(
     const std::string& process_type,
     const content::MainFunctionParams& main_function_params) {
   if (process_type.empty()) {
-    AwBrowserDependencyFactoryImpl::InstallInstance();
-
     browser_runner_.reset(content::BrowserMainRunner::Create());
     int exit_code = browser_runner_->Initialize(main_function_params);
     DCHECK_LT(exit_code, 0);

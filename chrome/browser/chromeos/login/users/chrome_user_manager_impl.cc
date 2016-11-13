@@ -60,7 +60,6 @@
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/cryptohome/async_method_caller.h"
 #include "chromeos/login/login_state.h"
-#include "chromeos/login/user_names.h"
 #include "chromeos/settings/cros_settings_names.h"
 #include "chromeos/timezone/timezone_resolver.h"
 #include "components/policy/policy_constants.h"
@@ -73,6 +72,7 @@
 #include "components/user_manager/remove_user_delegate.h"
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_image/user_image.h"
+#include "components/user_manager/user_names.h"
 #include "components/user_manager/user_type.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
@@ -303,8 +303,8 @@ user_manager::UserList ChromeUserManagerImpl::GetUsersAllowedForMultiProfile()
     if ((*it)->GetType() == user_manager::USER_TYPE_REGULAR &&
         !(*it)->is_logged_in()) {
       MultiProfileUserController::UserAllowedInSessionReason check;
-      multi_profile_user_controller_->IsUserAllowedInSession((*it)->email(),
-                                                             &check);
+      multi_profile_user_controller_->IsUserAllowedInSession(
+          (*it)->GetAccountId().GetUserEmail(), &check);
       if (check ==
           MultiProfileUserController::NOT_ALLOWED_PRIMARY_USER_POLICY_FORBIDS) {
         return user_manager::UserList();
@@ -373,16 +373,6 @@ user_manager::UserList ChromeUserManagerImpl::GetUnlockUsers() const {
   }
 
   return unlock_users;
-}
-
-void ChromeUserManagerImpl::SessionStarted() {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  ChromeUserManager::SessionStarted();
-
-  content::NotificationService::current()->Notify(
-      chrome::NOTIFICATION_SESSION_STARTED,
-      content::Source<UserManager>(this),
-      content::Details<const user_manager::User>(GetActiveUser()));
 }
 
 void ChromeUserManagerImpl::RemoveUserInternal(
@@ -738,7 +728,7 @@ void ChromeUserManagerImpl::GuestUserLoggedIn() {
       user_manager::User::USER_IMAGE_INVALID, false);
 
   // Initializes wallpaper after active_user_ is set.
-  WallpaperManager::Get()->SetUserWallpaperNow(login::GuestAccountId());
+  WallpaperManager::Get()->SetUserWallpaperNow(user_manager::GuestAccountId());
 }
 
 void ChromeUserManagerImpl::RegularUserLoggedIn(const AccountId& account_id) {
@@ -878,13 +868,14 @@ void ChromeUserManagerImpl::KioskAppLoggedIn(user_manager::User* user) {
 
 void ChromeUserManagerImpl::DemoAccountLoggedIn() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  active_user_ = user_manager::User::CreateKioskAppUser(login::DemoAccountId());
+  active_user_ =
+      user_manager::User::CreateKioskAppUser(user_manager::DemoAccountId());
   active_user_->SetStubImage(
       base::MakeUnique<user_manager::UserImage>(
           *ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
               IDR_PROFILE_PICTURE_LOADING)),
       user_manager::User::USER_IMAGE_INVALID, false);
-  WallpaperManager::Get()->SetUserWallpaperNow(login::DemoAccountId());
+  WallpaperManager::Get()->SetUserWallpaperNow(user_manager::DemoAccountId());
 
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   command_line->AppendSwitch(::switches::kForceAppMode);
@@ -944,7 +935,8 @@ void ChromeUserManagerImpl::
       local_state->GetString(kDeviceLocalAccountPendingDataRemoval);
   if (device_local_account_pending_data_removal.empty() ||
       (IsUserLoggedIn() &&
-       device_local_account_pending_data_removal == GetActiveUser()->email())) {
+       device_local_account_pending_data_removal ==
+           GetActiveUser()->GetAccountId().GetUserEmail())) {
     return;
   }
 
@@ -959,14 +951,15 @@ void ChromeUserManagerImpl::CleanUpDeviceLocalAccountNonCryptohomeData(
   for (user_manager::UserList::const_iterator it = users_.begin();
        it != users_.end();
        ++it)
-    users.insert((*it)->email());
+    users.insert((*it)->GetAccountId().GetUserEmail());
 
   // If the user is logged into a device local account that has been removed
   // from the user list, mark the account's data as pending removal after
   // logout.
   const user_manager::User* const active_user = GetActiveUser();
   if (active_user && active_user->IsDeviceLocalAccount()) {
-    const std::string active_user_id = active_user->email();
+    const std::string active_user_id =
+        active_user->GetAccountId().GetUserEmail();
     if (users.find(active_user_id) == users.end()) {
       GetLocalState()->SetString(kDeviceLocalAccountPendingDataRemoval,
                                  active_user_id);
@@ -993,7 +986,7 @@ bool ChromeUserManagerImpl::UpdateAndCleanUpDeviceLocalAccounts(
   std::vector<std::string> old_accounts;
   for (auto* user : users_) {
     if (user->IsDeviceLocalAccount())
-      old_accounts.push_back(user->email());
+      old_accounts.push_back(user->GetAccountId().GetUserEmail());
   }
 
   // If the list of device local accounts has not changed, return.
@@ -1020,7 +1013,7 @@ bool ChromeUserManagerImpl::UpdateAndCleanUpDeviceLocalAccounts(
   for (user_manager::UserList::iterator it = users_.begin();
        it != users_.end();) {
     if ((*it)->IsDeviceLocalAccount()) {
-      if (*it != GetLoggedInUser())
+      if (*it != GetActiveUser())
         DeleteUser(*it);
       it = users_.erase(it);
     } else {
@@ -1082,7 +1075,7 @@ UserFlow* ChromeUserManagerImpl::GetCurrentUserFlow() const {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   if (!IsUserLoggedIn())
     return GetDefaultUserFlow();
-  return GetUserFlow(GetLoggedInUser()->GetAccountId());
+  return GetUserFlow(GetActiveUser()->GetAccountId());
 }
 
 UserFlow* ChromeUserManagerImpl::GetUserFlow(
@@ -1263,7 +1256,7 @@ bool ChromeUserManagerImpl::GetPlatformKnownUserId(
 }
 
 const AccountId& ChromeUserManagerImpl::GetGuestAccountId() const {
-  return login::GuestAccountId();
+  return user_manager::GuestAccountId();
 }
 
 bool ChromeUserManagerImpl::IsFirstExecAfterBoot() const {
@@ -1280,17 +1273,17 @@ void ChromeUserManagerImpl::AsyncRemoveCryptohome(
 
 bool ChromeUserManagerImpl::IsGuestAccountId(
     const AccountId& account_id) const {
-  return account_id == login::GuestAccountId();
+  return account_id == user_manager::GuestAccountId();
 }
 
 bool ChromeUserManagerImpl::IsStubAccountId(const AccountId& account_id) const {
-  return account_id == login::StubAccountId();
+  return account_id == user_manager::StubAccountId();
 }
 
 bool ChromeUserManagerImpl::IsSupervisedAccountId(
     const AccountId& account_id) const {
   return gaia::ExtractDomainName(account_id.GetUserEmail()) ==
-         chromeos::login::kSupervisedUserDomain;
+         user_manager::kSupervisedUserDomain;
 }
 
 bool ChromeUserManagerImpl::HasBrowserRestarted() const {
@@ -1335,6 +1328,9 @@ ChromeUserManagerImpl::CreateUserFromDeviceLocalAccount(
       break;
     case policy::DeviceLocalAccount::TYPE_KIOSK_APP:
       user.reset(user_manager::User::CreateKioskAppUser(account_id));
+      break;
+    case policy::DeviceLocalAccount::TYPE_ARC_KIOSK_APP:
+      user.reset(user_manager::User::CreateArcKioskAppUser(account_id));
       break;
     default:
       NOTREACHED();

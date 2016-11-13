@@ -23,12 +23,21 @@ extern const base::Feature kForeignSessionsSuggestionsFeature;;
 // context menu.
 extern const base::Feature kSaveToOfflineFeature;
 
+// Feature to allow offline badges to appear on snippets.
+extern const base::Feature kOfflineBadgeFeature;
+
 // Feature to allow dismissing sections.
 extern const base::Feature kSectionDismissalFeature;
 
 // Global toggle for the whole content suggestions feature. If this is set to
 // false, all the per-provider features are ignored.
 extern const base::Feature kContentSuggestionsFeature;
+
+// Feature to allow UI as specified here: https://crbug.com/660837.
+extern const base::Feature kIncreasedVisibility;
+
+// Feature to enable the Fetch More action
+extern const base::Feature kFetchMoreFeature;
 
 // Returns a feature param as an int instead of a string.
 int GetParamAsInt(const base::Feature& feature,

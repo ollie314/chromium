@@ -113,6 +113,9 @@ bool DXVAPictureBuffer::BindSampleToTexture(
 
 bool PbufferPictureBuffer::Initialize(const DXVAVideoDecodeAccelerator& decoder,
                                       EGLConfig egl_config) {
+  RETURN_ON_FAILURE(!picture_buffer_.service_texture_ids().empty(),
+                    "No service texture ids provided", false);
+
   EGLDisplay egl_display = gl::GLSurfaceEGL::GetHardwareDisplay();
   EGLint use_rgb = 1;
   eglGetConfigAttrib(egl_display, egl_config, EGL_BIND_TO_TEXTURE_RGB,
@@ -274,7 +277,7 @@ bool PbufferPictureBuffer::CopySurfaceComplete(
   GLint current_texture = 0;
   glGetIntegerv(GL_TEXTURE_BINDING_2D, &current_texture);
 
-  glBindTexture(GL_TEXTURE_2D, picture_buffer_.texture_ids()[0]);
+  glBindTexture(GL_TEXTURE_2D, picture_buffer_.service_texture_ids()[0]);
 
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 
@@ -349,6 +352,9 @@ EGLStreamPictureBuffer::~EGLStreamPictureBuffer() {
 }
 
 bool EGLStreamPictureBuffer::Initialize() {
+  RETURN_ON_FAILURE(picture_buffer_.service_texture_ids().size() >= 2,
+                    "Not enough texture ids provided", false);
+
   EGLDisplay egl_display = gl::GLSurfaceEGL::GetHardwareDisplay();
   const EGLint stream_attributes[] = {
       EGL_CONSUMER_LATENCY_USEC_KHR,
@@ -360,11 +366,11 @@ bool EGLStreamPictureBuffer::Initialize() {
   stream_ = eglCreateStreamKHR(egl_display, stream_attributes);
   RETURN_ON_FAILURE(!!stream_, "Could not create stream", false);
   gl::ScopedActiveTexture texture0(GL_TEXTURE0);
-  gl::ScopedTextureBinder texture0_binder(GL_TEXTURE_EXTERNAL_OES,
-                                          picture_buffer_.texture_ids()[0]);
+  gl::ScopedTextureBinder texture0_binder(
+      GL_TEXTURE_EXTERNAL_OES, picture_buffer_.service_texture_ids()[0]);
   gl::ScopedActiveTexture texture1(GL_TEXTURE1);
-  gl::ScopedTextureBinder texture1_binder(GL_TEXTURE_EXTERNAL_OES,
-                                          picture_buffer_.texture_ids()[1]);
+  gl::ScopedTextureBinder texture1_binder(
+      GL_TEXTURE_EXTERNAL_OES, picture_buffer_.service_texture_ids()[1]);
 
   EGLAttrib consumer_attributes[] = {
       EGL_COLOR_BUFFER_TYPE,
@@ -456,6 +462,9 @@ EGLStreamCopyPictureBuffer::~EGLStreamCopyPictureBuffer() {
 
 bool EGLStreamCopyPictureBuffer::Initialize(
     const DXVAVideoDecodeAccelerator& decoder) {
+  RETURN_ON_FAILURE(picture_buffer_.service_texture_ids().size() >= 2,
+                    "Not enough texture ids provided", false);
+
   EGLDisplay egl_display = gl::GLSurfaceEGL::GetHardwareDisplay();
   const EGLint stream_attributes[] = {
       EGL_CONSUMER_LATENCY_USEC_KHR,
@@ -467,11 +476,11 @@ bool EGLStreamCopyPictureBuffer::Initialize(
   stream_ = eglCreateStreamKHR(egl_display, stream_attributes);
   RETURN_ON_FAILURE(!!stream_, "Could not create stream", false);
   gl::ScopedActiveTexture texture0(GL_TEXTURE0);
-  gl::ScopedTextureBinder texture0_binder(GL_TEXTURE_EXTERNAL_OES,
-                                          picture_buffer_.texture_ids()[0]);
+  gl::ScopedTextureBinder texture0_binder(
+      GL_TEXTURE_EXTERNAL_OES, picture_buffer_.service_texture_ids()[0]);
   gl::ScopedActiveTexture texture1(GL_TEXTURE1);
-  gl::ScopedTextureBinder texture1_binder(GL_TEXTURE_EXTERNAL_OES,
-                                          picture_buffer_.texture_ids()[1]);
+  gl::ScopedTextureBinder texture1_binder(
+      GL_TEXTURE_EXTERNAL_OES, picture_buffer_.service_texture_ids()[1]);
 
   EGLAttrib consumer_attributes[] = {
       EGL_COLOR_BUFFER_TYPE,

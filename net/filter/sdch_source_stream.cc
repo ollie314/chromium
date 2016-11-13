@@ -134,6 +134,8 @@ int SdchSourceStream::FilterData(IOBuffer* output_buffer,
         break;
       }
       case STATE_OUTPUT_REPLACE: {
+        // Drains the entire input since the replacement will be returned.
+        input_data_size = 0;
         int flushed = FlushBufferedOutput(output_buffer->data() + bytes_out,
                                           output_buffer_size - bytes_out,
                                           buffered_output_);
@@ -142,18 +144,19 @@ int SdchSourceStream::FilterData(IOBuffer* output_buffer,
         break;
       }
       case STATE_PASS_THROUGH: {
-        if (buffered_output_.empty())
-          break;
-        int flushed = FlushBufferedOutput(output_buffer->data() + bytes_out,
-                                          output_buffer_size - bytes_out,
-                                          buffered_output_);
-        buffered_output_.erase(0, flushed);
-        bytes_out += flushed;
+        if (!buffered_output_.empty()) {
+          int flushed = FlushBufferedOutput(output_buffer->data() + bytes_out,
+                                            output_buffer_size - bytes_out,
+                                            buffered_output_);
+          buffered_output_.erase(0, flushed);
+          bytes_out += flushed;
+        }
         if (!buffered_output_.empty())
           break;
         size_t to_copy =
             std::min(output_buffer_size - bytes_out, input_data_size);
         memcpy(output_buffer->data() + bytes_out, input_data, to_copy);
+        bytes_out += to_copy;
         input_data += to_copy;
         input_data_size -= to_copy;
         break;

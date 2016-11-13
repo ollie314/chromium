@@ -10,6 +10,7 @@
       "ipc_tests",
       "media_unittests",
       "net_unittests",
+      "pdf_unittests",
       "printing_unittests",
       "skia_unittests",
       "sql_unittests",
@@ -173,7 +174,7 @@
       },
       {
         "swarming": {
-          "can_use_on_swarming_builders": true
+          "can_use_on_swarming_builders": false
         },
         "test": "interactive_ui_tests"
       },
@@ -200,12 +201,6 @@
           "can_use_on_swarming_builders": true
         },
         "test": "media_blink_unittests"
-      },
-      {
-        "swarming": {
-          "can_use_on_swarming_builders": true
-        },
-        "test": "media_mojo_unittests"
       },
       {
         "swarming": {
@@ -260,6 +255,12 @@
           "can_use_on_swarming_builders": true
         },
         "test": "net_unittests"
+      },
+      {
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "pdf_unittests"
       },
       {
         "swarming": {
@@ -366,12 +367,6 @@
         "swarming": {
           "can_use_on_swarming_builders": true
         }
-      }
-    ],
-    "scripts": [
-      {
-        "name": "nacl_integration",
-        "script": "nacl_integration.py"
       }
     ]
   },
@@ -556,12 +551,6 @@
         "swarming": {
           "can_use_on_swarming_builders": true
         },
-        "test": "media_mojo_unittests"
-      },
-      {
-        "swarming": {
-          "can_use_on_swarming_builders": true
-        },
         "test": "media_unittests"
       },
       {
@@ -611,6 +600,12 @@
           "can_use_on_swarming_builders": true
         },
         "test": "net_unittests"
+      },
+      {
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "pdf_unittests"
       },
       {
         "swarming": {
@@ -717,12 +712,6 @@
         "swarming": {
           "can_use_on_swarming_builders": true
         }
-      }
-    ],
-    "scripts": [
-      {
-        "name": "nacl_integration",
-        "script": "nacl_integration.py"
       }
     ]
   },
@@ -908,12 +897,6 @@
         "swarming": {
           "can_use_on_swarming_builders": true
         },
-        "test": "media_mojo_unittests"
-      },
-      {
-        "swarming": {
-          "can_use_on_swarming_builders": true
-        },
         "test": "media_unittests"
       },
       {
@@ -963,6 +946,12 @@
           "can_use_on_swarming_builders": true
         },
         "test": "net_unittests"
+      },
+      {
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "pdf_unittests"
       },
       {
         "swarming": {
@@ -1057,12 +1046,6 @@
         "swarming": {
           "can_use_on_swarming_builders": true
         }
-      }
-    ],
-    "scripts": [
-      {
-        "name": "nacl_integration",
-        "script": "nacl_integration.py"
       }
     ]
   },
@@ -1248,12 +1231,6 @@
         "swarming": {
           "can_use_on_swarming_builders": true
         },
-        "test": "media_mojo_unittests"
-      },
-      {
-        "swarming": {
-          "can_use_on_swarming_builders": true
-        },
         "test": "media_unittests"
       },
       {
@@ -1303,6 +1280,12 @@
           "can_use_on_swarming_builders": true
         },
         "test": "net_unittests"
+      },
+      {
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "pdf_unittests"
       },
       {
         "swarming": {
@@ -1397,12 +1380,6 @@
         "swarming": {
           "can_use_on_swarming_builders": true
         }
-      }
-    ],
-    "scripts": [
-      {
-        "name": "nacl_integration",
-        "script": "nacl_integration.py"
       }
     ]
   }

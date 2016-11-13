@@ -171,13 +171,7 @@ void ScopedFocusNavigation::moveToPrevious() {
 void ScopedFocusNavigation::moveToFirst() {
   if (m_rootSlot) {
     if (!m_slotFallbackTraversal) {
-      HeapVector<Member<Node>> assignedNodes = m_rootSlot->assignedNodes();
-      for (auto assignedNode : assignedNodes) {
-        if (assignedNode->isElementNode()) {
-          m_current = toElement(assignedNode);
-          break;
-        }
-      }
+      m_current = SlotScopedTraversal::firstAssignedToSlot(*m_rootSlot);
     } else {
       Element* first = ElementTraversal::firstChild(*m_rootSlot);
       while (first &&
@@ -200,15 +194,7 @@ void ScopedFocusNavigation::moveToFirst() {
 void ScopedFocusNavigation::moveToLast() {
   if (m_rootSlot) {
     if (!m_slotFallbackTraversal) {
-      HeapVector<Member<Node>> assignedNodes = m_rootSlot->assignedNodes();
-      for (auto assignedNode = assignedNodes.rbegin();
-           assignedNode != assignedNodes.rend(); ++assignedNode) {
-        if ((*assignedNode)->isElementNode()) {
-          m_current =
-              ElementTraversal::lastWithinOrSelf(*toElement(*assignedNode));
-          break;
-        }
-      }
+      m_current = SlotScopedTraversal::lastAssignedToSlot(*m_rootSlot);
     } else {
       Element* last = ElementTraversal::lastWithin(*m_rootSlot);
       while (last &&
@@ -440,15 +426,16 @@ Element* findElementWithExactTabIndex(ScopedFocusNavigation& scope,
 Element* nextElementWithGreaterTabIndex(ScopedFocusNavigation& scope,
                                         int tabIndex) {
   // Search is inclusive of start
-  int winningTabIndex = std::numeric_limits<short>::max() + 1;
+  int winningTabIndex = std::numeric_limits<int>::max();
   Element* winner = nullptr;
   for (; scope.currentElement(); scope.moveToNext()) {
     Element* current = scope.currentElement();
     int currentTabIndex = adjustedTabIndex(*current);
-    if (shouldVisit(*current) && currentTabIndex > tabIndex &&
-        currentTabIndex < winningTabIndex) {
-      winner = current;
-      winningTabIndex = currentTabIndex;
+    if (shouldVisit(*current) && currentTabIndex > tabIndex) {
+      if (!winner || currentTabIndex < winningTabIndex) {
+        winner = current;
+        winningTabIndex = currentTabIndex;
+      }
     }
   }
   return winner;
@@ -547,8 +534,7 @@ Element* previousFocusableElement(ScopedFocusNavigation& scope) {
   // 1) has the highest non-zero tabindex (that is less than start's tabindex),
   //    and
   // 2) comes last in the scope, if there's a tie.
-  tabIndex =
-      (current && tabIndex) ? tabIndex : std::numeric_limits<short>::max();
+  tabIndex = (current && tabIndex) ? tabIndex : std::numeric_limits<int>::max();
   scope.moveToLast();
   return previousElementWithLowerTabIndex(scope, tabIndex);
 }

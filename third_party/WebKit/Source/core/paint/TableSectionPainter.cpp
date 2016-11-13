@@ -52,14 +52,14 @@ void TableSectionPainter::paintRepeatingHeaderGroup(
   LayoutPoint paginationOffset = paintOffset;
   LayoutUnit pageHeight = table->pageLogicalHeightForOffset(LayoutUnit());
 
-  // Move paginationOffset to the top of the next page.
+  LayoutUnit headerGroupOffset = table->blockOffsetToFirstRepeatableHeader();
   // The header may have a pagination strut before it so we need to account for
   // that when establishing its position.
-  LayoutUnit headerGroupOffset = table->pageLogicalOffset();
   if (LayoutTableRow* row = m_layoutTableSection.firstRow())
     headerGroupOffset += row->paginationStrut();
   LayoutUnit offsetToNextPage =
       pageHeight - intMod(headerGroupOffset, pageHeight);
+  // Move paginationOffset to the top of the next page.
   paginationOffset.move(LayoutUnit(), offsetToNextPage);
   // Now move paginationOffset to the top of the page the cull rect starts on.
   if (paintInfo.cullRect().m_rect.y() > paginationOffset.y()) {
@@ -69,10 +69,17 @@ void TableSectionPainter::paintRepeatingHeaderGroup(
                                              pageHeight)
                                                 .toInt());
   }
+
+  // We only want to consider pages where we going to paint a row, so exclude
+  // captions and border spacing from the table.
+  LayoutRect sectionsRect(LayoutPoint(), table->size());
+  table->subtractCaptionRect(sectionsRect);
+  LayoutUnit totalHeightOfRows =
+      sectionsRect.height() - table->vBorderSpacing();
   LayoutUnit bottomBound =
       std::min(LayoutUnit(paintInfo.cullRect().m_rect.maxY()),
-               paintOffset.y() + table->logicalHeight());
-  paginationOffset.move(LayoutUnit(), -m_layoutTableSection.logicalTop());
+               paintOffset.y() + totalHeightOfRows);
+
   while (paginationOffset.y() < bottomBound) {
     LayoutPoint nestedOffset =
         paginationOffset +
@@ -88,6 +95,7 @@ void TableSectionPainter::paintRepeatingHeaderGroup(
 
 void TableSectionPainter::paint(const PaintInfo& paintInfo,
                                 const LayoutPoint& paintOffset) {
+  ObjectPainter(m_layoutTableSection).checkPaintOffset(paintInfo, paintOffset);
   paintSection(paintInfo, paintOffset);
   LayoutTable* table = m_layoutTableSection.table();
   if (table->header() == m_layoutTableSection)
@@ -141,44 +149,46 @@ static inline bool compareCellPositionsWithOverflowingCells(
   return elem1->absoluteColumnIndex() < elem2->absoluteColumnIndex();
 }
 
-void TableSectionPainter::paintCollapsedBorders(
+PaintResult TableSectionPainter::paintCollapsedBorders(
     const PaintInfo& paintInfo,
     const LayoutPoint& paintOffset,
     const CollapsedBorderValue& currentBorderValue) {
-  paintCollapsedSectionBorders(paintInfo, paintOffset, currentBorderValue);
+  PaintResult result =
+      paintCollapsedSectionBorders(paintInfo, paintOffset, currentBorderValue);
   LayoutTable* table = m_layoutTableSection.table();
-  if (table->header() == m_layoutTableSection)
+  if (table->header() == m_layoutTableSection) {
     paintRepeatingHeaderGroup(paintInfo, paintOffset, currentBorderValue,
                               PaintCollapsedBorders);
+  }
+  return result;
 }
 
-void TableSectionPainter::paintCollapsedSectionBorders(
+PaintResult TableSectionPainter::paintCollapsedSectionBorders(
     const PaintInfo& paintInfo,
     const LayoutPoint& paintOffset,
     const CollapsedBorderValue& currentBorderValue) {
   if (!m_layoutTableSection.numRows() ||
       !m_layoutTableSection.table()->effectiveColumns().size())
-    return;
+    return FullyPainted;
 
   LayoutPoint adjustedPaintOffset =
       paintOffset + m_layoutTableSection.location();
   BoxClipper boxClipper(m_layoutTableSection, paintInfo, adjustedPaintOffset,
                         ForceContentsClip);
 
-  LayoutRect localPaintInvalidationRect =
-      LayoutRect(paintInfo.cullRect().m_rect);
-  localPaintInvalidationRect.moveBy(-adjustedPaintOffset);
+  LayoutRect localVisualRect = LayoutRect(paintInfo.cullRect().m_rect);
+  localVisualRect.moveBy(-adjustedPaintOffset);
 
   LayoutRect tableAlignedRect =
       m_layoutTableSection.logicalRectForWritingModeAndDirection(
-          localPaintInvalidationRect);
+          localVisualRect);
 
   CellSpan dirtiedRows = m_layoutTableSection.dirtiedRows(tableAlignedRect);
   CellSpan dirtiedColumns =
       m_layoutTableSection.dirtiedEffectiveColumns(tableAlignedRect);
 
   if (dirtiedColumns.start() >= dirtiedColumns.end())
-    return;
+    return MayBeClippedByPaintDirtyRect;
 
   // Collapsed borders are painted from the bottom right to the top left so that
   // precedence due to cell position is respected.
@@ -200,17 +210,21 @@ void TableSectionPainter::paintCollapsedSectionBorders(
                                                     currentBorderValue);
     }
   }
+
+  if (dirtiedRows == m_layoutTableSection.fullTableRowSpan() &&
+      dirtiedColumns == m_layoutTableSection.fullTableEffectiveColumnSpan())
+    return FullyPainted;
+  return MayBeClippedByPaintDirtyRect;
 }
 
 void TableSectionPainter::paintObject(const PaintInfo& paintInfo,
                                       const LayoutPoint& paintOffset) {
-  LayoutRect localPaintInvalidationRect =
-      LayoutRect(paintInfo.cullRect().m_rect);
-  localPaintInvalidationRect.moveBy(-paintOffset);
+  LayoutRect localVisualRect = LayoutRect(paintInfo.cullRect().m_rect);
+  localVisualRect.moveBy(-paintOffset);
 
   LayoutRect tableAlignedRect =
       m_layoutTableSection.logicalRectForWritingModeAndDirection(
-          localPaintInvalidationRect);
+          localVisualRect);
 
   CellSpan dirtiedRows = m_layoutTableSection.dirtiedRows(tableAlignedRect);
   CellSpan dirtiedColumns =

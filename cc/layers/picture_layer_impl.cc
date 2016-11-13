@@ -272,7 +272,7 @@ void PictureLayerImpl::AppendQuads(RenderPass* render_pass,
         } else if (iter.resolution() == LOW_RESOLUTION) {
           color = DebugColors::LowResTileBorderColor();
           width = DebugColors::LowResTileBorderWidth(layer_tree_impl());
-        } else if (iter->contents_scale() > max_contents_scale) {
+        } else if (iter->contents_scale_key() > max_contents_scale) {
           color = DebugColors::ExtraHighResTileBorderColor();
           width = DebugColors::ExtraHighResTileBorderWidth(layer_tree_impl());
         } else {
@@ -340,8 +340,8 @@ void PictureLayerImpl::AppendQuads(RenderPass* render_pass,
           // complete. But if a tile is ideal scale, we don't want to consider
           // it incomplete and trying to replace it with a tile at a worse
           // scale.
-          if (iter->contents_scale() != raster_contents_scale_ &&
-              iter->contents_scale() != ideal_contents_scale_ &&
+          if (iter->contents_scale_key() != raster_contents_scale_ &&
+              iter->contents_scale_key() != ideal_contents_scale_ &&
               geometry_rect.Intersects(scaled_viewport_for_tile_priority)) {
             append_quads_data->num_incomplete_tiles++;
           }
@@ -648,12 +648,13 @@ bool PictureLayerImpl::RasterSourceUsesLCDText() const {
 void PictureLayerImpl::NotifyTileStateChanged(const Tile* tile) {
   if (layer_tree_impl()->IsActiveTree()) {
     gfx::Rect layer_damage_rect = gfx::ScaleToEnclosingRect(
-        tile->content_rect(), 1.f / tile->contents_scale());
+        tile->content_rect(), 1.f / tile->raster_scales().width(),
+        1.f / tile->raster_scales().height());
     AddDamageRect(layer_damage_rect);
   }
   if (tile->draw_info().NeedsRaster()) {
     PictureLayerTiling* tiling =
-        tilings_->FindTilingWithScale(tile->contents_scale());
+        tilings_->FindTilingWithScaleKey(tile->contents_scale_key());
     if (tiling)
       tiling->set_all_tiles_done(false);
   }
@@ -670,7 +671,12 @@ void PictureLayerImpl::ReleaseResources() {
   ResetRasterScale();
 }
 
-void PictureLayerImpl::RecreateResources() {
+void PictureLayerImpl::ReleaseTileResources() {
+  // All resources are tile resources.
+  ReleaseResources();
+}
+
+void PictureLayerImpl::RecreateTileResources() {
   tilings_ = CreatePictureLayerTilingSet();
   if (raster_source_) {
     raster_source_->set_image_decode_controller(
@@ -718,7 +724,8 @@ const PictureLayerTiling* PictureLayerImpl::GetPendingOrActiveTwinTiling(
   PictureLayerImpl* twin_layer = GetPendingOrActiveTwinLayer();
   if (!twin_layer)
     return nullptr;
-  return twin_layer->tilings_->FindTilingWithScale(tiling->contents_scale());
+  return twin_layer->tilings_->FindTilingWithScaleKey(
+      tiling->contents_scale_key());
 }
 
 bool PictureLayerImpl::RequiresHighResToDraw() const {
@@ -886,7 +893,7 @@ void PictureLayerImpl::AddTilingsForRasterScale() {
   tilings_->MarkAllTilingsNonIdeal();
 
   PictureLayerTiling* high_res =
-      tilings_->FindTilingWithScale(raster_contents_scale_);
+      tilings_->FindTilingWithScaleKey(raster_contents_scale_);
   if (!high_res) {
     // We always need a high res tiling, so create one if it doesn't exist.
     high_res = AddTiling(raster_contents_scale_);
@@ -976,7 +983,7 @@ void PictureLayerImpl::AddLowResolutionTilingIfNeeded() {
     return;
 
   PictureLayerTiling* low_res =
-      tilings_->FindTilingWithScale(low_res_raster_contents_scale_);
+      tilings_->FindTilingWithScaleKey(low_res_raster_contents_scale_);
   DCHECK(!low_res || low_res->resolution() != HIGH_RESOLUTION);
 
   // Only create new low res tilings when the transform is static.  This
@@ -1040,7 +1047,7 @@ void PictureLayerImpl::RecalculateRasterScales() {
       while (desired_contents_scale < ideal_contents_scale_)
         desired_contents_scale *= kMaxScaleRatioDuringPinch;
     }
-    raster_contents_scale_ = tilings_->GetSnappedContentsScale(
+    raster_contents_scale_ = tilings_->GetSnappedContentsScaleKey(
         desired_contents_scale, kSnapToExistingTilingRatio);
     raster_page_scale_ =
         raster_contents_scale_ / raster_device_scale_ / raster_source_scale_;

@@ -12,6 +12,11 @@
   },
   {
     "prefix": "threaded",
+    "base": "fast/idleToBlob",
+    "args": ["--enable-threaded-compositing"]
+  },
+  {
+    "prefix": "threaded",
     "base": "compositing/visibility",
     "args": ["--enable-threaded-compositing"]
   },
@@ -136,6 +141,11 @@
     "prefix": "threaded",
     "base": "printing",
     "args": ["--enable-threaded-compositing"]
+  },
+  {
+    "prefix": "rootlayerscrolls",
+    "base": "scrollingcoordinator",
+    "args": ["--root-layer-scrolls"]
   },
   {
     "prefix": "rootlayerscrolls",
@@ -275,6 +285,11 @@
     "args": ["--enable-blink-features=LoadingWithMojo"]
   },
   {
+    "prefix": "mojo-loading",
+    "base": "http/tests/xmlhttprequest",
+    "args": ["--enable-blink-features=LoadingWithMojo"]
+  },
+  {
     "prefix": "scalefactor150",
     "base": "fast/events/synthetic-events",
     "args": ["--force-device-scale-factor=1.5"]
@@ -285,9 +300,9 @@
     "args": ["--enable-features=WebAssembly"]
   },
   {
-    "prefix": "mojo-service-worker",
+    "prefix": "disable-mojo-service-worker",
     "base": "http/tests/serviceworker",
-    "args": ["--mojo-service-worker"]
+    "args": ["--disable-mojo-service-worker"]
   },
   {
     "prefix": "service-worker-navigation-preload",

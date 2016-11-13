@@ -9,9 +9,10 @@
 #include "ash/common/accelerators/accelerator_controller.h"
 #include "ash/common/accelerators/ash_focus_manager_factory.h"
 #include "ash/common/accessibility_delegate.h"
+#include "ash/common/devtools/ash_devtools_dom_agent.h"
 #include "ash/common/focus_cycler.h"
 #include "ash/common/keyboard/keyboard_ui.h"
-#include "ash/common/new_window_delegate.h"
+#include "ash/common/new_window_client_proxy.h"
 #include "ash/common/palette_delegate.h"
 #include "ash/common/session/session_state_delegate.h"
 #include "ash/common/shelf/app_list_shelf_item_delegate.h"
@@ -84,9 +85,17 @@ void WmShell::Initialize(const scoped_refptr<base::SequencedWorkerPool>& pool) {
   // Shelf, and WallPaper could be created by the factory.
   views::FocusManagerFactory::Install(new AshFocusManagerFactory);
 
-  new_window_delegate_.reset(delegate_->CreateNewWindowDelegate());
-
   wallpaper_controller_.reset(new WallpaperController(blocking_pool_));
+
+  // Start devtools server
+  devtools_server_ = ui::devtools::UiDevToolsServer::Create(nullptr);
+  if (devtools_server_) {
+    auto dom_backend = base::MakeUnique<devtools::AshDevToolsDOMAgent>(this);
+    auto devtools_client = base::MakeUnique<ui::devtools::UiDevToolsClient>(
+        "Ash", devtools_server_.get());
+    devtools_client->AddAgent(std::move(dom_backend));
+    devtools_server_->AttachClient(std::move(devtools_client));
+  }
 }
 
 void WmShell::Shutdown() {
@@ -236,6 +245,8 @@ WmShell::WmShell(std::unique_ptr<ShellDelegate> shell_delegate)
       immersive_context_(base::MakeUnique<ImmersiveContextAsh>()),
       locale_notification_controller_(
           base::MakeUnique<LocaleNotificationController>()),
+      new_window_client_(base::MakeUnique<NewWindowClientProxy>(
+          delegate_->GetShellConnector())),
       shelf_controller_(base::MakeUnique<ShelfController>()),
       system_tray_controller_(base::MakeUnique<SystemTrayController>(
           delegate_->GetShellConnector())),

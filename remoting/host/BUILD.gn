@@ -116,6 +116,8 @@ static_library("host") {
     "desktop_capturer_proxy.cc",
     "desktop_capturer_proxy.h",
     "desktop_environment.h",
+    "desktop_environment_options.cc",
+    "desktop_environment_options.h",
     "desktop_process.cc",
     "desktop_process.h",
     "desktop_resizer.h",
@@ -145,6 +147,8 @@ static_library("host") {
     "gcd_state_updater.h",
     "heartbeat_sender.cc",
     "heartbeat_sender.h",
+    "host_attributes.cc",
+    "host_attributes.h",
     "host_change_notification_listener.cc",
     "host_change_notification_listener.h",
     "host_config.cc",
@@ -194,7 +198,6 @@ static_library("host") {
     "ipc_screen_controls.cc",
     "ipc_screen_controls.h",
     "ipc_util.h",
-    "ipc_util_posix.cc",
     "ipc_util_win.cc",
     "ipc_video_frame_capturer.cc",
     "ipc_video_frame_capturer.h",
@@ -496,6 +499,7 @@ source_set("unit_tests") {
     "gcd_rest_client_unittest.cc",
     "gcd_state_updater_unittest.cc",
     "heartbeat_sender_unittest.cc",
+    "host_attributes_unittest.cc",
     "host_change_notification_listener_unittest.cc",
     "host_config_unittest.cc",
     "host_extension_session_manager_unittest.cc",
@@ -757,6 +761,10 @@ if (enable_me2me_host) {
 
     if (is_mac && is_official_build) {
       sources += [ "internal/internal_mac-inl.h" ]
+    }
+
+    if (remoting_multi_process != 0) {
+      deps += [ "//mojo/edk/system" ]
     }
   }
 

@@ -34,11 +34,12 @@
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
+#include "printing/features/features.h"
 #include "printing/pdf_metafile_skia.h"
 #include "printing/printed_document.h"
 #include "ui/base/l10n/l10n_util.h"
 
-#if defined(ENABLE_PRINT_PREVIEW)
+#if BUILDFLAG(ENABLE_PRINT_PREVIEW)
 #include "chrome/browser/printing/print_error_dialog.h"
 #endif
 
@@ -90,7 +91,7 @@ PrintViewManagerBase::~PrintViewManagerBase() {
   DisconnectFromCurrentPrintJob();
 }
 
-#if defined(ENABLE_BASIC_PRINTING)
+#if BUILDFLAG(ENABLE_BASIC_PRINTING)
 bool PrintViewManagerBase::PrintNow() {
   return PrintNowInternal(new PrintMsg_PrintPages(routing_id()));
 }
@@ -192,18 +193,16 @@ void PrintViewManagerBase::OnDidPrintPage(
 #if defined(OS_WIN)
   print_job_->AppendPrintedPage(params.page_number);
   if (metafile_must_be_valid) {
-    bool print_text_with_gdi =
-        document->settings().print_text_with_gdi() &&
-        !document->settings().printer_is_xps() &&
-        !base::CommandLine::ForCurrentProcess()->HasSwitch(
-            switches::kDisableGDITextPrinting);
     scoped_refptr<base::RefCountedBytes> bytes = new base::RefCountedBytes(
         reinterpret_cast<const unsigned char*>(shared_buf->memory()),
         params.data_size);
 
     document->DebugDumpData(bytes.get(), FILE_PATH_LITERAL(".pdf"));
+    // TODO(thestig): Figure out why rendering text with GDI results in random
+    // missing characters for some users. https://crbug.com/658606
     print_job_->StartPdfToEmfConversion(
-        bytes, params.page_size, params.content_area, print_text_with_gdi);
+        bytes, params.page_size, params.content_area,
+        false /* print_text_with_gdi? */);
   }
 #else
   // Update the rendered document. It will send notifications to the listener.
@@ -217,7 +216,7 @@ void PrintViewManagerBase::OnDidPrintPage(
 void PrintViewManagerBase::OnPrintingFailed(int cookie) {
   PrintManager::OnPrintingFailed(cookie);
 
-#if defined(ENABLE_PRINT_PREVIEW)
+#if BUILDFLAG(ENABLE_PRINT_PREVIEW)
   chrome::ShowPrintErrorDialog();
 #endif
 

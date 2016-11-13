@@ -4,8 +4,6 @@
 
 #include "chrome/browser/ssl/chrome_security_state_model_client.h"
 
-#include <openssl/ssl.h>
-
 #include <vector>
 
 #include "base/command_line.h"
@@ -34,6 +32,7 @@
 #include "net/cert/x509_certificate.h"
 #include "net/ssl/ssl_cipher_suite_names.h"
 #include "net/ssl/ssl_connection_status_flags.h"
+#include "third_party/boringssl/src/include/openssl/ssl.h"
 #include "ui/base/l10n/l10n_util.h"
 
 DEFINE_WEB_CONTENTS_USER_DATA_KEY(ChromeSecurityStateModelClient);
@@ -159,9 +158,36 @@ void CheckSafeBrowsingStatus(content::NavigationEntry* entry,
   if (!sb_service)
     return;
   scoped_refptr<SafeBrowsingUIManager> sb_ui_manager = sb_service->ui_manager();
+  safe_browsing::SBThreatType threat_type;
   if (sb_ui_manager->IsUrlWhitelistedOrPendingForWebContents(
-          entry->GetURL(), false, entry, web_contents, false)) {
-    state->fails_malware_check = true;
+          entry->GetURL(), false, entry, web_contents, false, &threat_type)) {
+    switch (threat_type) {
+      case safe_browsing::SB_THREAT_TYPE_SAFE:
+        break;
+      case safe_browsing::SB_THREAT_TYPE_URL_PHISHING:
+      case safe_browsing::SB_THREAT_TYPE_CLIENT_SIDE_PHISHING_URL:
+        state->malicious_content_status = security_state::SecurityStateModel::
+            MALICIOUS_CONTENT_STATUS_SOCIAL_ENGINEERING;
+        break;
+      case safe_browsing::SB_THREAT_TYPE_URL_MALWARE:
+      case safe_browsing::SB_THREAT_TYPE_CLIENT_SIDE_MALWARE_URL:
+        state->malicious_content_status = security_state::SecurityStateModel::
+            MALICIOUS_CONTENT_STATUS_MALWARE;
+        break;
+      case safe_browsing::SB_THREAT_TYPE_URL_UNWANTED:
+        state->malicious_content_status = security_state::SecurityStateModel::
+            MALICIOUS_CONTENT_STATUS_UNWANTED_SOFTWARE;
+        break;
+      case safe_browsing::SB_THREAT_TYPE_BINARY_MALWARE_URL:
+      case safe_browsing::SB_THREAT_TYPE_EXTENSION:
+      case safe_browsing::SB_THREAT_TYPE_BLACKLISTED_RESOURCE:
+      case safe_browsing::SB_THREAT_TYPE_API_ABUSE:
+        // These threat types are not currently associated with
+        // interstitials, and thus resources with these threat types are
+        // not ever whitelisted or pending whitelisting.
+        NOTREACHED();
+        break;
+    }
   }
 }
 
@@ -196,7 +222,8 @@ blink::WebSecurityStyle ChromeSecurityStateModelClient::GetSecurityStyle(
             l10n_util::GetStringUTF8(IDS_PRIVATE_USER_DATA_INPUT_DESCRIPTION)));
   } else if (security_info.security_level ==
                  security_state::SecurityStateModel::NONE &&
-             security_info.displayed_private_user_data_input_on_http) {
+             (security_info.displayed_password_field_on_http ||
+              security_info.displayed_credit_card_field_on_http)) {
     // If the HTTP_SHOW_WARNING field trial isn't in use yet, display an
     // informational note that the omnibox will contain a warning for
     // this site in a future version of Chrome.
@@ -328,24 +355,29 @@ void ChromeSecurityStateModelClient::GetSecurityInfo(
   security_state_model_->GetSecurityInfo(result);
 }
 
-void ChromeSecurityStateModelClient::VisibleSSLStateChanged() {
+void ChromeSecurityStateModelClient::VisibleSecurityStateChanged() {
   if (logged_http_warning_on_current_navigation_)
     return;
 
   security_state::SecurityStateModel::SecurityInfo security_info;
   GetSecurityInfo(&security_info);
-  if (!security_info.displayed_private_user_data_input_on_http)
+  if (!security_info.displayed_password_field_on_http &&
+      !security_info.displayed_credit_card_field_on_http) {
     return;
+  }
 
   std::string warning;
+  bool warning_is_user_visible = false;
   switch (security_info.security_level) {
     case security_state::SecurityStateModel::HTTP_SHOW_WARNING:
       warning =
           "This page includes a password or credit card input in a non-secure "
           "context. A warning has been added to the URL bar. For more "
           "information, see https://goo.gl/zmWq3m.";
+      warning_is_user_visible = true;
       break;
     case security_state::SecurityStateModel::NONE:
+    case security_state::SecurityStateModel::DANGEROUS:
       warning =
           "This page includes a password or credit card input in a non-secure "
           "context. A warning will be added to the URL bar in Chrome 56 (Jan "
@@ -358,15 +390,24 @@ void ChromeSecurityStateModelClient::VisibleSSLStateChanged() {
   logged_http_warning_on_current_navigation_ = true;
   web_contents_->GetMainFrame()->AddMessageToConsole(
       content::CONSOLE_MESSAGE_LEVEL_WARNING, warning);
+
+  if (security_info.displayed_credit_card_field_on_http) {
+    UMA_HISTOGRAM_BOOLEAN(
+        "Security.HTTPBad.UserWarnedAboutSensitiveInput.CreditCard",
+        warning_is_user_visible);
+  }
+  if (security_info.displayed_password_field_on_http) {
+    UMA_HISTOGRAM_BOOLEAN(
+        "Security.HTTPBad.UserWarnedAboutSensitiveInput.Password",
+        warning_is_user_visible);
+  }
 }
 
 void ChromeSecurityStateModelClient::DidFinishNavigation(
     content::NavigationHandle* navigation_handle) {
-  if (navigation_handle->IsInMainFrame() &&
-      !navigation_handle->IsSynchronousNavigation()) {
+  if (navigation_handle->IsInMainFrame() && !navigation_handle->IsSamePage()) {
     // Only reset the console message flag for main-frame navigations,
-    // and not for synchronous navigations like reference fragments and
-    // pushState.
+    // and not for same-page navigations like reference fragments and pushState.
     logged_http_warning_on_current_navigation_ = false;
   }
 }

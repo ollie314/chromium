@@ -19,7 +19,6 @@ class BluetoothUUID;
 }
 
 namespace content {
-struct BluetoothScanFilter;
 
 // General Metrics
 
@@ -275,6 +274,24 @@ void RecordStartNotificationsOutcome(UMAGATTOperationOutcome outcome);
 // Records the outcome of a cache query for startNotifications. Should only be
 // called if QueryCacheForCharacteristic fails.
 void RecordStartNotificationsOutcome(CacheQueryOutcome outcome);
+
+enum class UMARSSISignalStrengthLevel {
+  LESS_THAN_OR_EQUAL_TO_MIN_RSSI,
+  LEVEL_0,
+  LEVEL_1,
+  LEVEL_2,
+  LEVEL_3,
+  LEVEL_4,
+  GREATER_THAN_OR_EQUAL_TO_MAX_RSSI,
+  // Note: Add new RSSI signal strength level immediately above this line.
+  COUNT
+};
+
+// Records the raw RSSI, and processed result displayed to users, when
+// content::BluetoothDeviceChooserController::CalculateSignalStrengthLevel() is
+// called.
+void RecordRSSISignalStrength(int rssi);
+void RecordRSSISignalStrengthLevel(UMARSSISignalStrengthLevel level);
 
 }  // namespace content
 

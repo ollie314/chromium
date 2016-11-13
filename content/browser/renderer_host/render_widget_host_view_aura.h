@@ -50,31 +50,18 @@ class ScopedTooltipDisabler;
 }
 }
 
-namespace cc {
-class CopyOutputRequest;
-class CopyOutputResult;
-class DelegatedFrameData;
-}
-
 namespace gfx {
-class Canvas;
 class Display;
 class Point;
 class Rect;
 }
 
-namespace gpu {
-struct Mailbox;
-}
-
 namespace ui {
-class CompositorLock;
 class InputMethod;
 class LocatedEvent;
 #if defined(OS_WIN)
 class OnScreenKeyboardObserver;
 #endif
-class Texture;
 class TouchSelectionController;
 }
 
@@ -85,7 +72,6 @@ class LegacyRenderWidgetHostHWND;
 
 class OverscrollController;
 class RenderFrameHostImpl;
-class RenderViewHostDelegateView;
 class RenderWidgetHostImpl;
 class RenderWidgetHostView;
 class TouchSelectionControllerClientAura;
@@ -361,7 +347,7 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
   FRIEND_TEST_ALL_PREFIXES(RenderWidgetHostViewAuraTest, TouchEventSyncAsync);
   FRIEND_TEST_ALL_PREFIXES(RenderWidgetHostViewAuraTest, Resize);
   FRIEND_TEST_ALL_PREFIXES(RenderWidgetHostViewAuraTest, SwapNotifiesWindow);
-  FRIEND_TEST_ALL_PREFIXES(RenderWidgetHostViewAuraTest, RecreateLayers);
+  FRIEND_TEST_ALL_PREFIXES(RenderWidgetHostViewAuraTest, MirrorLayers);
   FRIEND_TEST_ALL_PREFIXES(RenderWidgetHostViewAuraTest,
                            SkippedDelegatedFrames);
   FRIEND_TEST_ALL_PREFIXES(RenderWidgetHostViewAuraTest, OutputSurfaceIdChange);

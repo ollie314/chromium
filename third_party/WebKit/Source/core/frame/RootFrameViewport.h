@@ -64,11 +64,6 @@ class CORE_EXPORT RootFrameViewport final
   IntRect visibleContentRect(
       IncludeScrollbarsInRect = ExcludeScrollbars) const override;
   bool shouldUseIntegerScrollOffset() const override;
-  LayoutRect visualRectForScrollbarParts() const override {
-    ASSERT_NOT_REACHED();
-    return LayoutRect();
-  }
-  bool isActive() const override;
   int scrollSize(ScrollbarOrientation) const override;
   bool isScrollCornerVisible() const override;
   IntRect scrollCornerRect() const override;
@@ -89,6 +84,10 @@ class CORE_EXPORT RootFrameViewport final
   GraphicsLayer* layerForHorizontalScrollbar() const override;
   GraphicsLayer* layerForVerticalScrollbar() const override;
   GraphicsLayer* layerForScrollCorner() const override;
+  int horizontalScrollbarHeight(
+      OverlayScrollbarClipBehavior = IgnoreOverlayScrollbarSize) const override;
+  int verticalScrollbarWidth(
+      OverlayScrollbarClipBehavior = IgnoreOverlayScrollbarSize) const override;
   ScrollResult userScroll(ScrollGranularity, const FloatSize&) override;
   bool scrollAnimatorEnabled() const override;
   HostWindow* getHostWindow() const override;
@@ -97,8 +96,39 @@ class CORE_EXPORT RootFrameViewport final
   void cancelProgrammaticScrollAnimation() override;
   ScrollBehavior scrollBehaviorStyle() const override;
   Widget* getWidget() override;
-  void clearScrollAnimators() override;
+  void clearScrollableArea() override;
   LayoutBox* layoutBox() const override;
+  FloatQuad localToVisibleContentQuad(const FloatQuad&,
+                                      const LayoutObject*,
+                                      unsigned = 0) const final;
+
+  // Scrollbar related
+  // TODO(crbug.com/661236): Seperate the scrollbar related logic from
+  // ScrollableArea.
+  Scrollbar* horizontalScrollbar() const override;
+  Scrollbar* verticalScrollbar() const override;
+  bool isActive() const override;
+  bool hasOverlayScrollbars() const override;
+  void setScrollbarNeedsPaintInvalidation(ScrollbarOrientation) override;
+  LayoutRect visualRectForScrollbarParts() const override;
+  ScrollbarOverlayColorTheme getScrollbarOverlayColorTheme() const override;
+  void getTickmarks(Vector<IntRect>& rects) const override;
+  void mouseEnteredScrollbar(Scrollbar&) override;
+  void mouseExitedScrollbar(Scrollbar&) override;
+  void scrollbarVisibilityChanged() override;
+  bool scrollbarsHidden() const override;
+  IntRect convertFromScrollbarToContainingWidget(const Scrollbar&,
+                                                 const IntRect&) const override;
+  IntRect convertFromContainingWidgetToScrollbar(const Scrollbar&,
+                                                 const IntRect&) const override;
+  IntPoint convertFromScrollbarToContainingWidget(
+      const Scrollbar&,
+      const IntPoint&) const override;
+  IntPoint convertFromContainingWidgetToScrollbar(
+      const Scrollbar&,
+      const IntPoint&) const override;
+  ScrollOffset scrollAnimatorDesiredTargetOffset() const override;
+  void setScrollCornerNeedsPaintInvalidation() override;
 
  private:
   RootFrameViewport(ScrollableArea& visualViewport,

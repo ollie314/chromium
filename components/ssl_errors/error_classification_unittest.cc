@@ -39,9 +39,16 @@ NetworkErrorResponseHandler(const net::test_server::HttpRequest& request) {
 
 }  // namespace
 
-class SSLErrorClassificationTest : public network_time::FieldTrialTest {
+class SSLErrorClassificationTest : public ::testing::Test {
  public:
-  SSLErrorClassificationTest() : network_time::FieldTrialTest() {}
+  SSLErrorClassificationTest()
+      : field_trial_test_(network_time::FieldTrialTest::CreateForUnitTest()) {}
+  network_time::FieldTrialTest* field_trial_test() {
+    return field_trial_test_.get();
+  }
+
+ private:
+  std::unique_ptr<network_time::FieldTrialTest> field_trial_test_;
 };
 
 TEST_F(SSLErrorClassificationTest, TestNameMismatch) {
@@ -169,9 +176,9 @@ TEST_F(SSLErrorClassificationTest, TestNameMismatch) {
 }
 
 TEST_F(SSLErrorClassificationTest, TestHostNameHasKnownTLD) {
-  EXPECT_TRUE(ssl_errors::IsHostNameKnownTLD("www.google.com"));
-  EXPECT_TRUE(ssl_errors::IsHostNameKnownTLD("b.appspot.com"));
-  EXPECT_FALSE(ssl_errors::IsHostNameKnownTLD("a.private"));
+  EXPECT_TRUE(ssl_errors::HostNameHasKnownTLD("www.google.com"));
+  EXPECT_TRUE(ssl_errors::HostNameHasKnownTLD("b.appspot.com"));
+  EXPECT_FALSE(ssl_errors::HostNameHasKnownTLD("a.private"));
 }
 
 TEST_F(SSLErrorClassificationTest, TestPrivateURL) {
@@ -331,7 +338,7 @@ TEST_F(SSLErrorClassificationTest, NetworkClockStateHistogram) {
   EXPECT_TRUE(io_thread.StartWithOptions(thread_options));
 
   net::EmbeddedTestServer test_server;
-  ASSERT_TRUE(test_server.Start());
+  ASSERT_TRUE(test_server.InitializeAndListen());
 
   base::HistogramTester histograms;
   histograms.ExpectTotalCount(kNetworkTimeHistogram, 0);
@@ -349,7 +356,9 @@ TEST_F(SSLErrorClassificationTest, NetworkClockStateHistogram) {
       std::unique_ptr<base::TickClock>(tick_clock), &pref_service,
       new net::TestURLRequestContextGetter(io_thread.task_runner()));
   network_time_tracker.SetTimeServerURLForTesting(test_server.GetURL("/"));
-  SetNetworkQueriesWithVariationsService(true, 0.0);
+  field_trial_test()->SetNetworkQueriesWithVariationsService(
+      true, 0.0,
+      network_time::NetworkTimeTracker::FETCHES_IN_BACKGROUND_AND_ON_DEMAND);
 
   // No sync attempt.
   EXPECT_EQ(
@@ -362,6 +371,7 @@ TEST_F(SSLErrorClassificationTest, NetworkClockStateHistogram) {
 
   // First sync attempt is pending.
   test_server.RegisterRequestHandler(base::Bind(&NetworkErrorResponseHandler));
+  test_server.StartAcceptingConnections();
   EXPECT_TRUE(network_time_tracker.QueryTimeServiceForTesting());
   EXPECT_EQ(
       ssl_errors::ClockState::CLOCK_STATE_UNKNOWN,

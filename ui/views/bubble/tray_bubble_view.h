@@ -12,10 +12,6 @@
 #include "ui/views/mouse_watcher.h"
 #include "ui/views/views_export.h"
 
-namespace ui {
-class LocatedEvent;
-}
-
 namespace views {
 class View;
 class Widget;
@@ -70,7 +66,7 @@ class VIEWS_EXPORT TrayBubbleView : public views::BubbleDialogDelegateView,
     virtual void OnMouseEnteredView() = 0;
     virtual void OnMouseExitedView() = 0;
 
-    // Called from GetAccessibleState(); should return the appropriate
+    // Called from GetAccessibleNodeData(); should return the appropriate
     // accessible name for the bubble.
     virtual base::string16 GetAccessibleNameForBubble() = 0;
 
@@ -171,7 +167,7 @@ class VIEWS_EXPORT TrayBubbleView : public views::BubbleDialogDelegateView,
   int GetHeightForWidth(int width) const override;
   void OnMouseEntered(const ui::MouseEvent& event) override;
   void OnMouseExited(const ui::MouseEvent& event) override;
-  void GetAccessibleState(ui::AXViewState* state) override;
+  void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
 
   // Overridden from MouseWatcherListener
   void MouseMovedOutOfHost() override;

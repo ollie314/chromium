@@ -458,7 +458,7 @@ class ShelfViewTest : public AshTestBase {
                                  ui::EventTimeForNow(), 0, 0);
     test_api_->ButtonPressed(
         button, release_event,
-        views::test::InkDropHostViewTestApi(button).ink_drop());
+        views::test::InkDropHostViewTestApi(button).GetInkDrop());
     shelf_view_->PointerReleasedOnButton(button, ShelfView::MOUSE, false);
   }
 
@@ -471,7 +471,7 @@ class ShelfViewTest : public AshTestBase {
                                  0);
     test_api_->ButtonPressed(
         button, release_event,
-        views::test::InkDropHostViewTestApi(button).ink_drop());
+        views::test::InkDropHostViewTestApi(button).GetInkDrop());
     shelf_view_->PointerReleasedOnButton(button, ShelfView::MOUSE, false);
   }
 
@@ -1635,8 +1635,9 @@ TEST_F(ShelfViewTest, CheckDragInsertBoundsOfScrolledOverflowBubble) {
   // Add more buttons until OverflowBubble is scrollable and it has 3 invisible
   // items.
   while (bubble_view_api.GetContentsSize().width() <
-         (bubble_view->GetContentsBounds().width() + 3 * item_width))
+         (bubble_view->GetContentsBounds().width() + 3 * item_width)) {
     AddAppShortcut();
+  }
 
   ASSERT_TRUE(test_api_->IsShowingOverflowBubble());
 
@@ -1654,8 +1655,9 @@ TEST_F(ShelfViewTest, CheckDragInsertBoundsOfScrolledOverflowBubble) {
   EXPECT_TRUE(drag_reinsert_bounds.Contains(first_point));
   EXPECT_FALSE(drag_reinsert_bounds.Contains(last_point));
 
-  // Scrolls sufficiently to show last item.
-  bubble_view_api.ScrollByXOffset(3 * item_width);
+  // Scroll sufficiently to completely show last item.
+  bubble_view_api.ScrollByXOffset(bubble_view_api.GetContentsSize().width() -
+                                  bubble_view->GetContentsBounds().width());
   drag_reinsert_bounds =
       test_for_overflow_view.GetBoundsForDragInsertInScreen();
   first_point = first_button->GetBoundsInScreen().CenterPoint();
@@ -1954,7 +1956,14 @@ TEST_P(ShelfViewVisibleBoundsTest, ItemsAreInBounds) {
 }
 
 INSTANTIATE_TEST_CASE_P(LtrRtl, ShelfViewTextDirectionTest, testing::Bool());
-INSTANTIATE_TEST_CASE_P(VisibleBounds,
+
+// This test seems to be flaky with material design shelf (see
+// https://crbug.com/625671) and even in non-material mode (see
+// https://crbug.com/619344 which is fixed using a hack). Disabling for now.
+// TODO(mohsen): Hopefully, the fix for https://crbug.com/634128 that fixes
+// issues with shelf spacing, will fix this flake, too. Re-enable when that
+// issue is fixed.
+INSTANTIATE_TEST_CASE_P(DISABLED_VisibleBounds,
                         ShelfViewVisibleBoundsTest,
                         testing::Bool());
 

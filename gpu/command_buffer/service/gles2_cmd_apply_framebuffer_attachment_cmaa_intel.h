@@ -14,6 +14,7 @@ class CMAAEffect;
 
 namespace gpu {
 namespace gles2 {
+class CopyTextureCHROMIUMResourceManager;
 class GLES2Decoder;
 class Framebuffer;
 
@@ -34,8 +35,10 @@ class GPU_EXPORT ApplyFramebufferAttachmentCMAAINTELResourceManager {
 
   // Applies the algorithm to the color attachments of the currently bound draw
   // framebuffer.
-  void ApplyFramebufferAttachmentCMAAINTEL(gles2::GLES2Decoder* decoder,
-                                           gles2::Framebuffer* framebuffer);
+  void ApplyFramebufferAttachmentCMAAINTEL(
+      gles2::GLES2Decoder* decoder,
+      gles2::Framebuffer* framebuffer,
+      gles2::CopyTextureCHROMIUMResourceManager* copier);
 
  private:
   // Applies the CMAA algorithm to a texture.
@@ -46,7 +49,6 @@ class GPU_EXPORT ApplyFramebufferAttachmentCMAAINTELResourceManager {
   void OnSize(GLint width, GLint height);
   void ReleaseTextures();
 
-  void CopyTexture(GLint dest);
   GLuint CreateProgram(const char* defines,
                        const char* vs_source,
                        const char* fs_source);
@@ -72,7 +74,6 @@ class GPU_EXPORT ApplyFramebufferAttachmentCMAAINTELResourceManager {
   GLuint debug_display_edges_shader_;
 
   GLuint cmaa_framebuffer_;
-  GLuint copy_framebuffer_;
 
   GLuint rgba8_texture_;
   GLuint working_color_texture_;

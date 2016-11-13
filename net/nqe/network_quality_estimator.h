@@ -156,6 +156,14 @@ class NET_EXPORT NetworkQualityEstimator
     // Returns the current effective connection type.
     virtual EffectiveConnectionType GetEffectiveConnectionType() const = 0;
 
+    // Adds |observer| to a list of effective connection type observers.
+    virtual void AddEffectiveConnectionTypeObserver(
+        EffectiveConnectionTypeObserver* observer) = 0;
+
+    // Removes |observer| from a list of effective connection type observers.
+    virtual void RemoveEffectiveConnectionTypeObserver(
+        EffectiveConnectionTypeObserver* observer) = 0;
+
     virtual ~NetworkQualityProvider() {}
 
    protected:
@@ -297,25 +305,6 @@ class NET_EXPORT NetworkQualityEstimator
                                   int32_t downstream_throughput_kbps,
                                   int32_t upstream_throughput_kbps) override;
 
-  // Returns true if the RTT is available and sets |rtt| to the RTT estimated at
-  // the HTTP layer. Virtualized for testing. |rtt| should not be null. The RTT
-  // at the HTTP layer measures the time from when the request was sent (this
-  // happens after the connection is established) to the time when the response
-  // headers were received.
-  // TODO(tbansal): Change it to return HTTP RTT as base::TimeDelta.
-  virtual bool GetHttpRTT(base::TimeDelta* rtt) const WARN_UNUSED_RESULT;
-
-  // Returns true if the RTT is available and sets |rtt| to the RTT estimated at
-  // the transport layer. |rtt| should not be null. Virtualized for testing.
-  // TODO(tbansal): Change it to return transport RTT as base::TimeDelta.
-  virtual bool GetTransportRTT(base::TimeDelta* rtt) const WARN_UNUSED_RESULT;
-
-  // Returns true if downlink throughput is available and sets |kbps| to
-  // estimated downlink throughput (in kilobits per second).
-  // Virtualized for testing. |kbps| should not be null.
-  // TODO(tbansal): Change it to return throughput as int32.
-  virtual bool GetDownlinkThroughputKbps(int32_t* kbps) const;
-
   // Returns true if median RTT at the HTTP layer is available and sets |rtt|
   // to the median of RTT observations since |start_time|.
   // Virtualized for testing. |rtt| should not be null. The RTT at the HTTP
@@ -426,14 +415,6 @@ class NET_EXPORT NetworkQualityEstimator
       kDefaultEffectiveConnectionTypeAlgorithm =
           EffectiveConnectionTypeAlgorithm::HTTP_RTT_AND_DOWNSTREAM_THROUGHOUT;
 
-  // Minimum valid value of the variation parameter that holds RTT (in
-  // milliseconds) values.
-  static const int kMinimumRTTVariationParameterMsec = 1;
-
-  // Minimum valid value of the variation parameter that holds throughput (in
-  // kilobits per second) values.
-  static const int kMinimumThroughputVariationParameterKbps = 1;
-
   // Returns the RTT value to be used when the valid RTT is unavailable. Readers
   // should discard RTT if it is set to the value returned by |InvalidRTT()|.
   static const base::TimeDelta InvalidRTT();
@@ -461,15 +442,11 @@ class NET_EXPORT NetworkQualityEstimator
   void OnUpdatedRTTAvailable(SocketPerformanceWatcherFactory::Protocol protocol,
                              const base::TimeDelta& rtt);
 
-  // Obtains operating parameters from the field trial parameters.
-  void ObtainOperatingParams(
-      const std::map<std::string, std::string>& variation_params);
-
   // Obtains the model parameters for different effective connection types from
   // the field trial parameters. For each effective connection type, a model
   // (currently composed of a RTT threshold and a downlink throughput threshold)
   // is provided by the field trial.
-  void ObtainEffectiveConnectionTypeModelParams(
+  void ObtainOperatingParams(
       const std::map<std::string, std::string>& variation_params);
 
   // Adds the default median RTT and downstream throughput estimate for the
@@ -628,13 +605,7 @@ class NET_EXPORT NetworkQualityEstimator
   // estimator field trial parameters. The observations are indexed by
   // ConnectionType.
   nqe::internal::NetworkQuality
-      default_observations_[NetworkChangeNotifier::CONNECTION_LAST + 1];
-
-  // Default thresholds for different effective connection types. The default
-  // values are used if the thresholds are unavailable from the variation
-  // params.
-  nqe::internal::NetworkQuality default_effective_connection_type_thresholds_
-      [EffectiveConnectionType::EFFECTIVE_CONNECTION_TYPE_LAST];
+      default_observations_[NetworkChangeNotifier::CONNECTION_LAST];
 
   // Thresholds for different effective connection types obtained from field
   // trial variation params. These thresholds encode how different connection
@@ -691,11 +662,8 @@ class NET_EXPORT NetworkQualityEstimator
   size_t rtt_observations_size_at_last_ect_computation_;
   size_t throughput_observations_size_at_last_ect_computation_;
 
-  // Current estimates of the HTTP RTT, transport RTT and downstream throughput
-  // (in kilobits per second).
-  base::TimeDelta http_rtt_;
-  base::TimeDelta transport_rtt_;
-  int32_t downstream_throughput_kbps_;
+  // Current estimate of the network quality.
+  nqe::internal::NetworkQuality network_quality_;
 
   // Current effective connection type. It is updated on connection change
   // events. It is also updated every time there is network traffic (provided
@@ -722,7 +690,7 @@ class NET_EXPORT NetworkQualityEstimator
   // parameters. If set to true, GetEffectiveConnectionType() will always return
   // |forced_effective_connection_type_|.
   const bool forced_effective_connection_type_set_;
-  EffectiveConnectionType forced_effective_connection_type_;
+  const EffectiveConnectionType forced_effective_connection_type_;
 
   base::ThreadChecker thread_checker_;
 

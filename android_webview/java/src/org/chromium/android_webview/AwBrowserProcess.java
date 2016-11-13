@@ -35,6 +35,7 @@ public abstract class AwBrowserProcess {
 
     private static final String TAG = "AwBrowserProcess";
     private static final String EXCLUSIVE_LOCK_FILE = "webview_data.lock";
+    private static RandomAccessFile sLockFile;
     private static FileLock sExclusiveFileLock;
 
     /**
@@ -60,9 +61,10 @@ public abstract class AwBrowserProcess {
      * Configures child process launcher. This is required only if child services are used in
      * WebView.
      */
-    public static void configureChildProcessLauncher(String packageName, int extraBindFlags) {
+    public static void configureChildProcessLauncher(String packageName,
+            boolean isExternalService) {
         ChildProcessCreationParams.set(
-                new ChildProcessCreationParams(packageName, extraBindFlags,
+                new ChildProcessCreationParams(packageName, isExternalService,
                         LibraryProcessType.PROCESS_WEBVIEW_CHILD));
     }
 
@@ -115,9 +117,9 @@ public abstract class AwBrowserProcess {
             File lockFile = new File(dataPath, EXCLUSIVE_LOCK_FILE);
             boolean success = false;
             try {
-                // Note that the file is not closed intentionally.
-                RandomAccessFile file = new RandomAccessFile(lockFile, "rw");
-                sExclusiveFileLock = file.getChannel().tryLock();
+                // Note that the file is kept open intentionally.
+                sLockFile = new RandomAccessFile(lockFile, "rw");
+                sExclusiveFileLock = sLockFile.getChannel().tryLock();
                 success = sExclusiveFileLock != null;
             } catch (IOException e) {
                 Log.w(TAG, "Failed to create lock file " + lockFile, e);

@@ -10,7 +10,6 @@
           "content::mojom::FrameFactory",
           "content::mojom::RenderWidgetWindowTreeClientFactory",
           "IPC::mojom::ChannelBootstrap",
-          "mojom::ResourceUsageReporter",
           "visitedlink::mojom::VisitedLinkNotificationSink",
           "web_cache::mojom::WebCache"
         ],
@@ -21,6 +20,18 @@
       "requires": {
         "service:content_browser": [ "renderer" ],
         "service:ui": [ "ui:gpu_client" ]
+      }
+    },
+    "navigation:frame": {
+      "provides": {
+        "browser": [
+          "blink::mojom::AppBannerController",
+          "content::mojom::ImageDownloader",
+          "mojom::MediaDevicesListener"
+        ]
+      },
+      "requires": {
+        "service:content_browser": [ "renderer" ]
       }
     }
   }

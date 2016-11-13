@@ -52,6 +52,8 @@ SurfacesInstance::SurfacesInstance()
   surface_manager_.reset(new cc::SurfaceManager);
   surface_id_allocator_.reset(new cc::SurfaceIdAllocator());
   surface_manager_->RegisterFrameSinkId(frame_sink_id_);
+  surface_factory_.reset(
+      new cc::SurfaceFactory(frame_sink_id_, surface_manager_.get(), this));
 
   std::unique_ptr<cc::BeginFrameSource> begin_frame_source(
       new cc::StubBeginFrameSource);
@@ -67,14 +69,11 @@ SurfacesInstance::SurfacesInstance()
       output_surface_holder->capabilities().max_frames_pending));
   display_.reset(new cc::Display(
       nullptr /* shared_bitmap_manager */,
-      nullptr /* gpu_memory_buffer_manager */, settings,
+      nullptr /* gpu_memory_buffer_manager */, settings, frame_sink_id_,
       std::move(begin_frame_source), std::move(output_surface_holder),
       std::move(scheduler), std::move(texture_mailbox_deleter)));
-  display_->Initialize(this, surface_manager_.get(), frame_sink_id_);
+  display_->Initialize(this, surface_manager_.get());
   display_->SetVisible(true);
-
-  surface_factory_.reset(
-      new cc::SurfaceFactory(frame_sink_id_, surface_manager_.get(), this));
 
   DCHECK(!g_surfaces_instance);
   g_surfaces_instance = this;
@@ -86,10 +85,15 @@ SurfacesInstance::~SurfacesInstance() {
   g_surfaces_instance = nullptr;
 
   DCHECK(child_ids_.empty());
-  if (!root_id_.is_null())
+  if (root_id_.is_valid())
     surface_factory_->Destroy(root_id_);
 
   surface_manager_->InvalidateFrameSinkId(frame_sink_id_);
+}
+
+void SurfacesInstance::DisplayOutputSurfaceLost() {
+  // Android WebView does not handle context loss.
+  LOG(FATAL) << "Render thread context loss";
 }
 
 cc::FrameSinkId SurfacesInstance::AllocateFrameSinkId() {
@@ -128,17 +132,14 @@ void SurfacesInstance::DrawAndSwap(const gfx::Size& viewport,
   surface_quad->SetNew(quad_state, gfx::Rect(quad_state->quad_layer_bounds),
                        gfx::Rect(quad_state->quad_layer_bounds), child_id);
 
-  std::unique_ptr<cc::DelegatedFrameData> delegated_frame(
-      new cc::DelegatedFrameData);
-  delegated_frame->render_pass_list.push_back(std::move(render_pass));
   cc::CompositorFrame frame;
-  frame.delegated_frame_data = std::move(delegated_frame);
+  frame.render_pass_list.push_back(std::move(render_pass));
   frame.metadata.referenced_surfaces = child_ids_;
 
-  if (root_id_.is_null()) {
+  if (!root_id_.is_valid()) {
     root_id_ = surface_id_allocator_->GenerateId();
     surface_factory_->Create(root_id_);
-    display_->SetSurfaceId(cc::SurfaceId(frame_sink_id_, root_id_), 1.f);
+    display_->SetLocalFrameId(root_id_, 1.f);
   }
   surface_factory_->SubmitCompositorFrame(root_id_, std::move(frame),
                                           cc::SurfaceFactory::DrawCallback());
@@ -151,7 +152,7 @@ void SurfacesInstance::AddChildId(const cc::SurfaceId& child_id) {
   DCHECK(std::find(child_ids_.begin(), child_ids_.end(), child_id) ==
          child_ids_.end());
   child_ids_.push_back(child_id);
-  if (!root_id_.is_null())
+  if (root_id_.is_valid())
     SetEmptyRootFrame();
 }
 
@@ -159,14 +160,12 @@ void SurfacesInstance::RemoveChildId(const cc::SurfaceId& child_id) {
   auto itr = std::find(child_ids_.begin(), child_ids_.end(), child_id);
   DCHECK(itr != child_ids_.end());
   child_ids_.erase(itr);
-  if (!root_id_.is_null())
+  if (root_id_.is_valid())
     SetEmptyRootFrame();
 }
 
 void SurfacesInstance::SetEmptyRootFrame() {
   cc::CompositorFrame empty_frame;
-  empty_frame.delegated_frame_data =
-      base::WrapUnique(new cc::DelegatedFrameData);
   empty_frame.metadata.referenced_surfaces = child_ids_;
   surface_factory_->SubmitCompositorFrame(root_id_, std::move(empty_frame),
                                           cc::SurfaceFactory::DrawCallback());

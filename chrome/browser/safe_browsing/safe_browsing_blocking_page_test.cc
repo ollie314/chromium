@@ -44,6 +44,7 @@
 #include "components/security_interstitials/core/metrics_helper.h"
 #include "content/public/browser/interstitial_page.h"
 #include "content/public/browser/navigation_controller.h"
+#include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
@@ -116,6 +117,8 @@ class FakeSafeBrowsingDatabaseManager : public TestSafeBrowsingDatabaseManager {
   void SetURLThreatType(const GURL& url, SBThreatType threat_type) {
     badurls[url.spec()] = threat_type;
   }
+
+  void ClearBadURL(const GURL& url) { badurls.erase(url.spec()); }
 
   // These are called when checking URLs, so we implement them.
   bool IsSupported() const override { return true; }
@@ -325,6 +328,15 @@ class SafeBrowsingBlockingPageBrowserTest
     static_cast<FakeSafeBrowsingDatabaseManager*>(
         service->database_manager().get())
         ->SetURLThreatType(url, threat_type);
+  }
+
+  void ClearBadURL(const GURL& url) {
+    TestSafeBrowsingService* service = factory_.test_safe_browsing_service();
+    ASSERT_TRUE(service);
+
+    static_cast<FakeSafeBrowsingDatabaseManager*>(
+        service->database_manager().get())
+        ->ClearBadURL(url);
   }
 
   // The basic version of this method, which uses a HTTP test URL.
@@ -576,9 +588,22 @@ class SafeBrowsingBlockingPageBrowserTest
     model_client->GetSecurityInfo(&security_info);
     EXPECT_EQ(security_state::SecurityStateModel::DANGEROUS,
               security_info.security_level);
-    EXPECT_TRUE(security_info.fails_malware_check);
+    EXPECT_NE(security_state::SecurityStateModel::MALICIOUS_CONTENT_STATUS_NONE,
+              security_info.malicious_content_status);
     // TODO(felt): Restore this check when https://crbug.com/641187 is fixed.
     // EXPECT_EQ(cert_status, model_client->GetSecurityInfo().cert_status);
+  }
+
+  void ExpectNoSecurityIndicatorDowngrade(content::WebContents* tab) {
+    ChromeSecurityStateModelClient* model_client =
+        ChromeSecurityStateModelClient::FromWebContents(tab);
+    ASSERT_TRUE(model_client);
+    security_state::SecurityStateModel::SecurityInfo security_info;
+    model_client->GetSecurityInfo(&security_info);
+    EXPECT_EQ(security_state::SecurityStateModel::NONE,
+              security_info.security_level);
+    EXPECT_EQ(security_state::SecurityStateModel::MALICIOUS_CONTENT_STATUS_NONE,
+              security_info.malicious_content_status);
   }
 
  protected:
@@ -874,8 +899,7 @@ IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest, ProceedDisabled) {
 // TODO(mattm): Should also verify that no report is sent, but there isn't a
 // good way to do that in the current design.
 IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest, ReportingDisabled) {
-  browser()->profile()->GetPrefs()->SetBoolean(GetExtendedReportingPrefName(),
-                                               true);
+  SetExtendedReportingPref(browser()->profile()->GetPrefs(), true);
 
   TestReportingDisabledAndDontProceed(
       net::URLRequestMockHTTPJob::GetMockHttpsUrl(kEmptyPage));
@@ -885,8 +909,7 @@ IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest, ReportingDisabled) {
 // disabled by policy.
 IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest,
                        ReportingDisabledByPolicy) {
-  browser()->profile()->GetPrefs()->SetBoolean(GetExtendedReportingPrefName(),
-                                               true);
+  SetExtendedReportingPref(browser()->profile()->GetPrefs(), true);
   browser()->profile()->GetPrefs()->SetBoolean(
       prefs::kSafeBrowsingExtendedReportingOptInAllowed, false);
 
@@ -1047,6 +1070,140 @@ IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest, WhitelistUnsaved) {
   AssertNoInterstitial(true);
 }
 
+namespace {
+
+class SecurityStyleTestObserver : public content::WebContentsObserver {
+ public:
+  explicit SecurityStyleTestObserver(content::WebContents* web_contents)
+      : content::WebContentsObserver(web_contents),
+        latest_security_style_(blink::WebSecurityStyleUnknown) {}
+
+  blink::WebSecurityStyle latest_security_style() const {
+    return latest_security_style_;
+  }
+
+  // WebContentsObserver:
+  void SecurityStyleChanged(blink::WebSecurityStyle security_style,
+                            const content::SecurityStyleExplanations&
+                                security_style_explanations) override {
+    latest_security_style_ = security_style;
+  }
+
+ private:
+  blink::WebSecurityStyle latest_security_style_;
+  DISALLOW_COPY_AND_ASSIGN(SecurityStyleTestObserver);
+};
+
+}  // namespace
+
+// Test that the security indicator gets updated on a Safe Browsing
+// interstitial triggered by a subresource. Regression test for
+// https://crbug.com/659713.
+IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest,
+                       SecurityStateDowngradedForSubresourceInterstitial) {
+  WebContents* error_tab = browser()->tab_strip_model()->GetActiveWebContents();
+  ASSERT_TRUE(error_tab);
+  SecurityStyleTestObserver observer(error_tab);
+  // The security indicator should be downgraded while the interstitial shows.
+  SetupThreatIframeWarningAndNavigate();
+  ExpectSecurityIndicatorDowngrade(error_tab, 0u);
+  EXPECT_EQ(blink::WebSecurityStyleAuthenticationBroken,
+            observer.latest_security_style());
+
+  // The security indicator should still be downgraded post-interstitial.
+  EXPECT_TRUE(ClickAndWaitForDetach("proceed-link"));
+  AssertNoInterstitial(true);
+  WebContents* post_tab = browser()->tab_strip_model()->GetActiveWebContents();
+  ASSERT_TRUE(post_tab);
+  ExpectSecurityIndicatorDowngrade(post_tab, 0u);
+}
+
+// Test that the security indicator does not stay downgraded after
+// clicking back from a Safe Browsing interstitial. Regression test for
+// https://crbug.com/659709.
+IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest,
+                       SecurityStateGoBack) {
+  // Navigate to a page so that there is somewhere to go back to.
+  GURL start_url =
+      net::URLRequestMockHTTPJob::GetMockUrl("http://example.test");
+  ui_test_utils::NavigateToURL(browser(), start_url);
+
+  // The security indicator should be downgraded while the interstitial shows.
+  GURL bad_url = net::URLRequestMockHTTPJob::GetMockUrl(kEmptyPage);
+  SetupWarningAndNavigate();
+  WebContents* error_tab = browser()->tab_strip_model()->GetActiveWebContents();
+  ASSERT_TRUE(error_tab);
+  ExpectSecurityIndicatorDowngrade(error_tab, 0u);
+  content::NavigationEntry* entry =
+      error_tab->GetController().GetVisibleEntry();
+  ASSERT_TRUE(entry);
+  ASSERT_EQ(bad_url, entry->GetURL());
+
+  // Go back.
+  EXPECT_EQ(VISIBLE, GetVisibility("primary-button"));
+  EXPECT_EQ(HIDDEN, GetVisibility("details"));
+  EXPECT_EQ(HIDDEN, GetVisibility("proceed-link"));
+  EXPECT_EQ(HIDDEN, GetVisibility("error-code"));
+  EXPECT_TRUE(Click("details-button"));
+  EXPECT_EQ(VISIBLE, GetVisibility("details"));
+  EXPECT_EQ(VISIBLE, GetVisibility("proceed-link"));
+  EXPECT_EQ(HIDDEN, GetVisibility("error-code"));
+  EXPECT_TRUE(ClickAndWaitForDetach("primary-button"));
+
+  // The security indicator should *not* still be downgraded after going back.
+  AssertNoInterstitial(true);
+  WebContents* post_tab = browser()->tab_strip_model()->GetActiveWebContents();
+  ASSERT_TRUE(post_tab);
+  entry = post_tab->GetController().GetVisibleEntry();
+  ASSERT_TRUE(entry);
+  EXPECT_EQ(start_url, entry->GetURL());
+  ExpectNoSecurityIndicatorDowngrade(post_tab);
+
+  ClearBadURL(bad_url);
+  // Navigate to the URL that the interstitial was on, and check that it
+  // is no longer marked as dangerous.
+  ui_test_utils::NavigateToURL(browser(), bad_url);
+  ExpectNoSecurityIndicatorDowngrade(
+      browser()->tab_strip_model()->GetActiveWebContents());
+}
+
+// Test that the security indicator does not stay downgraded after
+// clicking back from a Safe Browsing interstitial triggered by a
+// subresource. Regression test for https://crbug.com/659709.
+IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest,
+                       SecurityStateGoBackOnSubresourceInterstitial) {
+  // Navigate to a page so that there is somewhere to go back to.
+  GURL start_url =
+      net::URLRequestMockHTTPJob::GetMockUrl("http://example.test");
+  ui_test_utils::NavigateToURL(browser(), start_url);
+
+  // The security indicator should be downgraded while the interstitial shows.
+  SetupThreatIframeWarningAndNavigate();
+  WebContents* error_tab = browser()->tab_strip_model()->GetActiveWebContents();
+  ASSERT_TRUE(error_tab);
+  ExpectSecurityIndicatorDowngrade(error_tab, 0u);
+
+  // Go back.
+  EXPECT_EQ(VISIBLE, GetVisibility("primary-button"));
+  EXPECT_EQ(HIDDEN, GetVisibility("details"));
+  EXPECT_EQ(HIDDEN, GetVisibility("proceed-link"));
+  EXPECT_EQ(HIDDEN, GetVisibility("error-code"));
+  EXPECT_TRUE(Click("details-button"));
+  EXPECT_EQ(VISIBLE, GetVisibility("details"));
+  EXPECT_EQ(VISIBLE, GetVisibility("proceed-link"));
+  EXPECT_EQ(HIDDEN, GetVisibility("error-code"));
+  EXPECT_TRUE(ClickAndWaitForDetach("primary-button"));
+
+  // The security indicator should *not* still be downgraded after going back.
+  AssertNoInterstitial(true);
+  WebContents* post_tab = browser()->tab_strip_model()->GetActiveWebContents();
+  ASSERT_TRUE(post_tab);
+  content::NavigationEntry* entry = post_tab->GetController().GetVisibleEntry();
+  ASSERT_TRUE(entry);
+  EXPECT_EQ(start_url, entry->GetURL());
+  ExpectNoSecurityIndicatorDowngrade(post_tab);
+}
+
 // Test that the security indicator is downgraded after clicking through a
 // Safe Browsing interstitial.
 IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest,
@@ -1122,6 +1279,7 @@ class SafeBrowsingBlockingPageIDNTest
   SecurityInterstitialPage* CreateInterstitial(
       content::WebContents* contents,
       const GURL& request_url) const override {
+    SafeBrowsingUIManager::CreateWhitelistForTesting(contents);
     const bool is_subresource = testing::get<0>(GetParam());
 
     SafeBrowsingService* sb_service =

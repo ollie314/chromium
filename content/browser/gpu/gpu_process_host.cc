@@ -82,6 +82,8 @@
 #endif
 
 #if defined(USE_OZONE)
+#include "ui/ozone/public/gpu_platform_support_host.h"
+#include "ui/ozone/public/ozone_platform.h"
 #include "ui/ozone/public/ozone_switches.h"
 #endif
 
@@ -106,8 +108,10 @@ namespace {
 
 // Command-line switches to propagate to the GPU process.
 static const char* const kSwitchNames[] = {
+    switches::kCreateDefaultGLContext,
     switches::kDisableAcceleratedVideoDecode,
     switches::kDisableBreakpad,
+    switches::kDisableES3GLContext,
     switches::kDisableGpuSandbox,
     switches::kDisableGpuWatchdog,
     switches::kDisableGLExtensions,
@@ -143,6 +147,7 @@ static const char* const kSwitchNames[] = {
     switches::kV,
     switches::kVModule,
 #if defined(OS_MACOSX)
+    switches::kDisableAVFoundationOverlays,
     switches::kDisableRemoteCoreAnimation,
     switches::kEnableSandboxLogging,
     switches::kShowMacOverlayBorders,
@@ -156,8 +161,7 @@ static const char* const kSwitchNames[] = {
     switches::kGpuTestingGLVendor,
     switches::kGpuTestingGLRenderer,
     switches::kGpuTestingGLVersion,
-    switches::kDisableGpuDriverBugWorkarounds
-};
+    switches::kDisableGpuDriverBugWorkarounds};
 
 enum GPUProcessLifetimeEvent {
   LAUNCHED,
@@ -183,17 +187,27 @@ void SendGpuProcessMessage(GpuProcessHost::GpuProcessKind kind,
   }
 }
 
+#if defined(USE_OZONE)
+void SendGpuProcessMessageByHostId(int host_id, IPC::Message* message) {
+  GpuProcessHost* host = GpuProcessHost::FromID(host_id);
+  if (host) {
+    host->Send(message);
+  } else {
+    delete message;
+  }
+}
+#endif
+
 // NOTE: changes to this class need to be reviewed by the security team.
 class GpuSandboxedProcessLauncherDelegate
     : public SandboxedProcessLauncherDelegate {
  public:
-  GpuSandboxedProcessLauncherDelegate(base::CommandLine* cmd_line,
-                                      ChildProcessHost* host)
+  explicit GpuSandboxedProcessLauncherDelegate(base::CommandLine* cmd_line)
 #if defined(OS_WIN)
-      : cmd_line_(cmd_line) {}
-#elif defined(OS_POSIX)
-      : ipc_fd_(host->TakeClientFileDescriptor()) {}
+      : cmd_line_(cmd_line)
 #endif
+  {
+  }
 
   ~GpuSandboxedProcessLauncherDelegate() override {}
 
@@ -274,9 +288,6 @@ class GpuSandboxedProcessLauncherDelegate
 
     return true;
   }
-#elif defined(OS_POSIX)
-
-  base::ScopedFD TakeIpcFd() override { return std::move(ipc_fd_); }
 #endif  // OS_WIN
 
   SandboxType GetSandboxType() override {
@@ -286,10 +297,16 @@ class GpuSandboxedProcessLauncherDelegate
  private:
 #if defined(OS_WIN)
   base::CommandLine* cmd_line_;
-#elif defined(OS_POSIX)
-  base::ScopedFD ipc_fd_;
 #endif  // OS_WIN
 };
+
+void HostLoadedShader(int host_id,
+                      const std::string& key,
+                      const std::string& data) {
+  GpuProcessHost* host = GpuProcessHost::FromID(host_id);
+  if (host)
+    host->LoadedShader(key, data);
+}
 
 }  // anonymous namespace
 
@@ -593,6 +610,16 @@ bool GpuProcessHost::Init() {
 
   if (!Send(new GpuMsg_Initialize(gpu_preferences)))
     return false;
+
+#if defined(USE_OZONE)
+  // Ozone needs to send the primary DRM device to GPU process as early as
+  // possible to ensure the latter always has a valid device. crbug.com/608839
+  ui::OzonePlatform::GetInstance()
+      ->GetGpuPlatformSupportHost()
+      ->OnGpuProcessLaunched(
+          host_id_, BrowserThread::GetTaskRunnerForThread(BrowserThread::IO),
+          base::Bind(&SendGpuProcessMessageByHostId, host_id_));
+#endif
 
   return true;
 }
@@ -973,8 +1000,7 @@ bool GpuProcessHost::LaunchGpuProcess(gpu::GpuPreferences* gpu_preferences) {
 
   cmd_line->AppendSwitchASCII(switches::kProcessType, switches::kGpuProcess);
 
-  field_trial_state_ =
-      BrowserChildProcessHostImpl::CopyFeatureAndFieldTrialFlags(cmd_line);
+  BrowserChildProcessHostImpl::CopyFeatureAndFieldTrialFlags(cmd_line);
 
 #if defined(OS_WIN)
   cmd_line->AppendArg(switches::kPrefetchArgumentGpu);
@@ -1017,9 +1043,8 @@ bool GpuProcessHost::LaunchGpuProcess(gpu::GpuPreferences* gpu_preferences) {
   if (!gpu_launcher.empty())
     cmd_line->PrependWrapper(gpu_launcher);
 
-  process_->Launch(
-      new GpuSandboxedProcessLauncherDelegate(cmd_line, process_->GetHost()),
-      cmd_line, field_trial_state_.get(), true);
+  process_->Launch(new GpuSandboxedProcessLauncherDelegate(cmd_line), cmd_line,
+                   true);
   process_launched_ = true;
 
   UMA_HISTOGRAM_ENUMERATION("GPU.GPUProcessLifetimeEvents",
@@ -1149,7 +1174,7 @@ void GpuProcessHost::CreateChannelCache(int32_t client_id) {
   if (!cache.get())
     return;
 
-  cache->set_host_id(host_id_);
+  cache->set_shader_loaded_callback(base::Bind(&HostLoadedShader, host_id_));
 
   client_id_to_shader_cache_[client_id] = cache;
 }

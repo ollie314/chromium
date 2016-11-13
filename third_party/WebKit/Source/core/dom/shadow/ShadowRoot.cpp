@@ -56,7 +56,7 @@ static_assert(sizeof(ShadowRoot) == sizeof(SameSizeAsShadowRoot),
 ShadowRoot::ShadowRoot(Document& document, ShadowRootType type)
     : DocumentFragment(0, CreateShadowRoot),
       TreeScope(*this, document),
-      m_numberOfStyles(0),
+      m_styleSheetList(nullptr),
       m_childShadowRootCount(0),
       m_type(static_cast<unsigned>(type)),
       m_registeredWithParentShadowRoot(false),
@@ -129,9 +129,11 @@ void ShadowRoot::recalcStyle(StyleRecalcChange change) {
 
   // There's no style to update so just calling recalcStyle means we're updated.
   clearNeedsStyleRecalc();
+  clearNeedsReattachLayoutTree();
 
   recalcDescendantStyles(change);
   clearChildNeedsStyleRecalc();
+  clearChildNeedsReattachLayoutTree();
 }
 
 void ShadowRoot::attachLayoutTree(const AttachContext& context) {
@@ -200,15 +202,6 @@ void ShadowRoot::childrenChanged(const ChildrenChange& change) {
     if (ShadowRoot* root = point->containingShadowRoot())
       root->owner()->setNeedsDistributionRecalc();
   }
-}
-
-void ShadowRoot::registerScopedHTMLStyleChild() {
-  ++m_numberOfStyles;
-}
-
-void ShadowRoot::unregisterScopedHTMLStyleChild() {
-  DCHECK_GT(m_numberOfStyles, 0u);
-  --m_numberOfStyles;
 }
 
 ShadowRootRareDataV0& ShadowRoot::ensureShadowRootRareDataV0() {
@@ -307,7 +300,7 @@ DEFINE_TRACE(ShadowRoot) {
 }
 
 DEFINE_TRACE_WRAPPERS(ShadowRoot) {
-  visitor->traceWrappers(m_styleSheetList);
+  visitor->traceWrappersWithManualWriteBarrier(m_styleSheetList);
   DocumentFragment::traceWrappers(visitor);
 }
 

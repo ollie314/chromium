@@ -212,8 +212,14 @@ const char kEafePath[] = "eafe-path";
 // EAFE URL to use for Easy bootstrapping.
 const char kEafeUrl[] = "eafe-url";
 
+// Enables AD functionality.
+const char kEnableAd[] = "enable-ad";
+
 // Enables starting the ARC instance upon session start.
 const char kEnableArc[] = "enable-arc";
+
+// Enables ARC OptIn flow in OOBE.
+const char kEnableArcOOBEOptIn[] = "enable-arc-oobe-optin";
 
 // Enables Data Saver prompt on cellular networks.
 const char kEnableDataSaverPrompt[] = "enable-datasaver-prompt";
@@ -411,6 +417,9 @@ const char kSystemDevMode[] = "system-developer-mode";
 
 // Enables testing for auto update UI.
 const char kTestAutoUpdateUI[] = "test-auto-update-ui";
+
+// Determines which Google Privacy CA to use for attestation.
+const char kAttestationServer[] = "attestation-server";
 
 // Enables wake on wifi packet feature, which wakes the device on the receipt
 // of network packets from whitelisted sources.

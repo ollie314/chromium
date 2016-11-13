@@ -369,7 +369,6 @@ IPC_STRUCT_TRAITS_BEGIN(content::RequestNavigationParams)
   IPC_STRUCT_TRAITS_MEMBER(redirects)
   IPC_STRUCT_TRAITS_MEMBER(redirect_response)
   IPC_STRUCT_TRAITS_MEMBER(can_load_local_resources)
-  IPC_STRUCT_TRAITS_MEMBER(request_time)
   IPC_STRUCT_TRAITS_MEMBER(page_state)
   IPC_STRUCT_TRAITS_MEMBER(nav_entry_id)
   IPC_STRUCT_TRAITS_MEMBER(is_same_document_history_load)
@@ -916,6 +915,10 @@ IPC_MESSAGE_ROUTED0(FrameMsg_EnableViewSourceMode)
 // ScopedPageLoadDeferrer is on the stack for SwapOut.
 IPC_MESSAGE_ROUTED0(FrameMsg_SuppressFurtherDialogs)
 
+// Tells the frame to consider itself to have received a user gesture (based
+// on a user gesture proceed by a descendant).
+IPC_MESSAGE_ROUTED0(FrameMsg_SetHasReceivedUserGesture)
+
 IPC_MESSAGE_ROUTED1(FrameMsg_RunFileChooserResponse,
                     std::vector<content::FileChooserFileInfo>)
 
@@ -924,7 +927,7 @@ IPC_MESSAGE_ROUTED1(FrameMsg_RunFileChooserResponse,
 
 // Blink and JavaScript error messages to log to the console
 // or debugger UI.
-IPC_MESSAGE_ROUTED4(FrameHostMsg_AddMessageToConsole,
+IPC_MESSAGE_ROUTED4(FrameHostMsg_DidAddMessageToConsole,
                     int32_t,        /* log level */
                     base::string16, /* msg */
                     int32_t,        /* line number */
@@ -1284,6 +1287,10 @@ IPC_MESSAGE_ROUTED1(FrameHostMsg_FrameRectChanged, gfx::Rect /* frame_rect */)
 
 // Informs the child that the frame has changed visibility.
 IPC_MESSAGE_ROUTED1(FrameHostMsg_VisibilityChanged, bool /* visible */)
+
+// Indicates that a child of this frame recieved a user gesture, and this
+// frame should in turn consider itself to have received a user gesture.
+IPC_MESSAGE_ROUTED0(FrameHostMsg_SetHasReceivedUserGesture)
 
 // Used to tell the parent that the user right clicked on an area of the
 // content area, and a context menu should be shown for it. The params

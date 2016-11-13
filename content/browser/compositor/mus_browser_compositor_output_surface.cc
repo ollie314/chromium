@@ -16,12 +16,16 @@
 #include "gpu/ipc/client/command_buffer_proxy_impl.h"
 #include "services/ui/public/cpp/window.h"
 #include "services/ui/public/cpp/window_compositor_frame_sink.h"
+#include "ui/aura/mus/window_compositor_frame_sink.h"
+#include "ui/aura/mus/window_port_mus.h"
+#include "ui/aura/window.h"
 
 namespace content {
 
 MusBrowserCompositorOutputSurface::MusBrowserCompositorOutputSurface(
     ui::Window* window,
     scoped_refptr<ContextProviderCommandBuffer> context,
+    gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
     scoped_refptr<ui::CompositorVSyncManager> vsync_manager,
     cc::SyntheticBeginFrameSource* begin_frame_source,
     std::unique_ptr<display_compositor::CompositorOverlayCandidateValidator>
@@ -32,19 +36,42 @@ MusBrowserCompositorOutputSurface::MusBrowserCompositorOutputSurface(
                                         std::move(overlay_candidate_validator)),
       ui_window_(window) {
   ui_compositor_frame_sink_ = ui_window_->RequestCompositorFrameSink(
-      ui::mojom::CompositorFrameSinkType::DEFAULT, context);
+      ui::mojom::CompositorFrameSinkType::DEFAULT, context,
+      gpu_memory_buffer_manager);
+  ui_compositor_frame_sink_->BindToClient(this);
+}
+
+MusBrowserCompositorOutputSurface::MusBrowserCompositorOutputSurface(
+    aura::Window* window,
+    scoped_refptr<ContextProviderCommandBuffer> context,
+    gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
+    scoped_refptr<ui::CompositorVSyncManager> vsync_manager,
+    cc::SyntheticBeginFrameSource* begin_frame_source,
+    std::unique_ptr<display_compositor::CompositorOverlayCandidateValidator>
+        overlay_candidate_validator)
+    : GpuBrowserCompositorOutputSurface(std::move(context),
+                                        std::move(vsync_manager),
+                                        begin_frame_source,
+                                        std::move(overlay_candidate_validator)),
+      window_(window) {
+  aura::WindowPortMus* window_port = aura::WindowPortMus::Get(window_);
+  DCHECK(window_port);
+  compositor_frame_sink_ = window_port->RequestCompositorFrameSink(
+      ui::mojom::CompositorFrameSinkType::DEFAULT, context,
+      gpu_memory_buffer_manager);
+  compositor_frame_sink_->BindToClient(this);
 }
 
 MusBrowserCompositorOutputSurface::~MusBrowserCompositorOutputSurface() {}
 
 void MusBrowserCompositorOutputSurface::SwapBuffers(
     cc::OutputSurfaceFrame frame) {
-  const gfx::Rect bounds(ui_window_->bounds().size());
+  const gfx::Rect bounds = ui_window_ ? gfx::Rect(ui_window_->bounds().size())
+                                      : gfx::Rect(window_->bounds().size());
   cc::CompositorFrame ui_frame;
   ui_frame.metadata.latency_info = std::move(frame.latency_info);
   // Reset latency_info to known empty state after moving contents.
   frame.latency_info.clear();
-  ui_frame.delegated_frame_data = base::MakeUnique<cc::DelegatedFrameData>();
   const cc::RenderPassId render_pass_id(1, 1);
   std::unique_ptr<cc::RenderPass> pass = cc::RenderPass::Create();
   const bool has_transparent_background = true;
@@ -85,7 +112,7 @@ void MusBrowserCompositorOutputSurface::SwapBuffers(
   resource.read_lock_fences_enabled = false;
   resource.is_software = false;
   resource.is_overlay_candidate = false;
-  ui_frame.delegated_frame_data->resource_list.push_back(std::move(resource));
+  ui_frame.resource_list.push_back(std::move(resource));
 
   const bool needs_blending = true;
   const bool premultiplied_alpha = true;
@@ -104,17 +131,15 @@ void MusBrowserCompositorOutputSurface::SwapBuffers(
                background_color, vertex_opacity, y_flipped, nearest_neighbor,
                secure_output_only);
 
-  ui_frame.delegated_frame_data->render_pass_list.push_back(std::move(pass));
-  ui_compositor_frame_sink_->SubmitCompositorFrame(std::move(ui_frame));
-  return;
-}
+  ui_frame.render_pass_list.push_back(std::move(pass));
 
-bool MusBrowserCompositorOutputSurface::BindToClient(
-    cc::OutputSurfaceClient* client) {
-  if (!GpuBrowserCompositorOutputSurface::BindToClient(client))
-    return false;
-  ui_compositor_frame_sink_->BindToClient(this);
-  return true;
+  // TODO(mfomitchev): Remove ui_compositor_frame_sink_ once we complete the
+  // switch to Aura-Mus.
+  if (ui_compositor_frame_sink_)
+    ui_compositor_frame_sink_->SubmitCompositorFrame(std::move(ui_frame));
+  else
+    compositor_frame_sink_->SubmitCompositorFrame(std::move(ui_frame));
+  return;
 }
 
 void MusBrowserCompositorOutputSurface::SetBeginFrameSource(

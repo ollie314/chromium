@@ -30,7 +30,7 @@
 #include "chromecast/browser/cast_network_delegate.h"
 #include "chromecast/browser/cast_quota_permission_context.h"
 #include "chromecast/browser/cast_resource_dispatcher_host_delegate.h"
-#include "chromecast/browser/devtools/cast_devtools_delegate.h"
+#include "chromecast/browser/devtools/cast_devtools_manager_delegate.h"
 #include "chromecast/browser/grit/cast_browser_resources.h"
 #include "chromecast/browser/media/media_caps_impl.h"
 #include "chromecast/browser/service/cast_service_simple.h"
@@ -62,14 +62,14 @@
 #include "ui/gl/gl_switches.h"
 
 #if defined(ENABLE_MOJO_MEDIA_IN_BROWSER_PROCESS)
-#include "chromecast/browser/media/cast_mojo_media_client.h"
+#include "chromecast/media/service/cast_mojo_media_client.h"
 #include "media/mojo/services/media_service.h"  // nogncheck
 #endif  // ENABLE_MOJO_MEDIA_IN_BROWSER_PROCESS
 
 #if defined(OS_ANDROID)
 #include "components/crash/content/browser/crash_dump_manager_android.h"
 #else
-#include "chromecast/browser/media/cast_browser_cdm_factory.h"
+#include "chromecast/media/cdm/cast_cdm_factory.h"
 #endif  // defined(OS_ANDROID)
 
 namespace chromecast {
@@ -78,8 +78,7 @@ namespace shell {
 namespace {
 #if defined(ENABLE_MOJO_MEDIA_IN_BROWSER_PROCESS)
 static std::unique_ptr<service_manager::Service> CreateMediaService(
-    CastContentBrowserClient* browser_client,
-    const base::Closure& quit_closure) {
+    CastContentBrowserClient* browser_client) {
   std::unique_ptr<media::CastMojoMediaClient> mojo_media_client(
       new media::CastMojoMediaClient(
           base::Bind(&CastContentBrowserClient::CreateMediaPipelineBackend,
@@ -89,7 +88,7 @@ static std::unique_ptr<service_manager::Service> CreateMediaService(
           browser_client->GetVideoResolutionPolicy(),
           browser_client->media_resource_tracker()));
   return std::unique_ptr<service_manager::Service>(
-      new ::media::MediaService(std::move(mojo_media_client), quit_closure));
+      new ::media::MediaService(std::move(mojo_media_client)));
 }
 #endif  // defined(ENABLE_MOJO_MEDIA_IN_BROWSER_PROCESS)
 
@@ -484,8 +483,8 @@ void CastContentBrowserClient::GetAdditionalMappedFilesForChildProcess(
 std::unique_ptr<::media::CdmFactory>
 CastContentBrowserClient::CreateCdmFactory() {
 #if defined(ENABLE_MOJO_MEDIA_IN_BROWSER_PROCESS)
-  return base::MakeUnique<media::CastBrowserCdmFactory>(
-      GetMediaTaskRunner(), media_resource_tracker());
+  return base::MakeUnique<media::CastCdmFactory>(GetMediaTaskRunner(),
+                                                 media_resource_tracker());
 #endif  // defined(ENABLE_MOJO_MEDIA_IN_BROWSER_PROCESS)
   return nullptr;
 }
@@ -509,7 +508,7 @@ void CastContentBrowserClient::GetAdditionalWebUISchemes(
 
 content::DevToolsManagerDelegate*
 CastContentBrowserClient::GetDevToolsManagerDelegate() {
-  return new CastDevToolsDelegate();
+  return new CastDevToolsManagerDelegate();
 }
 
 #if !defined(OS_ANDROID)

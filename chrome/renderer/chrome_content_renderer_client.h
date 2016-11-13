@@ -18,7 +18,9 @@
 #include "base/strings/string16.h"
 #include "components/rappor/public/interfaces/rappor_recorder.mojom.h"
 #include "content/public/renderer/content_renderer_client.h"
+#include "extensions/features/features.h"
 #include "ipc/ipc_channel_proxy.h"
+#include "printing/features/features.h"
 #include "v8/include/v8.h"
 
 #if defined (OS_CHROMEOS)
@@ -26,7 +28,7 @@
 #endif
 
 class ChromeRenderThreadObserver;
-#if defined(ENABLE_PRINT_PREVIEW)
+#if BUILDFLAG(ENABLE_PRINT_PREVIEW)
 class ChromePDFPrintClient;
 #endif
 class PrescientNetworkingDispatcher;
@@ -134,8 +136,7 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
                   bool* send_referrer) override;
   bool WillSendRequest(blink::WebFrame* frame,
                        ui::PageTransition transition_type,
-                       const GURL& url,
-                       const GURL& first_party_for_cookies,
+                       const blink::WebURL& url,
                        GURL* new_url) override;
   bool IsPrefetchOnly(content::RenderFrame* render_frame,
                       const blink::WebURLRequest& request) override;
@@ -169,8 +170,6 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
   void RecordRappor(const std::string& metric,
                     const std::string& sample) override;
   void RecordRapporURL(const std::string& metric, const GURL& url) override;
-  std::unique_ptr<blink::WebAppBannerClient> CreateAppBannerClient(
-      content::RenderFrame* render_frame) override;
   void AddImageContextMenuProperties(
       const blink::WebURLResponse& response,
       std::map<std::string, std::string>* properties) override;
@@ -201,7 +200,7 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
       const ChromeViewHostMsg_GetPluginInfo_Output& output);
 #endif
 
-#if defined(ENABLE_PLUGINS) && defined(ENABLE_EXTENSIONS)
+#if defined(ENABLE_PLUGINS) && BUILDFLAG(ENABLE_EXTENSIONS)
   static bool IsExtensionOrSharedModuleWhitelisted(
       const GURL& url, const std::set<std::string>& whitelist);
 #endif
@@ -246,7 +245,7 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
 #if defined(ENABLE_WEBRTC)
   scoped_refptr<WebRtcLoggingMessageFilter> webrtc_logging_message_filter_;
 #endif
-#if defined(ENABLE_PRINT_PREVIEW)
+#if BUILDFLAG(ENABLE_PRINT_PREVIEW)
   std::unique_ptr<ChromePDFPrintClient> pdf_print_client_;
 #endif
 #if defined(ENABLE_PLUGINS)

@@ -152,6 +152,19 @@ void ParseConfigurationArguments(const base::ListValue* args,
     NOTREACHED();
 }
 
+std::string GetSyncErrorAction(sync_ui_util::ActionType action_type) {
+  switch (action_type) {
+    case sync_ui_util::REAUTHENTICATE:
+      return "reauthenticate";
+    case sync_ui_util::UPGRADE_CLIENT:
+      return "upgradeClient";
+    case sync_ui_util::ENTER_PASSPHRASE:
+      return "enterPassphrase";
+    default:
+      return "noAction";
+  }
+}
+
 }  // namespace
 
 namespace settings {
@@ -731,13 +744,15 @@ PeopleHandler::GetSyncStatusDictionary() {
 
   base::string16 status_label;
   base::string16 link_label;
+  sync_ui_util::ActionType action_type = sync_ui_util::NO_ACTION;
   bool status_has_error =
       sync_ui_util::GetStatusLabels(profile_, service, *signin,
                                     sync_ui_util::PLAIN_TEXT, &status_label,
-                                    &link_label) == sync_ui_util::SYNC_ERROR;
+                                    &link_label, &action_type) ==
+      sync_ui_util::SYNC_ERROR;
   sync_status->SetString("statusText", status_label);
-  sync_status->SetString("actionLinkText", link_label);
   sync_status->SetBoolean("hasError", status_has_error);
+  sync_status->SetString("statusAction", GetSyncErrorAction(action_type));
 
   sync_status->SetBoolean("managed", service && service->IsManaged());
   sync_status->SetBoolean("signedIn", signin->IsAuthenticated());
@@ -868,9 +883,6 @@ void PeopleHandler::PushSyncPrefs() {
   } else if (passphrase_type == syncer::PassphraseType::CUSTOM_PASSPHRASE) {
     args.SetString("fullEncryptionBody",
                    GetStringUTF16(IDS_SYNC_FULL_ENCRYPTION_BODY_CUSTOM));
-  } else {
-    args.SetString("fullEncryptionBody",
-                   GetStringUTF16(IDS_SYNC_FULL_ENCRYPTION_DATA));
   }
 
   CallJavascriptFunction("cr.webUIListenerCallback",

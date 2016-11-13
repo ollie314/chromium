@@ -9,12 +9,20 @@ goog.provide('__crWeb.common');
 goog.require('__crWeb.base');
 
 
+/** @typedef {HTMLInputElement|HTMLTextAreaElement|HTMLSelectElement} */
+var FormControlElement;
+
 /**
  * Namespace for this file. It depends on |__gCrWeb| having already been
  * injected. String 'common' is used in |__gCrWeb['common']| as it needs to be
  * accessed in Objective-C code.
  */
-__gCrWeb['common'] = {};
+__gCrWeb.common = {};
+
+// Store common namespace object in a global __gCrWeb object referenced by a
+// string, so it does not get renamed by closure compiler during the
+// minification.
+__gCrWeb['common'] = __gCrWeb.common;
 
 /* Beginning of anonymous object. */
 (function() {
@@ -23,13 +31,13 @@ __gCrWeb['common'] = {};
    * in host pages.
    * @constructor
    */
-  __gCrWeb['common'].JSONSafeObject = function JSONSafeObject() {
+  __gCrWeb.common.JSONSafeObject = function JSONSafeObject() {
   };
 
   /**
    * Protect against custom implementation of Object.toJSON in host pages.
    */
-  __gCrWeb['common'].JSONSafeObject.prototype.toJSON = null;
+  __gCrWeb.common.JSONSafeObject.prototype['toJSON'] = null;
 
   /**
    * Retain the original JSON.stringify method where possible to reduce the
@@ -89,7 +97,7 @@ __gCrWeb['common'] = {};
    *
    * @param {Element} form A form element for which the control elements are
    *   returned.
-   * @return {Array<Element>}
+   * @return {Array<FormControlElement>}
    */
   __gCrWeb.common.getFormControlElements = function(form) {
     if (!form) {
@@ -111,7 +119,7 @@ __gCrWeb['common'] = {};
     var elements = form.elements;
     for (var i = 0; i < elements.length; i++) {
       if (__gCrWeb.common.isFormControlElement(elements[i])) {
-        results.push(elements[i]);
+        results.push(/** @type {FormControlElement} */ (elements[i]));
       }
     }
     return results;

@@ -23,13 +23,13 @@ namespace ui {
 class DirectOutputSurface : public cc::OutputSurface,
                             public SurfacesContextProviderDelegate {
  public:
-  explicit DirectOutputSurface(
+  DirectOutputSurface(
       scoped_refptr<SurfacesContextProvider> context_provider,
       cc::SyntheticBeginFrameSource* synthetic_begin_frame_source);
   ~DirectOutputSurface() override;
 
   // cc::OutputSurface implementation
-  bool BindToClient(cc::OutputSurfaceClient* client) override;
+  void BindToClient(cc::OutputSurfaceClient* client) override;
   void EnsureBackbuffer() override;
   void DiscardBackbuffer() override;
   void BindFramebuffer() override;
@@ -53,6 +53,7 @@ class DirectOutputSurface : public cc::OutputSurface,
  private:
   void OnSwapBuffersComplete();
 
+  cc::OutputSurfaceClient* client_ = nullptr;
   cc::SyntheticBeginFrameSource* const synthetic_begin_frame_source_;
   base::WeakPtrFactory<DirectOutputSurface> weak_ptr_factory_;
 };

@@ -18,13 +18,10 @@
 #include "ash/common/wm_root_window_controller.h"
 #include "ash/common/wm_shell.h"
 #include "ash/common/wm_window_property.h"
-#include "ash/display/display_manager.h"
 #include "ash/public/cpp/shelf_types.h"
 #include "ash/public/cpp/shell_window_ids.h"
-#include "ash/screen_util.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
-#include "ash/test/display_manager_test_api.h"
 #include "ash/test/shelf_view_test_api.h"
 #include "ash/wm/window_state_aura.h"
 #include "ash/wm/window_util.h"
@@ -37,7 +34,9 @@
 #include "ui/aura/test/test_windows.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_event_dispatcher.h"
+#include "ui/display/manager/display_manager.h"
 #include "ui/display/manager/managed_display_info.h"
+#include "ui/display/test/display_manager_test_api.h"
 #include "ui/events/event_utils.h"
 #include "ui/events/test/event_generator.h"
 #include "ui/views/widget/widget.h"
@@ -55,10 +54,6 @@ display::ManagedDisplayInfo CreateDisplayInfo(int64_t id,
   display::ManagedDisplayInfo info(id, ToDisplayName(id), false);
   info.SetBounds(bounds);
   return info;
-}
-
-DisplayManager* display_manager() {
-  return Shell::GetInstance()->display_manager();
 }
 
 }  // namespace
@@ -125,7 +120,7 @@ class PanelLayoutManagerTest : public test::AshTestBase {
     gfx::Rect panel_bounds = panel->GetBoundsInRootWindow();
     gfx::Point root_point = gfx::Point(panel_bounds.x(), panel_bounds.y());
     display::Display display =
-        ScreenUtil::FindDisplayContainingPoint(root_point);
+        display_manager()->FindDisplayContainingPoint(root_point);
 
     gfx::Rect panel_bounds_in_screen = panel->GetBoundsInScreen();
     gfx::Point screen_bottom_right = gfx::Point(
@@ -311,7 +306,8 @@ TEST_F(PanelLayoutManagerTest, UndockTest) {
   std::vector<display::ManagedDisplayInfo> info_list;
 
   const int64_t internal_display_id =
-      test::DisplayManagerTestApi(Shell::GetInstance()->display_manager())
+      display::test::DisplayManagerTestApi(
+          Shell::GetInstance()->display_manager())
           .SetFirstDisplayAsInternalDisplay();
 
   // Create the primary display info.
@@ -342,7 +338,8 @@ TEST_F(PanelLayoutManagerTest, DockUndockTest) {
   std::vector<display::ManagedDisplayInfo> info_list;
 
   const int64_t internal_display_id =
-      test::DisplayManagerTestApi(Shell::GetInstance()->display_manager())
+      display::test::DisplayManagerTestApi(
+          Shell::GetInstance()->display_manager())
           .SetFirstDisplayAsInternalDisplay();
 
   // Create the primary display info.

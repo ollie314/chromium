@@ -293,7 +293,7 @@ void LayoutBox::styleDidChange(StyleDifference diff,
   }
 
   if (isDocumentElement() || isBody()) {
-    document().view()->recalculateScrollbarOverlayStyle(
+    document().view()->recalculateScrollbarOverlayColorTheme(
         document().view()->documentBackgroundColor());
     document().view()->recalculateCustomScrollbarStyle();
     if (LayoutView* layoutView = view()) {
@@ -404,6 +404,11 @@ void LayoutBox::updateGridPositionAfterStyleChange(
       oldStyle->hasOutOfFlowPosition() == style()->hasOutOfFlowPosition())
     return;
 
+  // Positioned items don't participate on the layout of the grid,
+  // so we don't need to mark the grid as dirty if they change positions.
+  if (oldStyle->hasOutOfFlowPosition() && style()->hasOutOfFlowPosition())
+    return;
+
   // It should be possible to not dirty the grid in some cases (like moving an
   // explicitly placed grid item).
   // For now, it's more simple to just always recompute the grid.
@@ -465,7 +470,7 @@ void LayoutBox::layout() {
     return;
   }
 
-  LayoutState state(*this, locationOffset());
+  LayoutState state(*this);
   while (child) {
     child->layoutIfNeeded();
     ASSERT(!child->needsLayout());
@@ -668,9 +673,12 @@ void LayoutBox::scrollRectToVisible(const LayoutRect& rect,
     }
   }
 
-  // If we are fixed-position, it is useless to scroll the parent.
-  if (hasLayer() && layer()->scrollsWithViewport())
+  // If we are fixed-position and scroll with the viewport, it is useless to
+  // scroll the parent.
+  if (style()->position() == FixedPosition && hasLayer() &&
+      layer()->scrollsWithViewport()) {
     return;
+  }
 
   if (frame()->page()->autoscrollController().autoscrollInProgress())
     parentBox = enclosingScrollableBox();
@@ -704,6 +712,15 @@ void LayoutBox::updateLayerTransformAfterLayout() {
   // transform after layout.
   if (hasLayer())
     layer()->updateTransformationMatrix();
+}
+
+LayoutUnit LayoutBox::logicalHeightWithVisibleOverflow() const {
+  if (!m_overflow || hasOverflowClip())
+    return logicalHeight();
+  LayoutRect overflow = layoutOverflowRect();
+  if (style()->isHorizontalWritingMode())
+    return overflow.maxY();
+  return overflow.maxX();
 }
 
 LayoutUnit LayoutBox::constrainLogicalWidthByMinMax(LayoutUnit logicalWidth,
@@ -1008,6 +1025,12 @@ LayoutBox* LayoutBox::findAutoscrollable(LayoutObject* layoutObject) {
   while (
       layoutObject &&
       !(layoutObject->isBox() && toLayoutBox(layoutObject)->canAutoscroll())) {
+    // Do not start autoscroll when the node is inside a fixed-position element.
+    if (layoutObject->isBox() && toLayoutBox(layoutObject)->hasLayer() &&
+        toLayoutBox(layoutObject)->layer()->scrollsWithViewport()) {
+      return nullptr;
+    }
+
     if (!layoutObject->parent() &&
         layoutObject->node() == layoutObject->document() &&
         layoutObject->document().localOwner())
@@ -1016,7 +1039,8 @@ LayoutBox* LayoutBox::findAutoscrollable(LayoutObject* layoutObject) {
       layoutObject = layoutObject->parent();
   }
 
-  return layoutObject && layoutObject->isBox() ? toLayoutBox(layoutObject) : 0;
+  return layoutObject && layoutObject->isBox() ? toLayoutBox(layoutObject)
+                                               : nullptr;
 }
 
 static inline int adjustedScrollDelta(int beginningDelta) {
@@ -1348,7 +1372,7 @@ void LayoutBox::clearExtraInlineAndBlockOffests() {
 
 LayoutUnit LayoutBox::adjustBorderBoxLogicalWidthForBoxSizing(
     float width) const {
-  LayoutUnit bordersPlusPadding = borderAndPaddingLogicalWidth();
+  LayoutUnit bordersPlusPadding = collapsedBorderAndCSSPaddingLogicalWidth();
   LayoutUnit result(width);
   if (style()->boxSizing() == BoxSizingContentBox)
     return result + bordersPlusPadding;
@@ -1357,7 +1381,7 @@ LayoutUnit LayoutBox::adjustBorderBoxLogicalWidthForBoxSizing(
 
 LayoutUnit LayoutBox::adjustBorderBoxLogicalHeightForBoxSizing(
     float height) const {
-  LayoutUnit bordersPlusPadding = borderAndPaddingLogicalHeight();
+  LayoutUnit bordersPlusPadding = collapsedBorderAndCSSPaddingLogicalHeight();
   LayoutUnit result(height);
   if (style()->boxSizing() == BoxSizingContentBox)
     return result + bordersPlusPadding;
@@ -1368,7 +1392,7 @@ LayoutUnit LayoutBox::adjustContentBoxLogicalWidthForBoxSizing(
     float width) const {
   LayoutUnit result(width);
   if (style()->boxSizing() == BoxSizingBorderBox)
-    result -= borderAndPaddingLogicalWidth();
+    result -= collapsedBorderAndCSSPaddingLogicalWidth();
   return std::max(LayoutUnit(), result);
 }
 
@@ -1376,7 +1400,7 @@ LayoutUnit LayoutBox::adjustContentBoxLogicalHeightForBoxSizing(
     float height) const {
   LayoutUnit result(height);
   if (style()->boxSizing() == BoxSizingBorderBox)
-    result -= borderAndPaddingLogicalHeight();
+    result -= collapsedBorderAndCSSPaddingLogicalHeight();
   return std::max(LayoutUnit(), result);
 }
 
@@ -1769,10 +1793,11 @@ void LayoutBox::excludeScrollbars(
     LayoutRect& rect,
     OverlayScrollbarClipBehavior overlayScrollbarClipBehavior) const {
   if (PaintLayerScrollableArea* scrollableArea = this->getScrollableArea()) {
-    if (shouldPlaceBlockDirectionScrollbarOnLogicalLeft())
+    if (shouldPlaceBlockDirectionScrollbarOnLogicalLeft()) {
       rect.move(
           scrollableArea->verticalScrollbarWidth(overlayScrollbarClipBehavior),
           0);
+    }
     rect.contract(
         scrollableArea->verticalScrollbarWidth(overlayScrollbarClipBehavior),
         scrollableArea->horizontalScrollbarHeight(
@@ -2028,9 +2053,6 @@ void LayoutBox::positionLineBox(InlineBox* box) {
     box->remove(DontMarkLineBoxes);
     box->destroy();
   } else if (isAtomicInlineLevel()) {
-    // FIXME: the call to roundedLayoutPoint() below is temporary and should be
-    // removed once the transition to LayoutUnit-based types is complete
-    // (crbug.com/321237).
     setLocationAndUpdateOverflowControlsIfNeeded(box->topLeft());
     setInlineBoxWrapper(box);
   }
@@ -2233,30 +2255,23 @@ bool LayoutBox::needsForcedBreakBefore(EBreak previousBreakAfterValue) const {
 }
 
 bool LayoutBox::paintedOutputOfObjectHasNoEffectRegardlessOfSize() const {
-  // In case scrollbars got repositioned (which will typically happen if the box
-  // got resized), we cannot skip invalidation.
-  if (hasNonCompositedScrollbars())
+  if (hasNonCompositedScrollbars() || getSelectionState() != SelectionNone ||
+      hasBoxDecorationBackground() || styleRef().hasBoxDecorations() ||
+      styleRef().hasVisualOverflowingEffect())
     return false;
 
-  // Cannot skip paint invalidation if the box has real things to paint.
-  if (getSelectionState() != SelectionNone || hasBoxDecorationBackground() ||
-      styleRef().hasBoxDecorations() || styleRef().hasVisualOverflowingEffect())
-    return false;
-
-  // If the box has clip, we need issue a paint invalidation to cover the
-  // changed part of children because of change of clip when the box got
-  // resized. In theory the children should invalidate themselves when ancestor
-  // clip changes, but for now this is missing and ensuring it may hurt
-  // performance.
-  // TODO(wangxianzhu): Paint invalidation for clip change will be different in
-  //                    spv2.
-  if (hasClipRelatedProperty() || hasControlClip())
-    return false;
+  // If the box has clip or mask, we need issue paint invalidation to cover
+  // the changed part of children when the box got resized. In SPv2 this is
+  // handled by detecting paint property changes.
+  if (!RuntimeEnabledFeatures::slimmingPaintV2Enabled()) {
+    if (hasClipRelatedProperty() || hasControlClip() || hasMask())
+      return false;
+  }
 
   return true;
 }
 
-LayoutRect LayoutBox::localOverflowRectForPaintInvalidation() const {
+LayoutRect LayoutBox::localVisualRect() const {
   if (style()->visibility() != EVisibility::Visible)
     return LayoutRect();
 
@@ -2381,7 +2396,7 @@ bool LayoutBox::mapToVisualRectInAncestorSpace(
     // doesn't need viewport-adjusting.
     if (ancestor->style()->position() != FixedPosition &&
         container->isLayoutView() && position == FixedPosition)
-      toLayoutView(container)->adjustOffsetForFixedPosition(rect);
+      rect.move(toLayoutView(container)->offsetForFixedPosition(true));
     return true;
   }
 
@@ -2394,11 +2409,9 @@ bool LayoutBox::mapToVisualRectInAncestorSpace(
                                                      visualRectFlags);
 }
 
-void LayoutBox::inflateVisualRectForFilter(
-    LayoutRect& paintInvalidationRect) const {
+void LayoutBox::inflateVisualRectForFilter(LayoutRect& visualRect) const {
   if (layer() && layer()->hasFilterInducingProperty())
-    paintInvalidationRect =
-        layer()->mapLayoutRectForFilter(paintInvalidationRect);
+    visualRect = layer()->mapLayoutRectForFilter(visualRect);
 }
 
 void LayoutBox::updateLogicalWidth() {
@@ -3193,7 +3206,8 @@ LayoutUnit LayoutBox::computePercentageLogicalHeight(
         // cases, but it is preferable to the alternative (sizing intrinsically
         // and making the row end up too big).
         LayoutTableCell* cell = toLayoutTableCell(cb);
-        if (scrollsOverflowY() &&
+        if (style()->overflowY() != OverflowVisible &&
+            style()->overflowY() != OverflowHidden &&
             (!cell->style()->logicalHeight().isAuto() ||
              !cell->table()->style()->logicalHeight().isAuto()))
           return LayoutUnit();
@@ -3388,7 +3402,7 @@ LayoutUnit LayoutBox::computeReplacedLogicalHeightUsing(
 
       if (cb->isOutOfFlowPositioned() && cb->style()->height().isAuto() &&
           !(cb->style()->top().isAuto() || cb->style()->bottom().isAuto())) {
-        ASSERT_WITH_SECURITY_IMPLICATION(cb->isLayoutBlock());
+        SECURITY_DCHECK(cb->isLayoutBlock());
         LayoutBlock* block = toLayoutBlock(cb);
         LogicalExtentComputedValues computedValues;
         block->computeLogicalHeight(block->logicalHeight(), LayoutUnit(),
@@ -4546,7 +4560,7 @@ LayoutRect LayoutBox::localCaretRect(InlineBox* box,
   // is needed because we use offsets inside an "atomic" element to represent
   // positions before and after the element in deprecated editing offsets.
   if (node() &&
-      !(editingIgnoresContent(node()) || isDisplayInsideTable(node()))) {
+      !(editingIgnoresContent(*node()) || isDisplayInsideTable(node()))) {
     rect.setX(rect.x() + borderLeft() + paddingLeft());
     rect.setY(rect.y() + paddingTop() + borderTop());
   }
@@ -4695,18 +4709,65 @@ bool LayoutBox::hasNonCompositedScrollbars() const {
   return false;
 }
 
+void LayoutBox::updateFragmentationInfoForChild(LayoutBox& child) {
+  LayoutState* layoutState = view()->layoutState();
+  DCHECK(layoutState->isPaginated());
+  child.setOffsetToNextPage(LayoutUnit());
+  if (!pageLogicalHeightForOffset(child.logicalTop()))
+    return;
+
+  LayoutUnit logicalTop = child.logicalTop();
+  LayoutUnit logicalHeight = child.logicalHeightWithVisibleOverflow();
+  LayoutUnit spaceLeft =
+      pageRemainingLogicalHeightForOffset(logicalTop, AssociateWithLatterPage);
+  if (spaceLeft < logicalHeight)
+    child.setOffsetToNextPage(spaceLeft);
+}
+
+bool LayoutBox::childNeedsRelayoutForPagination(const LayoutBox& child) const {
+  // TODO(mstensho): Should try to get this to work for floats too, instead of
+  // just marking and bailing here.
+  if (child.isFloating())
+    return true;
+  LayoutUnit logicalTop = child.logicalTop();
+  // Figure out if we really need to force re-layout of the child. We only need
+  // to do this if there's a chance that we need to recalculate pagination
+  // struts inside.
+  if (LayoutUnit pageLogicalHeight = pageLogicalHeightForOffset(logicalTop)) {
+    LayoutUnit logicalHeight = child.logicalHeightWithVisibleOverflow();
+    LayoutUnit remainingSpace = pageRemainingLogicalHeightForOffset(
+        logicalTop, AssociateWithLatterPage);
+    if (child.offsetToNextPage()) {
+      // We need to relayout unless we're going to break at the exact same
+      // location as before.
+      if (child.offsetToNextPage() != remainingSpace)
+        return true;
+    } else if (logicalHeight > remainingSpace) {
+      // Last time we laid out this child, we didn't need to break, but now we
+      // have to. So we need to relayout.
+      return true;
+    }
+  } else if (child.offsetToNextPage()) {
+    // This child did previously break, but it won't anymore, because we no
+    // longer have a known fragmentainer height.
+    return true;
+  }
+
+  // It seems that we can skip layout of this child, but we need to ask the flow
+  // thread for permission first. We currently cannot skip over objects
+  // containing column spanners.
+  LayoutFlowThread* flowThread = child.flowThreadContainingBlock();
+  return flowThread && !flowThread->canSkipLayout(child);
+}
+
 void LayoutBox::markChildForPaginationRelayoutIfNeeded(
     LayoutBox& child,
     SubtreeLayoutScope& layoutScope) {
   DCHECK(!child.needsLayout());
   LayoutState* layoutState = view()->layoutState();
-  if (!layoutState->isPaginated())
-    return;
 
-  if (layoutState->pageLogicalHeightChanged() ||
-      (layoutState->pageLogicalHeight() &&
-       layoutState->pageLogicalOffset(child, child.logicalTop()) !=
-           child.pageLogicalOffset()))
+  if (layoutState->paginationStateChanged() ||
+      (layoutState->isPaginated() && childNeedsRelayoutForPagination(child)))
     layoutScope.setChildNeedsLayout(&child);
 }
 
@@ -5215,8 +5276,7 @@ LayoutObject* LayoutBox::splitAnonymousBoxesAroundChild(
       LayoutBox* parentBox = toLayoutBox(boxToSplit->parent());
       // We need to invalidate the |parentBox| before inserting the new node
       // so that the table paint invalidation logic knows the structure is
-      // dirty.
-      // See for example LayoutTableCell:localOverflowRectForPaintInvalidation.
+      // dirty. See for example LayoutTableCell:localVisualRect().
       markBoxForRelayoutAfterSplit(parentBox);
       parentBox->virtualChildren()->insertChildNode(parentBox, postBox,
                                                     boxToSplit->nextSibling());
@@ -5259,10 +5319,8 @@ LayoutUnit LayoutBox::offsetFromLogicalTopOfFirstPage() const {
     return LayoutUnit();
 
   if (layoutState->layoutObject() == this) {
-    LayoutSize offsetDelta =
-        layoutState->layoutOffset() - layoutState->pageOffset();
-    return isHorizontalWritingMode() ? offsetDelta.height()
-                                     : offsetDelta.width();
+    LayoutSize offset = layoutState->paginationOffset();
+    return isHorizontalWritingMode() ? offset.height() : offset.width();
   }
 
   // A LayoutBlock always establishes a layout state, and this method is only
@@ -5276,10 +5334,10 @@ LayoutUnit LayoutBox::offsetFromLogicalTopOfFirstPage() const {
   return containerBlock->offsetFromLogicalTopOfFirstPage() + logicalTop();
 }
 
-void LayoutBox::setPageLogicalOffset(LayoutUnit offset) {
+void LayoutBox::setOffsetToNextPage(LayoutUnit offset) {
   if (!m_rareData && !offset)
     return;
-  ensureRareData().m_pageLogicalOffset = offset;
+  ensureRareData().m_offsetToNextPage = offset;
 }
 
 void LayoutBox::logicalExtentAfterUpdatingLogicalWidth(
@@ -5438,10 +5496,10 @@ ShapeOutsideInfo* LayoutBox::shapeOutsideInfo() const {
                                                : nullptr;
 }
 
-void LayoutBox::clearPreviousPaintInvalidationRects() {
-  LayoutBoxModelObject::clearPreviousPaintInvalidationRects();
+void LayoutBox::clearPreviousVisualRects() {
+  LayoutBoxModelObject::clearPreviousVisualRects();
   if (PaintLayerScrollableArea* scrollableArea = this->getScrollableArea())
-    scrollableArea->clearPreviousPaintInvalidationRects();
+    scrollableArea->clearPreviousVisualRects();
 }
 
 void LayoutBox::setPercentHeightContainer(LayoutBlock* container) {

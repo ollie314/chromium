@@ -16,6 +16,16 @@ TrayTiles::TrayTiles(SystemTray* system_tray)
 
 TrayTiles::~TrayTiles() {}
 
+views::View* TrayTiles::GetHelpButtonView() const {
+  if (!default_view_)
+    return nullptr;
+  return default_view_->GetHelpButtonView();
+}
+
+views::View* TrayTiles::CreateDefaultViewForTesting(LoginStatus status) {
+  return CreateDefaultView(status);
+}
+
 views::View* TrayTiles::CreateDefaultView(LoginStatus status) {
   CHECK(default_view_ == nullptr);
   default_view_ = new TilesDefaultView(this, status);

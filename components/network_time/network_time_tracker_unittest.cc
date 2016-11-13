@@ -10,6 +10,7 @@
 
 #include "base/compiler_specific.h"
 #include "base/memory/ptr_util.h"
+#include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
 #include "base/test/histogram_tester.h"
 #include "base/test/simple_test_clock.h"
@@ -39,12 +40,13 @@ const char kWallClockBackwardsHistogram[] =
     "NetworkTimeTracker.WallClockRanBackwards";
 }  // namespace
 
-class NetworkTimeTrackerTest : public FieldTrialTest {
+class NetworkTimeTrackerTest : public ::testing::Test {
  public:
   ~NetworkTimeTrackerTest() override {}
 
   NetworkTimeTrackerTest()
       : io_thread_("IO thread"),
+        field_trial_test_(FieldTrialTest::CreateForUnitTest()),
         clock_(new base::SimpleTestClock),
         tick_clock_(new base::SimpleTestTickClock),
         test_server_(new net::EmbeddedTestServer) {
@@ -53,7 +55,9 @@ class NetworkTimeTrackerTest : public FieldTrialTest {
     EXPECT_TRUE(io_thread_.StartWithOptions(thread_options));
     NetworkTimeTracker::RegisterPrefs(pref_service_.registry());
 
-    SetNetworkQueriesWithVariationsService(true, 0.0 /* query probability */);
+    field_trial_test_->SetNetworkQueriesWithVariationsService(
+        true, 0.0 /* query probability */,
+        NetworkTimeTracker::FETCHES_IN_BACKGROUND_AND_ON_DEMAND);
 
     tracker_.reset(new NetworkTimeTracker(
         std::unique_ptr<base::Clock>(clock_),
@@ -85,30 +89,6 @@ class NetworkTimeTrackerTest : public FieldTrialTest {
         std::unique_ptr<base::Clock>(clock_),
         std::unique_ptr<base::TickClock>(tick_clock_), &pref_service_,
         new net::TestURLRequestContextGetter(io_thread_.task_runner())));
-  }
-
-  // Returns a valid time response.  Update as follows:
-  //
-  // curl http://clients2.google.com/time/1/current?cup2key=1:123123123
-  //
-  // where 1 is the key version and 123123123 is the nonce.  Copy the nonce, the
-  // response, and the x-cup-server-proof header into the test.
-  static std::unique_ptr<net::test_server::HttpResponse>
-  GoodTimeResponseHandler(const net::test_server::HttpRequest& request) {
-    net::test_server::BasicHttpResponse* response =
-        new net::test_server::BasicHttpResponse();
-    response->set_code(net::HTTP_OK);
-    response->set_content(
-        ")]}'\n"
-        "{\"current_time_millis\":1461621971825,\"server_nonce\":-6."
-        "006853099049523E85}");
-    response->AddCustomHeader(
-        "x-cup-server-proof",
-        "304402202e0f24db1ea69f1bbe81da4108f381fcf7a2781c53cf7663cb47083cb5fe8e"
-        "fd"
-        "022009d2b67c0deceaaf849f7c529be96701ed5f15d5efcaf401a94e0801accc9832:"
-        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
-    return std::unique_ptr<net::test_server::HttpResponse>(response);
   }
 
   // Good signature over invalid data, though made with a non-production key.
@@ -175,6 +155,7 @@ class NetworkTimeTrackerTest : public FieldTrialTest {
 
  protected:
   base::Thread io_thread_;
+  std::unique_ptr<FieldTrialTest> field_trial_test_;
   base::MessageLoop message_loop_;
   base::TimeDelta resolution_;
   base::TimeDelta latency_;
@@ -482,8 +463,7 @@ TEST_F(NetworkTimeTrackerTest, UpdateFromNetwork) {
   EXPECT_EQ(base::TimeDelta::FromMinutes(0),
             tracker_->GetTimerDelayForTesting());
 
-  test_server_->RegisterRequestHandler(
-      base::Bind(&NetworkTimeTrackerTest::GoodTimeResponseHandler));
+  test_server_->RegisterRequestHandler(base::Bind(&GoodTimeResponseHandler));
   EXPECT_TRUE(test_server_->Start());
   tracker_->SetTimeServerURLForTesting(test_server_->GetURL("/"));
   EXPECT_TRUE(tracker_->QueryTimeServiceForTesting());
@@ -503,13 +483,98 @@ TEST_F(NetworkTimeTrackerTest, UpdateFromNetwork) {
   histograms.ExpectBucketCount(kFetchValidHistogram, true, 1);
 }
 
-TEST_F(NetworkTimeTrackerTest, NoNetworkQueryWhileSynced) {
-  test_server_->RegisterRequestHandler(
-      base::Bind(&NetworkTimeTrackerTest::GoodTimeResponseHandler));
+TEST_F(NetworkTimeTrackerTest, StartTimeFetch) {
+  test_server_->RegisterRequestHandler(base::Bind(&GoodTimeResponseHandler));
   EXPECT_TRUE(test_server_->Start());
   tracker_->SetTimeServerURLForTesting(test_server_->GetURL("/"));
 
-  SetNetworkQueriesWithVariationsService(true, 0.0);
+  base::Time out_network_time;
+  EXPECT_EQ(NetworkTimeTracker::NETWORK_TIME_NO_SYNC_ATTEMPT,
+            tracker_->GetNetworkTime(&out_network_time, nullptr));
+
+  base::RunLoop run_loop;
+  EXPECT_TRUE(tracker_->StartTimeFetch(run_loop.QuitClosure()));
+  tracker_->WaitForFetchForTesting(123123123);
+  run_loop.Run();
+
+  EXPECT_EQ(NetworkTimeTracker::NETWORK_TIME_AVAILABLE,
+            tracker_->GetNetworkTime(&out_network_time, nullptr));
+  EXPECT_EQ(base::Time::UnixEpoch() +
+                base::TimeDelta::FromMilliseconds(1461621971825),
+            out_network_time);
+  // Should see no backoff in the success case.
+  EXPECT_EQ(base::TimeDelta::FromMinutes(60),
+            tracker_->GetTimerDelayForTesting());
+}
+
+// Tests that when StartTimeFetch() is called with a query already in
+// progress, it calls the callback when that query completes.
+TEST_F(NetworkTimeTrackerTest, StartTimeFetchWithQueryInProgress) {
+  test_server_->RegisterRequestHandler(base::Bind(&GoodTimeResponseHandler));
+  EXPECT_TRUE(test_server_->Start());
+  tracker_->SetTimeServerURLForTesting(test_server_->GetURL("/"));
+
+  base::Time out_network_time;
+  EXPECT_EQ(NetworkTimeTracker::NETWORK_TIME_NO_SYNC_ATTEMPT,
+            tracker_->GetNetworkTime(&out_network_time, nullptr));
+
+  EXPECT_TRUE(tracker_->QueryTimeServiceForTesting());
+
+  base::RunLoop run_loop;
+  EXPECT_TRUE(tracker_->StartTimeFetch(run_loop.QuitClosure()));
+  tracker_->WaitForFetchForTesting(123123123);
+  run_loop.Run();
+
+  EXPECT_EQ(NetworkTimeTracker::NETWORK_TIME_AVAILABLE,
+            tracker_->GetNetworkTime(&out_network_time, nullptr));
+  EXPECT_EQ(base::Time::UnixEpoch() +
+                base::TimeDelta::FromMilliseconds(1461621971825),
+            out_network_time);
+  // Should see no backoff in the success case.
+  EXPECT_EQ(base::TimeDelta::FromMinutes(60),
+            tracker_->GetTimerDelayForTesting());
+}
+
+// Tests that StartTimeFetch() returns false if called while network
+// time is available.
+TEST_F(NetworkTimeTrackerTest, StartTimeFetchWhileSynced) {
+  test_server_->RegisterRequestHandler(base::Bind(&GoodTimeResponseHandler));
+  EXPECT_TRUE(test_server_->Start());
+  tracker_->SetTimeServerURLForTesting(test_server_->GetURL("/"));
+
+  base::Time in_network_time = clock_->Now();
+  UpdateNetworkTime(in_network_time, resolution_, latency_,
+                    tick_clock_->NowTicks());
+
+  // No query should be started so long as NetworkTimeTracker is synced.
+  base::RunLoop run_loop;
+  EXPECT_FALSE(tracker_->StartTimeFetch(run_loop.QuitClosure()));
+}
+
+// Tests that StartTimeFetch() returns false if the field trial
+// is not configured to allow on-demand time fetches.
+TEST_F(NetworkTimeTrackerTest, StartTimeFetchWithoutVariationsParam) {
+  field_trial_test_->SetNetworkQueriesWithVariationsService(
+      true, 0.0, NetworkTimeTracker::FETCHES_IN_BACKGROUND_ONLY);
+  test_server_->RegisterRequestHandler(base::Bind(&GoodTimeResponseHandler));
+  EXPECT_TRUE(test_server_->Start());
+  tracker_->SetTimeServerURLForTesting(test_server_->GetURL("/"));
+
+  base::Time out_network_time;
+  EXPECT_EQ(NetworkTimeTracker::NETWORK_TIME_NO_SYNC_ATTEMPT,
+            tracker_->GetNetworkTime(&out_network_time, nullptr));
+
+  base::RunLoop run_loop;
+  EXPECT_FALSE(tracker_->StartTimeFetch(run_loop.QuitClosure()));
+}
+
+TEST_F(NetworkTimeTrackerTest, NoNetworkQueryWhileSynced) {
+  test_server_->RegisterRequestHandler(base::Bind(&GoodTimeResponseHandler));
+  EXPECT_TRUE(test_server_->Start());
+  tracker_->SetTimeServerURLForTesting(test_server_->GetURL("/"));
+
+  field_trial_test_->SetNetworkQueriesWithVariationsService(
+      true, 0.0, NetworkTimeTracker::FETCHES_IN_BACKGROUND_AND_ON_DEMAND);
   base::Time in_network_time = clock_->Now();
   UpdateNetworkTime(in_network_time, resolution_, latency_,
                     tick_clock_->NowTicks());
@@ -520,7 +585,8 @@ TEST_F(NetworkTimeTrackerTest, NoNetworkQueryWhileSynced) {
   EXPECT_EQ(base::TimeDelta::FromMinutes(6),
             tracker_->GetTimerDelayForTesting());
 
-  SetNetworkQueriesWithVariationsService(true, 1.0);
+  field_trial_test_->SetNetworkQueriesWithVariationsService(
+      true, 1.0, NetworkTimeTracker::FETCHES_IN_BACKGROUND_AND_ON_DEMAND);
   EXPECT_TRUE(tracker_->QueryTimeServiceForTesting());
   tracker_->WaitForFetchForTesting(123123123);
   EXPECT_EQ(base::TimeDelta::FromMinutes(60),
@@ -529,13 +595,16 @@ TEST_F(NetworkTimeTrackerTest, NoNetworkQueryWhileSynced) {
 
 TEST_F(NetworkTimeTrackerTest, NoNetworkQueryWhileFeatureDisabled) {
   // Disable network time queries and check that a query is not sent.
-  SetNetworkQueriesWithVariationsService(false, 0.0);
+  field_trial_test_->SetNetworkQueriesWithVariationsService(
+      false, 0.0, NetworkTimeTracker::FETCHES_IN_BACKGROUND_AND_ON_DEMAND);
   EXPECT_FALSE(tracker_->QueryTimeServiceForTesting());
-  EXPECT_EQ(base::TimeDelta::FromMinutes(6),
+  // The timer is not started when the feature is disabled.
+  EXPECT_EQ(base::TimeDelta::FromMinutes(0),
             tracker_->GetTimerDelayForTesting());
 
   // Enable time queries and check that a query is sent.
-  SetNetworkQueriesWithVariationsService(true, 0.0);
+  field_trial_test_->SetNetworkQueriesWithVariationsService(
+      true, 0.0, NetworkTimeTracker::FETCHES_IN_BACKGROUND_AND_ON_DEMAND);
   EXPECT_TRUE(tracker_->QueryTimeServiceForTesting());
   tracker_->WaitForFetchForTesting(123123123);
 }
@@ -625,7 +694,14 @@ TEST_F(NetworkTimeTrackerTest, UpdateFromNetworkServerError) {
   histograms.ExpectTotalCount(kFetchValidHistogram, 0);
 }
 
-TEST_F(NetworkTimeTrackerTest, UpdateFromNetworkNetworkError) {
+#if defined(OS_IOS)
+// http://crbug.com/658619
+#define MAYBE_UpdateFromNetworkNetworkError     \
+    DISABLED_UpdateFromNetworkNetworkError
+#else
+#define MAYBE_UpdateFromNetworkNetworkError UpdateFromNetworkNetworkError
+#endif
+TEST_F(NetworkTimeTrackerTest, MAYBE_UpdateFromNetworkNetworkError) {
   base::HistogramTester histograms;
   histograms.ExpectTotalCount(kFetchFailedHistogram, 0);
   histograms.ExpectTotalCount(kFetchValidHistogram, 0);
@@ -655,8 +731,7 @@ TEST_F(NetworkTimeTrackerTest, UpdateFromNetworkLargeResponse) {
   histograms.ExpectTotalCount(kFetchFailedHistogram, 0);
   histograms.ExpectTotalCount(kFetchValidHistogram, 0);
 
-  test_server_->RegisterRequestHandler(
-      base::Bind(&NetworkTimeTrackerTest::GoodTimeResponseHandler));
+  test_server_->RegisterRequestHandler(base::Bind(&GoodTimeResponseHandler));
   EXPECT_TRUE(test_server_->Start());
   tracker_->SetTimeServerURLForTesting(test_server_->GetURL("/"));
 

@@ -8,6 +8,7 @@
 #include "bindings/core/v8/ScriptPromise.h"
 #include "bindings/core/v8/ScriptValue.h"
 #include "bindings/core/v8/ScriptWrappable.h"
+#include "components/payments/payment_request.mojom-blink.h"
 #include "core/dom/ContextLifecycleObserver.h"
 #include "core/events/EventTarget.h"
 #include "modules/ModulesExport.h"
@@ -19,7 +20,6 @@
 #include "mojo/public/cpp/bindings/binding.h"
 #include "platform/Timer.h"
 #include "platform/heap/Handle.h"
-#include "public/platform/modules/payments/payment_request.mojom-blink.h"
 #include "wtf/Compiler.h"
 #include "wtf/Noncopyable.h"
 #include "wtf/RefPtr.h"
@@ -35,7 +35,8 @@ class ScriptState;
 
 class MODULES_EXPORT PaymentRequest final
     : public EventTargetWithInlineData,
-      WTF_NON_EXPORTED_BASE(public mojom::blink::PaymentRequestClient),
+      WTF_NON_EXPORTED_BASE(
+          public payments::mojom::blink::PaymentRequestClient),
       public PaymentCompleter,
       public PaymentUpdater,
       public ContextLifecycleObserver,
@@ -102,11 +103,12 @@ class MODULES_EXPORT PaymentRequest final
   // LifecycleObserver:
   void contextDestroyed() override;
 
-  // mojom::blink::PaymentRequestClient:
-  void OnShippingAddressChange(mojom::blink::PaymentAddressPtr) override;
+  // payments::mojom::blink::PaymentRequestClient:
+  void OnShippingAddressChange(
+      payments::mojom::blink::PaymentAddressPtr) override;
   void OnShippingOptionChange(const String& shippingOptionId) override;
-  void OnPaymentResponse(mojom::blink::PaymentResponsePtr) override;
-  void OnError(mojom::blink::PaymentErrorReason) override;
+  void OnPaymentResponse(payments::mojom::blink::PaymentResponsePtr) override;
+  void OnError(payments::mojom::blink::PaymentErrorReason) override;
   void OnComplete() override;
   void OnAbort(bool abortedSuccessfully) override;
 
@@ -122,8 +124,8 @@ class MODULES_EXPORT PaymentRequest final
   Member<ScriptPromiseResolver> m_showResolver;
   Member<ScriptPromiseResolver> m_completeResolver;
   Member<ScriptPromiseResolver> m_abortResolver;
-  mojom::blink::PaymentRequestPtr m_paymentProvider;
-  mojo::Binding<mojom::blink::PaymentRequestClient> m_clientBinding;
+  payments::mojom::blink::PaymentRequestPtr m_paymentProvider;
+  mojo::Binding<payments::mojom::blink::PaymentRequestClient> m_clientBinding;
   Timer<PaymentRequest> m_completeTimer;
 };
 

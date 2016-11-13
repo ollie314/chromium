@@ -18,7 +18,7 @@ const char kSoftwareRenderingListJson[] = LONG_STRING_CONST(
 {
   "name": "software rendering list",
   // Please update the version number whenever you change this file.
-  "version": "11.17",
+  "version": "12.02",
   "entries": [
     {
       "id": 1,
@@ -1373,6 +1373,59 @@ LONG_STRING_CONST(
       },
       "features": [
         "gpu_rasterization"
+      ]
+    },
+)  // String split to avoid MSVC char limit.
+LONG_STRING_CONST(
+    {
+      "id": 125,
+      "description": "VirtualBox driver is unstable on linux.",
+      "cr_bugs": [656572, 658668],
+      "os": {
+        "type": "linux"
+      },
+      "vendor_id": "0x80ee",
+      "device_id": ["0xbeef"],
+      "features": [
+        "all"
+      ]
+    },
+    {
+      "id": 126,
+      "description": "Don't allow ES3 on Mac core profile < 4.1",
+      "cr_bugs": [295792],
+      "os": {
+        "type": "macosx"
+      },
+      "gl_version": {
+        "op": "<",
+        "value": "4.1"
+      },
+      "features": [
+        "webgl2"
+      ]
+    },
+    {
+      "id": 127,
+      "description": "AMD cards have rendering issues with GPU rasterization on Windows",
+      "cr_bugs": [660897],
+      "os": {
+        "type": "win"
+      },
+      "vendor_id": "0x1002",
+      "features": [
+        "gpu_rasterization"
+      ]
+    },
+    {
+      "id": 128,
+      "description": "WebGL 2 is not yet ready on Android",
+      "cr_bugs": [295792, 641635],
+      "os": {
+        "type": "android"
+      },
+      "features": [
+        "webgl2"
       ]
     }
   ]

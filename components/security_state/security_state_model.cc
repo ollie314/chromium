@@ -43,14 +43,15 @@ bool GetSecurityLevelAndHistogramValueForNonSecureFieldTrial(
   }
 
   if (switch_or_field_trial_group ==
-      switches::kMarkHttpWithPasswordsOrCcWithChip) {
+          switches::kMarkHttpWithPasswordsOrCcWithChip ||
+      switch_or_field_trial_group ==
+          switches::kMarkHttpWithPasswordsOrCcWithChipAndFormWarning) {
     if (displayed_sensitive_input_on_http) {
       *level = SecurityStateModel::HTTP_SHOW_WARNING;
-      *histogram_status = HTTP_SHOW_WARNING;
     } else {
       *level = SecurityStateModel::NONE;
-      *histogram_status = NEUTRAL;
     }
+    *histogram_status = HTTP_SHOW_WARNING;
     return true;
   }
 
@@ -64,7 +65,7 @@ SecurityStateModel::SecurityLevel GetSecurityLevelForNonSecureFieldTrial(
           switches::kMarkHttpAs);
   std::string group = base::FieldTrialList::FindFullName("MarkNonSecureAs");
 
-  const char kEnumeration[] = "MarkHttpAs";
+  const char kEnumeration[] = "SSL.MarkHttpAsStatus";
 
   SecurityStateModel::SecurityLevel level = SecurityStateModel::NONE;
   MarkHttpStatus status;
@@ -124,12 +125,15 @@ SecurityStateModel::SecurityLevel GetSecurityLevelForRequest(
     SecurityStateModel::ContentStatus mixed_content_status,
     SecurityStateModel::ContentStatus content_with_cert_errors_status) {
   DCHECK(visible_security_state.connection_info_initialized ||
-         visible_security_state.fails_malware_check);
+         visible_security_state.malicious_content_status !=
+             SecurityStateModel::MALICIOUS_CONTENT_STATUS_NONE);
 
   // Override the connection security information if the website failed the
   // browser's malware checks.
-  if (visible_security_state.fails_malware_check)
+  if (visible_security_state.malicious_content_status !=
+      SecurityStateModel::MALICIOUS_CONTENT_STATUS_NONE) {
     return SecurityStateModel::DANGEROUS;
+  }
 
   GURL url = visible_security_state.url;
 
@@ -207,9 +211,10 @@ void SecurityInfoForRequest(
     SecurityStateModel::SecurityInfo* security_info) {
   if (!visible_security_state.connection_info_initialized) {
     *security_info = SecurityStateModel::SecurityInfo();
-    security_info->fails_malware_check =
-        visible_security_state.fails_malware_check;
-    if (security_info->fails_malware_check) {
+    security_info->malicious_content_status =
+        visible_security_state.malicious_content_status;
+    if (security_info->malicious_content_status !=
+        SecurityStateModel::MALICIOUS_CONTENT_STATUS_NONE) {
       security_info->security_level = GetSecurityLevelForRequest(
           visible_security_state, client, SecurityStateModel::UNKNOWN_SHA1,
           SecurityStateModel::CONTENT_STATUS_UNKNOWN,
@@ -238,11 +243,12 @@ void SecurityInfoForRequest(
   security_info->sct_verify_statuses =
       visible_security_state.sct_verify_statuses;
 
-  security_info->fails_malware_check =
-      visible_security_state.fails_malware_check;
+  security_info->malicious_content_status =
+      visible_security_state.malicious_content_status;
 
-  security_info->displayed_private_user_data_input_on_http =
-      visible_security_state.displayed_password_field_on_http ||
+  security_info->displayed_password_field_on_http =
+      visible_security_state.displayed_password_field_on_http;
+  security_info->displayed_credit_card_field_on_http =
       visible_security_state.displayed_credit_card_field_on_http;
 
   security_info->security_level = GetSecurityLevelForRequest(
@@ -262,7 +268,8 @@ const SecurityStateModel::SecurityLevel
 
 SecurityStateModel::SecurityInfo::SecurityInfo()
     : security_level(SecurityStateModel::NONE),
-      fails_malware_check(false),
+      malicious_content_status(
+          SecurityStateModel::MALICIOUS_CONTENT_STATUS_NONE),
       sha1_deprecation_status(SecurityStateModel::NO_DEPRECATED_SHA1),
       mixed_content_status(SecurityStateModel::CONTENT_STATUS_NONE),
       content_with_cert_errors_status(SecurityStateModel::CONTENT_STATUS_NONE),
@@ -273,7 +280,8 @@ SecurityStateModel::SecurityInfo::SecurityInfo()
       key_exchange_group(0),
       obsolete_ssl_status(net::OBSOLETE_SSL_NONE),
       pkp_bypassed(false),
-      displayed_private_user_data_input_on_http(false) {}
+      displayed_password_field_on_http(false),
+      displayed_credit_card_field_on_http(false) {}
 
 SecurityStateModel::SecurityInfo::~SecurityInfo() {}
 
@@ -293,7 +301,8 @@ void SecurityStateModel::SetClient(SecurityStateModelClient* client) {
 }
 
 SecurityStateModel::VisibleSecurityState::VisibleSecurityState()
-    : fails_malware_check(false),
+    : malicious_content_status(
+          SecurityStateModel::MALICIOUS_CONTENT_STATUS_NONE),
       connection_info_initialized(false),
       cert_status(0),
       connection_status(0),
@@ -312,7 +321,7 @@ SecurityStateModel::VisibleSecurityState::~VisibleSecurityState() {}
 bool SecurityStateModel::VisibleSecurityState::operator==(
     const SecurityStateModel::VisibleSecurityState& other) const {
   return (url == other.url &&
-          fails_malware_check == other.fails_malware_check &&
+          malicious_content_status == other.malicious_content_status &&
           !!certificate == !!other.certificate &&
           (certificate ? certificate->Equals(other.certificate.get()) : true) &&
           connection_status == other.connection_status &&

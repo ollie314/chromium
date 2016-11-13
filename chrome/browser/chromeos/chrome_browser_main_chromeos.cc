@@ -30,6 +30,7 @@
 #include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
 #include "chrome/browser/chromeos/accessibility/magnification_manager.h"
 #include "chrome/browser/chromeos/accessibility/spoken_feedback_event_rewriter.h"
+#include "chrome/browser/chromeos/app_mode/arc/arc_kiosk_app_manager.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_app_launch_error.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_app_manager.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_mode_idle_app_name_notification.h"
@@ -53,6 +54,7 @@
 #include "chrome/browser/chromeos/login/helper.h"
 #include "chrome/browser/chromeos/login/lock/screen_locker.h"
 #include "chrome/browser/chromeos/login/login_wizard.h"
+#include "chrome/browser/chromeos/login/session/chrome_session_manager.h"
 #include "chrome/browser/chromeos/login/session/user_session_manager.h"
 #include "chrome/browser/chromeos/login/startup_utils.h"
 #include "chrome/browser/chromeos/login/users/chrome_user_manager.h"
@@ -60,6 +62,8 @@
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/net/network_connect_delegate_chromeos.h"
 #include "chrome/browser/chromeos/net/network_portal_detector_impl.h"
+#include "chrome/browser/chromeos/net/network_pref_state_observer.h"
+#include "chrome/browser/chromeos/net/network_throttling_observer.h"
 #include "chrome/browser/chromeos/net/wake_on_wifi_manager.h"
 #include "chrome/browser/chromeos/options/cert_library.h"
 #include "chrome/browser/chromeos/ownership/owner_settings_service_chromeos_factory.h"
@@ -112,7 +116,6 @@
 #include "chromeos/dbus/session_manager_client.h"
 #include "chromeos/disks/disk_mount_manager.h"
 #include "chromeos/login/login_state.h"
-#include "chromeos/login/user_names.h"
 #include "chromeos/login_event_recorder.h"
 #include "chromeos/network/network_change_notifier_chromeos.h"
 #include "chromeos/network/network_change_notifier_factory_chromeos.h"
@@ -129,6 +132,7 @@
 #include "components/signin/core/account_id/account_id.h"
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
+#include "components/user_manager/user_names.h"
 #include "components/wallpaper/wallpaper_manager_base.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
@@ -332,7 +336,7 @@ void ChromeBrowserMainPartsChromeos::PreEarlyInitialization() {
       !parsed_command_line().HasSwitch(switches::kGuestSession)) {
     singleton_command_line->AppendSwitchASCII(
         switches::kLoginUser,
-        cryptohome::Identification(login::StubAccountId()).id());
+        cryptohome::Identification(user_manager::StubAccountId()).id());
     if (!parsed_command_line().HasSwitch(switches::kLoginProfile)) {
       singleton_command_line->AppendSwitchASCII(switches::kLoginProfile,
                                                 chrome::kTestUserProfileDir);
@@ -411,6 +415,8 @@ void ChromeBrowserMainPartsChromeos::PreMainMessageLoopRun() {
   DeviceOAuth2TokenServiceFactory::Initialize();
 
   wake_on_wifi_manager_.reset(new WakeOnWifiManager());
+  network_throttling_observer_.reset(
+      new NetworkThrottlingObserver(g_browser_process->local_state()));
 
   arc_service_launcher_.reset(new arc::ArcServiceLauncher());
   arc_service_launcher_->Initialize();
@@ -436,6 +442,7 @@ void ChromeBrowserMainPartsChromeos::PreProfileInit() {
   // -- just before CreateProfile().
 
   g_browser_process->platform_part()->InitializeChromeUserManager();
+  g_browser_process->platform_part()->InitializeSessionManager();
 
   ScreenLocker::InitClass();
 
@@ -517,6 +524,8 @@ void ChromeBrowserMainPartsChromeos::PreProfileInit() {
 
   power_prefs_.reset(new PowerPrefs(PowerPolicyController::Get()));
 
+  arc_kiosk_app_manager_.reset(new ArcKioskAppManager());
+
   // In Aura builds this will initialize ash::Shell.
   ChromeBrowserMainPartsLinux::PreProfileInit();
 
@@ -543,7 +552,8 @@ void ChromeBrowserMainPartsChromeos::PreProfileInit() {
     // In case of multi-profiles --login-profile will contain user_id_hash.
     std::string user_id_hash =
         parsed_command_line().GetSwitchValueASCII(switches::kLoginProfile);
-    user_manager->UserLoggedIn(account_id, user_id_hash, true);
+    session_manager::SessionManager::Get()->CreateSessionForRestart(
+        account_id, user_id_hash);
     VLOG(1) << "Relaunching browser for user: " << account_id.Serialize()
             << " with hash: " << user_id_hash;
   }
@@ -635,8 +645,8 @@ void ChromeBrowserMainPartsChromeos::PostProfileInit() {
   // Initialize the network portal detector for Chrome OS. The network
   // portal detector starts to listen for notifications from
   // NetworkStateHandler and initiates captive portal detection for
-  // active networks. Should be called before call to CreateSessionManager,
-  // because it depends on NetworkPortalDetector.
+  // active networks. Should be called before call to initialize
+  // ChromeSessionManager because it depends on NetworkPortalDetector.
   InitializeNetworkPortalDetector();
   {
 #if defined(GOOGLE_CHROME_BUILD)
@@ -650,6 +660,9 @@ void ChromeBrowserMainPartsChromeos::PostProfileInit() {
       network_portal_detector::GetInstance()->Enable(true);
   }
 
+  // Initialize an observer to update NetworkHandler's pref based services.
+  network_pref_state_observer_ = base::MakeUnique<NetworkPrefStateObserver>();
+
   // Initialize input methods.
   input_method::InputMethodManager* manager =
       input_method::InputMethodManager::Get();
@@ -660,9 +673,8 @@ void ChromeBrowserMainPartsChromeos::PostProfileInit() {
   manager->SetState(session_manager->GetDefaultIMEState(profile()));
 
   bool is_running_test = parameters().ui_task != nullptr;
-  g_browser_process->platform_part()->InitializeSessionManager(
+  g_browser_process->platform_part()->session_manager()->Initialize(
       parsed_command_line(), profile(), is_running_test);
-  g_browser_process->platform_part()->SessionManager()->Start();
 
   // Guest user profile is never initialized with locale settings,
   // so we need special handling for Guest session.
@@ -736,8 +748,6 @@ void ChromeBrowserMainPartsChromeos::PreBrowserStart() {
 
 void ChromeBrowserMainPartsChromeos::PostBrowserStart() {
   if (!chrome::IsRunningInMash()) {
-    system::InputDeviceSettings::Get()->InitTouchDevicesStatusFromLocalPrefs();
-
     // These are dependent on the ash::Shell singleton already having been
     // initialized. Consequently, these cannot be used when running as a mus
     // client.
@@ -768,6 +778,7 @@ void ChromeBrowserMainPartsChromeos::PostMainMessageLoopRun() {
   BootTimesRecorder::Get()->AddLogoutTimeMarker("UIMessageLoopEnded", true);
 
   arc_service_launcher_->Shutdown();
+  arc_kiosk_app_manager_.reset();
 
   // Destroy the application name notifier for Kiosk mode.
   KioskModeIdleAppNameNotification::Shutdown();
@@ -794,11 +805,13 @@ void ChromeBrowserMainPartsChromeos::PostMainMessageLoopRun() {
 
   // We should remove observers attached to D-Bus clients before
   // DBusThreadManager is shut down.
+  network_pref_state_observer_.reset();
   extension_volume_observer_.reset();
   peripheral_battery_observer_.reset();
   power_prefs_.reset();
   renderer_freezer_.reset();
   wake_on_wifi_manager_.reset();
+  network_throttling_observer_.reset();
   ScreenLocker::ShutDownClass();
   keyboard_event_rewriters_.reset();
   low_disk_notification_.reset();
@@ -877,9 +890,8 @@ void ChromeBrowserMainPartsChromeos::PostMainMessageLoopRun() {
   // parts of WebUI depends on NetworkPortalDetector.
   network_portal_detector::Shutdown();
 
-  g_browser_process->platform_part()->DestroyChromeUserManager();
-
   g_browser_process->platform_part()->ShutdownSessionManager();
+  g_browser_process->platform_part()->DestroyChromeUserManager();
 }
 
 void ChromeBrowserMainPartsChromeos::PostDestroyThreads() {

@@ -8,10 +8,6 @@
 #include "ui/aura/aura_export.h"
 #include "ui/gfx/geometry/vector2d.h"
 
-namespace gfx {
-class Point;
-}
-
 namespace aura {
 class Window;
 namespace client {
@@ -41,6 +37,7 @@ class AURA_EXPORT WindowMoveClient {
   // Ends a previously started move loop.
   virtual void EndMoveLoop() = 0;
 
+ protected:
   virtual ~WindowMoveClient() {}
 };
 

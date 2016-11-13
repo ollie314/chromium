@@ -8,7 +8,6 @@ import android.content.ComponentName;
 import android.support.v7.widget.RecyclerView.ViewHolder;
 import android.text.TextUtils;
 import android.view.LayoutInflater;
-import android.view.View;
 import android.view.ViewGroup;
 
 import org.chromium.base.metrics.RecordHistogram;
@@ -122,6 +121,9 @@ public class DownloadHistoryAdapter extends DateDividedAdapter implements Downlo
         for (DownloadItem item : result) {
             DownloadItemWrapper wrapper = createDownloadItemWrapper(item, isOffTheRecord);
 
+            // Don't display any incomplete downloads, yet.
+            if (item.getDownloadInfo().state() != DownloadState.COMPLETE) continue;
+
             // TODO(twellington): The native downloads service should remove externally deleted
             //                    downloads rather than passing them to Java.
             if (getExternallyDeletedItemsMap(isOffTheRecord).containsKey(wrapper.getId())) {
@@ -135,9 +137,9 @@ public class DownloadHistoryAdapter extends DateDividedAdapter implements Downlo
             }
         }
 
-        if (!isOffTheRecord) recordDownloadCountHistograms(mItemCounts, result.size());
+        if (!isOffTheRecord) recordDownloadCountHistograms(mItemCounts);
 
-        if (mLoadingDelegate.isLoaded()) filter(mLoadingDelegate.getPendingFilter());
+        onItemsRetrieved();
     }
 
     /** Called when the user's offline page history has been gathered. */
@@ -153,10 +155,20 @@ public class DownloadHistoryAdapter extends DateDividedAdapter implements Downlo
             mFilePathsToItemsMap.addItem(wrapper);
         }
 
-        if (mLoadingDelegate.isLoaded()) filter(mLoadingDelegate.getPendingFilter());
-
         RecordHistogram.recordCountHistogram("Android.DownloadManager.InitialCount.OfflinePage",
                 result.size());
+
+        onItemsRetrieved();
+    }
+
+    /**
+     * Should be called when download items or offline pages have been retrieved.
+     */
+    private void onItemsRetrieved() {
+        if (mLoadingDelegate.isLoaded()) {
+            recordTotalDownloadCountHistogram();
+            filter(mLoadingDelegate.getPendingFilter());
+        }
     }
 
     /** Returns the total size of all non-deleted downloaded items. */
@@ -181,9 +193,9 @@ public class DownloadHistoryAdapter extends DateDividedAdapter implements Downlo
 
     @Override
     public ViewHolder createViewHolder(ViewGroup parent) {
-        View v = LayoutInflater.from(parent.getContext()).inflate(
+        DownloadItemView v = (DownloadItemView) LayoutInflater.from(parent.getContext()).inflate(
                 R.layout.download_item_view, parent, false);
-        ((DownloadItemView) v).setSelectionDelegate(getSelectionDelegate());
+        v.setSelectionDelegate(getSelectionDelegate());
         return new DownloadHistoryItemViewHolder(v);
     }
 
@@ -192,17 +204,17 @@ public class DownloadHistoryAdapter extends DateDividedAdapter implements Downlo
         final DownloadHistoryItemWrapper item = (DownloadHistoryItemWrapper) timedItem;
 
         DownloadHistoryItemViewHolder holder = (DownloadHistoryItemViewHolder) current;
-        holder.displayItem(mBackendProvider, item);
+        holder.getItemView().displayItem(mBackendProvider, item);
     }
 
     /**
      * Updates the list when new information about a download comes in.
      */
-    public void onDownloadItemUpdated(DownloadItem item, boolean isOffTheRecord, int state) {
+    public void onDownloadItemUpdated(DownloadItem item, boolean isOffTheRecord) {
         if (isOffTheRecord && !mShowOffTheRecord) return;
 
         // The adapter currently only cares about completion events.
-        if (state != DownloadState.COMPLETE) return;
+        if (item.getDownloadInfo().state() != DownloadState.COMPLETE) return;
 
         List<DownloadItemWrapper> list = getDownloadItemList(isOffTheRecord);
         int index = findItemIndex(list, item.getId());
@@ -439,7 +451,7 @@ public class DownloadHistoryAdapter extends DateDividedAdapter implements Downlo
         return new OfflinePageItemWrapper(item, mBackendProvider, mParentComponent);
     }
 
-    private void recordDownloadCountHistograms(int[] itemCounts, int totalCount) {
+    private void recordDownloadCountHistograms(int[] itemCounts) {
         RecordHistogram.recordCountHistogram("Android.DownloadManager.InitialCount.Audio",
                 itemCounts[DownloadFilter.FILTER_AUDIO]);
         RecordHistogram.recordCountHistogram("Android.DownloadManager.InitialCount.Document",
@@ -450,8 +462,13 @@ public class DownloadHistoryAdapter extends DateDividedAdapter implements Downlo
                 itemCounts[DownloadFilter.FILTER_OTHER]);
         RecordHistogram.recordCountHistogram("Android.DownloadManager.InitialCount.Video",
                 itemCounts[DownloadFilter.FILTER_VIDEO]);
+    }
+
+    private void recordTotalDownloadCountHistogram() {
+        // The total count intentionally leaves out incognito downloads. This should be revisited
+        // if/when incognito downloads are persistently available in downloads home.
         RecordHistogram.recordCountHistogram("Android.DownloadManager.InitialCount.Total",
-                totalCount);
+                mDownloadItems.size() + mOfflinePageItems.size());
     }
 
     private void removeExternallyDeletedItem(DownloadItemWrapper wrapper, boolean isOffTheRecord) {

@@ -166,23 +166,28 @@ void UpdateStats(const gpu::GPUInfo& gpu_info,
       gpu::GPU_FEATURE_TYPE_ACCELERATED_2D_CANVAS,
       gpu::GPU_FEATURE_TYPE_GPU_COMPOSITING,
       gpu::GPU_FEATURE_TYPE_GPU_RASTERIZATION,
-      gpu::GPU_FEATURE_TYPE_WEBGL};
+      gpu::GPU_FEATURE_TYPE_WEBGL,
+      gpu::GPU_FEATURE_TYPE_WEBGL2};
   const std::string kGpuBlacklistFeatureHistogramNames[] = {
       "GPU.BlacklistFeatureTestResults.Accelerated2dCanvas",
       "GPU.BlacklistFeatureTestResults.GpuCompositing",
       "GPU.BlacklistFeatureTestResults.GpuRasterization",
-      "GPU.BlacklistFeatureTestResults.Webgl"};
+      "GPU.BlacklistFeatureTestResults.Webgl",
+      "GPU.BlacklistFeatureTestResults.Webgl2"};
   const bool kGpuFeatureUserFlags[] = {
       command_line.HasSwitch(switches::kDisableAccelerated2dCanvas),
       command_line.HasSwitch(switches::kDisableGpu),
       command_line.HasSwitch(switches::kDisableGpuRasterization),
-      command_line.HasSwitch(switches::kDisableExperimentalWebGL)};
+      command_line.HasSwitch(switches::kDisableExperimentalWebGL),
+      (!command_line.HasSwitch(switches::kEnableES3APIs) ||
+       command_line.HasSwitch(switches::kDisableES3APIs))};
 #if defined(OS_WIN)
   const std::string kGpuBlacklistFeatureHistogramNamesWin[] = {
       "GPU.BlacklistFeatureTestResultsWindows.Accelerated2dCanvas",
       "GPU.BlacklistFeatureTestResultsWindows.GpuCompositing",
       "GPU.BlacklistFeatureTestResultsWindows.GpuRasterization",
-      "GPU.BlacklistFeatureTestResultsWindows.Webgl"};
+      "GPU.BlacklistFeatureTestResultsWindows.Webgl",
+      "GPU.BlacklistFeatureTestResultsWindows.Webgl2"};
 #endif
   const size_t kNumFeatures =
       sizeof(kGpuFeatures) / sizeof(gpu::GpuFeatureType);
@@ -741,6 +746,11 @@ void GpuDataManagerImplPrivate::AppendGpuCommandLine(
     }
   }
 
+  if (gpu_driver_bugs_.find(gpu::CREATE_DEFAULT_GL_CONTEXT) !=
+      gpu_driver_bugs_.end()) {
+    command_line->AppendSwitch(switches::kCreateDefaultGLContext);
+  }
+
 #if defined(OS_WIN)
   if (IsFeatureBlacklisted(gpu::GPU_FEATURE_TYPE_ACCELERATED_VPX_DECODE) &&
       gpu_preferences) {
@@ -759,6 +769,15 @@ void GpuDataManagerImplPrivate::AppendGpuCommandLine(
     }
   }
 #endif
+
+  if (gpu_preferences) { // enable_es3_apis
+    bool blacklisted = IsFeatureBlacklisted(gpu::GPU_FEATURE_TYPE_WEBGL2);
+    bool enabled = base::CommandLine::ForCurrentProcess()->HasSwitch(
+        switches::kEnableES3APIs);
+    bool disabled = base::CommandLine::ForCurrentProcess()->HasSwitch(
+        switches::kDisableES3APIs);
+    gpu_preferences->enable_es3_apis = (enabled || !blacklisted) && !disabled;
+  }
 
   // Pass GPU and driver information to GPU process. We try to avoid full GPU
   // info collection at GPU process startup, but we need gpu vendor_id,

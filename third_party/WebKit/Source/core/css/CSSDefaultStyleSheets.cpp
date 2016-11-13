@@ -126,9 +126,9 @@ CSSDefaultStyleSheets::ensureTelevisionViewportStyleSheet() {
   return m_televisionViewportStyleSheet;
 }
 
-void CSSDefaultStyleSheets::ensureDefaultStyleSheetsForElement(
-    const Element& element,
-    bool& changedDefaultStyle) {
+bool CSSDefaultStyleSheets::ensureDefaultStyleSheetsForElement(
+    const Element& element) {
+  bool changedDefaultStyle = false;
   // FIXME: We should assert that the sheet only styles SVG elements.
   if (element.isSVGElement() && !m_svgStyleSheet) {
     m_svgStyleSheet = parseUASheet(loadResourceAsASCIIString("svg.css"));
@@ -150,10 +150,7 @@ void CSSDefaultStyleSheets::ensureDefaultStyleSheetsForElement(
   // <audio>.
   if (!m_mediaControlsStyleSheet &&
       (isHTMLVideoElement(element) || isHTMLAudioElement(element))) {
-    String mediaRules = loadResourceAsASCIIString(
-                            RuntimeEnabledFeatures::newMediaPlaybackUiEnabled()
-                                ? "mediaControlsNew.css"
-                                : "mediaControls.css") +
+    String mediaRules = loadResourceAsASCIIString("mediaControls.css") +
                         LayoutTheme::theme().extraMediaControlsStyleSheet();
     m_mediaControlsStyleSheet = parseUASheet(mediaRules);
     m_defaultStyle->addRulesFromSheet(mediaControlsStyleSheet(), screenEval());
@@ -162,8 +159,9 @@ void CSSDefaultStyleSheets::ensureDefaultStyleSheetsForElement(
     changedDefaultStyle = true;
   }
 
-  ASSERT(!m_defaultStyle->features().hasIdsInSelectors());
-  ASSERT(m_defaultStyle->features().siblingRules.isEmpty());
+  DCHECK(!m_defaultStyle->features().hasIdsInSelectors());
+  DCHECK(!m_defaultStyle->features().usesSiblingRules());
+  return changedDefaultStyle;
 }
 
 void CSSDefaultStyleSheets::ensureDefaultStyleSheetForFullscreen() {

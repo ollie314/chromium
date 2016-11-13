@@ -71,11 +71,11 @@ static_library("arc") {
 
   public_deps = [
     ":arc_base",
-    ":arc_bindings",
   ]
 
   deps = [
     "//ash:ash",
+    "//ash/public/interfaces",
     "//base",
     "//chromeos",
     "//chromeos:power_manager_proto",
@@ -122,36 +122,19 @@ static_library("arc_base") {
   ]
 }
 
-mojom("arc_bindings") {
+# TODO(crbug.com/662510): Remove this altogether.
+mojom("arc_bindings_old_types") {
   sources = [
     "common/app.mojom",
-    "common/arc_bridge.mojom",
-    "common/audio.mojom",
-    "common/auth.mojom",
     "common/bitmap.mojom",
     "common/bluetooth.mojom",
-    "common/boot_phase_monitor.mojom",
-    "common/clipboard.mojom",
-    "common/crash_collector.mojom",
     "common/enterprise_reporting.mojom",
-    "common/file_system.mojom",
-    "common/ime.mojom",
     "common/intent_helper.mojom",
-    "common/metrics.mojom",
     "common/net.mojom",
     "common/notifications.mojom",
-    "common/obb_mounter.mojom",
-    "common/policy.mojom",
-    "common/power.mojom",
-    "common/print.mojom",
-    "common/process.mojom",
     "common/scale_factor.mojom",
     "common/screen_rect.mojom",
-    "common/storage_manager.mojom",
-    "common/tts.mojom",
-    "common/video.mojom",
     "common/video_accelerator.mojom",
-    "common/wallpaper.mojom",
   ]
 
   public_deps = [
@@ -160,6 +143,34 @@ mojom("arc_bindings") {
   ]
 
   use_new_wrapper_types = false
+}
+
+mojom("arc_bindings") {
+  sources = [
+    "common/arc_bridge.mojom",
+    "common/audio.mojom",
+    "common/auth.mojom",
+    "common/boot_phase_monitor.mojom",
+    "common/clipboard.mojom",
+    "common/crash_collector.mojom",
+    "common/file_system.mojom",
+    "common/ime.mojom",
+    "common/metrics.mojom",
+    "common/obb_mounter.mojom",
+    "common/policy.mojom",
+    "common/power.mojom",
+    "common/print.mojom",
+    "common/process.mojom",
+    "common/storage_manager.mojom",
+    "common/tts.mojom",
+    "common/video.mojom",
+    "common/wallpaper.mojom",
+  ]
+
+  public_deps = [
+    ":arc_bindings_old_types",
+    "//mojo/common:common_custom_types",
+  ]
 }
 
 static_library("arc_test_support") {
@@ -181,10 +192,11 @@ static_library("arc_test_support") {
     "test/fake_policy_instance.h",
   ]
 
-  deps = [
+  public_deps = [
     ":arc",
-    ":arc_base",
-    ":arc_bindings",
+  ]
+
+  deps = [
     "//base",
     "//mojo/common:common_base",
   ]
@@ -203,12 +215,11 @@ source_set("unit_tests") {
     "intent_helper/font_size_util_unittest.cc",
     "intent_helper/intent_filter_unittest.cc",
     "intent_helper/link_handler_model_impl_unittest.cc",
+    "intent_helper/local_activity_resolver_unittest.cc",
     "intent_helper/page_transition_util_unittest.cc",
   ]
 
   deps = [
-    ":arc",
-    ":arc_bindings",
     ":arc_test_support",
     "//base",
     "//chromeos",
@@ -216,6 +227,7 @@ source_set("unit_tests") {
     "//mojo/public/cpp/system:system",
     "//testing/gtest",
     "//ui/aura",
+    "//ui/aura:test_support",
     "//ui/base:test_support",
     "//ui/base/ime",
     "//ui/events",

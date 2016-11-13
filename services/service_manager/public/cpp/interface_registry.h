@@ -5,6 +5,7 @@
 #ifndef SERVICES_SERVICE_MANAGER_PUBLIC_CPP_INTERFACE_REGISTRY_H_
 #define SERVICES_SERVICE_MANAGER_PUBLIC_CPP_INTERFACE_REGISTRY_H_
 
+#include <list>
 #include <memory>
 #include <queue>
 #include <set>
@@ -76,21 +77,30 @@ class InterfaceRegistry : public mojom::InterfaceProvider {
     DISALLOW_COPY_AND_ASSIGN(TestApi);
   };
 
-  // Construct an InterfaceRegistry with no filtering rules applied.
-  InterfaceRegistry();
-
-  // Construct an InterfaceRegistry in |local_identity| that exposes only
-  // |allowed_interfaces| to |remote_identity|.
-  InterfaceRegistry(const Identity& local_identity,
-                    const Identity& remote_identity,
-                    const InterfaceSet& allowed_interfaces);
+  // Construct an unbound InterfaceRegistry. This object will not bind requests
+  // for interfaces until Bind() is called. |name| is used for error reporting
+  // and should reflect the name of the InterfaceProviderSpec pair that controls
+  // which interfaces can be bound via this InterfaceRegistry.
+  explicit InterfaceRegistry(const std::string& name);
   ~InterfaceRegistry() override;
 
   // Sets a default handler for incoming interface requests which are allowed by
   // capability filters but have no registered handler in this registry.
   void set_default_binder(const Binder& binder) { default_binder_ = binder; }
 
-  void Bind(mojom::InterfaceProviderRequest local_interfaces_request);
+  // Binds a request for an InterfaceProvider from a remote source.
+  // |remote_info| contains the the identity of the remote, and the remote's
+  // InterfaceProviderSpec, which will be intersected with the local's exports
+  // to determine what interfaces may be bound.
+  void Bind(mojom::InterfaceProviderRequest request,
+            const Identity& local_identity,
+            const InterfaceProviderSpec& local_interface_provider_spec,
+            const Identity& remote_identity,
+            const InterfaceProviderSpec& remote_interface_provider_spec);
+
+  // Serializes the contents of the registry (including the local and remote
+  // specs) to a stringstream.
+  void Serialize(std::stringstream* stream);
 
   base::WeakPtr<InterfaceRegistry> GetWeakPtr();
 
@@ -140,11 +150,13 @@ class InterfaceRegistry : public mojom::InterfaceProvider {
   // Populates a set with the interface names this registry can bind.
   void GetInterfaceNames(std::set<std::string>* interface_names);
 
-  // Sets a closure to be run when the InterfaceProvider pipe is closed.
-  void SetConnectionLostClosure(const base::Closure& connection_lost_closure);
+  // Sets a closure to be run when the InterfaceProvider pipe is closed. Note
+  // that by the time any added closure is invoked, the InterfaceRegistry may
+  // have been deleted.
+  void AddConnectionLostClosure(const base::Closure& connection_lost_closure);
 
  private:
-  using NameToInterfaceBinderMap =
+  using InterfaceNameToBinderMap =
       std::map<std::string, std::unique_ptr<InterfaceBinder>>;
 
   // mojom::InterfaceProvider:
@@ -160,15 +172,39 @@ class InterfaceRegistry : public mojom::InterfaceProvider {
   // according to capability policy.
   bool CanBindRequestForInterface(const std::string& interface_name) const;
 
+  // Called whenever |remote_interface_provider_spec_| changes to rebuild the
+  // contents of |exposed_interfaces_| and |expose_all_interfaces_|.
+  void RebuildExposedInterfaces();
+
+  void OnConnectionError();
+
   mojom::InterfaceProviderRequest pending_request_;
 
   mojo::Binding<mojom::InterfaceProvider> binding_;
-  const Identity local_identity_;
-  const Identity remote_identity_;
-  const InterfaceSet allowed_interfaces_;
-  const bool allow_all_interfaces_;
 
-  NameToInterfaceBinderMap name_to_binder_;
+  std::string name_;
+
+  // Initialized from static metadata in the host service's manifest.
+  Identity local_identity_;
+  InterfaceProviderSpec local_interface_provider_spec_;
+
+  // Initialized from static metadata in the remote service's manifest.
+  Identity remote_identity_;
+  // Initialized from static metadata in the remote service's manifest. May be
+  // mutated after the fact when a capability is dynamically granted via a call
+  // to GrantCapability().
+  InterfaceProviderSpec remote_interface_provider_spec_;
+
+  // Metadata computed whenever |remote_interface_provider_spec_| changes.
+  InterfaceSet exposed_interfaces_;
+  bool expose_all_interfaces_ = false;
+
+  // Contains every interface binder that has been registered with this
+  // InterfaceRegistry. Not all binders may be reachable depending on the
+  // capabilities requested by the remote. Only interfaces in
+  // exposed_interfaces_ may be bound. When |expose_all_interfaces_| is true,
+  // any interface may be bound.
+  InterfaceNameToBinderMap name_to_binder_;
   Binder default_binder_;
 
   bool is_paused_ = false;
@@ -177,6 +213,8 @@ class InterfaceRegistry : public mojom::InterfaceProvider {
   // while binding is paused.
   std::queue<std::pair<std::string, mojo::ScopedMessagePipeHandle>>
       pending_interface_requests_;
+
+  std::list<base::Closure> connection_lost_closures_;
 
   base::WeakPtrFactory<InterfaceRegistry> weak_factory_;
 

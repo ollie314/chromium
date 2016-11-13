@@ -94,6 +94,10 @@ void RenderWidgetHostViewBase::SetBackgroundColor(SkColor color) {
   background_color_ = color;
 }
 
+SkColor RenderWidgetHostViewBase::background_color() {
+  return background_color_;
+}
+
 void RenderWidgetHostViewBase::SetBackgroundColorToDefault() {
   SetBackgroundColor(SK_ColorWHITE);
 }
@@ -109,7 +113,7 @@ gfx::Size RenderWidgetHostViewBase::GetPhysicalBackingSize() const {
                                 display.device_scale_factor());
 }
 
-bool RenderWidgetHostViewBase::DoTopControlsShrinkBlinkSize() const {
+bool RenderWidgetHostViewBase::DoBrowserControlsShrinkBlinkSize() const {
   return false;
 }
 

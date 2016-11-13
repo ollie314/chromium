@@ -18,10 +18,8 @@
 using base::IntToString;
 using base::StringPiece;
 using std::make_pair;
-using std::map;
 using std::max;
 using std::string;
-using std::vector;
 using net::SpdyPriority;
 
 namespace net {
@@ -29,8 +27,11 @@ namespace net {
 #define ENDPOINT \
   (perspective() == Perspective::IS_SERVER ? "Server: " : " Client: ")
 
-QuicSession::QuicSession(QuicConnection* connection, const QuicConfig& config)
+QuicSession::QuicSession(QuicConnection* connection,
+                         Visitor* owner,
+                         const QuicConfig& config)
     : connection_(connection),
+      visitor_(owner),
       config_(config),
       max_open_outgoing_streams_(kDefaultMaxStreamsPerConnection),
       max_open_incoming_streams_(config_.GetMaxIncomingDynamicStreamsToSend()),
@@ -73,7 +74,7 @@ QuicSession::~QuicSession() {
 void QuicSession::OnStreamFrame(const QuicStreamFrame& frame) {
   // TODO(rch) deal with the error case of stream id 0.
   QuicStreamId stream_id = frame.stream_id;
-  ReliableQuicStream* stream = GetOrCreateStream(stream_id);
+  QuicStream* stream = GetOrCreateStream(stream_id);
   if (!stream) {
     // The stream no longer exists, but we may still be interested in the
     // final stream byte offset sent by the peer. A frame with a FIN can give
@@ -95,7 +96,7 @@ void QuicSession::OnRstStream(const QuicRstStreamFrame& frame) {
     return;
   }
 
-  ReliableQuicStream* stream = GetOrCreateDynamicStream(frame.stream_id);
+  QuicStream* stream = GetOrCreateDynamicStream(frame.stream_id);
   if (!stream) {
     HandleRstOnValidNonexistentStream(frame);
     return;  // Errors are handled by GetOrCreateStream.
@@ -109,7 +110,7 @@ void QuicSession::OnGoAway(const QuicGoAwayFrame& frame) {
 }
 
 void QuicSession::OnConnectionClosed(QuicErrorCode error,
-                                     const string& /*error_details*/,
+                                     const string& error_details,
                                      ConnectionCloseSource source) {
   DCHECK(!connection_->connected());
   if (error_ == QUIC_NO_ERROR) {
@@ -125,6 +126,17 @@ void QuicSession::OnConnectionClosed(QuicErrorCode error,
       QUIC_BUG << ENDPOINT << "Stream failed to close under OnConnectionClosed";
       CloseStream(id);
     }
+  }
+
+  if (visitor_) {
+    visitor_->OnConnectionClosed(connection_->connection_id(), error,
+                                 error_details);
+  }
+}
+
+void QuicSession::OnWriteBlocked() {
+  if (visitor_) {
+    visitor_->OnWriteBlocked(connection_);
   }
 }
 
@@ -146,8 +158,8 @@ void QuicSession::OnWindowUpdateFrame(const QuicWindowUpdateFrame& frame) {
     flow_controller_.UpdateSendWindowOffset(frame.byte_offset);
     return;
   }
-  ReliableQuicStream* stream = GetOrCreateStream(stream_id);
-  if (stream) {
+  QuicStream* stream = GetOrCreateStream(stream_id);
+  if (stream != nullptr) {
     stream->OnWindowUpdateFrame(frame);
   }
 }
@@ -160,7 +172,7 @@ void QuicSession::OnBlockedFrame(const QuicBlockedFrame& frame) {
            << "Received BLOCKED frame with stream id: " << frame.stream_id;
 }
 
-bool QuicSession::CheckStreamNotBusyLooping(ReliableQuicStream* stream,
+bool QuicSession::CheckStreamNotBusyLooping(QuicStream* stream,
                                             uint64_t previous_bytes_written,
                                             bool previous_fin_sent) {
   if (  // Stream should not be closed.
@@ -228,8 +240,7 @@ void QuicSession::OnCanWrite() {
       return;
     }
     currently_writing_stream_id_ = write_blocked_streams_.PopFront();
-    ReliableQuicStream* stream =
-        GetOrCreateStream(currently_writing_stream_id_);
+    QuicStream* stream = GetOrCreateStream(currently_writing_stream_id_);
     if (stream != nullptr && !stream->flow_controller()->IsBlocked()) {
       // If the stream can't write all bytes it'll re-add itself to the blocked
       // list.
@@ -271,7 +282,7 @@ void QuicSession::ProcessUdpPacket(const IPEndPoint& self_address,
 }
 
 QuicConsumedData QuicSession::WritevData(
-    ReliableQuicStream* stream,
+    QuicStream* stream,
     QuicStreamId id,
     QuicIOVector iov,
     QuicStreamOffset offset,
@@ -343,12 +354,12 @@ void QuicSession::CloseStreamInner(QuicStreamId stream_id, bool locally_reset) {
   DynamicStreamMap::iterator it = dynamic_stream_map_.find(stream_id);
   if (it == dynamic_stream_map_.end()) {
     // When CloseStreamInner has been called recursively (via
-    // ReliableQuicStream::OnClose), the stream will already have been deleted
+    // QuicStream::OnClose), the stream will already have been deleted
     // from stream_map_, so return immediately.
     DVLOG(1) << ENDPOINT << "Stream is already closed: " << stream_id;
     return;
   }
-  ReliableQuicStream* stream = it->second.get();
+  QuicStream* stream = it->second.get();
 
   // Tell the stream that a RST has been sent.
   if (locally_reset) {
@@ -384,7 +395,7 @@ void QuicSession::CloseStreamInner(QuicStreamId stream_id, bool locally_reset) {
 void QuicSession::UpdateFlowControlOnFinalReceivedByteOffset(
     QuicStreamId stream_id,
     QuicStreamOffset final_byte_offset) {
-  map<QuicStreamId, QuicStreamOffset>::iterator it =
+  std::map<QuicStreamId, QuicStreamOffset>::iterator it =
       locally_closed_streams_highest_offset_.find(stream_id);
   if (it == locally_closed_streams_highest_offset_.end()) {
     return;
@@ -566,7 +577,7 @@ QuicConfig* QuicSession::config() {
   return &config_;
 }
 
-void QuicSession::ActivateStream(std::unique_ptr<ReliableQuicStream> stream) {
+void QuicSession::ActivateStream(std::unique_ptr<QuicStream> stream) {
   QuicStreamId stream_id = stream->id();
   DVLOG(1) << ENDPOINT << "num_streams: " << dynamic_stream_map_.size()
            << ". activating " << stream_id;
@@ -586,8 +597,7 @@ QuicStreamId QuicSession::GetNextOutgoingStreamId() {
   return id;
 }
 
-ReliableQuicStream* QuicSession::GetOrCreateStream(
-    const QuicStreamId stream_id) {
+QuicStream* QuicSession::GetOrCreateStream(const QuicStreamId stream_id) {
   StaticStreamMap::iterator it = static_stream_map_.find(stream_id);
   if (it != static_stream_map_.end()) {
     return it->second;
@@ -619,7 +629,8 @@ bool QuicSession::MaybeIncreaseLargestPeerStreamId(
   size_t new_num_available_streams =
       GetNumAvailableStreams() + additional_available_streams;
   if (new_num_available_streams > MaxAvailableStreams()) {
-    DVLOG(1) << "Failed to create a new incoming stream with id:" << stream_id
+    DVLOG(1) << ENDPOINT
+             << "Failed to create a new incoming stream with id:" << stream_id
              << ".  There are already " << GetNumAvailableStreams()
              << " streams available, which would become "
              << new_num_available_streams << ", which exceeds the limit "
@@ -647,7 +658,7 @@ bool QuicSession::ShouldYield(QuicStreamId stream_id) {
   return write_blocked_streams()->ShouldYield(stream_id);
 }
 
-ReliableQuicStream* QuicSession::GetOrCreateDynamicStream(
+QuicStream* QuicSession::GetOrCreateDynamicStream(
     const QuicStreamId stream_id) {
   DCHECK(!base::ContainsKey(static_stream_map_, stream_id))
       << "Attempt to call GetOrCreateDynamicStream for a static stream";
@@ -737,8 +748,12 @@ size_t QuicSession::GetNumOpenIncomingStreams() const {
 }
 
 size_t QuicSession::GetNumOpenOutgoingStreams() const {
-  return GetNumDynamicOutgoingStreams() - GetNumDrainingOutgoingStreams() +
-         GetNumLocallyClosedOutgoingStreamsHighestOffset();
+  CHECK_GE(GetNumDynamicOutgoingStreams() +
+               GetNumLocallyClosedOutgoingStreamsHighestOffset(),
+           GetNumDrainingOutgoingStreams());
+  return GetNumDynamicOutgoingStreams() +
+         GetNumLocallyClosedOutgoingStreamsHighestOffset() -
+         GetNumDrainingOutgoingStreams();
 }
 
 size_t QuicSession::GetNumActiveStreams() const {
@@ -767,14 +782,18 @@ void QuicSession::PostProcessAfterData() {
 }
 
 size_t QuicSession::GetNumDynamicOutgoingStreams() const {
+  DCHECK_GE(dynamic_stream_map_.size(), num_dynamic_incoming_streams_);
   return dynamic_stream_map_.size() - num_dynamic_incoming_streams_;
 }
 
 size_t QuicSession::GetNumDrainingOutgoingStreams() const {
+  DCHECK_GE(draining_streams_.size(), num_draining_incoming_streams_);
   return draining_streams_.size() - num_draining_incoming_streams_;
 }
 
 size_t QuicSession::GetNumLocallyClosedOutgoingStreamsHighestOffset() const {
+  DCHECK_GE(locally_closed_streams_highest_offset_.size(),
+            num_locally_closed_incoming_streams_highest_offset_);
   return locally_closed_streams_highest_offset_.size() -
          num_locally_closed_incoming_streams_highest_offset_;
 }

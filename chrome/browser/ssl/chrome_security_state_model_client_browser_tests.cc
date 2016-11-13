@@ -4,8 +4,6 @@
 
 #include "chrome/browser/ssl/chrome_security_state_model_client.h"
 
-#include <openssl/ssl.h>
-
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/macros.h"
@@ -55,6 +53,7 @@
 #include "net/test/url_request/url_request_mock_http_job.h"
 #include "net/url_request/url_request_filter.h"
 #include "net/url_request/url_request_test_util.h"
+#include "third_party/boringssl/src/include/openssl/ssl.h"
 #include "ui/base/l10n/l10n_util.h"
 
 using security_state::SecurityStateModel;
@@ -312,7 +311,8 @@ GURL GetURLWithNonLocalHostname(net::EmbeddedTestServer* server,
 }
 
 class ChromeSecurityStateModelClientTestWithPasswordCcSwitch
-    : public ChromeSecurityStateModelClientTest {
+    : public ChromeSecurityStateModelClientTest,
+      public testing::WithParamInterface<bool> {
  public:
   ChromeSecurityStateModelClientTestWithPasswordCcSwitch()
       : ChromeSecurityStateModelClientTest() {}
@@ -326,9 +326,16 @@ class ChromeSecurityStateModelClientTestWithPasswordCcSwitch
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
     ChromeSecurityStateModelClientTest::SetUpCommandLine(command_line);
-    command_line->AppendSwitchASCII(
-        security_state::switches::kMarkHttpAs,
-        security_state::switches::kMarkHttpWithPasswordsOrCcWithChip);
+    if (GetParam()) {
+      command_line->AppendSwitchASCII(
+          security_state::switches::kMarkHttpAs,
+          security_state::switches::
+              kMarkHttpWithPasswordsOrCcWithChipAndFormWarning);
+    } else {
+      command_line->AppendSwitchASCII(
+          security_state::switches::kMarkHttpAs,
+          security_state::switches::kMarkHttpWithPasswordsOrCcWithChip);
+    }
   }
 
  private:
@@ -941,7 +948,7 @@ IN_PROC_BROWSER_TEST_F(ChromeSecurityStateModelClientTest,
 // Tests that when a visible password field is detected on an HTTP page
 // load, and when the command-line flag is set, the security level is
 // downgraded to HTTP_SHOW_WARNING.
-IN_PROC_BROWSER_TEST_F(ChromeSecurityStateModelClientTestWithPasswordCcSwitch,
+IN_PROC_BROWSER_TEST_P(ChromeSecurityStateModelClientTestWithPasswordCcSwitch,
                        PasswordSecurityLevelDowngraded) {
   content::WebContents* contents =
       browser()->tab_strip_model()->GetActiveWebContents();
@@ -968,7 +975,7 @@ IN_PROC_BROWSER_TEST_F(ChromeSecurityStateModelClientTestWithPasswordCcSwitch,
 // Tests that when an invisible password field is present on an HTTP page
 // load, and when the command-line flag is set, the security level is
 // *not* downgraded to HTTP_SHOW_WARNING.
-IN_PROC_BROWSER_TEST_F(ChromeSecurityStateModelClientTestWithPasswordCcSwitch,
+IN_PROC_BROWSER_TEST_P(ChromeSecurityStateModelClientTestWithPasswordCcSwitch,
                        PasswordSecurityLevelNotDowngradedForInvisibleInput) {
   content::WebContents* contents =
       browser()->tab_strip_model()->GetActiveWebContents();
@@ -996,7 +1003,7 @@ IN_PROC_BROWSER_TEST_F(ChromeSecurityStateModelClientTestWithPasswordCcSwitch,
 // Tests that when a visible password field is detected inside an iframe
 // on an HTTP page load, and when the command-line flag is set, the
 // security level is downgraded to HTTP_SHOW_WARNING.
-IN_PROC_BROWSER_TEST_F(ChromeSecurityStateModelClientTestWithPasswordCcSwitch,
+IN_PROC_BROWSER_TEST_P(ChromeSecurityStateModelClientTestWithPasswordCcSwitch,
                        PasswordSecurityLevelDowngradedFromIframe) {
   content::WebContents* contents =
       browser()->tab_strip_model()->GetActiveWebContents();
@@ -1025,8 +1032,16 @@ IN_PROC_BROWSER_TEST_F(ChromeSecurityStateModelClientTestWithPasswordCcSwitch,
 // on an HTTP page load, and when the command-line flag is set, the
 // security level is downgraded to HTTP_SHOW_WARNING, even if the iframe
 // itself was loaded over HTTPS.
-IN_PROC_BROWSER_TEST_F(ChromeSecurityStateModelClientTestWithPasswordCcSwitch,
-                       PasswordSecurityLevelDowngradedFromHttpsIframe) {
+#if defined(OS_LINUX)
+// Flaky on Linux. See https://crbug.com/662485.
+#define MAYBE_PasswordSecurityLevelDowngradedFromHttpsIframe \
+  DISABLED_PasswordSecurityLevelDowngradedFromHttpsIframe
+#else
+#define MAYBE_PasswordSecurityLevelDowngradedFromHttpsIframe \
+  PasswordSecurityLevelDowngradedFromHttpsIframe
+#endif
+IN_PROC_BROWSER_TEST_P(ChromeSecurityStateModelClientTestWithPasswordCcSwitch,
+                       MAYBE_PasswordSecurityLevelDowngradedFromHttpsIframe) {
   content::WebContents* contents =
       browser()->tab_strip_model()->GetActiveWebContents();
   ASSERT_TRUE(contents);
@@ -1091,7 +1106,7 @@ IN_PROC_BROWSER_TEST_F(ChromeSecurityStateModelClientTest,
 // Tests that when a visible password field is detected on an HTTPS page
 // load, and when the command-line flag is set, the security level is
 // *not* downgraded to HTTP_SHOW_WARNING.
-IN_PROC_BROWSER_TEST_F(ChromeSecurityStateModelClientTestWithPasswordCcSwitch,
+IN_PROC_BROWSER_TEST_P(ChromeSecurityStateModelClientTestWithPasswordCcSwitch,
                        PasswordSecurityLevelNotDowngradedOnHttps) {
   content::WebContents* contents =
       browser()->tab_strip_model()->GetActiveWebContents();
@@ -1141,11 +1156,11 @@ class ConsoleWebContentsDelegate : public Browser {
   void ClearConsoleMessages() { console_messages_.clear(); }
 
   // content::WebContentsDelegate
-  bool AddMessageToConsole(content::WebContents* source,
-                           int32_t level,
-                           const base::string16& message,
-                           int32_t line_no,
-                           const base::string16& source_id) override {
+  bool DidAddMessageToConsole(content::WebContents* source,
+                              int32_t level,
+                              const base::string16& message,
+                              int32_t line_no,
+                              const base::string16& source_id) override {
     console_messages_.push_back(message);
     if (!console_message_callback_.is_null()) {
       console_message_callback_.Run();
@@ -1187,7 +1202,7 @@ void CheckForOneFutureHttpWarningConsoleMessage(
 // Tests that console messages are printed upon a call to
 // GetSecurityInfo() on an HTTP_SHOW_WARNING page, exactly once per
 // main-frame navigation.
-IN_PROC_BROWSER_TEST_F(ChromeSecurityStateModelClientTestWithPasswordCcSwitch,
+IN_PROC_BROWSER_TEST_P(ChromeSecurityStateModelClientTestWithPasswordCcSwitch,
                        ConsoleMessage) {
   ConsoleWebContentsDelegate* delegate = new ConsoleWebContentsDelegate(
       Browser::CreateParams(browser()->profile()));
@@ -1232,7 +1247,7 @@ IN_PROC_BROWSER_TEST_F(ChromeSecurityStateModelClientTestWithPasswordCcSwitch,
   ASSERT_NO_FATAL_FAILURE(CheckForOneHttpWarningConsoleMessage(delegate));
   delegate->ClearConsoleMessages();
 
-  // Two subsequent triggers of VisibleSSLStateChanged -- one on the
+  // Two subsequent triggers of VisibleSecurityStateChanged -- one on the
   // same navigation and one on another navigation -- should only result
   // in one additional console message.
   contents->OnCreditCardInputShownOnHttp();
@@ -1299,13 +1314,13 @@ IN_PROC_BROWSER_TEST_F(ChromeSecurityStateModelClientTest, ConsoleMessage) {
   client->GetSecurityInfo(&security_info);
   EXPECT_EQ(security_state::SecurityStateModel::NONE,
             security_info.security_level);
-  EXPECT_TRUE(security_info.displayed_private_user_data_input_on_http);
+  EXPECT_TRUE(security_info.displayed_password_field_on_http);
 
   // Check that the expected console message is present.
   ASSERT_NO_FATAL_FAILURE(CheckForOneFutureHttpWarningConsoleMessage(delegate));
   delegate->ClearConsoleMessages();
 
-  // Two subsequent triggers of VisibleSSLStateChanged -- one on the
+  // Two subsequent triggers of VisibleSecurityStateChanged -- one on the
   // same navigation and one on another navigation -- should only result
   // in one additional console message.
   contents->OnCreditCardInputShownOnHttp();
@@ -1324,14 +1339,34 @@ IN_PROC_BROWSER_TEST_F(ChromeSecurityStateModelClientTest, ConsoleMessage) {
   client->GetSecurityInfo(&security_info);
   EXPECT_EQ(security_state::SecurityStateModel::NONE,
             security_info.security_level);
-  EXPECT_TRUE(security_info.displayed_private_user_data_input_on_http);
+  EXPECT_TRUE(security_info.displayed_password_field_on_http);
+  EXPECT_FALSE(security_info.displayed_credit_card_field_on_http);
+
+  ASSERT_NO_FATAL_FAILURE(CheckForOneFutureHttpWarningConsoleMessage(delegate));
+  delegate->ClearConsoleMessages();
+
+  // Check that a console message is printed for credit card field shown.
+  ui_test_utils::NavigateToURL(delegate, http_url);
+  entry = contents->GetController().GetVisibleEntry();
+  ASSERT_TRUE(entry);
+  EXPECT_EQ(http_url, entry->GetURL());
+
+  base::RunLoop third_message;
+  delegate->set_console_message_callback(third_message.QuitClosure());
+  contents->OnCreditCardInputShownOnHttp();
+  third_message.Run();
+
+  client->GetSecurityInfo(&security_info);
+  EXPECT_EQ(security_state::SecurityStateModel::NONE,
+            security_info.security_level);
+  EXPECT_TRUE(security_info.displayed_credit_card_field_on_http);
 
   ASSERT_NO_FATAL_FAILURE(CheckForOneFutureHttpWarningConsoleMessage(delegate));
 }
 
 // Tests that additional HTTP_SHOW_WARNING console messages are not
 // printed after subframe navigations.
-IN_PROC_BROWSER_TEST_F(ChromeSecurityStateModelClientTestWithPasswordCcSwitch,
+IN_PROC_BROWSER_TEST_P(ChromeSecurityStateModelClientTestWithPasswordCcSwitch,
                        ConsoleMessageNotPrintedForFrameNavigation) {
   ConsoleWebContentsDelegate* delegate = new ConsoleWebContentsDelegate(
       Browser::CreateParams(browser()->profile()));
@@ -1376,7 +1411,7 @@ IN_PROC_BROWSER_TEST_F(ChromeSecurityStateModelClientTestWithPasswordCcSwitch,
   ASSERT_NO_FATAL_FAILURE(CheckForOneHttpWarningConsoleMessage(delegate));
   delegate->ClearConsoleMessages();
 
-  // Navigate the subframe and trigger VisibleSSLStateChanged
+  // Navigate the subframe and trigger VisibleSecurityStateChanged
   // again. While the security level is still HTTP_SHOW_WARNING, an
   // additional console message should not be logged because there was
   // already a console message logged for the current main-frame
@@ -1415,7 +1450,7 @@ IN_PROC_BROWSER_TEST_F(ChromeSecurityStateModelClientTestWithPasswordCcSwitch,
 
 // Tests that additional HTTP_SHOW_WARNING console messages are not
 // printed after pushState navigations.
-IN_PROC_BROWSER_TEST_F(ChromeSecurityStateModelClientTestWithPasswordCcSwitch,
+IN_PROC_BROWSER_TEST_P(ChromeSecurityStateModelClientTestWithPasswordCcSwitch,
                        ConsoleMessageNotPrintedForPushStateNavigation) {
   ConsoleWebContentsDelegate* delegate = new ConsoleWebContentsDelegate(
       Browser::CreateParams(browser()->profile()));
@@ -1460,7 +1495,7 @@ IN_PROC_BROWSER_TEST_F(ChromeSecurityStateModelClientTestWithPasswordCcSwitch,
   ASSERT_NO_FATAL_FAILURE(CheckForOneHttpWarningConsoleMessage(delegate));
   delegate->ClearConsoleMessages();
 
-  // Navigate with pushState and trigger VisibleSSLStateChanged
+  // Navigate with pushState and trigger VisibleSecurityStateChanged
   // again. While the security level is still HTTP_SHOW_WARNING, an
   // additional console message should not be logged because there was
   // already a console message logged for the current main-frame
@@ -1491,6 +1526,13 @@ IN_PROC_BROWSER_TEST_F(ChromeSecurityStateModelClientTestWithPasswordCcSwitch,
             security_info.security_level);
   ASSERT_NO_FATAL_FAILURE(CheckForOneHttpWarningConsoleMessage(delegate));
 }
+
+INSTANTIATE_TEST_CASE_P(ChromeSecurityStateModelClientTestWithPasswordCcSwitch,
+                        ChromeSecurityStateModelClientTestWithPasswordCcSwitch,
+                        // Here 'true' means that the omnibox warning + form
+                        // warning are enabled, and 'false' means just the
+                        // omnibox warning is enabled.
+                        testing::Bool());
 
 // Tests that the SecurityStateModel for a WebContents is up to date
 // when the WebContents is inserted into a Browser's TabStripModel.

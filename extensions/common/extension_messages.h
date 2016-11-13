@@ -234,6 +234,7 @@ IPC_STRUCT_TRAITS_END()
 IPC_STRUCT_TRAITS_BEGIN(extensions::UsbDevicePermissionData)
   IPC_STRUCT_TRAITS_MEMBER(vendor_id())
   IPC_STRUCT_TRAITS_MEMBER(product_id())
+  IPC_STRUCT_TRAITS_MEMBER(interface_class())
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(extensions::MediaGalleriesPermissionData)
@@ -537,10 +538,6 @@ IPC_MESSAGE_CONTROL3(ExtensionMsg_ClearTabSpecificPermissions,
 // Tell the renderer which type this view is.
 IPC_MESSAGE_ROUTED1(ExtensionMsg_NotifyRenderViewType,
                     extensions::ViewType /* view_type */)
-
-// Deliver a message sent with ExtensionHostMsg_PostMessage.
-IPC_MESSAGE_CONTROL1(ExtensionMsg_UsingWebRequestAPI,
-                     bool /* webrequest_used */)
 
 // The browser's response to the ExtensionMsg_WakeEventPage IPC.
 IPC_MESSAGE_CONTROL2(ExtensionMsg_WakeEventPageResponse,

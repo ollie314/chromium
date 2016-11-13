@@ -8,11 +8,18 @@
 #include <utility>
 #include <vector>
 
+#include "ash/common/material_design/material_design_controller.h"
+#include "ash/common/system/chromeos/network/network_icon.h"
+#include "ash/common/system/chromeos/network/network_icon_animation.h"
+#include "ash/common/system/chromeos/network/network_icon_animation_observer.h"
+#include "ash/common/system/chromeos/network/network_list_delegate.h"
 #include "ash/common/system/chromeos/network/vpn_delegate.h"
 #include "ash/common/system/tray/hover_highlight_view.h"
 #include "ash/common/system/tray/system_tray_delegate.h"
 #include "ash/common/system/tray/tray_constants.h"
 #include "ash/common/system/tray/tray_popup_label_button.h"
+#include "ash/common/system/tray/tray_popup_utils.h"
+#include "ash/common/system/tray/tri_view.h"
 #include "ash/common/wm_shell.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
@@ -25,10 +32,6 @@
 #include "chromeos/network/network_type_pattern.h"
 #include "grit/ash_strings.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/chromeos/network/network_icon.h"
-#include "ui/chromeos/network/network_icon_animation.h"
-#include "ui/chromeos/network/network_icon_animation_observer.h"
-#include "ui/chromeos/network/network_list_delegate.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/text_constants.h"
@@ -42,6 +45,10 @@
 namespace ash {
 
 namespace {
+
+bool UseMd() {
+  return MaterialDesignController::IsSystemTrayMenuMaterial();
+}
 
 bool IsConnectedOrConnecting(const chromeos::NetworkState* network) {
   return network->IsConnectedState() || network->IsConnectingState();
@@ -75,17 +82,16 @@ class VPNListProviderEntry : public VPNListEntryBase {
 // network is currently connected, a disconnect button will be shown next to its
 // name.
 class VPNListNetworkEntry : public VPNListEntryBase,
-                            public ui::network_icon::AnimationObserver,
-                            public views::ButtonListener {
+                            public network_icon::AnimationObserver {
  public:
   VPNListNetworkEntry(VPNListView* parent,
                       const chromeos::NetworkState* network);
   ~VPNListNetworkEntry() override;
 
-  // ui::network_icon::AnimationObserver:
+  // network_icon::AnimationObserver:
   void NetworkIconChanged() override;
 
-  // views::ButtonListener:
+  // Overriden from ActionableView.
   void ButtonPressed(views::Button* sender, const ui::Event& event) override;
 
  private:
@@ -111,15 +117,14 @@ class VPNListNetworkEntry : public VPNListEntryBase,
 
   const std::string service_path_;
 
-  DisconnectButton* disconnect_button_ = nullptr;
+  views::LabelButton* disconnect_button_ = nullptr;
 
   DISALLOW_COPY_AND_ASSIGN(VPNListNetworkEntry);
 };
 
 VPNListEntryBase::VPNListEntryBase(VPNListView* parent)
     : HoverHighlightView(parent) {
-  SetBorder(
-      views::Border::CreateEmptyBorder(0, kTrayPopupPaddingHorizontal, 0, 0));
+  SetBorder(views::CreateEmptyBorder(0, kTrayPopupPaddingHorizontal, 0, 0));
 }
 
 VPNListProviderEntry::VPNListProviderEntry(VPNListView* parent,
@@ -127,7 +132,7 @@ VPNListProviderEntry::VPNListProviderEntry(VPNListView* parent,
     : VPNListEntryBase(parent) {
   views::Label* const label =
       AddLabel(base::UTF8ToUTF16(name), gfx::ALIGN_LEFT, false /* highlight */);
-  label->SetBorder(views::Border::CreateEmptyBorder(5, 0, 5, 0));
+  label->SetBorder(views::CreateEmptyBorder(5, 0, 5, 0));
 }
 
 VPNListNetworkEntry::VPNListNetworkEntry(VPNListView* parent,
@@ -137,7 +142,7 @@ VPNListNetworkEntry::VPNListNetworkEntry(VPNListView* parent,
 }
 
 VPNListNetworkEntry::~VPNListNetworkEntry() {
-  ui::network_icon::NetworkIconAnimation::GetInstance()->RemoveObserver(this);
+  network_icon::NetworkIconAnimation::GetInstance()->RemoveObserver(this);
 }
 
 void VPNListNetworkEntry::NetworkIconChanged() {
@@ -148,6 +153,11 @@ void VPNListNetworkEntry::NetworkIconChanged() {
 
 void VPNListNetworkEntry::ButtonPressed(views::Button* sender,
                                         const ui::Event& event) {
+  if (sender != disconnect_button_) {
+    ActionableView::ButtonPressed(sender, event);
+    return;
+  }
+
   WmShell::Get()->RecordUserMetricsAction(
       UMA_STATUS_AREA_VPN_DISCONNECT_CLICKED);
   chromeos::NetworkHandler::Get()
@@ -162,6 +172,7 @@ VPNListNetworkEntry::DisconnectButton::DisconnectButton(
           parent,
           l10n_util::GetStringUTF16(IDS_ASH_STATUS_TRAY_VPN_DISCONNECT)),
       parent_(parent) {
+  DCHECK(!UseMd());
   DCHECK(parent_);
 }
 
@@ -190,9 +201,9 @@ void VPNListNetworkEntry::DisconnectButton::OnBoundsChanged(
 void VPNListNetworkEntry::UpdateFromNetworkState(
     const chromeos::NetworkState* network) {
   if (network && network->IsConnectingState())
-    ui::network_icon::NetworkIconAnimation::GetInstance()->AddObserver(this);
+    network_icon::NetworkIconAnimation::GetInstance()->AddObserver(this);
   else
-    ui::network_icon::NetworkIconAnimation::GetInstance()->RemoveObserver(this);
+    network_icon::NetworkIconAnimation::GetInstance()->RemoveObserver(this);
 
   if (!network) {
     // This is a transient state where the network has been removed already but
@@ -203,35 +214,47 @@ void VPNListNetworkEntry::UpdateFromNetworkState(
   RemoveAllChildViews(true);
   disconnect_button_ = nullptr;
 
-  AddIconAndLabel(ui::network_icon::GetImageForNetwork(
-                      network, ui::network_icon::ICON_TYPE_LIST),
-                  ui::network_icon::GetLabelForNetwork(
-                      network, ui::network_icon::ICON_TYPE_LIST),
-                  IsConnectedOrConnecting(network));
+  AddIconAndLabel(
+      network_icon::GetImageForNetwork(network, network_icon::ICON_TYPE_LIST),
+      network_icon::GetLabelForNetwork(network, network_icon::ICON_TYPE_LIST),
+      IsConnectedOrConnecting(network));
   if (IsConnectedOrConnecting(network)) {
-    disconnect_button_ = new DisconnectButton(this);
-    AddChildView(disconnect_button_);
+    if (UseMd()) {
+      disconnect_button_ = TrayPopupUtils::CreateTrayPopupButton(
+          this, l10n_util::GetStringUTF16(IDS_ASH_STATUS_TRAY_VPN_DISCONNECT));
+    } else {
+      disconnect_button_ = new DisconnectButton(this);
+    }
+    if (UseMd()) {
+      DCHECK(tri_view());
+      tri_view()->AddView(TriView::Container::END, disconnect_button_);
+      tri_view()->SetContainerVisible(TriView::Container::END, true);
+    } else {
+      AddChildView(disconnect_button_);
+    }
+
     SetBorder(
-        views::Border::CreateEmptyBorder(0, kTrayPopupPaddingHorizontal, 0, 3));
+        views::CreateEmptyBorder(0, kTrayPopupPaddingHorizontal, 0,
+                                 UseMd() ? kTrayPopupButtonEndMargin : 3));
   } else {
-    SetBorder(
-        views::Border::CreateEmptyBorder(0, kTrayPopupPaddingHorizontal, 0, 0));
+    SetBorder(views::CreateEmptyBorder(0, kTrayPopupPaddingHorizontal, 0, 0));
   }
 
-  // The icon and the disconnect button are always set to their preferred size.
-  // All remaining space is used for the network name.
-  views::BoxLayout* layout = new views::BoxLayout(
-      views::BoxLayout::kHorizontal, 0, 3, kTrayPopupPaddingBetweenItems);
-  SetLayoutManager(layout);
-  layout->SetDefaultFlex(0);
-  layout->SetFlexForView(text_label(), 1);
+  if (!UseMd()) {
+    // The icon and the disconnect button are always set to their preferred
+    // size. All remaining space is used for the network name.
+    views::BoxLayout* layout = new views::BoxLayout(
+        views::BoxLayout::kHorizontal, 0, 3, kTrayPopupPaddingBetweenItems);
+    SetLayoutManager(layout);
+    layout->SetDefaultFlex(0);
+    layout->SetFlexForView(text_label(), 1);
+  }
   Layout();
 }
 
 }  // namespace
 
-VPNListView::VPNListView(ui::NetworkListDelegate* delegate)
-    : delegate_(delegate) {
+VPNListView::VPNListView(NetworkListDelegate* delegate) : delegate_(delegate) {
   WmShell::Get()->system_tray_delegate()->GetVPNDelegate()->AddObserver(this);
 }
 

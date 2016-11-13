@@ -21,12 +21,7 @@
 
 namespace base {
 class CommandLine;
-class FilePath;
 class SharedPersistentMemoryAllocator;
-}
-
-namespace service_manager {
-class InterfaceProvider;
 }
 
 namespace content {
@@ -63,12 +58,9 @@ class CONTENT_EXPORT BrowserChildProcessHost : public IPC::Sender {
   ~BrowserChildProcessHost() override {}
 
   // Derived classes call this to launch the child process asynchronously.
-  // Takes ownership of |cmd_line| and |delegate|. Takes in |field_trial_state|
-  // to explicitly pass its handle to be inherited on Windows to the child
-  // process via the command line.
+  // Takes ownership of |cmd_line| and |delegate|.
   virtual void Launch(SandboxedProcessLauncherDelegate* delegate,
                       base::CommandLine* cmd_line,
-                      const base::SharedMemory* field_trial_state,
                       bool terminate_on_shutdown) = 0;
 
   virtual const ChildProcessData& GetData() const = 0;

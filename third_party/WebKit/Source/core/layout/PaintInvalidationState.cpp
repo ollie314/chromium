@@ -249,14 +249,6 @@ void PaintInvalidationState::updateForCurrentObject(
   EPosition position = m_currentObject.styleRef().position();
 
   if (position == FixedPosition) {
-    if (m_paintInvalidationContainer != m_currentObject.view() &&
-        m_paintInvalidationContainer->view() == m_currentObject.view()) {
-      // TODO(crbug.com/598762): localToAncestorPoint() is incorrect for
-      // fixed-position when paintInvalidationContainer is under the containing
-      // LayoutView.
-      m_cachedOffsetsEnabled = false;
-      return;
-    }
     // Use slow path to get the offset of the fixed-position, and enable fast
     // path for descendants.
     FloatPoint fixedOffset = m_currentObject.localToAncestorPoint(
@@ -323,7 +315,8 @@ void PaintInvalidationState::updateForChildren(PaintInvalidationReason reason) {
                ForcedSubtreeFullInvalidationForStackedContents);
       break;
     case PaintInvalidationSVGResourceChange:
-      setForceSubtreeInvalidationCheckingWithinContainer();
+      m_forcedSubtreeInvalidationFlags |=
+          PaintInvalidatorContext::ForcedSubtreeSVGResourceChange;
       break;
     default:
       break;
@@ -417,11 +410,16 @@ static FloatPoint slowLocalToAncestorPoint(const LayoutObject& object,
   return result;
 }
 
-LayoutPoint
-PaintInvalidationState::computePositionFromPaintInvalidationBacking() const {
+LayoutPoint PaintInvalidationState::computeLocationInBacking(
+    const LayoutPoint& visualRectLocation) const {
 #if ENABLE(ASSERT)
   DCHECK(!m_didUpdateForChildren);
 #endif
+
+  // Use visual rect location for LayoutTexts because it suffices to check
+  // visual rect change for layout caused invalidation.
+  if (m_currentObject.isText())
+    return visualRectLocation;
 
   FloatPoint point;
   if (m_paintInvalidationContainer != &m_currentObject) {
@@ -430,7 +428,9 @@ PaintInvalidationState::computePositionFromPaintInvalidationBacking() const {
         point = m_svgTransform.mapPoint(point);
       point += FloatPoint(m_paintOffset);
 #ifdef CHECK_FAST_PATH_SLOW_PATH_EQUALITY
-            DCHECK(point == slowLocalOriginToAncestorPoint(m_currentObject, m_paintInvalidationContainer, FloatPoint());
+      DCHECK(point ==
+             slowLocalOriginToAncestorPoint(
+                 m_currentObject, m_paintInvalidationContainer, FloatPoint()));
 #endif
     } else {
       point = slowLocalToAncestorPoint(
@@ -445,42 +445,38 @@ PaintInvalidationState::computePositionFromPaintInvalidationBacking() const {
   return LayoutPoint(point);
 }
 
-LayoutRect PaintInvalidationState::computePaintInvalidationRectInBacking()
-    const {
+LayoutRect PaintInvalidationState::computeVisualRectInBacking() const {
 #if ENABLE(ASSERT)
   DCHECK(!m_didUpdateForChildren);
 #endif
 
   if (m_currentObject.isSVG() && !m_currentObject.isSVGRoot())
-    return computePaintInvalidationRectInBackingForSVG();
+    return computeVisualRectInBackingForSVG();
 
-  LayoutRect rect = m_currentObject.localOverflowRectForPaintInvalidation();
+  LayoutRect rect = m_currentObject.localVisualRect();
   mapLocalRectToPaintInvalidationBacking(rect);
   return rect;
 }
 
-LayoutRect PaintInvalidationState::computePaintInvalidationRectInBackingForSVG()
-    const {
+LayoutRect PaintInvalidationState::computeVisualRectInBackingForSVG() const {
   LayoutRect rect;
   if (m_cachedOffsetsEnabled) {
-    FloatRect svgRect = SVGLayoutSupport::localOverflowRectForPaintInvalidation(
-        m_currentObject);
-    rect = SVGLayoutSupport::transformPaintInvalidationRect(
-        m_currentObject, m_svgTransform, svgRect);
+    FloatRect svgRect = SVGLayoutSupport::localVisualRect(m_currentObject);
+    rect = SVGLayoutSupport::transformVisualRect(m_currentObject,
+                                                 m_svgTransform, svgRect);
     rect.move(m_paintOffset);
     if (m_clipped)
       rect.intersect(m_clipRect);
 #ifdef CHECK_FAST_PATH_SLOW_PATH_EQUALITY
-    LayoutRect slowPathRect =
-        SVGLayoutSupport::clippedOverflowRectForPaintInvalidation(
-            m_currentObject, *m_paintInvalidationContainer);
+    LayoutRect slowPathRect = SVGLayoutSupport::visualRectInAncestorSpace(
+        m_currentObject, *m_paintInvalidationContainer);
     assertFastPathAndSlowPathRectsEqual(rect, slowPathRect);
 #endif
   } else {
     // TODO(wangxianzhu): Sometimes m_cachedOffsetsEnabled==false doesn't mean
     // we can't use cached m_svgTransform. We can use hybrid fast path (for SVG)
     // and slow path (for things above the SVGRoot).
-    rect = SVGLayoutSupport::clippedOverflowRectForPaintInvalidation(
+    rect = SVGLayoutSupport::visualRectInAncestorSpace(
         m_currentObject, *m_paintInvalidationContainer);
   }
 
@@ -605,11 +601,9 @@ void PaintInvalidationState::assertFastPathAndSlowPathRectsEqual(
       return;
   }
 
-  WTFLogAlways(
-      "Fast path paint invalidation rect differs from slow path: fast: %s vs "
-      "slow: %s",
-      fastPathRect.toString().ascii().data(),
-      slowPathRect.toString().ascii().data());
+  LOG(ERROR) << "Fast path visual rect differs from slow path: fast: "
+             << fastPathRect.toString()
+             << " vs slow: " << slowPathRect.toString();
   showLayoutTree(&m_currentObject);
 
   ASSERT_NOT_REACHED();

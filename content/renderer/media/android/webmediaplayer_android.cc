@@ -67,6 +67,8 @@
 #include "third_party/skia/include/core/SkPaint.h"
 #include "third_party/skia/include/core/SkTypeface.h"
 #include "ui/gfx/image/image.h"
+#include "url/gurl.h"
+#include "url/origin.h"
 
 static const uint32_t kGLTextureExternalOES = 0x8D65;
 static const int kSDKVersionToSupportSecurityOriginCheck = 20;
@@ -331,6 +333,10 @@ void WebMediaPlayerAndroid::requestRemotePlayback() {
 
 void WebMediaPlayerAndroid::requestRemotePlaybackControl() {
   player_manager_->RequestRemotePlaybackControl(player_id_);
+}
+
+void WebMediaPlayerAndroid::requestRemotePlaybackStop() {
+  player_manager_->RequestRemotePlaybackStop(player_id_);
 }
 
 void WebMediaPlayerAndroid::seek(double seconds) {
@@ -874,6 +880,11 @@ void WebMediaPlayerAndroid::OnCancelledRemotePlaybackRequest() {
   client_->cancelledRemotePlaybackRequest();
 }
 
+void WebMediaPlayerAndroid::OnRemotePlaybackStarted() {
+  DCHECK(main_thread_checker_.CalledOnValidThread());
+  client_->remotePlaybackStarted();
+}
+
 void WebMediaPlayerAndroid::OnDidExitFullscreen() {
   SetNeedsEstablishPeer(true);
   // We had the fullscreen surface connected to Android MediaPlayer,
@@ -907,8 +918,8 @@ void WebMediaPlayerAndroid::OnMediaPlayerPause() {
 }
 
 void WebMediaPlayerAndroid::OnRemoteRouteAvailabilityChanged(
-    bool routes_available) {
-  client_->remoteRouteAvailabilityChanged(routes_available);
+    blink::WebRemotePlaybackAvailability availability) {
+  client_->remoteRouteAvailabilityChanged(availability);
 }
 
 void WebMediaPlayerAndroid::UpdateNetworkState(
@@ -1103,22 +1114,6 @@ scoped_refptr<media::VideoFrame> WebMediaPlayerAndroid::GetCurrentFrame() {
 void WebMediaPlayerAndroid::PutCurrentFrame() {
 }
 
-void WebMediaPlayerAndroid::RemoveSurfaceTextureAndProxy() {
-  DCHECK(main_thread_checker_.CalledOnValidThread());
-
-  if (texture_id_) {
-    GLES2Interface* gl = stream_texture_factory_->ContextGL();
-    gl->DeleteTextures(1, &texture_id_);
-    // Flush to ensure that the stream texture gets deleted in a timely fashion.
-    gl->ShallowFlushCHROMIUM();
-    texture_id_ = 0;
-    texture_mailbox_ = gpu::Mailbox();
-  }
-  stream_texture_proxy_.reset();
-  needs_establish_peer_ =
-      !is_remote_ && !is_fullscreen_ && (hasVideo() || IsHLSStream());
-}
-
 void WebMediaPlayerAndroid::UpdateStreamTextureProxyCallback(
     cc::VideoFrameProvider::Client* client) {
   base::Closure frame_received_cb;
@@ -1232,11 +1227,11 @@ void WebMediaPlayerAndroid::OnShown() {
     play();
 }
 
-void WebMediaPlayerAndroid::OnSuspendRequested(bool must_suspend) {
+bool WebMediaPlayerAndroid::OnSuspendRequested(bool must_suspend) {
   if (!must_suspend &&
       base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kDisableMediaSuspend)) {
-    return;
+    return true;
   }
 
   // If we're idle or playing video, pause and release resources; audio only
@@ -1245,6 +1240,8 @@ void WebMediaPlayerAndroid::OnSuspendRequested(bool must_suspend) {
       (hasVideo() && !IsBackgroundVideoCandidate())) {
     SuspendAndReleaseResources();
   }
+
+  return true;
 }
 
 void WebMediaPlayerAndroid::OnPlay() {
@@ -1297,7 +1294,7 @@ void WebMediaPlayerAndroid::ReportHLSMetrics() const {
   UMA_HISTOGRAM_BOOLEAN("Media.Android.IsHttpLiveStreamingMedia", is_hls);
   if (is_hls) {
     media::RecordOriginOfHLSPlayback(
-        blink::WebStringToGURL(frame_->getSecurityOrigin().toString()));
+        url::Origin(frame_->getSecurityOrigin()).GetURL());
   }
 
   // Assuming that |is_hls| is the ground truth, test predictions.

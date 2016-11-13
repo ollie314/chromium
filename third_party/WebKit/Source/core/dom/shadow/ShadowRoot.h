@@ -27,7 +27,9 @@
 #ifndef ShadowRoot_h
 #define ShadowRoot_h
 
+#include "bindings/core/v8/ScriptWrappableVisitor.h"
 #include "core/CoreExport.h"
+#include "core/css/StyleSheetList.h"
 #include "core/dom/ContainerNode.h"
 #include "core/dom/DocumentFragment.h"
 #include "core/dom/Element.h"
@@ -39,11 +41,9 @@ class Document;
 class ElementShadow;
 class ExceptionState;
 class HTMLShadowElement;
-class HTMLSlotElement;
 class InsertionPoint;
 class ShadowRootRareDataV0;
 class SlotAssignment;
-class StyleSheetList;
 
 enum class ShadowRootType { UserAgent, V0, Open, Closed };
 
@@ -117,7 +117,6 @@ class CORE_EXPORT ShadowRoot final : public DocumentFragment, public TreeScope {
 
   // For Internals, don't use this.
   unsigned childShadowRootCount() const { return m_childShadowRootCount; }
-  unsigned numberOfStyles() const { return m_numberOfStyles; }
 
   void recalcStyle(StyleRecalcChange);
 
@@ -143,10 +142,10 @@ class CORE_EXPORT ShadowRoot final : public DocumentFragment, public TreeScope {
   StyleSheetList& styleSheets();
   void setStyleSheets(StyleSheetList* styleSheetList) {
     m_styleSheetList = styleSheetList;
+    ScriptWrappableVisitor::writeBarrier(this, m_styleSheetList);
   }
 
   DECLARE_VIRTUAL_TRACE();
-
   DECLARE_VIRTUAL_TRACE_WRAPPERS();
 
  private:
@@ -170,7 +169,6 @@ class CORE_EXPORT ShadowRoot final : public DocumentFragment, public TreeScope {
   Member<ShadowRootRareDataV0> m_shadowRootRareDataV0;
   Member<StyleSheetList> m_styleSheetList;
   Member<SlotAssignment> m_slotAssignment;
-  unsigned m_numberOfStyles : 14;
   unsigned m_childShadowRootCount : 13;
   unsigned m_type : 2;
   unsigned m_registeredWithParentShadowRoot : 1;

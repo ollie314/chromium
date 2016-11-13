@@ -16,6 +16,7 @@
 #include "ash/common/metrics/user_metrics_action.h"
 #include "ash/common/wm/lock_state_observer.h"
 #include "base/observer_list.h"
+#include "components/ui_devtools/devtools_server.h"
 #include "ui/base/ui_base_types.h"
 #include "ui/compositor/layer_type.h"
 #include "ui/wm/public/window_types.h"
@@ -40,7 +41,6 @@ enum class PointerWatcherEventTypes;
 }
 
 namespace ash {
-
 class AcceleratorController;
 class AccessibilityDelegate;
 class BrightnessControlDelegate;
@@ -53,7 +53,6 @@ class KeyboardUI;
 class LocaleNotificationController;
 class MaximizeModeController;
 class MruWindowTracker;
-class NewWindowDelegate;
 class PaletteDelegate;
 class ScopedDisableInternalMouseAndKeyboard;
 class SessionStateDelegate;
@@ -81,6 +80,10 @@ class WorkspaceEventHandler;
 
 enum class LoginStatus;
 enum class TaskSwitchSource;
+
+namespace mojom {
+class NewWindowClient;
+}
 
 namespace wm {
 class MaximizeModeEventHandler;
@@ -137,8 +140,8 @@ class ASH_EXPORT WmShell {
 
   MediaDelegate* media_delegate() { return media_delegate_.get(); }
 
-  NewWindowDelegate* new_window_delegate() {
-    return new_window_delegate_.get();
+  mojom::NewWindowClient* new_window_client() {
+    return new_window_client_.get();
   }
 
   // NOTE: Prefer ScopedRootWindowForNewWindows when setting temporarily.
@@ -283,12 +286,6 @@ class ASH_EXPORT WmShell {
   // this function invocation.
   virtual void SetPinnedWindow(WmWindow* window) = 0;
 
-  // Returns true if |window| can be shown for the current user. This is
-  // intended to check if the current user matches the user associated with
-  // |window|.
-  // TODO(jamescook): Remove this when ShellDelegate has been moved.
-  virtual bool CanShowWindowForUser(WmWindow* window) = 0;
-
   // See aura::client::CursorClient for details on these.
   virtual void LockCursor() = 0;
   virtual void UnlockCursor() = 0;
@@ -401,6 +398,12 @@ class ASH_EXPORT WmShell {
   void AddLockStateObserver(LockStateObserver* observer);
   void RemoveLockStateObserver(LockStateObserver* observer);
 
+  // Displays the shutdown animation and requests a system shutdown or system
+  // restart depending on the the state of the |RebootOnShutdown| device policy.
+  // TODO(mash): Remove this method and call LockStateController directly when
+  // it is available to code in ash/common.
+  virtual void RequestShutdown() = 0;
+
   void SetShelfDelegateForTesting(std::unique_ptr<ShelfDelegate> test_delegate);
   void SetPaletteDelegateForTesting(
       std::unique_ptr<PaletteDelegate> palette_delegate);
@@ -477,7 +480,7 @@ class ASH_EXPORT WmShell {
   std::unique_ptr<MaximizeModeController> maximize_mode_controller_;
   std::unique_ptr<MediaDelegate> media_delegate_;
   std::unique_ptr<MruWindowTracker> mru_window_tracker_;
-  std::unique_ptr<NewWindowDelegate> new_window_delegate_;
+  std::unique_ptr<mojom::NewWindowClient> new_window_client_;
   std::unique_ptr<PaletteDelegate> palette_delegate_;
   std::unique_ptr<ShelfController> shelf_controller_;
   std::unique_ptr<ShelfDelegate> shelf_delegate_;
@@ -490,6 +493,7 @@ class ASH_EXPORT WmShell {
   std::unique_ptr<WallpaperDelegate> wallpaper_delegate_;
   std::unique_ptr<WindowCycleController> window_cycle_controller_;
   std::unique_ptr<WindowSelectorController> window_selector_controller_;
+  std::unique_ptr<ui::devtools::UiDevToolsServer> devtools_server_;
 
   base::ObserverList<LockStateObserver> lock_state_observers_;
 

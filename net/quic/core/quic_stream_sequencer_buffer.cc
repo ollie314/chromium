@@ -50,11 +50,7 @@ QuicStreamSequencerBuffer::QuicStreamSequencerBuffer(size_t max_capacity_bytes)
       blocks_count_(
           ceil(static_cast<double>(max_capacity_bytes) / kBlockSizeBytes)),
       total_bytes_read_(0),
-      reduce_sequencer_buffer_memory_life_time_(
-          FLAGS_quic_reduce_sequencer_buffer_memory_life_time),  // NOLINT
-      blocks_(reduce_sequencer_buffer_memory_life_time_
-                  ? nullptr
-                  : new BufferBlock*[blocks_count_]()) {
+      blocks_(nullptr) {
   Clear();
 }
 
@@ -63,7 +59,7 @@ QuicStreamSequencerBuffer::~QuicStreamSequencerBuffer() {
 }
 
 void QuicStreamSequencerBuffer::Clear() {
-  if (!reduce_sequencer_buffer_memory_life_time_ || blocks_ != nullptr) {
+  if (blocks_ != nullptr) {
     for (size_t i = 0; i < blocks_count_; ++i) {
       if (blocks_[i] != nullptr) {
         RetireBlock(i);
@@ -75,7 +71,7 @@ void QuicStreamSequencerBuffer::Clear() {
   // total_bytes_read_ has been consumed, and those after total_bytes_read_
   // has never arrived.
   gaps_ = std::list<Gap>(
-      1, Gap(total_bytes_read_, std::numeric_limits<QuicStreamOffset>::max())),
+      1, Gap(total_bytes_read_, std::numeric_limits<QuicStreamOffset>::max()));
   frame_arrival_time_map_.clear();
 }
 
@@ -181,7 +177,7 @@ QuicErrorCode QuicStreamSequencerBuffer::OnStreamData(
       bytes_avail = total_bytes_read_ + max_buffer_capacity_bytes_ - offset;
     }
 
-    if (reduce_sequencer_buffer_memory_life_time_ && blocks_ == nullptr) {
+    if (blocks_ == nullptr) {
       blocks_.reset(new BufferBlock*[blocks_count_]());
       for (size_t i = 0; i < blocks_count_; ++i) {
         blocks_[i] = nullptr;
@@ -462,10 +458,6 @@ size_t QuicStreamSequencerBuffer::FlushBufferedFrames() {
 }
 
 void QuicStreamSequencerBuffer::ReleaseWholeBuffer() {
-  if (!reduce_sequencer_buffer_memory_life_time_) {
-    // Don't release buffer if flag is off.
-    return;
-  }
   Clear();
   blocks_.reset(nullptr);
 }

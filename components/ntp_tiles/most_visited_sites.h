@@ -34,6 +34,8 @@ class PrefRegistrySyncable;
 
 namespace ntp_tiles {
 
+class IconCacher;
+
 // Shim interface for SupervisedUserService.
 class MostVisitedSitesSupervisor {
  public:
@@ -71,12 +73,6 @@ class MostVisitedSitesSupervisor {
 };
 
 // Tracks the list of most visited sites and their thumbnails.
-//
-// Do not use, except from MostVisitedSitesBridge. The interface is in flux
-// while we are extracting the functionality of the Java class to make available
-// in C++.
-//
-// TODO(sfiera): finalize interface.
 class MostVisitedSites : public history::TopSitesObserver,
                          public MostVisitedSitesSupervisor::Observer {
  public:
@@ -86,7 +82,8 @@ class MostVisitedSites : public history::TopSitesObserver,
   class Observer {
    public:
     virtual void OnMostVisitedURLsAvailable(const NTPTilesVector& tiles) = 0;
-    virtual void OnPopularURLsAvailable(const PopularSitesVector& sites) {}
+    // TODO(sfiera): make this method required after iOS implements it:
+    virtual void OnIconMadeAvailable(const GURL& site_url) {}
 
    protected:
     virtual ~Observer() {}
@@ -101,6 +98,7 @@ class MostVisitedSites : public history::TopSitesObserver,
                    scoped_refptr<history::TopSites> top_sites,
                    suggestions::SuggestionsService* suggestions,
                    std::unique_ptr<PopularSites> popular_sites,
+                   std::unique_ptr<IconCacher> icon_cacher,
                    MostVisitedSitesSupervisor* supervisor);
 
   ~MostVisitedSites() override;
@@ -162,6 +160,8 @@ class MostVisitedSites : public history::TopSitesObserver,
 
   void OnPopularSitesAvailable(bool success);
 
+  void OnIconMadeAvailable(const GURL& site_url, bool newly_available);
+
   // history::TopSitesObserver implementation.
   void TopSitesLoaded(history::TopSites* top_sites) override;
   void TopSitesChanged(history::TopSites* top_sites,
@@ -171,6 +171,7 @@ class MostVisitedSites : public history::TopSitesObserver,
   scoped_refptr<history::TopSites> top_sites_;
   suggestions::SuggestionsService* suggestions_service_;
   std::unique_ptr<PopularSites> const popular_sites_;
+  std::unique_ptr<IconCacher> const icon_cacher_;
   MostVisitedSitesSupervisor* supervisor_;
 
   Observer* observer_;

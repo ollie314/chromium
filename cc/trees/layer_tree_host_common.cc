@@ -15,8 +15,6 @@
 #include "cc/layers/layer.h"
 #include "cc/layers/layer_impl.h"
 #include "cc/layers/layer_iterator.h"
-#include "cc/proto/begin_main_frame_and_commit_state.pb.h"
-#include "cc/proto/gfx_conversions.h"
 #include "cc/trees/draw_property_utils.h"
 #include "cc/trees/effect_node.h"
 #include "cc/trees/layer_tree_host.h"
@@ -172,50 +170,27 @@ bool LayerTreeHostCommon::ScrollUpdateInfo::operator==(
   return layer_id == other.layer_id && scroll_delta == other.scroll_delta;
 }
 
-void LayerTreeHostCommon::ScrollUpdateInfo::ToProtobuf(
-    proto::ScrollUpdateInfo* proto) const {
-  proto->set_layer_id(layer_id);
-  Vector2dToProto(scroll_delta, proto->mutable_scroll_delta());
+LayerTreeHostCommon::ScrollbarsUpdateInfo::ScrollbarsUpdateInfo()
+    : layer_id(Layer::INVALID_ID), hidden(true) {}
+
+LayerTreeHostCommon::ScrollbarsUpdateInfo::ScrollbarsUpdateInfo(int layer_id,
+                                                                bool hidden)
+    : layer_id(layer_id), hidden(hidden) {}
+
+bool LayerTreeHostCommon::ScrollbarsUpdateInfo::operator==(
+    const LayerTreeHostCommon::ScrollbarsUpdateInfo& other) const {
+  return layer_id == other.layer_id && hidden == other.hidden;
 }
 
-void LayerTreeHostCommon::ScrollUpdateInfo::FromProtobuf(
-    const proto::ScrollUpdateInfo& proto) {
-  layer_id = proto.layer_id();
-  scroll_delta = ProtoToVector2d(proto.scroll_delta());
-}
+ReflectedMainFrameState::ReflectedMainFrameState() : page_scale_delta(1.0f) {}
+
+ReflectedMainFrameState::~ReflectedMainFrameState() = default;
 
 ScrollAndScaleSet::ScrollAndScaleSet()
     : page_scale_delta(1.f), top_controls_delta(0.f) {
 }
 
 ScrollAndScaleSet::~ScrollAndScaleSet() {}
-
-bool ScrollAndScaleSet::EqualsForTesting(const ScrollAndScaleSet& other) const {
-  return scrolls == other.scrolls &&
-         page_scale_delta == other.page_scale_delta &&
-         elastic_overscroll_delta == other.elastic_overscroll_delta &&
-         top_controls_delta == other.top_controls_delta;
-}
-
-void ScrollAndScaleSet::ToProtobuf(proto::ScrollAndScaleSet* proto) const {
-  for (const auto& scroll : scrolls)
-    scroll.ToProtobuf(proto->add_scrolls());
-  proto->set_page_scale_delta(page_scale_delta);
-  Vector2dFToProto(elastic_overscroll_delta,
-                   proto->mutable_elastic_overscroll_delta());
-  proto->set_top_controls_delta(top_controls_delta);
-}
-
-void ScrollAndScaleSet::FromProtobuf(const proto::ScrollAndScaleSet& proto) {
-  DCHECK_EQ(scrolls.size(), 0u);
-  for (int i = 0; i < proto.scrolls_size(); ++i) {
-    scrolls.push_back(LayerTreeHostCommon::ScrollUpdateInfo());
-    scrolls[i].FromProtobuf(proto.scrolls(i));
-  }
-  page_scale_delta = proto.page_scale_delta();
-  elastic_overscroll_delta = ProtoToVector2dF(proto.elastic_overscroll_delta());
-  top_controls_delta = proto.top_controls_delta();
-}
 
 static inline void SetMaskLayersAreDrawnRenderSurfaceLayerListMembers(
     RenderSurfaceImpl* surface,
@@ -356,13 +331,10 @@ static void ComputeInitialRenderSurfaceLayerList(
     }
     layer->set_is_drawn_render_surface_layer_list_member(false);
 
-    bool layer_is_drawn =
-        property_trees->effect_tree.Node(layer->effect_tree_index())->is_drawn;
     bool is_root = layer_tree_impl->IsRootLayer(layer);
-    bool skip_layer =
-        !is_root && draw_property_utils::LayerShouldBeSkipped(
-                        layer, layer_is_drawn, property_trees->transform_tree,
-                        property_trees->effect_tree);
+    bool skip_layer = !is_root && draw_property_utils::LayerShouldBeSkipped(
+                                      layer, property_trees->transform_tree,
+                                      property_trees->effect_tree);
     if (skip_layer)
       continue;
 
@@ -411,8 +383,10 @@ static void ComputeInitialRenderSurfaceLayerList(
             surface->render_target()->nearest_occlusion_immune_ancestor());
       }
     }
+    bool layer_is_drawn =
+        property_trees->effect_tree.Node(layer->effect_tree_index())->is_drawn;
     bool layer_should_be_drawn = draw_property_utils::LayerNeedsUpdate(
-        layer, layer_is_drawn, property_trees->transform_tree);
+        layer, layer_is_drawn, property_trees);
     if (!layer_should_be_drawn)
       continue;
 
@@ -580,12 +554,16 @@ void CalculateDrawPropertiesInternal(
           inputs->elastic_overscroll);
       // Similarly, the device viewport and device transform are shared
       // by both trees.
-      inputs->property_trees->clip_tree.SetViewportClip(
+      PropertyTrees* property_trees = inputs->property_trees;
+      property_trees->clip_tree.SetViewportClip(
           gfx::RectF(gfx::SizeF(inputs->device_viewport_size)));
-      inputs->property_trees->transform_tree.SetDeviceTransform(
+      float page_scale_factor_for_root =
+          inputs->page_scale_layer == inputs->root_layer
+              ? inputs->page_scale_factor
+              : 1.f;
+      property_trees->transform_tree.SetRootTransformsAndScales(
+          inputs->device_scale_factor, page_scale_factor_for_root,
           inputs->device_transform, inputs->root_layer->position());
-      inputs->property_trees->transform_tree.SetDeviceTransformScaleFactor(
-          inputs->device_transform);
       draw_property_utils::ComputeVisibleRects(
           inputs->root_layer, inputs->property_trees,
           inputs->can_render_to_separate_surface, &visible_layer_list);
@@ -645,8 +623,7 @@ void LayerTreeHostCommon::CalculateDrawPropertiesForTesting(
   draw_property_utils::UpdatePropertyTrees(property_trees,
                                            can_render_to_separate_surface);
   draw_property_utils::FindLayersThatNeedUpdates(
-      inputs->root_layer->GetLayerTree(), property_trees->transform_tree,
-      property_trees->effect_tree, &update_layer_list);
+      inputs->root_layer->GetLayerTree(), property_trees, &update_layer_list);
 }
 
 void LayerTreeHostCommon::CalculateDrawProperties(

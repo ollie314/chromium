@@ -165,8 +165,8 @@ TEST_F(LayoutTableCellTest, RepaintContentInTableCell) {
 
   // Check that overflow was calculated on the cell.
   LayoutBlock* inputBlock = toLayoutBlock(getLayoutObjectByElementId("cell"));
-  LayoutRect rect = inputBlock->localOverflowRectForPaintInvalidation();
-  EXPECT_EQ(rect, LayoutRect(-1, -1, 24, 24));
+  LayoutRect rect = inputBlock->localVisualRect();
+  EXPECT_EQ(LayoutRect(-1, -1, 24, 24), rect);
 }
 }  // namespace
 

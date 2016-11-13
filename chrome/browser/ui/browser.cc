@@ -203,6 +203,7 @@
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/manifest_handlers/background_info.h"
+#include "extensions/features/features.h"
 #include "net/base/filename_util.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "net/cookies/cookie_monster.h"
@@ -1424,8 +1425,8 @@ void Browser::NavigationStateChanged(WebContents* source,
     hosted_app_controller_->UpdateLocationBarVisibility(true);
 }
 
-void Browser::VisibleSSLStateChanged(WebContents* source) {
-  // When the current tab's SSL state changes, we need to update the URL
+void Browser::VisibleSecurityStateChanged(WebContents* source) {
+  // When the current tab's security state changes, we need to update the URL
   // bar to reflect the new state.
   DCHECK(source);
   if (tab_strip_model_->GetActiveWebContents() == source)
@@ -1433,7 +1434,7 @@ void Browser::VisibleSSLStateChanged(WebContents* source) {
 
   ChromeSecurityStateModelClient* security_model =
       ChromeSecurityStateModelClient::FromWebContents(source);
-  security_model->VisibleSSLStateChanged();
+  security_model->VisibleSecurityStateChanged();
 }
 
 void Browser::AddNewContents(WebContents* source,
@@ -1851,6 +1852,18 @@ void Browser::SwapTabContents(content::WebContents* old_contents,
                               content::WebContents* new_contents,
                               bool did_start_load,
                               bool did_finish_load) {
+  // Copies the background color from an old WebContents to a new one that
+  // replaces it on the screen. This allows the new WebContents to use the
+  // old one's background color as the starting background color, before having
+  // loaded any contents. As a result, we avoid flashing white when navigating
+  // from a site whith a dark background to another site with a dark background.
+  if (old_contents && new_contents) {
+    RenderWidgetHostView* old_view = old_contents->GetMainFrame()->GetView();
+    RenderWidgetHostView* new_view = new_contents->GetMainFrame()->GetView();
+    if (old_view && new_view)
+      new_view->SetBackgroundColor(old_view->background_color());
+  }
+
   int index = tab_strip_model_->GetIndexOfWebContents(old_contents);
   DCHECK_NE(TabStripModel::kNoTab, index);
   tab_strip_model_->ReplaceWebContentsAt(index, new_contents);
@@ -1900,7 +1913,13 @@ void Browser::SetWebContentsBlocked(content::WebContents* web_contents,
     return;
   }
   tab_strip_model_->SetTabBlocked(index, blocked);
-  if (!blocked && tab_strip_model_->GetActiveWebContents() == web_contents)
+
+  bool browser_active = BrowserList::GetInstance()->GetLastActive() == this;
+  bool contents_is_active =
+      tab_strip_model_->GetActiveWebContents() == web_contents;
+  // If the WebContents is foremost (the active tab in the front-most browser)
+  // and is being unblocked, focus it to make sure that input works again.
+  if (!blocked && contents_is_active && browser_active)
     web_contents->Focus();
 }
 
@@ -1994,7 +2013,7 @@ void Browser::Observe(int type,
   }
 }
 
-#if defined(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
 ///////////////////////////////////////////////////////////////////////////////
 // Browser, extensions::ExtensionRegistryObserver implementation:
 
@@ -2048,7 +2067,7 @@ void Browser::OnExtensionUnloaded(
     }
   }
 }
-#endif  // defined(ENABLE_EXTENSIONS)
+#endif  // BUILDFLAG(ENABLE_EXTENSIONS)
 
 ///////////////////////////////////////////////////////////////////////////////
 // Browser, translate::ContentTranslateDriver::Observer implementation:
@@ -2491,7 +2510,7 @@ void Browser::UpdateBookmarkBarState(BookmarkBarStateChangeReason reason) {
 }
 
 bool Browser::ShouldHideUIForFullscreen() const {
-  // Windows and GTK remove the top controls in fullscreen, but Mac and Ash
+  // Windows and GTK remove the browser controls in fullscreen, but Mac and Ash
   // keep the controls in a slide-down panel.
   return window_ && window_->ShouldHideUIForFullscreen();
 }

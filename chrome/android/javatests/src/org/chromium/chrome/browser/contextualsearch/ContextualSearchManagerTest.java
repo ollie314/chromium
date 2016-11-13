@@ -14,7 +14,6 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.graphics.Point;
-import android.os.Environment;
 import android.os.SystemClock;
 import android.test.suitebuilder.annotation.SmallTest;
 import android.text.TextUtils;
@@ -39,9 +38,12 @@ import org.chromium.chrome.browser.compositor.bottombar.OverlayContentDelegate;
 import org.chromium.chrome.browser.compositor.bottombar.OverlayContentProgressObserver;
 import org.chromium.chrome.browser.compositor.bottombar.OverlayPanel.PanelState;
 import org.chromium.chrome.browser.compositor.bottombar.OverlayPanel.StateChangeReason;
+import org.chromium.chrome.browser.compositor.bottombar.contextualsearch.ContextualSearchBarControl;
+import org.chromium.chrome.browser.compositor.bottombar.contextualsearch.ContextualSearchCaptionControl;
 import org.chromium.chrome.browser.compositor.bottombar.contextualsearch.ContextualSearchIconSpriteControl;
 import org.chromium.chrome.browser.compositor.bottombar.contextualsearch.ContextualSearchImageControl;
 import org.chromium.chrome.browser.compositor.bottombar.contextualsearch.ContextualSearchPanel;
+import org.chromium.chrome.browser.compositor.bottombar.contextualsearch.ContextualSearchQuickActionControl;
 import org.chromium.chrome.browser.contextualsearch.ContextualSearchFakeServer.FakeSlowResolveSearch;
 import org.chromium.chrome.browser.externalnav.ExternalNavigationHandler;
 import org.chromium.chrome.browser.gsa.GSAContextDisplaySelection;
@@ -115,8 +117,7 @@ public class ContextualSearchManagerTest extends ChromeActivityTestCaseBase<Chro
     @Override
     protected void setUp() throws Exception {
         // We have to set up the test server before starting the activity.
-        mTestServer = EmbeddedTestServer.createAndStartFileServer(
-                getInstrumentation().getContext(), Environment.getExternalStorageDirectory());
+        mTestServer = EmbeddedTestServer.createAndStartServer(getInstrumentation().getContext());
 
         super.setUp();
 
@@ -368,11 +369,14 @@ public class ContextualSearchManagerTest extends ChromeActivityTestCaseBase<Chro
         private final String mContextLanguage;
         private final String mThumbnailUrl;
         private final String mCaption;
+        private final String mQuickActionUri;
+        private final int mQuickActionCategory;
 
         public FakeResponseOnMainThread(boolean isNetworkUnavailable, int responseCode,
                 String searchTerm, String displayText, String alternateTerm, String mid,
                 boolean doPreventPreload, int startAdjust, int endAdjudst, String contextLanguage,
-                String thumbnailUrl, String caption) {
+                String thumbnailUrl, String caption, String quickActionUri,
+                int quickActionCategory) {
             mIsNetworkUnavailable = isNetworkUnavailable;
             mResponseCode = responseCode;
             mSearchTerm = searchTerm;
@@ -385,13 +389,16 @@ public class ContextualSearchManagerTest extends ChromeActivityTestCaseBase<Chro
             mContextLanguage = contextLanguage;
             mThumbnailUrl = thumbnailUrl;
             mCaption = caption;
+            mQuickActionUri = quickActionUri;
+            mQuickActionCategory = quickActionCategory;
         }
 
         @Override
         public void run() {
             mFakeServer.handleSearchTermResolutionResponse(mIsNetworkUnavailable, mResponseCode,
                     mSearchTerm, mDisplayText, mAlternateTerm, mMid, mDoPreventPreload,
-                    mStartAdjust, mEndAdjust, mContextLanguage, mThumbnailUrl, mCaption);
+                    mStartAdjust, mEndAdjust, mContextLanguage, mThumbnailUrl, mCaption,
+                    mQuickActionUri, mQuickActionCategory);
         }
     }
 
@@ -402,7 +409,7 @@ public class ContextualSearchManagerTest extends ChromeActivityTestCaseBase<Chro
     private void fakeResponse(boolean isNetworkUnavailable, int responseCode,
             String searchTerm, String displayText, String alternateTerm, boolean doPreventPreload) {
         fakeResponse(isNetworkUnavailable, responseCode, searchTerm, displayText, alternateTerm,
-                null, doPreventPreload, 0, 0, "", "", "");
+                null, doPreventPreload, 0, 0, "", "", "", "", QuickActionCategory.NONE);
     }
 
     /**
@@ -412,11 +419,12 @@ public class ContextualSearchManagerTest extends ChromeActivityTestCaseBase<Chro
     private void fakeResponse(boolean isNetworkUnavailable, int responseCode, String searchTerm,
             String displayText, String alternateTerm, String mid, boolean doPreventPreload,
             int startAdjust, int endAdjust, String contextLanguage, String thumbnailUrl,
-            String caption) {
+            String caption, String quickActionUri, int quickActionCategory) {
         if (mFakeServer.getSearchTermRequested() != null) {
             getInstrumentation().runOnMainSync(new FakeResponseOnMainThread(isNetworkUnavailable,
                     responseCode, searchTerm, displayText, alternateTerm, mid, doPreventPreload,
-                    startAdjust, endAdjust, contextLanguage, thumbnailUrl, caption));
+                    startAdjust, endAdjust, contextLanguage, thumbnailUrl, caption,
+                    quickActionUri, quickActionCategory));
         }
     }
 
@@ -1989,7 +1997,7 @@ public class ContextualSearchManagerTest extends ChromeActivityTestCaseBase<Chro
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
             public void run() {
-                contentViewCore.hideSelectActionMode();
+                contentViewCore.destroySelectActionMode();
             }
         });
         assertWaitForSelectActionBarVisible(false);
@@ -2140,7 +2148,7 @@ public class ContextualSearchManagerTest extends ChromeActivityTestCaseBase<Chro
         waitForPanelToPeek();
 
         fakeResponse(false, 200, "Intelligence", "United States Intelligence", "alternate-term",
-                null, false, -14, 0, "", "", "");
+                null, false, -14, 0, "", "", "", "", QuickActionCategory.NONE);
         waitForSelectionToBe("United States Intelligence");
     }
 
@@ -2686,7 +2694,7 @@ public class ContextualSearchManagerTest extends ChromeActivityTestCaseBase<Chro
             }
         });
 
-        imageControl.hideThumbnail(false);
+        imageControl.hideStaticImage(false);
 
         assertTrue(iconSpriteControl.isVisible());
         assertFalse(imageControl.getThumbnailVisible());
@@ -2718,5 +2726,97 @@ public class ContextualSearchManagerTest extends ChromeActivityTestCaseBase<Chro
         longPressNodeWithoutWaiting("states");
         waitForSelectActionBarVisible();
         waitForPanelToPeek();
+    }
+
+    /**
+     * Tests that the quick action caption is set correctly when one is available. Also tests that
+     * the caption gets changed when the panel is expanded and reset when the panel is closed.
+     */
+    @SmallTest
+    @Feature({"ContextualSearch"})
+    public void testQuickActionCaptionAndImage() throws InterruptedException, TimeoutException {
+        // Simulate a tap to show the Bar, then set the quick action data.
+        simulateTapSearch("search");
+        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
+            @Override
+            public void run() {
+                mPanel.onSearchTermResolved("search", null, "tel:555-555-5555",
+                        QuickActionCategory.PHONE);
+                // Finish all running animations.
+                mPanel.onUpdateAnimation(System.currentTimeMillis(), true);
+            }
+        });
+
+        ContextualSearchBarControl barControl = mPanel.getSearchBarControl();
+        ContextualSearchQuickActionControl quickActionControl = barControl.getQuickActionControl();
+        ContextualSearchImageControl imageControl = mPanel.getImageControl();
+        final ContextualSearchIconSpriteControl iconSpriteControl =
+                imageControl.getIconSpriteControl();
+
+        // Check that the peeking bar is showing the quick action data.
+        assertTrue(quickActionControl.hasQuickAction());
+        assertTrue(barControl.getCaptionVisible());
+        assertEquals(getActivity().getResources().getString(
+                R.string.contextual_search_quick_action_caption_phone),
+                barControl.getCaptionText());
+        assertEquals(1.f, imageControl.getStaticImageVisibilityPercentage());
+
+        // Expand the bar.
+        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
+            @Override
+            public void run() {
+                mPanel.simulateTapOnEndButton();
+            }
+        });
+        waitForPanelToExpand();
+
+        // Check that the expanded bar is showing the correct image and caption.
+        assertTrue(barControl.getCaptionVisible());
+        assertEquals(getActivity().getResources().getString(
+                ContextualSearchCaptionControl.EXPANED_CAPTION_ID),
+                barControl.getCaptionText());
+        assertEquals(0.f, imageControl.getStaticImageVisibilityPercentage());
+        assertTrue(iconSpriteControl.isVisible());
+
+        // Go back to peeking.
+        swipePanelDown();
+        waitForPanelToPeek();
+
+        // Assert that the quick action data is showing.
+        assertTrue(barControl.getCaptionVisible());
+        assertEquals(getActivity().getResources().getString(
+                R.string.contextual_search_quick_action_caption_phone),
+                barControl.getCaptionText());
+        assertEquals(1.f, imageControl.getStaticImageVisibilityPercentage());
+    }
+
+    /**
+     * Tests that an intent is sent when the bar is tapped and a quick action is available.
+     */
+    @SmallTest
+    @Feature({"ContextualSearch"})
+    public void testQuickActionIntent() throws InterruptedException, TimeoutException {
+        // Add a new filter to the activity monitor that matches the intent that should be fired.
+        IntentFilter quickActionFilter = new IntentFilter(Intent.ACTION_VIEW);
+        quickActionFilter.addDataScheme("tel");
+        mActivityMonitor = getInstrumentation().addMonitor(
+                quickActionFilter, new Instrumentation.ActivityResult(Activity.RESULT_OK, null),
+                true);
+
+        // Simulate a tap to show the Bar, then set the quick action data.
+        simulateTapSearch("search");
+        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
+            @Override
+            public void run() {
+                mPanel.onSearchTermResolved("search", null, "tel:555-555-5555",
+                        QuickActionCategory.PHONE);
+            }
+        });
+
+        // Tap on the portion of the bar that should trigger the quick action intent to be fired.
+        clickPanelBar(0.95f);
+
+        // Assert that an intent was fired.
+        assertEquals(1, mActivityMonitor.getHits());
     }
 }

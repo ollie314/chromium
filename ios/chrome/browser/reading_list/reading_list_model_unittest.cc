@@ -142,9 +142,9 @@ TEST_F(ReadingListModelTest, EmptyLoaded) {
 TEST_F(ReadingListModelTest, AddEntry) {
   ClearCounts();
   const ReadingListEntry& entry =
-      model_->AddEntry(GURL("http://example.com"), "sample");
+      model_->AddEntry(GURL("http://example.com"), "\n  \tsample Test ");
   EXPECT_EQ(GURL("http://example.com"), entry.URL());
-  EXPECT_EQ("sample", entry.Title());
+  EXPECT_EQ("sample Test", entry.Title());
 
   AssertObserverCount(0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1);
   EXPECT_EQ(1ul, model_->unread_size());
@@ -153,7 +153,7 @@ TEST_F(ReadingListModelTest, AddEntry) {
 
   const ReadingListEntry& other_entry = model_->GetUnreadEntryAtIndex(0);
   EXPECT_EQ(GURL("http://example.com"), other_entry.URL());
-  EXPECT_EQ("sample", other_entry.Title());
+  EXPECT_EQ("sample Test", other_entry.Title());
 }
 
 TEST_F(ReadingListModelTest, ReadEntry) {
@@ -169,6 +169,24 @@ TEST_F(ReadingListModelTest, ReadEntry) {
   const ReadingListEntry& other_entry = model_->GetReadEntryAtIndex(0);
   EXPECT_EQ(GURL("http://example.com"), other_entry.URL());
   EXPECT_EQ("sample", other_entry.Title());
+}
+
+TEST_F(ReadingListModelTest, EntryFromURL) {
+  GURL url1("http://example.com");
+  GURL url2("http://example2.com");
+  std::string entry1_title = "foo bar qux";
+  model_->AddEntry(url1, entry1_title);
+
+  const ReadingListEntry* entry1 = model_->GetEntryFromURL(url1);
+  EXPECT_NE(nullptr, entry1);
+  EXPECT_EQ(entry1_title, entry1->Title());
+  model_->MarkReadByURL(url1);
+  entry1 = model_->GetEntryFromURL(url1);
+  EXPECT_NE(nullptr, entry1);
+  EXPECT_EQ(entry1_title, entry1->Title());
+
+  const ReadingListEntry* entry2 = model_->GetEntryFromURL(url2);
+  EXPECT_EQ(nullptr, entry2);
 }
 
 TEST_F(ReadingListModelTest, UnreadEntry) {

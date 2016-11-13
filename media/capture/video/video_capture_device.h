@@ -26,11 +26,11 @@
 #include "base/single_thread_task_runner.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
-#include "media/base/video_capture_types.h"
 #include "media/base/video_frame.h"
 #include "media/capture/capture_export.h"
 #include "media/capture/video/scoped_result_callback.h"
 #include "media/capture/video/video_capture_device_descriptor.h"
+#include "media/capture/video_capture_types.h"
 #include "media/mojo/interfaces/image_capture.mojom.h"
 #include "mojo/public/cpp/bindings/array.h"
 #include "ui/gfx/gpu_memory_buffer.h"
@@ -119,7 +119,7 @@ class CAPTURE_EXPORT VideoCaptureDevice {
         base::TimeDelta timestamp) = 0;
     virtual void OnIncomingCapturedVideoFrame(
         std::unique_ptr<Buffer> buffer,
-        const scoped_refptr<VideoFrame>& frame) = 0;
+        scoped_refptr<VideoFrame> frame) = 0;
 
     // Attempts to reserve the same Buffer provided in the last call to one of
     // the OnIncomingCapturedXXX() methods. This will fail if the content of the

@@ -1147,9 +1147,10 @@ void MetricsService::CheckForClonedInstall(
 }
 
 void MetricsService::NotifySyntheticTrialObservers() {
-  FOR_EACH_OBSERVER(variations::SyntheticTrialObserver,
-                    synthetic_trial_observer_list_,
-                    OnSyntheticTrialsChanged(synthetic_trial_groups_));
+  for (variations::SyntheticTrialObserver& observer :
+       synthetic_trial_observer_list_) {
+    observer.OnSyntheticTrialsChanged(synthetic_trial_groups_);
+  }
 }
 
 void MetricsService::GetSyntheticFieldTrialsOlderThan(
@@ -1170,10 +1171,13 @@ std::unique_ptr<MetricsLog> MetricsService::CreateLog(
 }
 
 void MetricsService::RecordCurrentEnvironment(MetricsLog* log) {
+  DCHECK(client_);
   std::vector<variations::ActiveGroupId> synthetic_trials;
   GetSyntheticFieldTrialsOlderThan(log->creation_time(), &synthetic_trials);
-  log->RecordEnvironment(metrics_providers_.get(), synthetic_trials,
-                         GetInstallDate(), GetMetricsReportingEnabledDate());
+  std::string serialized_environment = log->RecordEnvironment(
+      metrics_providers_.get(), synthetic_trials, GetInstallDate(),
+      GetMetricsReportingEnabledDate());
+  client_->OnEnvironmentUpdate(&serialized_environment);
 }
 
 void MetricsService::RecordCurrentHistograms() {

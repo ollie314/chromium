@@ -26,20 +26,21 @@
 #include "components/url_formatter/url_fixer.h"
 #include "components/url_matcher/url_matcher.h"
 #include "content/public/browser/browser_thread.h"
+#include "extensions/features/features.h"
 #include "net/base/escape.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "net/base/url_util.h"
 #include "url/gurl.h"
 #include "url/url_constants.h"
 
-#if defined(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
 #include "extensions/common/extension_urls.h"
 #endif
 
 using content::BrowserThread;
 using net::registry_controlled_domains::EXCLUDE_UNKNOWN_REGISTRIES;
 using net::registry_controlled_domains::EXCLUDE_PRIVATE_REGISTRIES;
-using net::registry_controlled_domains::GetRegistryLength;
+using net::registry_controlled_domains::GetCanonicalHostRegistryLength;
 using policy::URLBlacklist;
 using url_matcher::URLMatcher;
 using url_matcher::URLMatcherConditionSet;
@@ -92,7 +93,7 @@ const char* kFilteredSchemes[] = {
   "wss"
 };
 
-#if defined(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
 const char* kCrxDownloadUrls[] = {
     "https://clients2.googleusercontent.com/crx/blobs/",
     "https://chrome.google.com/webstore/download/"
@@ -280,12 +281,13 @@ bool SupervisedUserURLFilter::HasFilteredScheme(const GURL& url) {
 }
 
 // static
-bool SupervisedUserURLFilter::HostMatchesPattern(const std::string& host,
-                                                 const std::string& pattern) {
+bool SupervisedUserURLFilter::HostMatchesPattern(
+    const std::string& canonical_host,
+    const std::string& pattern) {
   std::string trimmed_pattern = pattern;
-  std::string trimmed_host = host;
+  std::string trimmed_host = canonical_host;
   if (base::EndsWith(pattern, ".*", base::CompareCase::SENSITIVE)) {
-    size_t registry_length = GetRegistryLength(
+    size_t registry_length = GetCanonicalHostRegistryLength(
         trimmed_host, EXCLUDE_UNKNOWN_REGISTRIES, EXCLUDE_PRIVATE_REGISTRIES);
     // A host without a known registry part does not match.
     if (registry_length == 0)
@@ -348,7 +350,7 @@ SupervisedUserURLFilter::GetFilteringBehaviorForURL(
   if (!HasFilteredScheme(effective_url))
     return ALLOW;
 
-#if defined(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
   // Allow webstore crx downloads. This applies to both extension installation
   // and updates.
   if (extension_urls::GetWebstoreUpdateUrl() == Normalize(effective_url))

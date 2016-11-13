@@ -17,7 +17,7 @@
 #include "ash/common/system/tray/tray_item_more.h"
 #include "ash/common/system/tray/tray_popup_header_button.h"
 #include "ash/common/system/tray/tray_popup_item_style.h"
-#include "ash/common/system/tray/tray_utils.h"
+#include "ash/common/system/tray/tray_popup_utils.h"
 #include "ash/common/wm_shell.h"
 #include "ash/resources/vector_icons/vector_icons.h"
 #include "device/bluetooth/bluetooth_common.h"
@@ -32,11 +32,16 @@
 #include "ui/views/controls/button/toggle_button.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/label.h"
+#include "ui/views/controls/progress_bar.h"
 #include "ui/views/layout/box_layout.h"
 
 namespace ash {
 namespace tray {
 namespace {
+
+bool UseMd() {
+  return MaterialDesignController::IsSystemTrayMenuMaterial();
+}
 
 // Updates bluetooth device |device| in the |list|. If it is new, append to the
 // end of the |list|; otherwise, keep it at the same place, but update the data
@@ -108,7 +113,7 @@ class BluetoothDefaultView : public TrayItemMore {
  public:
   BluetoothDefaultView(SystemTrayItem* owner, bool show_more)
       : TrayItemMore(owner, show_more) {
-    if (!MaterialDesignController::IsSystemTrayMenuMaterial()) {
+    if (!UseMd()) {
       // The icon doesn't change in non-md.
       ui::ResourceBundle& bundle = ui::ResourceBundle::GetSharedInstance();
       SetImage(
@@ -153,7 +158,7 @@ class BluetoothDefaultView : public TrayItemMore {
   void UpdateStyle() override {
     TrayItemMore::UpdateStyle();
 
-    if (!MaterialDesignController::IsSystemTrayMenuMaterial())
+    if (!UseMd())
       return;
 
     SystemTrayDelegate* delegate = WmShell::Get()->system_tray_delegate();
@@ -162,7 +167,7 @@ class BluetoothDefaultView : public TrayItemMore {
     SetImage(gfx::CreateVectorIcon(delegate->GetBluetoothEnabled()
                                        ? kSystemMenuBluetoothIcon
                                        : kSystemMenuBluetoothDisabledIcon,
-                                   style->GetForegroundColor()));
+                                   style->GetIconColor()));
   }
 
  private:
@@ -206,17 +211,12 @@ class BluetoothDetailedView : public TrayDetailsView {
   }
 
   void BluetoothStartDiscovering() {
-    // TODO(tdanderson|fukino): The material design version of the detailed
-    // view should use an infinite loader bar instead of a throbber. See
-    // crbug.com/632128.
     SystemTrayDelegate* delegate = WmShell::Get()->system_tray_delegate();
     if (delegate->GetBluetoothDiscovering()) {
-      if (throbber_)
-        throbber_->Start();
+      ShowLoadingIndicator();
       return;
     }
-    if (throbber_)
-      throbber_->Stop();
+    HideLoadingIndicator();
     if (delegate->GetBluetoothEnabled())
       delegate->BluetoothStartDiscovering();
   }
@@ -225,8 +225,7 @@ class BluetoothDetailedView : public TrayDetailsView {
     SystemTrayDelegate* delegate = WmShell::Get()->system_tray_delegate();
     if (delegate && delegate->GetBluetoothDiscovering()) {
       delegate->BluetoothStopDiscovering();
-      if (throbber_)
-        throbber_->Stop();
+      HideLoadingIndicator();
     }
   }
 
@@ -320,7 +319,7 @@ class BluetoothDetailedView : public TrayDetailsView {
                                          bool enabled) {
     for (size_t i = 0; i < list.size(); ++i) {
       HoverHighlightView* container = nullptr;
-      if (MaterialDesignController::IsSystemTrayMenuMaterial()) {
+      if (UseMd()) {
         gfx::ImageSkia icon_image = CreateVectorIcon(
             GetBluetoothDeviceIcon(list[i].device_type), kMenuIconColor);
         container = AddScrollListItemWithIcon(list[i].display_name, highlight,
@@ -372,7 +371,7 @@ class BluetoothDetailedView : public TrayDetailsView {
   void AppendSettingsEntries() {
     // Do not append the bottom button row in material design; this is replaced
     // by the settings button in the header row.
-    if (MaterialDesignController::IsSystemTrayMenuMaterial())
+    if (UseMd())
       return;
 
     if (!WmShell::Get()->system_tray_delegate()->ShouldShowSettings())
@@ -380,7 +379,7 @@ class BluetoothDetailedView : public TrayDetailsView {
 
     // Add bluetooth device requires a browser window, hide it for non logged in
     // user.
-    if (!CanOpenWebUISettings(login_))
+    if (!TrayPopupUtils::CanOpenWebUISettings(login_))
       return;
 
     SystemTrayDelegate* delegate = WmShell::Get()->system_tray_delegate();
@@ -461,7 +460,7 @@ class BluetoothDetailedView : public TrayDetailsView {
 
   void HandleButtonPressed(views::Button* sender,
                            const ui::Event& event) override {
-    if (MaterialDesignController::IsSystemTrayMenuMaterial()) {
+    if (UseMd()) {
       if (sender == toggle_)
         WmShell::Get()->system_tray_delegate()->ToggleBluetooth();
       else if (sender == settings_)
@@ -482,7 +481,7 @@ class BluetoothDetailedView : public TrayDetailsView {
     if (login_ == LoginStatus::LOCKED)
       return;
 
-    if (MaterialDesignController::IsSystemTrayMenuMaterial()) {
+    if (UseMd()) {
       toggle_ = title_row()->AddToggleButton(this);
       settings_ = title_row()->AddSettingsButton(this, login_);
       return;
@@ -511,10 +510,26 @@ class BluetoothDetailedView : public TrayDetailsView {
   }
 
   void ShowSettings() {
-    if (CanOpenWebUISettings(login_)) {
+    if (TrayPopupUtils::CanOpenWebUISettings(login_)) {
       WmShell::Get()->system_tray_delegate()->ManageBluetoothDevices();
       owner()->system_tray()->CloseSystemBubble();
     }
+  }
+
+  void ShowLoadingIndicator() {
+    if (throbber_) {
+      throbber_->Start();
+    } else if (UseMd()) {
+      // Setting a value of -1 gives progress_bar an infinite-loading behavior.
+      ShowProgress(-1, true);
+    }
+  }
+
+  void HideLoadingIndicator() {
+    if (throbber_)
+      throbber_->Stop();
+    else if (UseMd())
+      ShowProgress(0, false);
   }
 
   LoginStatus login_;

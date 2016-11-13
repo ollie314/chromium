@@ -141,7 +141,7 @@ bool ScrollbarTheme::paint(const Scrollbar& scrollbar,
       FloatRect floatThumbRect(thumbRect);
       floatThumbRect.inflate(1);  // some themes inflate thumb bounds
       compositingRecorder.emplace(graphicsContext, scrollbar,
-                                  SkXfermode::kSrcOver_Mode, opacity,
+                                  SkBlendMode::kSrcOver, opacity,
                                   &floatThumbRect);
     }
 
@@ -231,6 +231,16 @@ bool ScrollbarTheme::shouldSnapBackToDragOrigin(
   return Platform::current()->scrollbarBehavior()->shouldSnapBackToDragOrigin(
       mousePosition, trackRect(scrollbar),
       scrollbar.orientation() == HorizontalScrollbar);
+}
+
+double ScrollbarTheme::overlayScrollbarFadeOutDelaySeconds() const {
+  // On Mac, fading is controlled by the painting code in ScrollAnimatorMac.
+  return 0.0;
+}
+
+double ScrollbarTheme::overlayScrollbarFadeOutDurationSeconds() const {
+  // On Mac, fading is controlled by the painting code in ScrollAnimatorMac.
+  return 0.0;
 }
 
 int ScrollbarTheme::thumbPosition(const ScrollbarThemeClient& scrollbar,

@@ -115,8 +115,7 @@ public class ReplicaInputConnection
 
     @Override
     public void updateStateOnUiThread(String text, int selectionStart, int selectionEnd,
-            int compositionStart, int compositionEnd, boolean singleLine, boolean isNonImeChange,
-            boolean inBatchEditMode) {
+            int compositionStart, int compositionEnd, boolean singleLine, boolean isNonImeChange) {
         if (DEBUG_LOGS) {
             Log.w(TAG, "updateState [%s] [%s %s] [%s %s] [%b] [%b]", text, selectionStart,
                     selectionEnd, compositionStart, compositionEnd, singleLine, isNonImeChange);
@@ -210,7 +209,7 @@ public class ReplicaInputConnection
         mPendingAccent = 0;
         super.commitText(text, newCursorPosition);
         updateSelectionIfRequired();
-        return mImeAdapter.sendCompositionToNative(text, newCursorPosition, text.length() > 0, 0);
+        return mImeAdapter.sendCompositionToNative(text, newCursorPosition, true, 0);
     }
 
     /**

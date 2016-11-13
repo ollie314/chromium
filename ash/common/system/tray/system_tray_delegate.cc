@@ -9,14 +9,6 @@
 
 namespace ash {
 
-NetworkIconInfo::NetworkIconInfo()
-    : connecting(false),
-      connected(false),
-      tray_icon_visible(true),
-      is_cellular(false) {}
-
-NetworkIconInfo::~NetworkIconInfo() {}
-
 BluetoothDeviceInfo::BluetoothDeviceInfo()
     : connected(false), connecting(false), paired(false) {}
 
@@ -43,6 +35,10 @@ LoginStatus SystemTrayDelegate::GetUserLoginStatus() const {
 }
 
 std::string SystemTrayDelegate::GetEnterpriseDomain() const {
+  return std::string();
+}
+
+std::string SystemTrayDelegate::GetEnterpriseRealm() const {
   return std::string();
 }
 
@@ -80,8 +76,6 @@ bool SystemTrayDelegate::ShouldShowSettings() {
   return false;
 }
 
-void SystemTrayDelegate::ShowSetTimeDialog() {}
-
 void SystemTrayDelegate::ShowEnterpriseInfo() {}
 
 void SystemTrayDelegate::ShowUserLogin() {}
@@ -89,8 +83,6 @@ void SystemTrayDelegate::ShowUserLogin() {}
 void SystemTrayDelegate::SignOut() {}
 
 void SystemTrayDelegate::RequestRestartForUpdate() {}
-
-void SystemTrayDelegate::RequestShutdown() {}
 
 void SystemTrayDelegate::GetAvailableBluetoothDevices(
     BluetoothDeviceList* list) {}
@@ -118,8 +110,6 @@ void SystemTrayDelegate::ToggleBluetooth() {}
 bool SystemTrayDelegate::IsBluetoothDiscovering() {
   return false;
 }
-
-void SystemTrayDelegate::ShowOtherNetworkDialog(const std::string& type) {}
 
 bool SystemTrayDelegate::GetBluetoothAvailable() {
   return false;

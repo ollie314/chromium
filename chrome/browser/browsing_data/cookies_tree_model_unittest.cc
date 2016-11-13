@@ -32,11 +32,12 @@
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/test/test_browser_thread_bundle.h"
+#include "extensions/features/features.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-#if defined(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
 #include "chrome/browser/extensions/extension_special_storage_policy.h"
 #endif
 
@@ -49,7 +50,7 @@ class CookiesTreeModelTest : public testing::Test {
  public:
   ~CookiesTreeModelTest() override {
     // Avoid memory leaks.
-#if defined(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
     special_storage_policy_ = nullptr;
 #endif
     profile_.reset();
@@ -85,9 +86,15 @@ class CookiesTreeModelTest : public testing::Test {
     mock_browsing_data_media_license_helper_ =
         new MockBrowsingDataMediaLicenseHelper(profile_.get());
 
-#if defined(ENABLE_EXTENSIONS)
+    const char kExtensionScheme[] = "extensionscheme";
+    scoped_refptr<content_settings::CookieSettings> cookie_settings =
+        new content_settings::CookieSettings(
+            HostContentSettingsMapFactory::GetForProfile(profile_.get()),
+            profile_->GetPrefs(),
+            kExtensionScheme);
+#if BUILDFLAG(ENABLE_EXTENSIONS)
     special_storage_policy_ =
-        new ExtensionSpecialStoragePolicy(profile_.get());
+        new ExtensionSpecialStoragePolicy(cookie_settings.get());
 #endif
   }
 
@@ -443,7 +450,7 @@ class CookiesTreeModelTest : public testing::Test {
 
  protected:
   ExtensionSpecialStoragePolicy* special_storage_policy() {
-#if defined(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
     return special_storage_policy_.get();
 #else
     return nullptr;
@@ -479,7 +486,7 @@ class CookiesTreeModelTest : public testing::Test {
   scoped_refptr<MockBrowsingDataMediaLicenseHelper>
       mock_browsing_data_media_license_helper_;
 
-#if defined(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
   scoped_refptr<ExtensionSpecialStoragePolicy> special_storage_policy_;
 #endif
 };

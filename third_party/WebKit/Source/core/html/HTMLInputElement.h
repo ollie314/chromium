@@ -125,6 +125,8 @@ class CORE_EXPORT HTMLInputElement : public HTMLTextFormControlElement {
   void setValue(const String&,
                 TextFieldEventBehavior = DispatchNoEvent) override;
   void setValueForUser(const String&);
+  // Update the value, and clear hasDirtyValue() flag.
+  void setNonDirtyValue(const String&);
   // Checks if the specified string would be a valid value.
   // We should not call this for types with no string value such as CHECKBOX and
   // RADIO.
@@ -148,7 +150,7 @@ class CORE_EXPORT HTMLInputElement : public HTMLTextFormControlElement {
                         ExceptionState&,
                         TextFieldEventBehavior = DispatchNoEvent);
 
-  String valueWithDefault() const;
+  String valueOrDefaultLabel() const;
 
   // This function dispatches 'input' event for non-textfield types. Callers
   // need to handle any DOM structure changes by event handlers, or need to
@@ -231,7 +233,7 @@ class CORE_EXPORT HTMLInputElement : public HTMLTextFormControlElement {
   bool isInRequiredRadioButtonGroup();
 
   // Functions for InputType classes.
-  void setValueInternal(const String&, TextFieldEventBehavior);
+  void setNonAttributeValue(const String&);
   bool valueAttributeWasUpdatedAfterParsing() const {
     return m_valueAttributeWasUpdatedAfterParsing;
   }
@@ -405,9 +407,8 @@ class CORE_EXPORT HTMLInputElement : public HTMLTextFormControlElement {
   bool shouldDispatchFormControlChangeEvent(String&, String&) override;
 
   AtomicString m_name;
-  // A dirty value.  isNull() means the value is not dirty and we should refer
-  // to |value| content attribute value.
-  String m_valueIfDirty;
+  // The value string in |value| value mode.
+  String m_nonAttributeValue;
   String m_suggestedValue;
   int m_size;
   int m_maxLength;

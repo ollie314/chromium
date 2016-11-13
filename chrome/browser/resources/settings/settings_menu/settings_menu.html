@@ -101,7 +101,7 @@
             $i18n{internetPageTitle}
           </div>
 </if>
-          <div data-path="/people" on-tap="openPage_"
+          <div id="people" data-path="/people" on-tap="openPage_"
               hidden="[[!pageVisibility.people]]">
             <iron-icon icon="settings:people"></iron-icon>
             $i18n{peoplePageTitle}
@@ -161,7 +161,7 @@
             $i18n{bluetoothPageTitle}
           </div>
 </if>
-          <div data-path="/passwords" on-tap="openPage_"
+          <div data-path="/passwordsAndForms" on-tap="openPage_"
               hidden="[[!pageVisibility.passwordsAndForms]]">
             <iron-icon icon="settings:assignment"></iron-icon>
             $i18n{passwordsAndAutofillPageTitle}

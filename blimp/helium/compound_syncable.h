@@ -34,14 +34,14 @@ class BLIMP_HELIUM_EXPORT CompoundSyncable : public Syncable {
   ~CompoundSyncable() override;
 
   // Syncable implementation.
+  void SetLocalUpdateCallback(base::Closure local_update_callback) override;
   void CreateChangesetToCurrent(
       Revision from,
       google::protobuf::io::CodedOutputStream* output_stream) override;
   Result ApplyChangeset(
-      Revision to,
       google::protobuf::io::CodedInputStream* changeset) override;
   void ReleaseBefore(Revision from) override;
-  VersionVector GetVersionVector() const override;
+  Revision GetRevision() const override;
 
  protected:
   template <typename T>
@@ -51,7 +51,7 @@ class BLIMP_HELIUM_EXPORT CompoundSyncable : public Syncable {
     RegisteredMember(RegisteredMember<T>&& other) = default;
 
     T* get() const { return member_.get(); }
-    T& operator->() const { return *member_; }
+    T* operator->() const { return member_.get(); }
 
    private:
     friend class CompoundSyncable;

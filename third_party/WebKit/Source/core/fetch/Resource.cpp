@@ -323,8 +323,6 @@ Resource::Resource(const ResourceRequest& request,
       m_responseTimestamp(currentTime()),
       m_cancelTimer(this, &Resource::cancelTimerFired),
       m_resourceRequest(request) {
-  // m_type is a bitfield, so this tests careless updates of the enum.
-  DCHECK_EQ(m_type, unsigned(type));
   InstanceCounters::incrementCounter(InstanceCounters::ResourceCounter);
 
   // Currently we support the metadata caching only for HTTP family.
@@ -397,9 +395,14 @@ void Resource::setResourceBuffer(PassRefPtr<SharedBuffer> resourceBuffer) {
   setEncodedSize(m_data->size());
 }
 
+void Resource::clearData() {
+  m_data.clear();
+  m_encodedSizeMemoryUsage = 0;
+}
+
 void Resource::setDataBufferingPolicy(DataBufferingPolicy dataBufferingPolicy) {
   m_options.dataBufferingPolicy = dataBufferingPolicy;
-  m_data.clear();
+  clearData();
   setEncodedSize(0);
 }
 
@@ -414,7 +417,7 @@ void Resource::error(const ResourceError& error) {
   if (!errorOccurred())
     setStatus(LoadError);
   DCHECK(errorOccurred());
-  m_data.clear();
+  clearData();
   m_loader = nullptr;
   checkNotify();
 }
@@ -802,13 +805,8 @@ void Resource::setEncodedSize(size_t encodedSize) {
   memoryCache()->update(this, oldSize, size());
 }
 
-void Resource::setEncodedSizeMemoryUsage(size_t encodedSize) {
-  m_encodedSizeMemoryUsage = encodedSize;
-}
-
 void Resource::didAccessDecodedData() {
   memoryCache()->updateDecodedResource(this, UpdateForAccess);
-  memoryCache()->prune();
 }
 
 void Resource::finishPendingClients() {
@@ -852,7 +850,9 @@ void Resource::prune() {
   destroyDecodedDataIfPossible();
 }
 
-void Resource::prepareToSuspend() {
+void Resource::onMemoryStateChange(MemoryState state) {
+  if (state != MemoryState::SUSPENDED)
+    return;
   prune();
   if (!m_cacheHandler)
     return;
@@ -938,6 +938,10 @@ void Resource::setLoFiStateOff() {
   m_resourceRequest.setLoFiState(WebURLRequest::LoFiOff);
 }
 
+void Resource::clearRangeRequestHeader() {
+  m_resourceRequest.clearHTTPHeaderField("range");
+}
+
 void Resource::revalidationSucceeded(
     const ResourceResponse& validatingResponse) {
   SECURITY_CHECK(m_redirectChain.isEmpty());
@@ -964,7 +968,7 @@ void Resource::revalidationSucceeded(
 
 void Resource::revalidationFailed() {
   SECURITY_CHECK(m_redirectChain.isEmpty());
-  m_data.clear();
+  clearData();
   m_cacheHandler.clear();
   destroyDecodedDataForFailedRevalidation();
   m_isRevalidating = false;

@@ -37,6 +37,7 @@
 #include "platform/exported/WrappedResourceResponse.h"
 #include "platform/network/ResourceError.h"
 #include "public/platform/Platform.h"
+#include "public/platform/WebCachePolicy.h"
 #include "public/platform/WebData.h"
 #include "public/platform/WebURLError.h"
 #include "public/platform/WebURLRequest.h"
@@ -54,7 +55,9 @@ ResourceLoader* ResourceLoader::create(ResourceFetcher* fetcher,
 }
 
 ResourceLoader::ResourceLoader(ResourceFetcher* fetcher, Resource* resource)
-    : m_fetcher(fetcher), m_resource(resource) {
+    : m_fetcher(fetcher),
+      m_resource(resource),
+      m_isCacheAwareLoadingActivated(false) {
   DCHECK(m_resource);
   DCHECK(m_fetcher);
   m_resource->setLoader(this);
@@ -80,9 +83,19 @@ void ResourceLoader::start(const ResourceRequest& request,
   }
 
   m_loader = wrapUnique(Platform::current()->createURLLoader());
-  m_loader->setDefersLoading(defersLoading);
   DCHECK(m_loader);
+  m_loader->setDefersLoading(defersLoading);
   m_loader->setLoadingTaskRunner(loadingTaskRunner);
+
+  if (m_isCacheAwareLoadingActivated) {
+    // Override cache policy for cache-aware loading. If this request fails, a
+    // reload with original request will be triggered in didFail().
+    ResourceRequest cacheAwareRequest(request);
+    cacheAwareRequest.setCachePolicy(WebCachePolicy::ReturnCacheDataIfValid);
+    m_loader->loadAsynchronously(WrappedResourceRequest(cacheAwareRequest),
+                                 this);
+    return;
+  }
 
   if (m_resource->options().synchronousPolicy == RequestSynchronously)
     requestSynchronously(request);
@@ -90,12 +103,12 @@ void ResourceLoader::start(const ResourceRequest& request,
     m_loader->loadAsynchronously(WrappedResourceRequest(request), this);
 }
 
-void ResourceLoader::restartForServiceWorkerFallback(
-    const ResourceRequest& request) {
+void ResourceLoader::restart(const ResourceRequest& request,
+                             WebTaskRunner* loadingTaskRunner,
+                             bool defersLoading) {
+  CHECK_EQ(m_resource->options().synchronousPolicy, RequestAsynchronously);
   m_loader.reset();
-  m_loader = wrapUnique(Platform::current()->createURLLoader());
-  DCHECK(m_loader);
-  m_loader->loadAsynchronously(WrappedResourceRequest(request), this);
+  start(request, loadingTaskRunner, defersLoading);
 }
 
 void ResourceLoader::setDefersLoading(bool defers) {
@@ -119,15 +132,15 @@ void ResourceLoader::didChangePriority(ResourceLoadPriority loadPriority,
 }
 
 void ResourceLoader::cancel() {
-  didFail(nullptr, ResourceError::cancelledError(
-                       m_resource->lastResourceRequest().url()));
+  didFail(
+      ResourceError::cancelledError(m_resource->lastResourceRequest().url()));
 }
 
 void ResourceLoader::cancelForRedirectAccessCheckError(const KURL& newURL) {
   m_resource->willNotFollowRedirect();
 
   if (m_loader)
-    didFail(nullptr, ResourceError::cancelledDueToAccessCheckError(newURL));
+    didFail(ResourceError::cancelledDueToAccessCheckError(newURL));
 }
 
 bool ResourceLoader::willFollowRedirect(
@@ -136,6 +149,13 @@ bool ResourceLoader::willFollowRedirect(
     const WebURLResponse& passedRedirectResponse) {
   DCHECK(!passedNewRequest.isNull());
   DCHECK(!passedRedirectResponse.isNull());
+
+  if (m_isCacheAwareLoadingActivated) {
+    // Fail as cache miss if cached response is a redirect.
+    didFail(
+        ResourceError::cacheMissError(m_resource->lastResourceRequest().url()));
+    return false;
+  }
 
   ResourceRequest& newRequest(passedNewRequest.toMutableResourceRequest());
   const ResourceResponse& redirectResponse(
@@ -222,6 +242,20 @@ void ResourceLoader::didFinishLoading(WebURLLoader*,
 }
 
 void ResourceLoader::didFail(WebURLLoader*, const WebURLError& error) {
+  didFail(error);
+}
+
+void ResourceLoader::didFail(const ResourceError& error) {
+  if (m_isCacheAwareLoadingActivated && error.isCacheMiss() &&
+      m_fetcher->context().shouldLoadNewResource(m_resource->getType())) {
+    m_resource->willReloadAfterDiskCacheMiss();
+    m_isCacheAwareLoadingActivated = false;
+    restart(m_resource->resourceRequest(),
+            m_fetcher->context().loadingTaskRunner(),
+            m_fetcher->context().defersLoading());
+    return;
+  }
+
   m_loader.reset();
   m_fetcher->didFailLoading(m_resource.get(), error);
 }
@@ -263,6 +297,29 @@ void ResourceLoader::requestSynchronously(const ResourceRequest& request) {
     m_resource->setResourceBuffer(dataOut);
   }
   didFinishLoading(0, monotonicallyIncreasingTime(), encodedDataLength);
+}
+
+void ResourceLoader::activateCacheAwareLoadingIfNeeded(
+    const ResourceRequest& request) {
+  DCHECK(!m_isCacheAwareLoadingActivated);
+
+  if (m_resource->options().cacheAwareLoadingEnabled !=
+      IsCacheAwareLoadingEnabled)
+    return;
+
+  // Synchronous requests are not supported.
+  if (m_resource->options().synchronousPolicy == RequestSynchronously)
+    return;
+
+  // Don't activate on Resource revalidation.
+  if (m_resource->isCacheValidator())
+    return;
+
+  // Don't activate if cache policy is explicitly set.
+  if (request.getCachePolicy() != WebCachePolicy::UseProtocolCachePolicy)
+    return;
+
+  m_isCacheAwareLoadingActivated = true;
 }
 
 }  // namespace blink

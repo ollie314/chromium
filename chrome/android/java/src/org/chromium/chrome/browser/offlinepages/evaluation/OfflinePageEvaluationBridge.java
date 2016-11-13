@@ -53,9 +53,16 @@ public class OfflinePageEvaluationBridge {
         public void savePageRequestChanged(SavePageRequest request) {}
     }
 
-    public static OfflinePageEvaluationBridge getForProfile(Profile profile) {
+    /**
+     * Get the instance of the evaluation bridge.
+     * @param profile The profile used to get bridge.
+     * @param useEvaluationScheduler True if using the evaluation scheduler instead of the
+     * GCMNetworkManager one.
+     */
+    public static OfflinePageEvaluationBridge getForProfile(
+            Profile profile, boolean useEvaluationScheduler) {
         ThreadUtils.assertOnUiThread();
-        return nativeGetBridgeForProfile(profile);
+        return nativeGetBridgeForProfile(profile, useEvaluationScheduler);
     }
 
     private long mNativeOfflinePageEvaluationBridge;
@@ -115,11 +122,34 @@ public class OfflinePageEvaluationBridge {
     }
 
     /**
-     * Force request coordinator to process the requests in the queue.
+     * Forces request coordinator to process the requests in the queue.
      * @param callback The callback would be invoked after the operation completes.
+     * @return True if processing starts successfully and callback is expected to be called, false
+     * otherwise.
      */
-    public void pushRequestProcessing(final Callback<Boolean> callback) {
-        nativePushRequestProcessing(mNativeOfflinePageEvaluationBridge, callback);
+    public boolean pushRequestProcessing(final Callback<Boolean> callback) {
+        return nativePushRequestProcessing(mNativeOfflinePageEvaluationBridge, callback);
+    }
+
+    /**
+     * Gets all requests in the queue.
+     * @param callback The callback would be invoked with a list of requests which are in the queue.
+     */
+    public void getRequestsInQueue(Callback<SavePageRequest[]> callback) {
+        nativeGetRequestsInQueue(mNativeOfflinePageEvaluationBridge, callback);
+    }
+
+    /**
+     * Removes requests from the queue by request ids.
+     * @param requestIds The list of request ids to be deleted.
+     * @param callback The callback would be invoked with number of successfully deleted ids.
+     */
+    public void removeRequestsFromQueue(List<Long> requestIds, Callback<Integer> callback) {
+        long[] ids = new long[requestIds.size()];
+        for (int i = 0; i < requestIds.size(); i++) {
+            ids[i] = requestIds.get(i);
+        }
+        nativeRemoveRequestsFromQueue(mNativeOfflinePageEvaluationBridge, ids, callback);
     }
 
     /**
@@ -184,12 +214,17 @@ public class OfflinePageEvaluationBridge {
                 creationTime, accessCount, lastAccessTimeMs);
     }
 
-    private static native OfflinePageEvaluationBridge nativeGetBridgeForProfile(Profile profile);
+    private static native OfflinePageEvaluationBridge nativeGetBridgeForProfile(
+            Profile profile, boolean useEvaluationScheduler);
 
     private native void nativeGetAllPages(long nativeOfflinePageEvaluationBridge,
             List<OfflinePageItem> offlinePages, final Callback<List<OfflinePageItem>> callback);
     private native void nativeSavePageLater(long nativeOfflinePageEvaluationBridge, String url,
             String clientNamespace, String clientId, boolean userRequested);
-    private native void nativePushRequestProcessing(
+    private native boolean nativePushRequestProcessing(
             long nativeOfflinePageEvaluationBridge, Callback<Boolean> callback);
+    private native void nativeGetRequestsInQueue(
+            long nativeOfflinePageEvaluationBridge, final Callback<SavePageRequest[]> callback);
+    private native void nativeRemoveRequestsFromQueue(long nativeOfflinePageEvaluationBridge,
+            long[] requestIds, final Callback<Integer> callback);
 }

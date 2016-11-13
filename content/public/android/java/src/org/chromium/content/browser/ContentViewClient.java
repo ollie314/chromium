@@ -11,6 +11,7 @@ import android.view.KeyEvent;
 import android.view.View.MeasureSpec;
 
 import org.chromium.base.Log;
+import org.chromium.base.metrics.RecordUserAction;
 
 /**
  *  Main callback class used by ContentView.
@@ -26,11 +27,15 @@ import org.chromium.base.Log;
  */
 public class ContentViewClient {
     // Tag used for logging.
-    private static final String TAG = "cr.ContentViewClient";
+    private static final String TAG = "cr_ContentViewClient";
 
     // Default value to signal that the ContentView's size should not be overridden.
     private static final int UNSPECIFIED_MEASURE_SPEC =
             MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED);
+
+    private static final String GEO_SCHEME = "geo";
+    private static final String TEL_SCHEME = "tel";
+    private static final String MAILTO_SCHEME = "mailto";
 
     public void onUpdateTitle(String title) {
     }
@@ -47,7 +52,7 @@ public class ContentViewClient {
      * @param topControlsOffsetY The Y offset of the top controls in physical pixels.
      * @param topContentOffsetY The Y offset of the content in physical pixels.
      */
-    public void onTopControlsChanged(float topControlsOffsetY, float topContentOffsetY) { }
+    public void onTopControlsChanged(float browserControlsOffsetY, float topContentOffsetY) {}
 
     /**
      * Notifies the client of the position of the bottom controls.
@@ -80,63 +85,6 @@ public class ContentViewClient {
     }
 
     /**
-     * Called when the contextual ActionBar is shown.
-     */
-    public void onContextualActionBarShown() {
-    }
-
-    /**
-     * Called when the contextual ActionBar is hidden.
-     */
-    public void onContextualActionBarHidden() {
-    }
-
-    /**
-     * Perform a search on {@code searchQuery}.  This method is only called if
-     * {@link #doesPerformWebSearch()} returns {@code true}.
-     * @param searchQuery The string to search for.
-     */
-    public void performWebSearch(String searchQuery) {
-    }
-
-    /**
-     * If this returns {@code true} contextual web search attempts will be forwarded to
-     * {@link #performWebSearch(String)}.
-     * @return {@code true} iff this {@link ContentViewClient} wants to consume web search queries
-     *         and override the default intent behavior.
-     */
-    public boolean doesPerformWebSearch() {
-        return false;
-    }
-
-    /**
-     * If this returns {@code true} the text processing intents should be forwarded to {@link
-     * startProcessTextIntent(Intent)}, otherwise these intents should be sent by WindowAndroid by
-     * default.
-     * @return {@code true} iff this {@link ContentViewClient} wants to send the processing intents
-     * and override the default intent behavior.
-     */
-    public boolean doesPerformProcessText() {
-        return false;
-    }
-
-    /**
-     * Send the intent to process the current selected text.
-     */
-    public void startProcessTextIntent(Intent intent) {}
-
-    /**
-     * @param actionModeItem the flag for the action mode item in question. See
-     *        {@link WebActionModeCallback.ActionHandler} for a list of valid action
-     *        mode item flags.
-     * @return true if the action is allowed. Otherwise, the menu item
-     *         should be removed from the menu.
-     */
-    public boolean isSelectActionModeAllowed(int actionModeItem) {
-        return true;
-    }
-
-    /**
      * Called when a new content intent is requested to be started.
      */
     public void onStartContentIntent(Context context, String intentUrl, boolean isMainFrame) {
@@ -144,6 +92,14 @@ public class ContentViewClient {
         // Perform generic parsing of the URI to turn it into an Intent.
         try {
             intent = Intent.parseUri(intentUrl, Intent.URI_INTENT_SCHEME);
+
+            String scheme = intent.getScheme();
+            if (!scheme.equals(GEO_SCHEME) && !scheme.equals(TEL_SCHEME)
+                    && !scheme.equals(MAILTO_SCHEME)) {
+                Log.w(TAG, "Invalid scheme for URI %s", intentUrl);
+                return;
+            }
+
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         } catch (Exception ex) {
             Log.w(TAG, "Bad URI %s", intentUrl, ex);
@@ -151,6 +107,7 @@ public class ContentViewClient {
         }
 
         try {
+            RecordUserAction.record("Android.ContentDetectorActivated");
             context.startActivity(intent);
         } catch (ActivityNotFoundException ex) {
             Log.w(TAG, "No application can handle %s", intentUrl);

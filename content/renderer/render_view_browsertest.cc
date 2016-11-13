@@ -84,6 +84,7 @@
 #include "ui/events/keycodes/keyboard_codes.h"
 #include "ui/gfx/codec/jpeg_codec.h"
 #include "ui/gfx/range/range.h"
+#include "ui/native_theme/native_theme_switches.h"
 
 #if defined(USE_AURA) && defined(USE_X11)
 #include <X11/Xlib.h>
@@ -220,6 +221,8 @@ class RenderViewImplTest : public RenderViewTest {
     // does not have to bother enabling each feature.
     WebRuntimeFeatures::enableExperimentalFeatures(true);
     WebRuntimeFeatures::enableTestOnlyFeatures(true);
+    WebRuntimeFeatures::enableOverlayScrollbars(
+        ui::IsOverlayScrollbarEnabled());
     RenderViewTest::SetUp();
   }
 
@@ -834,10 +837,11 @@ TEST_F(RenderViewImplTest, OriginReplicationForSwapOut) {
   // replicated correctly.
   replication_state.origin = url::Origin();
   TestRenderFrame* child_frame2 = static_cast<TestRenderFrame*>(
-      RenderFrame::FromWebFrame(web_frame->lastChild()));
+      RenderFrame::FromWebFrame(web_frame->firstChild()->nextSibling()));
   child_frame2->SwapOut(kProxyRoutingId + 1, true, replication_state);
-  EXPECT_TRUE(web_frame->lastChild()->isWebRemoteFrame());
-  EXPECT_TRUE(web_frame->lastChild()->getSecurityOrigin().isUnique());
+  EXPECT_TRUE(web_frame->firstChild()->nextSibling()->isWebRemoteFrame());
+  EXPECT_TRUE(
+      web_frame->firstChild()->nextSibling()->getSecurityOrigin().isUnique());
 }
 
 // Test for https://crbug.com/568676, where a parent detaches a remote child
@@ -901,30 +905,6 @@ TEST_F(RenderViewImplTest, NavigateProxyAndDetachBeforeOnNavigate) {
   // Detach the provisional frame to clean it up.  Normally, the browser
   // process would trigger this via FrameMsg_Delete.
   provisional_frame->GetWebFrame()->detach();
-}
-
-// Verify that DidFlushPaint doesn't crash if called after a RenderView is
-// swapped out. See https://crbug.com/513552.
-TEST_F(RenderViewImplTest, PaintAfterSwapOut) {
-  // Create a new main frame RenderFrame so that we don't interfere with the
-  // shutdown of frame() in RenderViewTest.TearDown.
-  blink::WebURLRequest popup_request(GURL("http://foo.com"));
-  blink::WebView* new_web_view = view()->createView(
-      GetMainFrame(), popup_request, blink::WebWindowFeatures(), "foo",
-      blink::WebNavigationPolicyNewForegroundTab, false);
-  RenderViewImpl* new_view = RenderViewImpl::FromWebView(new_web_view);
-
-  // Respond to a swap out request.
-  TestRenderFrame* new_main_frame =
-      static_cast<TestRenderFrame*>(new_view->GetMainRenderFrame());
-  new_main_frame->SwapOut(
-      kProxyRoutingId, true,
-      ReconstructReplicationStateForTesting(new_main_frame));
-
-  // Simulate getting painted after swapping out.
-  new_view->DidFlushPaint();
-
-  CloseRenderView(new_view);
 }
 
 // Verify that the renderer process doesn't crash when device scale factor
@@ -1588,32 +1568,6 @@ TEST_F(RenderViewImplTest, GetCompositionCharacterBoundsTest) {
 }
 #endif
 
-TEST_F(RenderViewImplTest, ZoomLimit) {
-  const double kMinZoomLevel = ZoomFactorToZoomLevel(kMinimumZoomFactor);
-  const double kMaxZoomLevel = ZoomFactorToZoomLevel(kMaximumZoomFactor);
-
-  // Verifies navigation to a URL with preset zoom level indeed sets the level.
-  // Regression test for http://crbug.com/139559, where the level was not
-  // properly set when it is out of the default zoom limits of WebView.
-  CommonNavigationParams common_params;
-  common_params.url = GURL("data:text/html,min_zoomlimit_test");
-  view()->OnSetZoomLevelForLoadingURL(common_params.url, kMinZoomLevel);
-  frame()->Navigate(common_params, StartNavigationParams(),
-                    RequestNavigationParams());
-  ProcessPendingMessages();
-  EXPECT_DOUBLE_EQ(kMinZoomLevel, view()->GetWebView()->zoomLevel());
-
-  // It should work even when the zoom limit is temporarily changed in the page.
-  view()->GetWebView()->zoomLimitsChanged(ZoomFactorToZoomLevel(1.0),
-                                          ZoomFactorToZoomLevel(1.0));
-  common_params.url = GURL("data:text/html,max_zoomlimit_test");
-  view()->OnSetZoomLevelForLoadingURL(common_params.url, kMaxZoomLevel);
-  frame()->Navigate(common_params, StartNavigationParams(),
-                    RequestNavigationParams());
-  ProcessPendingMessages();
-  EXPECT_DOUBLE_EQ(kMaxZoomLevel, view()->GetWebView()->zoomLevel());
-}
-
 TEST_F(RenderViewImplTest, SetEditableSelectionAndComposition) {
   // Load an HTML page consisting of an input field.
   LoadHTML("<html>"
@@ -1840,9 +1794,9 @@ TEST_F(RendererErrorPageTest, MAYBE_Suppresses) {
   main_frame->didFailProvisionalLoad(web_frame, error,
                                      blink::WebStandardCommit);
   const int kMaxOutputCharacters = 22;
-  EXPECT_EQ("", base::UTF16ToASCII(base::StringPiece16(
-                    WebFrameContentDumper::dumpWebViewAsText(
-                        view()->GetWebView(), kMaxOutputCharacters))));
+  EXPECT_EQ("", WebFrameContentDumper::dumpWebViewAsText(view()->GetWebView(),
+                                                         kMaxOutputCharacters)
+                    .ascii());
 }
 
 #if defined(OS_ANDROID)

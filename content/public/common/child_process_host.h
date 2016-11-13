@@ -10,7 +10,6 @@
 #include "base/files/scoped_file.h"
 #include "build/build_config.h"
 #include "content/common/content_export.h"
-#include "ipc/attachment_broker_privileged.h"
 #include "ipc/ipc_channel_proxy.h"
 
 namespace base {
@@ -102,11 +101,6 @@ class CONTENT_EXPORT ChildProcessHost : public IPC::Sender {
   // bind
   // interfaces exposed to it from the child.
   virtual service_manager::InterfaceProvider* GetRemoteInterfaces() = 0;
-
-#if defined(OS_POSIX)
-  // See IPC::Channel::TakeClientFileDescriptor.
-  virtual base::ScopedFD TakeClientFileDescriptor() = 0;
-#endif
 };
 
 };  // namespace content

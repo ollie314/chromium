@@ -65,13 +65,9 @@ class GLES2Interface;
 
 namespace blink {
 
-class ANGLEInstancedArrays;
-class EXTBlendMinMax;
 class EXTDisjointTimerQuery;
-class EXTFragDepth;
-class EXTShaderTextureLOD;
+class EXTDisjointTimerQueryWebGL2;
 class EXTsRGB;
-class EXTTextureFilterAnisotropic;
 class ExceptionState;
 class HTMLCanvasElementOrOffscreenCanvas;
 class HTMLImageElement;
@@ -80,14 +76,9 @@ class ImageBitmap;
 class ImageBuffer;
 class ImageData;
 class IntSize;
-class OESElementIndexUint;
-class OESStandardDerivatives;
 class OESTextureFloat;
-class OESTextureFloatLinear;
 class OESTextureHalfFloat;
-class OESTextureHalfFloatLinear;
 class OESVertexArrayObject;
-class WaitableEvent;
 class WebGLActiveInfo;
 class WebGLBuffer;
 class WebGLCompressedTextureASTC;
@@ -99,13 +90,11 @@ class WebGLCompressedTextureS3TC;
 class WebGLCompressedTextureS3TCsRGB;
 class WebGLContextGroup;
 class WebGLContextObject;
-class WebGLDebugRendererInfo;
 class WebGLDebugShaders;
 class WebGLDepthTexture;
 class WebGLDrawBuffers;
 class WebGLExtension;
 class WebGLFramebuffer;
-class WebGLLoseContext;
 class WebGLObject;
 class WebGLProgram;
 class WebGLRenderbuffer;
@@ -115,7 +104,6 @@ class WebGLSharedObject;
 class WebGLUniformLocation;
 class WebGLVertexArrayObjectBase;
 
-class WebGLRenderingContextLostCallback;
 class WebGLRenderingContextErrorMessageCallback;
 
 // This class uses the color mask to prevent drawing to the alpha channel, if
@@ -595,15 +583,17 @@ class MODULES_EXPORT WebGLRenderingContextBase : public CanvasRenderingContext,
   };
 
   PassRefPtr<Image> getImage(AccelerationHint, SnapshotReason) const override;
+  ImageData* toImageData(SnapshotReason) const override;
   void setFilterQuality(SkFilterQuality) override;
   bool isWebGL2OrHigher() { return version() >= 2; }
 
   void getHTMLOrOffscreenCanvas(HTMLCanvasElementOrOffscreenCanvas&) const;
 
-  void commit(ExceptionState&);
+  void commit(ScriptState*, ExceptionState&);
 
  protected:
   friend class EXTDisjointTimerQuery;
+  friend class EXTDisjointTimerQueryWebGL2;
   friend class WebGLDrawBuffers;
   friend class WebGLFramebuffer;
   friend class WebGLObject;
@@ -1028,7 +1018,40 @@ class MODULES_EXPORT WebGLRenderingContextBase : public CanvasRenderingContext,
                     Image*,
                     WebGLImageConversion::ImageHtmlDomSource,
                     bool flipY,
-                    bool premultiplyAlpha);
+                    bool premultiplyAlpha,
+                    const IntRect&,
+                    GLsizei depth,
+                    GLint unpackImageHeight);
+  template <typename T>
+  bool validateTexImageSubRectangle(const char* functionName,
+                                    T* image,
+                                    const IntRect& subRect,
+                                    bool* selectingSubRectangle) {
+    *selectingSubRectangle = image &&
+                             !(subRect.x() == 0 && subRect.y() == 0 &&
+                               subRect.width() == image->width() &&
+                               subRect.height() == image->height());
+    // If the source image rect selects anything except the entire
+    // contents of the image, assert that we're running WebGL 2.0 or
+    // higher, since this should never happen for WebGL 1.0 (even though
+    // the code could support it). If the image is null, that will be
+    // signaled as an error later.
+    DCHECK(!*selectingSubRectangle || isWebGL2OrHigher())
+        << "subRect = (" << subRect.width() << " x " << subRect.height()
+        << ") @ (" << subRect.x() << ", " << subRect.y() << "), image = ("
+        << (image ? image->width() : -1) << " x "
+        << (image ? image->height() : -1) << ")";
+
+    if (subRect.x() < 0 || subRect.y() < 0 || subRect.maxX() > image->width() ||
+        subRect.maxY() > image->height() || subRect.width() < 0 ||
+        subRect.height() < 0) {
+      synthesizeGLError(GL_INVALID_OPERATION, functionName,
+                        "source sub-rectangle specified via pixel unpack "
+                        "parameters is invalid");
+      return false;
+    }
+    return true;
+  }
 
   // Copy from the source directly to the texture via the gpu, without a
   // read-back to system memory.  Souce could be canvas or imageBitmap.
@@ -1457,7 +1480,7 @@ class MODULES_EXPORT WebGLRenderingContextBase : public CanvasRenderingContext,
   static WebGLRenderingContextBase* oldestContext();
   static WebGLRenderingContextBase* oldestEvictedContext();
 
-  ImageBitmap* transferToImageBitmapBase();
+  ImageBitmap* transferToImageBitmapBase(ScriptState*);
 
   // Helper functions for tex(Sub)Image2D && texSubImage3D
   void texImageHelperDOMArrayBufferView(TexImageFunctionID,
@@ -1487,7 +1510,8 @@ class MODULES_EXPORT WebGLRenderingContextBase : public CanvasRenderingContext,
                                GLint,
                                GLint,
                                GLint,
-                               ImageData*);
+                               ImageData*,
+                               const IntRect&);
   void texImageHelperHTMLImageElement(TexImageFunctionID,
                                       GLenum,
                                       GLint,
@@ -1498,6 +1522,9 @@ class MODULES_EXPORT WebGLRenderingContextBase : public CanvasRenderingContext,
                                       GLint,
                                       GLint,
                                       HTMLImageElement*,
+                                      const IntRect&,
+                                      GLsizei,
+                                      GLint,
                                       ExceptionState&);
   void texImageHelperHTMLCanvasElement(TexImageFunctionID,
                                        GLenum,
@@ -1533,6 +1560,19 @@ class MODULES_EXPORT WebGLRenderingContextBase : public CanvasRenderingContext,
                                  ImageBitmap*,
                                  ExceptionState&);
   static const char* getTexImageFunctionName(TexImageFunctionID);
+  IntRect sentinelEmptyRect();
+  IntRect safeGetImageSize(Image*);
+  IntRect getImageDataSize(ImageData*);
+
+  // Helper implementing readPixels for WebGL 1.0 and 2.0.
+  void readPixelsHelper(GLint x,
+                        GLint y,
+                        GLsizei width,
+                        GLsizei height,
+                        GLenum format,
+                        GLenum type,
+                        DOMArrayBufferView* pixels,
+                        GLuint offset);
 
  private:
   WebGLRenderingContextBase(HTMLCanvasElement*,

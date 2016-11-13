@@ -25,7 +25,7 @@ class WebGL2ConformanceExpectations(WebGLConformanceExpectations):
     self.Skip('WebglExtension_WEBGL_compressed_texture_atc',
         ['win', 'mac', 'linux'])
     self.Skip('WebglExtension_WEBGL_compressed_texture_etc',
-        ['linux', 'mac'])
+        ['win', 'mac', 'linux'])
     self.Skip('WebglExtension_WEBGL_compressed_texture_etc1',
         ['mac', 'linux'])
     self.Skip('WebglExtension_WEBGL_compressed_texture_pvrtc',
@@ -55,29 +55,14 @@ class WebGL2ConformanceExpectations(WebGLConformanceExpectations):
         ['mac'], bug=654187)
 
     # All platforms.
-    self.Fail('conformance/glsl/bugs/samplers-in-ternary-operator.html',
-        bug=657853)
-    self.Fail('conformance2/textures/misc/tex-image-with-bad-args.html',
-        bug=656889)
-    self.Fail('conformance2/context/methods-2.html', bug=616554)
     self.Flaky('conformance2/query/occlusion-query.html', bug=603168)
-    self.Fail('conformance/buffers/buffer-uninitialized.html',
-        bug=654201)
-    self.Fail('conformance2/transform_feedback/transform_feedback.html',
-        bug=654201)
 
     # Windows only.
     # We are awesome!
-    self.Fail('conformance2/buffers/get-buffer-sub-data.html',
-        ['win'], bug=654201)
 
     # Win / NVidia
     self.Flaky('deqp/functional/gles3/fbomultisample*',
         ['win', 'nvidia'], bug=631317)
-
-    # This should be fixed in the latest driver.
-    self.Fail('deqp/functional/gles3/fboinvalidate/sub.html',
-        ['win', 'nvidia'], bug=1246) # ANGLE bug.
 
     # Win / AMD
 
@@ -96,12 +81,8 @@ class WebGL2ConformanceExpectations(WebGLConformanceExpectations):
 
     # Keep a separate set of failures for the R7 240, since it can use a new
     # and updated driver. The older drivers won't ever get fixes from AMD.
-    self.Fail('deqp/functional/gles3/framebufferblit/depth_stencil.html',
-        ['win', ('amd', 0x6613)], bug=638323)
-    self.Fail('deqp/functional/gles3/texturefiltering/2d_array*',
-        ['win', ('amd', 0x6613)], bug=638323)
-    self.Fail('deqp/functional/gles3/texturefiltering/cube*',
-        ['win', ('amd', 0x6613)], bug=638323)
+    # Use ['win', ('amd', 0x6613)] for the R7 240 devices.
+    # We are awesome!
 
     # It's unfortunate that these suppressions need to be so broad, but
     # basically any test that uses readPixels is potentially flaky, and
@@ -113,29 +94,14 @@ class WebGL2ConformanceExpectations(WebGLConformanceExpectations):
     # Win / Intel
     self.Skip('conformance2/textures/misc/copy-texture-image.html',
         ['win', 'intel'], bug=617449)
-    self.Fail('conformance2/textures/video/tex-2d-rgb9_e5-rgb-half_float.html',
-        ['win', 'intel'], bug=628395)
     # Seems to cause the harness to fail immediately afterward
     self.Skip('conformance2/textures/video/tex-2d-rgba16f-rgba-half_float.html',
         ['win', 'intel'], bug=648337)
-    self.Fail('deqp/functional/gles3/shaderderivate_*',
-        ['win', 'intel'], bug=483282)
-    self.Fail('deqp/functional/gles3/shaderstruct.html',
-        ['win', 'intel'], bug=483282)
     self.Flaky('deqp/functional/gles3/lifetime.html',
         ['win', 'intel'], bug=620379)
-    self.Fail('deqp/functional/gles3/texturespecification/' +
-        'teximage3d_depth.html',
-        ['win', 'intel'], bug=614418)
     self.Skip('deqp/functional/gles3/texturespecification/' +
         'teximage3d_depth_pbo.html',
         ['win', 'intel'], bug=617449)
-    self.Fail('deqp/functional/gles3/texturespecification/' +
-        'texsubimage3d_depth.html',
-        ['win', 'intel'], bug=614418)
-    self.Fail('deqp/functional/gles3/texturespecification/' +
-        'texstorage3d_format_depth_stencil.html',
-        ['win', 'intel'], bug=614418)
     self.Fail('deqp/functional/gles3/textureformat/sized_color_3d_pot_00.html',
         ['win', 'intel'], bug=614418)
     self.Fail('deqp/functional/gles3/textureformat/sized_color_3d_pot_01.html',
@@ -148,17 +114,10 @@ class WebGL2ConformanceExpectations(WebGLConformanceExpectations):
         ['win', 'intel'], bug=614418)
     self.Flaky('deqp/functional/gles3/textureformat/unsized_3d.html',
         ['win', 'intel'], bug=614418)
-    self.Fail('deqp/functional/gles3/shadertexturefunction/' +
-        'texelfetchoffset.html',
-        ['win', 'intel'], bug=483282)
-    self.Fail('deqp/functional/gles3/textureshadow/2d_array_*.html',
-        ['win', 'intel'], bug=483282)
 
     self.Fail('deqp/functional/gles3/fbomultisample*',
         ['win', 'intel'], bug=483282)
 
-    # self.Fail('conformance2/buffers/uniform-buffers.html',
-    #     ['win7', 'intel'], bug=593024)
     self.Fail('deqp/functional/gles3/uniformbuffers/*.html',
         ['win7', 'intel'], bug=593024)
 
@@ -171,10 +130,6 @@ class WebGL2ConformanceExpectations(WebGLConformanceExpectations):
 
     # Mac only.
 
-    # Fixed on OSX 10.11
-    self.Fail('deqp/functional/gles3/shaderoperator/common_functions.html',
-        ['mac', 'amd'], bug=483282)
-
     self.Fail('conformance2/rendering/' +
         'framebuffer-completeness-unaffected.html',
         ['mac'], bug=630800)
@@ -183,32 +138,20 @@ class WebGL2ConformanceExpectations(WebGLConformanceExpectations):
     # self.Fail('deqp/functional/gles3/fbocompleteness.html',
     #     ['mac', ('nvidia', 0xfe9)], bug=616562)
 
-    self.Fail('deqp/data/gles3/shaders/linkage.html',
-        ['mac'], bug=641129)
-
-    # This is due to "centroid out" / "in" mismatch.
-    self.Fail('deqp/data/gles3/shaders/qualification_order.html',
-        ['mac'], bug=483282)
-
     self.Fail('conformance2/renderbuffers/framebuffer-test.html',
         ['mac'], bug=641149)
 
+    # Mac Retina NVIDIA
     self.Fail('deqp/functional/gles3/fbomultisample*',
-        ['mac', 'intel'], bug=641209)
-
-    self.Fail('deqp/functional/gles3/fbomultisample*',
-        ['mac', 'nvidia'], bug=641209)
-
+        ['mac', ('nvidia', 0xfe9)], bug=641209)
     self.Fail('deqp/functional/gles3/framebufferblit/' +
         'default_framebuffer_04.html',
-        ['mac', 'nvidia'], bug=483282)
-
-    # Mac Retina NVIDIA
+        ['mac', ('nvidia', 0xfe9)], bug=483282)
     self.Fail('conformance/attribs/gl-disabled-vertex-attrib.html',
         ['mac', ('nvidia', 0xfe9)], bug=483282)
     self.Flaky(
-      'conformance/extensions/webgl-compressed-texture-size-limit.html',
-      ['mac', ('nvidia', 0xfe9)], bug=483282)
+        'conformance/extensions/webgl-compressed-texture-size-limit.html',
+        ['mac', ('nvidia', 0xfe9)], bug=483282)
     self.Fail('conformance/programs/' +
         'gl-bind-attrib-location-long-names-test.html',
         ['mac', ('nvidia', 0xfe9)], bug=483282)
@@ -250,9 +193,6 @@ class WebGL2ConformanceExpectations(WebGLConformanceExpectations):
         ['mac', ('nvidia', 0xfe9)], bug=483282)
     self.Fail('deqp/functional/gles3/shaderindexing/varying.html',
         ['mac', ('nvidia', 0xfe9)], bug=483282)
-    self.Fail('deqp/functional/gles3/texturespecification/' +
-        'basic_copyteximage2d.html',
-        ['mac', ('nvidia', 0xfe9)], bug=620067)
     self.Fail('deqp/functional/gles3/texturespecification/' +
         'teximage2d_pbo_2d_00.html',
         ['mac', ('nvidia', 0xfe9)], bug=614174)
@@ -359,79 +299,73 @@ class WebGL2ConformanceExpectations(WebGLConformanceExpectations):
     self.Fail('deqp/functional/gles3/primitiverestart/01.html',
         ['mac', 'amd'], bug=598930)
     self.Fail('deqp/functional/gles3/transformfeedback/' +
-              'array_interleaved_lines.html',
-              ['mac', 'amd'], bug=483282)
-    self.Fail('deqp/functional/gles3/transformfeedback/' +
-              'array_interleaved_points.html',
-              ['mac', 'amd'], bug=483282)
-    self.Fail('deqp/functional/gles3/transformfeedback/' +
-              'array_interleaved_triangles.html',
-              ['mac', 'amd'], bug=483282)
-    self.Fail('deqp/functional/gles3/transformfeedback/' +
-              'array_separate_lines.html',
-              ['mac', 'amd'], bug=483282)
-    self.Fail('deqp/functional/gles3/transformfeedback/' +
-              'array_separate_points.html',
-              ['mac', 'amd'], bug=483282)
-    self.Fail('deqp/functional/gles3/transformfeedback/' +
-              'array_separate_triangles.html',
-              ['mac', 'amd'], bug=483282)
-    self.Fail('deqp/functional/gles3/transformfeedback/' +
-              'basic_types_interleaved_lines.html',
-              ['mac', 'amd'], bug=483282)
-    self.Fail('deqp/functional/gles3/transformfeedback/' +
-              'basic_types_interleaved_points.html',
-              ['mac', 'amd'], bug=483282)
-    self.Fail('deqp/functional/gles3/transformfeedback/' +
-              'basic_types_interleaved_triangles.html',
-              ['mac', 'amd'], bug=483282)
-    self.Fail('deqp/functional/gles3/transformfeedback/' +
-              'basic_types_separate_lines.html',
-              ['mac', 'amd'], bug=483282)
-    self.Fail('deqp/functional/gles3/transformfeedback/' +
-              'basic_types_separate_points.html',
-              ['mac', 'amd'], bug=483282)
-    self.Fail('deqp/functional/gles3/transformfeedback/' +
-              'basic_types_separate_triangles.html',
-              ['mac', 'amd'], bug=483282)
-    self.Fail('deqp/functional/gles3/transformfeedback/' +
-              'interpolation_centroid.html',
-              ['mac', 'amd'], bug=483282)
-    self.Fail('deqp/functional/gles3/transformfeedback/' +
-              'interpolation_flat.html',
-              ['mac', 'amd'], bug=483282)
-    self.Fail('deqp/functional/gles3/transformfeedback/' +
-              'interpolation_smooth.html',
-              ['mac', 'amd'], bug=483282)
-    self.Fail('deqp/functional/gles3/transformfeedback/' +
-              'point_size.html',
-              ['mac', 'amd'], bug=483282)
-    self.Fail('deqp/functional/gles3/transformfeedback/' +
-              'position.html',
-              ['mac', 'amd'], bug=483282)
-    self.Fail('deqp/functional/gles3/transformfeedback/' +
-              'random_interleaved_lines.html',
-              ['mac', 'amd'], bug=483282)
-    self.Fail('deqp/functional/gles3/transformfeedback/' +
-              'random_interleaved_points.html',
-              ['mac', 'amd'], bug=483282)
-    self.Fail('deqp/functional/gles3/transformfeedback/' +
-              'random_interleaved_triangles.html',
-              ['mac', 'amd'], bug=483282)
-    self.Fail('deqp/functional/gles3/transformfeedback/' +
-              'random_separate_lines.html',
-              ['mac', 'amd'], bug=483282)
-    self.Fail('deqp/functional/gles3/transformfeedback/' +
-              'random_separate_points.html',
-              ['mac', 'amd'], bug=483282)
-    self.Fail('deqp/functional/gles3/transformfeedback/' +
-              'random_separate_triangles.html',
-              ['mac', 'amd'], bug=483282)
-    self.Fail('deqp/functional/gles3/shadertexturefunction/' +
-        'textureprojlodoffset.html',
+        'array_interleaved_lines.html',
         ['mac', 'amd'], bug=483282)
-    self.Fail('deqp/functional/gles3/shadertexturefunction/' +
-        'textureprojlod.html',
+    self.Fail('deqp/functional/gles3/transformfeedback/' +
+        'array_interleaved_points.html',
+        ['mac', 'amd'], bug=483282)
+    self.Fail('deqp/functional/gles3/transformfeedback/' +
+        'array_interleaved_triangles.html',
+        ['mac', 'amd'], bug=483282)
+    self.Fail('deqp/functional/gles3/transformfeedback/' +
+        'array_separate_lines.html',
+        ['mac', 'amd'], bug=483282)
+    self.Fail('deqp/functional/gles3/transformfeedback/' +
+        'array_separate_points.html',
+        ['mac', 'amd'], bug=483282)
+    self.Fail('deqp/functional/gles3/transformfeedback/' +
+        'array_separate_triangles.html',
+        ['mac', 'amd'], bug=483282)
+    self.Fail('deqp/functional/gles3/transformfeedback/' +
+        'basic_types_interleaved_lines.html',
+        ['mac', 'amd'], bug=483282)
+    self.Fail('deqp/functional/gles3/transformfeedback/' +
+        'basic_types_interleaved_points.html',
+        ['mac', 'amd'], bug=483282)
+    self.Fail('deqp/functional/gles3/transformfeedback/' +
+        'basic_types_interleaved_triangles.html',
+        ['mac', 'amd'], bug=483282)
+    self.Fail('deqp/functional/gles3/transformfeedback/' +
+        'basic_types_separate_lines.html',
+        ['mac', 'amd'], bug=483282)
+    self.Fail('deqp/functional/gles3/transformfeedback/' +
+        'basic_types_separate_points.html',
+        ['mac', 'amd'], bug=483282)
+    self.Fail('deqp/functional/gles3/transformfeedback/' +
+        'basic_types_separate_triangles.html',
+        ['mac', 'amd'], bug=483282)
+    self.Fail('deqp/functional/gles3/transformfeedback/' +
+        'interpolation_centroid.html',
+        ['mac', 'amd'], bug=483282)
+    self.Fail('deqp/functional/gles3/transformfeedback/' +
+        'interpolation_flat.html',
+        ['mac', 'amd'], bug=483282)
+    self.Fail('deqp/functional/gles3/transformfeedback/' +
+        'interpolation_smooth.html',
+        ['mac', 'amd'], bug=483282)
+    self.Fail('deqp/functional/gles3/transformfeedback/' +
+        'point_size.html',
+        ['mac', 'amd'], bug=483282)
+    self.Fail('deqp/functional/gles3/transformfeedback/' +
+        'position.html',
+        ['mac', 'amd'], bug=483282)
+    self.Fail('deqp/functional/gles3/transformfeedback/' +
+        'random_interleaved_lines.html',
+        ['mac', 'amd'], bug=483282)
+    self.Fail('deqp/functional/gles3/transformfeedback/' +
+        'random_interleaved_points.html',
+        ['mac', 'amd'], bug=483282)
+    self.Fail('deqp/functional/gles3/transformfeedback/' +
+        'random_interleaved_triangles.html',
+        ['mac', 'amd'], bug=483282)
+    self.Fail('deqp/functional/gles3/transformfeedback/' +
+        'random_separate_lines.html',
+        ['mac', 'amd'], bug=483282)
+    self.Fail('deqp/functional/gles3/transformfeedback/' +
+        'random_separate_points.html',
+        ['mac', 'amd'], bug=483282)
+    self.Fail('deqp/functional/gles3/transformfeedback/' +
+        'random_separate_triangles.html',
         ['mac', 'amd'], bug=483282)
     self.Fail('deqp/functional/gles3/vertexarrays/' +
         'single_attribute.normalize.html',
@@ -446,10 +380,6 @@ class WebGL2ConformanceExpectations(WebGLConformanceExpectations):
     self.Fail('deqp/functional/gles3/shaderoperator/geometric.html',
         ['mac', 'amd'], bug=483282)
 
-    # Fixed on OSX 10.12
-    self.Fail('deqp/functional/gles3/uniformbuffers/random.html',
-        ['mac', 'amd'], bug=618464)
-
     self.Flaky('deqp/functional/gles3/shaderindexing/mat_02.html',
         ['mac', 'amd'], bug=644360)
 
@@ -458,11 +388,19 @@ class WebGL2ConformanceExpectations(WebGLConformanceExpectations):
         ['mac', ('amd', 0x679e)], bug=483282)
     self.Flaky('deqp/functional/gles3/shaderindexing/mat_01.html',
         ['mac', ('amd', 0x679e)], bug=636648)
+    self.Flaky('deqp/functional/gles3/shaderindexing/tmp.html',
+        ['mac', ('amd', 0x679e)], bug=659871)
     self.Fail('deqp/functional/gles3/shadertexturefunction/' +
         'texturesize.html',
         ['mac', ('amd', 0x679e)], bug=640506)
+    self.Fail('deqp/functional/gles3/uniformbuffers/random.html',
+        ['mac', ('amd', 0x679e)], bug=618464)
+    self.Fail('deqp/functional/gles3/shaderoperator/common_functions.html',
+        ['mac', ('amd', 0x679e)], bug=483282)
 
     # Mac Intel
+    self.Fail('deqp/functional/gles3/fbomultisample*',
+        ['mac', 'intel'], bug=641209)
     self.Fail('deqp/functional/gles3/texturefiltering/2d_combinations_01.html',
         ['mac', 'intel'], bug=606074)
     self.Fail('deqp/functional/gles3/texturefiltering/' +
@@ -502,9 +440,6 @@ class WebGL2ConformanceExpectations(WebGLConformanceExpectations):
         ['mac', 'intel'], bug=618464)
 
     # Linux only.
-    self.Fail('conformance2/buffers/get-buffer-sub-data.html',
-        ['linux'], bug=654201)
-
     self.Flaky('conformance/textures/video/' +
                'tex-2d-rgba-rgba-unsigned_byte.html',
                ['linux'], bug=627525)
@@ -522,16 +457,11 @@ class WebGL2ConformanceExpectations(WebGLConformanceExpectations):
                ['linux'], bug=627525)
 
     # Linux Multi-vendor failures.
-
-    self.Fail('deqp/data/gles3/shaders/functions.html',
-        ['linux', 'amd', 'intel'], bug=483282)
     self.Skip('deqp/data/gles3/shaders/qualification_order.html',
         ['linux', 'amd', 'intel'], bug=483282)
     self.Flaky('deqp/functional/gles3/texturespecification/' +
         'random_teximage2d_2d.html',
         ['linux', 'amd', 'intel'], bug=618447)
-    self.Fail('conformance/glsl/misc/shaders-with-invariance.html',
-        ['linux', 'amd', 'intel'], bug=483282)
     self.Fail('deqp/data/gles3/shaders/linkage.html',
         ['linux', 'amd', 'intel'], bug=483282)
 
@@ -542,12 +472,6 @@ class WebGL2ConformanceExpectations(WebGLConformanceExpectations):
         ['linux', 'nvidia'], bug=618447)
 
     # Linux Intel
-    self.Fail('deqp/functional/gles3/shaderderivate_dfdx.html',
-        ['linux', 'intel'], bug=618408)
-    self.Fail('deqp/functional/gles3/fbomultisample.2_samples.html',
-        ['linux', 'intel'], bug=635528)
-    self.Fail('deqp/functional/gles3/fbomultisample.4_samples.html',
-        ['linux', 'intel'], bug=635528)
     self.Fail('conformance2/extensions/ext-color-buffer-float.html',
         ['linux', 'intel'], bug=640389)
 
@@ -555,20 +479,29 @@ class WebGL2ConformanceExpectations(WebGLConformanceExpectations):
     self.Skip('conformance/glsl/bugs/temp-expressions-should-not-crash.html',
         ['linux', 'intel'], bug=540543)  # GPU timeout
 
-    # The Mesa Intel driver has a scoping bug, see
-    # https://bugs.freedesktop.org/show_bug.cgi?id=95184
-    # It has been fixed in Mesa 12.0
-    self.Fail('deqp/data/gles3/shaders/scoping.html',
-        ['linux', 'intel'], bug=610800)
-
     self.Fail('deqp/functional/gles3/fbomultisample.8_samples.html',
         ['linux', 'intel'], bug=635528)
 
+    # Fails on Intel Mesa GL 3.3, passes on Intel Mesa GL 4.5.
+    self.Fail('conformance2/misc/views-with-offsets.html',
+        ['linux', 'intel'], bug=664180)
+
     # Linux Intel with ANGLE only
+    self.Fail('deqp/functional/gles3/framebufferblit/' +
+        'default_framebuffer_00.html',
+        ['linux', 'intel', 'opengl'], bug=658832)
+
     self.Fail('conformance2/textures/misc/copy-texture-image-luma-format.html',
         ['linux', 'intel', 'opengl'], bug=1492) # ANGLE bug id
     self.Fail('conformance2/rendering/blitframebuffer-filter-srgb.html',
         ['linux', 'intel', 'opengl'], bug=634525)
+    self.Fail('conformance2/rendering/blitframebuffer-filter-outofbounds.html',
+        ['linux', 'intel', 'opengl'], bug=655147)
+    self.Fail('conformance2/rendering/' +
+        'blitframebuffer-multisampled-readbuffer.html',
+        ['linux', 'intel', 'opengl'], bug=658898)
+    self.Fail('conformance2/rendering/blitframebuffer-test.html',
+        ['linux', 'intel', 'opengl'], bug=658898)
 
     # The Intel Mesa driver only supports sRGB encoding in ES 3.x, see
     # https://patchwork.freedesktop.org/patch/76903
@@ -606,12 +539,12 @@ class WebGL2ConformanceExpectations(WebGLConformanceExpectations):
     self.Fail('deqp/functional/gles3/framebufferblit/conversion_34.html',
         ['linux', 'intel', 'opengl'], bug=598902)
 
-    # Linux Intel without ANGLE only
-    self.Fail('conformance2/reading/read-pixels-from-fbo-test.html',
-        ['linux', 'intel', 'no_angle'], bug=598902)
-
     # Linux AMD only.
     # It looks like AMD shader compiler rejects many valid ES3 semantics.
+    self.Fail('conformance/glsl/misc/shaders-with-invariance.html',
+        ['linux', 'amd'], bug=483282)
+    self.Fail('deqp/data/gles3/shaders/functions.html',
+        ['linux', 'amd'], bug=483282)
     self.Fail('deqp/functional/gles3/multisample.html',
         ['linux', 'amd'], bug=617290)
     self.Fail('deqp/data/gles3/shaders/conversions.html',
@@ -804,6 +737,9 @@ class WebGL2ConformanceExpectations(WebGLConformanceExpectations):
         ['linux', 'amd'], bug=483282)
     self.Fail('deqp/functional/gles3/framebufferblit/conversion_34.html',
         ['linux', 'amd'], bug=483282)
+    self.Fail('deqp/functional/gles3/framebufferblit/' +
+        'default_framebuffer_00.html',
+        ['linux', 'amd'], bug=658832)
 
     self.Fail('deqp/functional/gles3/shaderoperator/unary_operator_01.html',
         ['linux', 'amd'], bug=483282)
@@ -818,6 +754,12 @@ class WebGL2ConformanceExpectations(WebGLConformanceExpectations):
         ['linux', 'amd', 'no_angle'], bug=483282)
     self.Fail('conformance2/extensions/ext-color-buffer-float.html',
         ['linux', 'amd'], bug=633022)
+    self.Fail('conformance2/buffers/uniform-buffers.html',
+        ['linux', 'amd'], bug=658842)
+    self.Fail('conformance2/rendering/blitframebuffer-filter-outofbounds.html',
+        ['linux', 'amd'], bug=655147)
+    self.Fail('conformance2/rendering/uniform-block-buffer-size.html',
+        ['linux', 'amd'], bug=658844)
 
     # Conflicting expectations to test that the
     # "Expectations Have No collisions" unittest works.

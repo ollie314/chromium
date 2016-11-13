@@ -16,6 +16,7 @@ import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.ShortcutHelper;
 import org.chromium.chrome.browser.UrlConstants;
+import org.chromium.chrome.browser.banners.AppBannerManager;
 import org.chromium.chrome.browser.bookmarks.BookmarkBridge;
 import org.chromium.chrome.browser.download.DownloadUtils;
 import org.chromium.chrome.browser.multiwindow.MultiWindowUtils;
@@ -24,7 +25,6 @@ import org.chromium.chrome.browser.preferences.ManagedPreferencesUtils;
 import org.chromium.chrome.browser.preferences.PrefServiceBridge;
 import org.chromium.chrome.browser.share.ShareHelper;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.util.FeatureUtilities;
 import org.chromium.components.dom_distiller.core.DomDistillerUrlUtils;
 import org.chromium.ui.base.DeviceFormFactor;
 
@@ -91,6 +91,7 @@ public class AppMenuPropertiesDelegate {
             String url = currentTab.getUrl();
             boolean isChromeScheme = url.startsWith(UrlConstants.CHROME_SCHEME)
                     || url.startsWith(UrlConstants.CHROME_NATIVE_SCHEME);
+            boolean isFileScheme = url.startsWith(UrlConstants.FILE_SCHEME);
             boolean shouldShowIconRow = !mActivity.isTablet()
                     || mActivity.getWindow().getDecorView().getWidth()
                             < DeviceFormFactor.getMinimumTabletWidthPx(mActivity);
@@ -137,9 +138,8 @@ public class AppMenuPropertiesDelegate {
             menu.findItem(R.id.move_to_other_window_menu_id).setVisible(
                     MultiWindowUtils.getInstance().isOpenInOtherWindowSupported(mActivity));
 
-            // Hide "Recent tabs" in incognito mode or when sync can't be enabled.
             MenuItem recentTabsMenuItem = menu.findItem(R.id.recent_tabs_menu_id);
-            recentTabsMenuItem.setVisible(!isIncognito && FeatureUtilities.canAllowSync(mActivity));
+            recentTabsMenuItem.setVisible(!isIncognito);
             recentTabsMenuItem.setTitle(R.string.menu_recent_tabs);
 
             MenuItem allBookmarksMenuItem = menu.findItem(R.id.all_bookmarks_menu_id);
@@ -155,15 +155,20 @@ public class AppMenuPropertiesDelegate {
             menu.findItem(R.id.find_in_page_id).setVisible(
                     !currentTab.isNativePage() && currentTab.getWebContents() != null);
 
-            // Hide 'Add to homescreen' on all chrome:// pages -- Android doesn't know how to direct
-            // those URLs.  Also hide it on incognito pages to avoid problems where users create
-            // shortcuts in incognito mode and then open the webapp in regular mode. Also check if
-            // creating shortcuts is supported at all.
+            // Hide 'Add to homescreen' for the following:
+            // 1.) chrome:// pages - Android doesn't know how to direct those URLs.
+            // 2.) incognito pages - To avoid problems where users create shortcuts in incognito
+            //                       mode and then open the webapp in regular mode.
+            // 3.) file:// - After API 24, file: URIs are not supported in VIEW intents and thus
+            //               can not be added to the homescreen.
+            // 4.) If creating shortcuts it not supported by the current home screen.
             MenuItem homescreenItem = menu.findItem(R.id.add_to_homescreen_id);
-            boolean canAddShortcutToHomescreen =
-                    ShortcutHelper.isAddToHomeIntentSupported(mActivity);
-            homescreenItem.setVisible(
-                    canAddShortcutToHomescreen && !isChromeScheme && !isIncognito);
+            boolean homescreenItemVisible = ShortcutHelper.isAddToHomeIntentSupported(mActivity)
+                    && !isChromeScheme && !isFileScheme && !isIncognito;
+            if (homescreenItemVisible) {
+                homescreenItem.setTitle(AppBannerManager.getHomescreenLanguageOption());
+            }
+            homescreenItem.setVisible(homescreenItemVisible);
 
             // Hide request desktop site on all chrome:// pages except for the NTP. Check request
             // desktop site if it's activated on this page.

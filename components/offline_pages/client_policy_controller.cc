@@ -52,6 +52,7 @@ ClientPolicyController::ClientPolicyController() {
       OfflinePageClientPolicyBuilder(kNTPSuggestionsNamespace,
                                      LifetimeType::PERSISTENT, kUnlimitedPages,
                                      kUnlimitedPages)
+          .SetIsSupportedByDownload(true)
           .Build()));
 
   // Fallback policy.
@@ -82,6 +83,14 @@ const OfflinePageClientPolicy& ClientPolicyController::GetPolicy(
     return iter->second;
   // Fallback when the namespace isn't defined.
   return policies_.at(kDefaultNamespace);
+}
+
+std::vector<std::string> ClientPolicyController::GetAllNamespaces() const {
+  std::vector<std::string> result;
+  for (const auto& policy_item : policies_)
+    result.emplace_back(policy_item.first);
+
+  return result;
 }
 
 bool ClientPolicyController::IsRemovedOnCacheReset(
@@ -143,6 +152,12 @@ ClientPolicyController::GetNamespacesRestrictedToOriginalTab() const {
   }
 
   return *show_in_original_tab_cache_;
+}
+
+void ClientPolicyController::AddPolicyForTest(
+    const std::string& name_space,
+    const OfflinePageClientPolicyBuilder& builder) {
+  policies_.insert(std::make_pair(name_space, builder.Build()));
 }
 
 }  // namespace offline_pages

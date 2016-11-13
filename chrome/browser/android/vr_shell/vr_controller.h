@@ -6,17 +6,20 @@
 #define CHROME_BROWSER_ANDROID_VR_SHELL_VR_CONTROLLER_H_
 
 #include <memory>
+#include <vector>
 
 #include "base/macros.h"
+#include "third_party/WebKit/public/web/WebInputEvent.h"
 #include "third_party/gvr-android-sdk/src/ndk/include/vr/gvr/capi/include/gvr_types.h"
+
+using blink::WebGestureEvent;
+using blink::WebInputEvent;
 
 namespace gvr {
 class ControllerState;
 }
 
 namespace vr_shell {
-
-struct VrGesture;
 
 class VrController {
  public:
@@ -35,7 +38,8 @@ class VrController {
 
   // Must be called when the GL renderer gets OnDrawFrame().
   void UpdateState();
-  std::unique_ptr<VrGesture> DetectGesture();
+
+  std::vector<std::unique_ptr<WebGestureEvent>> DetectGestures();
 
   bool IsTouching();
 
@@ -81,7 +85,7 @@ class VrController {
     int64_t timestamp;
   };
 
-  void UpdateGestureFromTouchInfo(VrGesture* gesture);
+  void UpdateGestureFromTouchInfo(WebGestureEvent* gesture);
 
   bool GetButtonLongPressFromButtonInfo();
 
@@ -89,10 +93,10 @@ class VrController {
   void HandleWaitingState();
 
   // Handle the detecting state.
-  void HandleDetectingState(VrGesture* gesture);
+  void HandleDetectingState(WebGestureEvent* gesture);
 
   // Handle the scrolling state.
-  void HandleScrollingState(VrGesture* gesture);
+  void HandleScrollingState(WebGestureEvent* gesture);
   void UpdateTouchInfo();
 
   // Returns true if the touch position is within the slop of the initial touch
@@ -102,7 +106,7 @@ class VrController {
   void Reset();
 
   // Update gesture parameters,
-  void UpdateGesture(VrGesture* gesture);
+  void UpdateGesture(WebGestureEvent* gesture);
 
   // If the user is touching the touch pad and the touch point is different from
   // before, update the touch point and return true. Otherwise, return false.
@@ -135,6 +139,9 @@ class VrController {
 
   // Overall velocity
   gvr::Vec2f overall_velocity_;
+
+  // Displacement of the touch point from the previews to the current touch
+  gvr::Vec2f displacement_;
 
   int64_t last_touch_timestamp_ = 0;
   int64_t last_timestamp_nanos_ = 0;

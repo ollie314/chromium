@@ -120,7 +120,7 @@ LogoutButtonTray::LogoutButtonTray(WmShelf* wm_shelf)
   }
   tray_container()->AddChildView(button_);
   if (!MaterialDesignController::IsShelfMaterial())
-    tray_container()->SetBorder(views::Border::NullBorder());
+    tray_container()->SetBorder(views::NullBorder());
   WmShell::Get()->system_tray_notifier()->AddLogoutButtonObserver(this);
 }
 
@@ -134,7 +134,7 @@ void LogoutButtonTray::SetShelfAlignment(ShelfAlignment alignment) {
   UpdateButtonTextAndImage(login_status_, alignment);
   TrayBackgroundView::SetShelfAlignment(alignment);
   if (!MaterialDesignController::IsShelfMaterial())
-    tray_container()->SetBorder(views::Border::NullBorder());
+    tray_container()->SetBorder(views::NullBorder());
 }
 
 base::string16 LogoutButtonTray::GetAccessibleNameForTray() {
@@ -146,18 +146,13 @@ void LogoutButtonTray::HideBubbleWithView(
 
 void LogoutButtonTray::ClickedOutsideBubble() {}
 
-void LogoutButtonTray::OnShowLogoutButtonInTrayChanged(bool show) {
-  show_logout_button_in_tray_ = show;
-  UpdateVisibility();
-}
-
-void LogoutButtonTray::OnLogoutDialogDurationChanged(base::TimeDelta duration) {
-  dialog_duration_ = duration;
-}
-
 void LogoutButtonTray::ButtonPressed(views::Button* sender,
                                      const ui::Event& event) {
-  DCHECK_EQ(sender, button_);
+  if (sender != button_) {
+    TrayBackgroundView::ButtonPressed(sender, event);
+    return;
+  }
+
   if (dialog_duration_ <= base::TimeDelta()) {
     // Sign out immediately if |dialog_duration_| is non-positive.
     WmShell::Get()->system_tray_delegate()->SignOut();
@@ -165,6 +160,15 @@ void LogoutButtonTray::ButtonPressed(views::Button* sender,
     WmShell::Get()->logout_confirmation_controller()->ConfirmLogout(
         base::TimeTicks::Now() + dialog_duration_);
   }
+}
+
+void LogoutButtonTray::OnShowLogoutButtonInTrayChanged(bool show) {
+  show_logout_button_in_tray_ = show;
+  UpdateVisibility();
+}
+
+void LogoutButtonTray::OnLogoutDialogDurationChanged(base::TimeDelta duration) {
+  dialog_duration_ = duration;
 }
 
 void LogoutButtonTray::UpdateAfterLoginStatusChange(LoginStatus login_status) {

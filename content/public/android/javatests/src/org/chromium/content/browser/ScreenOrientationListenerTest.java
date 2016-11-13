@@ -37,6 +37,9 @@ public class ScreenOrientationListenerTest extends ContentShellTestBase {
             notifyCalled();
         }
 
+        @Override
+        public void onDIPScaleChanged(float dipScale) {}
+
         public int getLastRotation() {
             return mLastOrientation;
         }
@@ -226,7 +229,7 @@ public class ScreenOrientationListenerTest extends ContentShellTestBase {
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
             public void run() {
-                ScreenOrientationProvider.lockOrientation((byte) orientationValue);
+                ScreenOrientationProvider.lockOrientation(null, (byte) orientationValue);
             }
         });
         mCallbackHelper.waitForCallback(callCount);

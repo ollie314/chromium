@@ -265,13 +265,14 @@ QuicConnection::QuicConnection(QuicConnectionId connection_id,
       time_of_last_sent_new_packet_(clock_->ApproximateNow()),
       last_send_for_timeout_(clock_->ApproximateNow()),
       packet_number_of_last_sent_packet_(0),
-      sent_packet_manager_(new QuicSentPacketManager(perspective,
-                                                     kDefaultPathId,
-                                                     clock_,
-                                                     &stats_,
-                                                     kCubic,
-                                                     kNack,
-                                                     /*delegate=*/nullptr)),
+      sent_packet_manager_(new QuicSentPacketManager(
+          perspective,
+          kDefaultPathId,
+          clock_,
+          &stats_,
+          FLAGS_quic_default_enable_cubic_bytes ? kCubicBytes : kCubic,
+          kNack,
+          /*delegate=*/nullptr)),
       version_negotiation_state_(START_NEGOTIATION),
       perspective_(perspective),
       connected_(true),
@@ -330,7 +331,7 @@ void QuicConnection::SetFromConfig(const QuicConfig& config) {
   if (config.negotiated()) {
     // Handshake complete, set handshake timeout to Infinite.
     SetNetworkTimeouts(QuicTime::Delta::Infinite(),
-                       config.IdleConnectionStateLifetime());
+                       config.IdleNetworkTimeout());
     if (config.SilentClose()) {
       idle_timeout_connection_close_behavior_ =
           ConnectionCloseBehavior::SILENT_CLOSE;
@@ -977,6 +978,7 @@ bool QuicConnection::OnBlockedFrame(const QuicBlockedFrame& frame) {
            << "BLOCKED_FRAME received for stream: " << frame.stream_id;
   visitor_->OnBlockedFrame(frame);
   visitor_->PostProcessAfterData();
+  stats_.blocked_frames_received++;
   should_last_packet_instigate_acks_ = true;
   return connected_;
 }
@@ -1271,6 +1273,7 @@ void QuicConnection::SendBlocked(QuicStreamId id) {
   // Opportunistically bundle an ack with this outgoing packet.
   ScopedPacketBundler ack_bundler(this, SEND_ACK_IF_PENDING);
   packet_generator_.AddControlFrame(QuicFrame(new QuicBlockedFrame(id)));
+  stats_.blocked_frames_sent++;
 }
 
 void QuicConnection::SendPathClose(QuicPathId path_id) {
@@ -1699,8 +1702,7 @@ bool QuicConnection::WritePacket(SerializedPacket* packet) {
   if (FLAGS_quic_only_track_sent_packets) {
     // In some cases, an MTU probe can cause EMSGSIZE. This indicates that the
     // MTU discovery is permanently unsuccessful.
-    if (FLAGS_graceful_emsgsize_on_mtu_probe &&
-        result.status == WRITE_STATUS_ERROR &&
+    if (result.status == WRITE_STATUS_ERROR &&
         result.error_code == kMessageTooBigErrorCode &&
         packet->retransmittable_frames.empty() &&
         packet->encrypted_length > long_term_mtu_) {
@@ -1769,8 +1771,7 @@ bool QuicConnection::WritePacket(SerializedPacket* packet) {
   if (!FLAGS_quic_only_track_sent_packets) {
     // In some cases, an MTU probe can cause EMSGSIZE. This indicates that the
     // MTU discovery is permanently unsuccessful.
-    if (FLAGS_graceful_emsgsize_on_mtu_probe &&
-        result.status == WRITE_STATUS_ERROR &&
+    if (result.status == WRITE_STATUS_ERROR &&
         result.error_code == kMessageTooBigErrorCode &&
         packet->retransmittable_frames.empty() &&
         packet->encrypted_length > long_term_mtu_) {

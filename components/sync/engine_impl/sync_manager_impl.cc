@@ -34,6 +34,7 @@
 #include "components/sync/engine_impl/net/sync_server_connection_manager.h"
 #include "components/sync/engine_impl/sync_scheduler.h"
 #include "components/sync/engine_impl/syncer_types.h"
+#include "components/sync/engine_impl/uss_migrator.h"
 #include "components/sync/protocol/proto_value_conversions.h"
 #include "components/sync/protocol/sync.pb.h"
 #include "components/sync/syncable/base_node.h"
@@ -45,6 +46,10 @@
 #include "components/sync/syncable/read_transaction.h"
 #include "components/sync/syncable/write_node.h"
 #include "components/sync/syncable/write_transaction.h"
+
+#if defined(OS_WIN)
+#include "components/sync/engine_impl/loopback_server/loopback_connection_manager.h"
+#endif
 
 using base::TimeDelta;
 using sync_pb::GetUpdatesCallerInfo;
@@ -281,11 +286,21 @@ void SyncManagerImpl::Init(InitArgs* args) {
     args->saved_nigori_state.reset();
   }
 
-  connection_manager_ = base::MakeUnique<SyncServerConnectionManager>(
-      args->service_url.host() + args->service_url.path(),
-      args->service_url.EffectiveIntPort(),
-      args->service_url.SchemeIsCryptographic(), args->post_factory.release(),
-      args->cancelation_signal);
+  if (args->enable_local_sync_backend) {
+#if defined(OS_WIN)
+    VLOG(1) << "Running against local sync backend.";
+    connection_manager_ = base::MakeUnique<LoopbackConnectionManager>(
+        args->cancelation_signal, args->local_sync_backend_folder);
+#else
+    NOTREACHED();
+#endif  // defined(OS_WIN)
+  } else {
+    connection_manager_ = base::MakeUnique<SyncServerConnectionManager>(
+        args->service_url.host() + args->service_url.path(),
+        args->service_url.EffectiveIntPort(),
+        args->service_url.SchemeIsCryptographic(), args->post_factory.release(),
+        args->cancelation_signal);
+  }
   connection_manager_->set_client_id(directory()->cache_guid());
   connection_manager_->AddListener(this);
 
@@ -296,8 +311,10 @@ void SyncManagerImpl::Init(InitArgs* args) {
   DVLOG(1) << "Setting invalidator client ID: " << args->invalidator_client_id;
   allstatus_.SetInvalidatorClientId(args->invalidator_client_id);
 
-  model_type_registry_ =
-      base::MakeUnique<ModelTypeRegistry>(args->workers, directory(), this);
+  // TODO(crbug.com/658002): Pass in the real USS migrator function once initial
+  // GetUpdates issues are addressed.
+  model_type_registry_ = base::MakeUnique<ModelTypeRegistry>(
+      args->workers, &share_, this, UssMigrator());
   sync_encryption_handler_->AddObserver(model_type_registry_.get());
 
   // Build a SyncCycleContext and store the worker in it.

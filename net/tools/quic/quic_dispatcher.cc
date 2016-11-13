@@ -475,7 +475,7 @@ bool QuicDispatcher::HasPendingWrites() const {
 
 void QuicDispatcher::Shutdown() {
   while (!session_map_.empty()) {
-    QuicServerSessionBase* session = session_map_.begin()->second.get();
+    QuicSession* session = session_map_.begin()->second.get();
     session->connection()->CloseConnection(
         QUIC_PEER_GOING_AWAY, "Server shutdown imminent",
         ConnectionCloseBehavior::SEND_CONNECTION_CLOSE_PACKET);
@@ -649,12 +649,12 @@ void QuicDispatcher::ProcessBufferedChlos(size_t max_connections_to_create) {
   for (; new_sessions_allowed_per_event_loop_ > 0;
        --new_sessions_allowed_per_event_loop_) {
     QuicConnectionId connection_id;
-    list<BufferedPacket> packets =
+    std::list<BufferedPacket> packets =
         buffered_packets_.DeliverPacketsForNextConnection(&connection_id);
     if (packets.empty()) {
       return;
     }
-    QuicServerSessionBase* session =
+    QuicSession* session =
         CreateQuicSession(connection_id, packets.front().client_address);
     DVLOG(1) << "Created new session for " << connection_id;
     session_map_.insert(
@@ -714,13 +714,6 @@ void QuicDispatcher::BufferEarlyPacket(QuicConnectionId connection_id) {
 }
 
 void QuicDispatcher::ProcessChlo() {
-  QUIC_BUG_IF(!FLAGS_quic_buffer_packet_till_chlo &&
-              FLAGS_quic_limit_num_new_sessions_per_epoll_loop)
-      << "Try to limit connection creation per epoll event while not "
-         "supporting packet buffer. "
-         "--quic_limit_num_new_sessions_per_epoll_loop = true "
-         "--quic_buffer_packet_till_chlo = false";
-
   if (FLAGS_quic_create_session_after_insertion &&
       !buffered_packets_.HasBufferedPackets(current_connection_id_) &&
       !ShouldCreateOrBufferPacketForConnection(current_connection_id_)) {
@@ -728,7 +721,6 @@ void QuicDispatcher::ProcessChlo() {
   }
 
   if (FLAGS_quic_limit_num_new_sessions_per_epoll_loop &&
-      FLAGS_quic_buffer_packet_till_chlo &&
       new_sessions_allowed_per_event_loop_ <= 0) {
     // Can't create new session any more. Wait till next event loop.
     if (!buffered_packets_.HasChloForConnection(current_connection_id_)) {
@@ -751,7 +743,7 @@ void QuicDispatcher::ProcessChlo() {
     return;
   }
   // Creates a new session and process all buffered packets for this connection.
-  QuicServerSessionBase* session =
+  QuicSession* session =
       CreateQuicSession(current_connection_id_, current_client_address_);
   DVLOG(1) << "Created new session for " << current_connection_id_;
   session_map_.insert(
@@ -759,8 +751,7 @@ void QuicDispatcher::ProcessChlo() {
   std::list<BufferedPacket> packets =
       buffered_packets_.DeliverPackets(current_connection_id_);
   // Check if CHLO is the first packet arrived on this connection.
-  if (!FLAGS_quic_create_session_after_insertion &&
-      FLAGS_quic_buffer_packet_till_chlo && packets.empty()) {
+  if (!FLAGS_quic_create_session_after_insertion && packets.empty()) {
     ShouldCreateOrBufferPacketForConnection(current_connection_id_);
   }
   // Process CHLO at first.
@@ -770,8 +761,7 @@ void QuicDispatcher::ProcessChlo() {
   // Do this even when flag is off because there might be still some packets
   // buffered in the store before flag is turned off.
   DeliverPacketsToSession(packets, session);
-  if (FLAGS_quic_limit_num_new_sessions_per_epoll_loop &&
-      FLAGS_quic_buffer_packet_till_chlo) {
+  if (FLAGS_quic_limit_num_new_sessions_per_epoll_loop) {
     --new_sessions_allowed_per_event_loop_;
   }
 }
@@ -843,8 +833,7 @@ void QuicDispatcher::MaybeRejectStatelessly(QuicConnectionId connection_id,
       header.public_header.versions.front() <= QUIC_VERSION_32 ||
       !ShouldAttemptCheapStatelessRejection()) {
     // Not use cheap stateless reject.
-    if (FLAGS_quic_buffer_packet_till_chlo &&
-        !ChloExtractor::Extract(*current_packet_, GetSupportedVersions(),
+    if (!ChloExtractor::Extract(*current_packet_, GetSupportedVersions(),
                                 nullptr)) {
       // Buffer non-CHLO packets.
       ProcessUnauthenticatedHeaderFate(kFateBuffer, connection_id,
@@ -865,16 +854,6 @@ void QuicDispatcher::MaybeRejectStatelessly(QuicConnectionId connection_id,
                           rejector.get());
   if (!ChloExtractor::Extract(*current_packet_, GetSupportedVersions(),
                               &validator)) {
-    if (!FLAGS_quic_buffer_packet_till_chlo) {
-      QUIC_BUG
-          << "Have to drop packet because buffering non-chlo packet is "
-             "not supported while trying to do stateless reject. "
-             "--gfe2_reloadable_flag_quic_buffer_packet_till_chlo false"
-             " --gfe2_reloadable_flag_quic_use_cheap_stateless_rejects true";
-      ProcessUnauthenticatedHeaderFate(kFateDrop, connection_id,
-                                       header.packet_number);
-      return;
-    }
     ProcessUnauthenticatedHeaderFate(kFateBuffer, connection_id,
                                      header.packet_number);
     return;
@@ -1006,7 +985,7 @@ const QuicVersionVector& QuicDispatcher::GetSupportedVersions() {
 
 void QuicDispatcher::DeliverPacketsToSession(
     const std::list<BufferedPacket>& packets,
-    QuicServerSessionBase* session) {
+    QuicSession* session) {
   for (const BufferedPacket& packet : packets) {
     session->ProcessUdpPacket(packet.server_address, packet.client_address,
                               *(packet.packet));
